@@ -1,0 +1,41 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Blender cache / temp
+*.blend1
+*.blend2
+*.blend@
+*.blend~
+*.blend.gz
+
+# System files
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
+
+# JetBrains
+.idea/
+
+# OS junk
+*.log
+*.tmp
+*.bak
+
+# Compiled extensions (if ever added)
+*.so
+*.dll
+*.dylib
+
+# Distribution artifacts
+dist/
+build/
+*.zip
+
+# Virtual environments (if you experiment with one)
+venv/
+.env/
