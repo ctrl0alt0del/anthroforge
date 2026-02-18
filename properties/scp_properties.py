@@ -1,20 +1,76 @@
 import bpy
+from mathutils import Euler, Quaternion
+from ..core.utils import get_af_root
+
+
+def _sync_scene(context):
+    from ..core.visualization.sync import register_sync
+    scene = context.scene if context else None
+    root = get_af_root(scene)
+    register_sync().sync_root_to_scene(root=root, scene=scene)
+
+
+def _on_scp_prop_update(self, context):
+    _sync_scene(context)
+
+
+def _on_euler_update(self, context):
+    e = Euler(self.local_rotation_euler, 'XYZ')
+    q = e.to_quaternion()
+    self.local_rotation = (q.w, q.x, q.y, q.z)
+    _sync_scene(context)
+
+
+def _on_quat_update(self, context):
+    q = Quaternion(self.local_rotation)
+    e = q.to_euler('XYZ')
+    self["local_rotation_euler"] = (e.x, e.y, e.z)
+    _sync_scene(context)
 
 
 class AF_SCP_Property(bpy.types.PropertyGroup):
-
     id: bpy.props.StringProperty(name="ID")
-
     shape_type: bpy.props.StringProperty(name="Shape Type")
 
-    # Transform
-    local_origin: bpy.props.FloatVectorProperty(size=3)
-    local_rotation: bpy.props.FloatVectorProperty(size=4)  # quaternion
-    local_scale: bpy.props.FloatVectorProperty(size=3)
+    local_origin: bpy.props.FloatVectorProperty(
+        name="Translate", size=3, subtype='TRANSLATION', update=_on_scp_prop_update
+    )
+
+    # Stored source of truth
+    local_rotation: bpy.props.FloatVectorProperty(
+        name="Rotation (Quat)", size=4, subtype='QUATERNION', update=_on_quat_update
+    )
+
+    # UI-facing rotation in radians (Blender displays degrees)
+    local_rotation_euler: bpy.props.FloatVectorProperty(
+        name="Rotate", size=3, subtype='EULER', update=_on_euler_update
+    )
+
+    local_scale: bpy.props.FloatVectorProperty(
+        name="Scale", size=3, subtype='XYZ', default=(1.0, 1.0, 1.0), update=_on_scp_prop_update
+    )
+
+    # Shape params: Ellipsoid
+    ellipsoid_radii: bpy.props.FloatVectorProperty(
+        name="Radii", size=3, subtype='XYZ', default=(1.0, 1.0, 1.0), min=0.001, update=_on_scp_prop_update
+    )
+    ellipsoid_resolution: bpy.props.IntProperty(
+        name="Resolution", default=8, min=3, max=128, update=_on_scp_prop_update
+    )
+
+    # Shape params: Curve
+    curve_length: bpy.props.FloatProperty(
+        name="Length", default=1.0, min=0.001, update=_on_scp_prop_update
+    )
+    curve_segments: bpy.props.IntProperty(
+        name="Segments", default=5, min=1, max=256, update=_on_scp_prop_update
+    )
 
     # Attachment
     parent_id: bpy.props.StringProperty(name="Parent ID")
     attach_param: bpy.props.StringProperty(name="Attach Param JSON")
 
+
 class AF_System_Property(bpy.types.PropertyGroup):
     scps: bpy.props.CollectionProperty(type=AF_SCP_Property)
+    active_scp_index: bpy.props.IntProperty()

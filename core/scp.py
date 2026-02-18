@@ -1,7 +1,6 @@
 from mathutils import Matrix, Vector
 from .attachment import Attachment
 
-
 class SCP:
 
     def __init__(self, scp_id: str, shape, 
@@ -67,10 +66,3 @@ class SCP:
 
         return T @ R @ S
 
-    # ------------------------------
-    # Debug
-    # ------------------------------
-
-    def render_debug(self, registry):
-        world_matrix = self.get_world_matrix(registry)
-        return self.shape.render_debug(world_matrix)

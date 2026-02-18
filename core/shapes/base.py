@@ -1,39 +1,55 @@
 from abc import ABC, abstractmethod
-from mathutils import Vector, Matrix
+from mathutils import Matrix
 
 
 class ShapeStrategy(ABC):
-    """
-    Base interface for all SCP shapes.
-    All shapes operate in local SCP space.
-    """
+    type_id = "BASE"
+    label = "Base"
+
+    proxy_object_type = "MESH"
+    proxy_data_type = "MESH"
+
+    @classmethod
+    def from_scp_prop(cls, scp_prop):
+        return cls()
+
+    @classmethod
+    def init_scp_prop_defaults(cls, scp_prop):
+        pass
+
+    # Scene "new SCP" form lifecycle
+    @classmethod
+    def register_scene_props(cls):
+        pass
+
+    @classmethod
+    def unregister_scene_props(cls):
+        pass
+
+    # UI hooks
+    @classmethod
+    def draw_creation_ui(cls, layout, scene):
+        pass
+
+    @classmethod
+    def apply_creation_to_scp(cls, scene, scp_prop):
+        pass
+
+    @classmethod
+    def draw_scp_ui(cls, layout, scp_prop, readonly=False):
+        pass
 
     @abstractmethod
     def get_attach_params(self):
-        """
-        Returns a list of parametric coordinates.
-        These are NOT world positions.
-        """
         pass
 
     @abstractmethod
     def compute_local_point(self, param):
-        """
-        Given a param, returns local-space position (Vector).
-        """
         pass
 
     def compute_world_point(self, param, scp_matrix: Matrix):
-        """
-        Converts param to world position using SCP transform matrix.
-        """
-        local = self.compute_local_point(param)
-        return scp_matrix @ local
+        return scp_matrix @ self.compute_local_point(param)
 
     @abstractmethod
-    def render_debug(self, scp_matrix: Matrix):
-        """
-        Debug draw representation.
-        Does NOT store state.
-        """
+    def ensure_proxy_object(self, obj):
         pass

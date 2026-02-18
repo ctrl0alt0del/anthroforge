@@ -2,7 +2,7 @@ import json
 from mathutils import Vector, Quaternion
 from .scp import SCP
 from .attachment import Attachment
-from .shapes.ellipsoid import EllipsoidShape
+from .shapes.registry import ShapeRegistry
 
 
 class SCPRegistry:
@@ -17,11 +17,10 @@ class SCPRegistry:
 
         for scp_prop in self.root.af_system.scps:
 
-            if scp_prop.shape_type == "ELLIPSOID":
-                shape = EllipsoidShape((1, 1, 1))
-            else:
+            shape = ShapeRegistry.create_from_prop(scp_prop)
+            if not shape:
                 continue
-
+            
             origin = Vector(scp_prop.local_origin)
             rotation = Quaternion(scp_prop.local_rotation).to_matrix()
             scale = Vector(scp_prop.local_scale)
