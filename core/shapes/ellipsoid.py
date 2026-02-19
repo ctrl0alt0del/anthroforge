@@ -111,8 +111,8 @@ class EllipsoidShape(ShapeStrategy):
         bm.free()
         mesh.update()
 
-        obj.display_type = "WIRE"
-        obj.hide_render = True
+        obj.display_type = "SOLID"
+        obj.hide_render = False
 
         # Keep transform scale neutral; SCP transform controls world scale
         obj.scale = (1.0, 1.0, 1.0)

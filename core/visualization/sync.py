@@ -1,9 +1,10 @@
 # core/visualization/sync.py
 import bpy
+import json
 from mathutils import Matrix
 from ..registry import SCPRegistry
 from ..utils import get_af_root
-
+from .colors import next_color
 
 class SCPSceneSync:
     """
@@ -74,6 +75,17 @@ class SCPSceneSync:
         obj["af_proxy"] = True
         obj["af_root_name"] = root_name
         obj["af_scp_id"] = scp.id
+
+        # assign muted color once
+        color = next_color()
+        mat_name = f"AF_SCP_MAT_{scp.id}"
+        mat = bpy.data.materials.new(mat_name)
+        mat.use_nodes = False
+        mat.diffuse_color = color
+        if hasattr(obj.data, "materials"):
+            obj.data.materials.clear()
+            obj.data.materials.append(mat)
+
         vis_col.objects.link(obj)
         return obj
 
@@ -133,6 +145,23 @@ class SCPSceneSync:
     # Visual -> Data
     # ------------------------------
 
+    def _nearest_parent_attach_param(self, parent, parent_world, child_world_loc):
+        params = parent.shape.get_attach_params()
+        if not params:
+            return None
+
+        best_param = None
+        best_d2 = None
+
+        for p in params:
+            world_pos = parent_world @ parent.shape.compute_local_point(p)
+            d2 = (world_pos - child_world_loc).length_squared
+            if best_d2 is None or d2 < best_d2:
+                best_d2 = d2
+                best_param = p
+
+        return best_param
+
     def _write_proxy_transform_to_data(self, root, proxy_obj):
         scp_id = proxy_obj.get("af_scp_id")
         if not scp_id:
@@ -151,17 +180,31 @@ class SCPSceneSync:
         if scp_prop.parent_id:
             parent = runtime.registry.get(scp_prop.parent_id)
             child = runtime.registry.get(scp_id)
-            if parent is None or child is None or child.attachment is None:
+            if parent is None or child is None:
                 return False
 
             parent_world = parent.get_world_matrix(runtime.registry)
-            attach_local = parent.shape.compute_local_point(child.attachment.param)
+            child_world_loc = proxy_obj.matrix_world.to_translation()
+
+            snapped_param = self._nearest_parent_attach_param(parent, parent_world, child_world_loc)
+            if snapped_param is not None:
+                scp_prop.attach_param = json.dumps(snapped_param)
+            else:
+                # keep existing
+                try:
+                    snapped_param = json.loads(scp_prop.attach_param) if scp_prop.attach_param else 0.0
+                except Exception:
+                    snapped_param = 0.0
+                    scp_prop.attach_param = "0.0"
+
+            attach_local = parent.shape.compute_local_point(snapped_param)
             attach_world = parent_world @ attach_local
             anchor_world = Matrix.Translation(attach_world)
 
             local_matrix = anchor_world.inverted() @ proxy_obj.matrix_world
             _loc, rot, scale = local_matrix.decompose()
 
+            # attached translation is represented by attach_param, keep origin zero
             scp_prop.local_origin = (0.0, 0.0, 0.0)
             scp_prop.local_rotation = (rot.w, rot.x, rot.y, rot.z)
             scp_prop.local_scale = (scale.x, scale.y, scale.z)

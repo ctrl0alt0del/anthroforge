@@ -18,6 +18,8 @@ from .properties.scp_properties import AF_SCP_Property, AF_System_Property
 from .core.shapes.registry import ShapeRegistry
 from .core.shapes import *
 from .core.visualization.sync import register_sync, unregister_sync
+from .ui.scene_props import register_scene_props, unregister_scene_props
+
 
 classes = (
     AF_OT_CreateRoot,
@@ -33,20 +35,13 @@ def register():
         bpy.utils.register_class(cls)
 
     bpy.types.Object.af_system = bpy.props.PointerProperty(type=AF_System_Property)
-    bpy.types.Scene.af_scp_type = bpy.props.EnumProperty(
-        name="SCP Type",
-        items=lambda self, context: ShapeRegistry.enum_items()
-    )
-
-    ShapeRegistry.register_scene_props()
+    register_scene_props()
     register_sync()
 
 def unregister():
     unregister_sync()
-    ShapeRegistry.unregister_scene_props()
-
+    unregister_scene_props()
     del bpy.types.Object.af_system
-    del bpy.types.Scene.af_scp_type
 
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

@@ -26,8 +26,18 @@ class SCPRegistry:
             scale = Vector(scp_prop.local_scale)
 
             attachment = None
+            attachment = None
             if scp_prop.parent_id:
-                param = json.loads(scp_prop.attach_param)
+                raw = (scp_prop.attach_param or "").strip()
+
+                if raw:
+                    try:
+                        param = json.loads(raw)
+                    except json.JSONDecodeError:
+                        param = 0.0
+                else:
+                    param = 0.0
+
                 attachment = Attachment(scp_prop.parent_id, param)
 
             scp = SCP(

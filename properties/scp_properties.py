@@ -27,6 +27,36 @@ def _on_quat_update(self, context):
     self["local_rotation_euler"] = (e.x, e.y, e.z)
     _sync_scene(context)
 
+def _on_active_scp_index_update(self, context):
+    scene = context.scene if context else None
+    if not scene or scene.af_selection_sync_lock:
+        return
+
+    root = get_af_root(scene)
+    if root is None:
+        return
+
+    idx = self.active_scp_index
+    if idx < 0 or idx >= len(self.scps):
+        return
+
+    scp_id = self.scps[idx].id
+    proxy = None
+    for obj in scene.objects:
+        if obj.get("af_proxy") and obj.get("af_root_name") == root.name and obj.get("af_scp_id") == scp_id:
+            proxy = obj
+            break
+    if proxy is None:
+        return
+
+    scene.af_selection_sync_lock = True
+    try:
+        for o in context.selected_objects:
+            o.select_set(False)
+        proxy.select_set(True)
+        context.view_layer.objects.active = proxy
+    finally:
+        scene.af_selection_sync_lock = False
 
 class AF_SCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
@@ -73,4 +103,4 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
 
 class AF_System_Property(bpy.types.PropertyGroup):
     scps: bpy.props.CollectionProperty(type=AF_SCP_Property)
-    active_scp_index: bpy.props.IntProperty()
+    active_scp_index: bpy.props.IntProperty(update=_on_active_scp_index_update)
