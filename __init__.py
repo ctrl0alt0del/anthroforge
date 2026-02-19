@@ -12,11 +12,15 @@ import bpy
 
 from .operators.create_root import AF_OT_CreateRoot
 from .operators.add_scp import AF_OT_AddSCP
+from .operators.tree import AF_OT_ToggleSCPCollapse, AF_OT_SelectSCPInTree
+
 from .ui.main_panel import AF_PT_MainPanel
-from .ui.scp_list import AF_UL_SCPList
+from .ui.panels.create_panel import AF_PT_CreatePanel
+from .ui.panels.tree_panel import AF_PT_TreePanel
+from .ui.panels.edit_panel import AF_PT_EditPanel
+
 from .properties.scp_properties import AF_SCP_Property, AF_System_Property
-from .core.shapes.registry import ShapeRegistry
-from .core.shapes import *
+from .core.shapes import *  # registers shape classes
 from .core.visualization.sync import register_sync, unregister_sync
 from .ui.scene_props import register_scene_props, unregister_scene_props
 
@@ -24,11 +28,16 @@ from .ui.scene_props import register_scene_props, unregister_scene_props
 classes = (
     AF_OT_CreateRoot,
     AF_OT_AddSCP,
-    AF_UL_SCPList,
+    AF_OT_ToggleSCPCollapse,
+    AF_OT_SelectSCPInTree,
     AF_PT_MainPanel,
+    AF_PT_CreatePanel,
+    AF_PT_TreePanel,
+    AF_PT_EditPanel,
     AF_SCP_Property,
     AF_System_Property,
 )
+
 
 def register():
     for cls in classes:
@@ -37,6 +46,7 @@ def register():
     bpy.types.Object.af_system = bpy.props.PointerProperty(type=AF_System_Property)
     register_scene_props()
     register_sync()
+
 
 def unregister():
     unregister_sync()
