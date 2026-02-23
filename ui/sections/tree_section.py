@@ -2,7 +2,7 @@ from ..tree_state import is_collapsed
 
 
 def _build_tree(root):
-    scps = list(root.af_system.scps)
+    scps = list(root.af_scp_system.scps)
     valid_ids = {s.id for s in scps}
     children_map = {}
     roots = []

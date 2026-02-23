@@ -28,7 +28,7 @@ class AF_OT_SelectSCPInTree(bpy.types.Operator):
             return {'CANCELLED'}
 
         target_index = -1
-        for i, scp in enumerate(root.af_system.scps):
+        for i, scp in enumerate(root.af_scp_system.scps):
             if scp.id == self.scp_id:
                 target_index = i
                 break
@@ -37,5 +37,5 @@ class AF_OT_SelectSCPInTree(bpy.types.Operator):
             return {'CANCELLED'}
 
         # This triggers existing active index callback -> viewport proxy select
-        root.af_system.active_scp_index = target_index
+        root.af_scp_system.active_scp_index = target_index
         return {'FINISHED'}

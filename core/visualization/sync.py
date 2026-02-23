@@ -55,7 +55,7 @@ class SCPSceneSync:
                 bpy.data.curves.remove(data)
 
     def _get_scp_prop_by_id(self, root, scp_id):
-        for scp_prop in root.af_system.scps:
+        for scp_prop in root.af_scp_system.scps:
             if scp_prop.id == scp_id:
                 return scp_prop
         return None

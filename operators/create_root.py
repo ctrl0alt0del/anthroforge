@@ -20,7 +20,7 @@ class AF_OT_CreateRoot(bpy.types.Operator):
       root["anthroforge_root"] = True
 
       # initialize system container
-      root.af_system  # just ensure pointer exists
+      root.af_scp_system  # just ensure pointer exists
 
       self.report({'INFO'}, "AnthroForge Root created.")
       register_sync().sync_root_to_scene(root=root, scene=context.scene)

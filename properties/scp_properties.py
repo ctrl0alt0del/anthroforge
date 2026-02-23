@@ -101,6 +101,6 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
     attach_param: bpy.props.StringProperty(name="Attach Param JSON")
 
 
-class AF_System_Property(bpy.types.PropertyGroup):
+class AF_SCP_System_Property(bpy.types.PropertyGroup):
     scps: bpy.props.CollectionProperty(type=AF_SCP_Property)
     active_scp_index: bpy.props.IntProperty(update=_on_active_scp_index_update)

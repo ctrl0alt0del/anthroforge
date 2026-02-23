@@ -6,13 +6,13 @@ def get_active_scp(root, context):
     if obj and obj.get("af_proxy") and obj.get("af_root_name") == root.name:
         scp_id = obj.get("af_scp_id")
         if scp_id:
-            for scp in root.af_system.scps:
+            for scp in root.af_scp_system.scps:
                 if scp.id == scp_id:
                     return scp
 
-    idx = root.af_system.active_scp_index
-    if 0 <= idx < len(root.af_system.scps):
-        return root.af_system.scps[idx]
+    idx = root.af_scp_system.active_scp_index
+    if 0 <= idx < len(root.af_scp_system.scps):
+        return root.af_scp_system.scps[idx]
 
     return None
 

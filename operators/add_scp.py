@@ -18,7 +18,7 @@ class AF_OT_AddSCP(bpy.types.Operator):
             self.report({'ERROR'}, "No AF_ROOT found in scene.")
             return {'CANCELLED'}
 
-        scp_collection = root.af_system.scps
+        scp_collection = root.af_scp_system.scps
         new_scp = scp_collection.add()
 
         new_scp.id = f"SCP_{len(scp_collection)}"
@@ -62,7 +62,7 @@ class AF_OT_AddSCP(bpy.types.Operator):
         register_sync().sync_root_to_scene(root=root, scene=context.scene)
 
         # Select newly created SCP
-        root.af_system.active_scp_index = len(root.af_system.scps) - 1
+        root.af_scp_system.active_scp_index = len(root.af_scp_system.scps) - 1
         new_id = new_scp.id
         proxy = None
         for obj in context.scene.objects:

@@ -13,7 +13,7 @@ class SCPRegistry:
     def build(self):
         self.registry.clear()
 
-        for scp_prop in self.root.af_system.scps:
+        for scp_prop in self.root.af_scp_system.scps:
             shape = ShapeRegistry.create_from_prop(scp_prop)
             if not shape:
                 continue
