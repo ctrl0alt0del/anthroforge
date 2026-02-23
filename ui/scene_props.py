@@ -28,7 +28,6 @@ def register_scene_props():
         poll=_poll_parent_proxy,
     )
 
-    # Fiber creation inputs
     bpy.types.Scene.af_new_fiber_origin_obj = bpy.props.PointerProperty(
         name="Fiber Origin",
         type=bpy.types.Object,
@@ -45,12 +44,19 @@ def register_scene_props():
         default="{}",
     )
 
+    # NEW: separate collapse state for VCP tree
+    bpy.types.Scene.af_vcp_tree_collapsed_json = bpy.props.StringProperty(
+        name="AF VCP Tree Collapsed",
+        default="{}",
+    )
+
     ShapeRegistry.register_scene_props()
 
 
 def unregister_scene_props():
     ShapeRegistry.unregister_scene_props()
 
+    del bpy.types.Scene.af_vcp_tree_collapsed_json
     del bpy.types.Scene.af_tree_collapsed_json
     del bpy.types.Scene.af_new_fiber_insertion_obj
     del bpy.types.Scene.af_new_fiber_origin_obj

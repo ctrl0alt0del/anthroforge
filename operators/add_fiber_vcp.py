@@ -1,7 +1,11 @@
+# operators/add_fiber_vcp.py
 import json
 import bpy
+
 from ..core.utils import get_af_root
 from ..core.attachment import Attachment
+from ..core.registry import SCPRegistry
+from ..core.visualization.fiber_sync import register_fiber_sync
 
 
 class AF_OT_AddFiberVCP(bpy.types.Operator):
@@ -27,12 +31,25 @@ class AF_OT_AddFiberVCP(bpy.types.Operator):
             self.report({'ERROR'}, "Origin/Insertion must be SCP proxy objects.")
             return {'CANCELLED'}
 
+        runtime = SCPRegistry(root)
+        runtime.build()
+
+        def first_param_for(parent_id):
+            parent = runtime.registry.get(parent_id)
+            if not parent:
+                return 0.0
+            params = parent.shape.get_attach_params()
+            return params[0] if params else 0.0
+
+        a_param = first_param_for(origin_id)
+        b_param = first_param_for(insertion_id)
+
         fibers = root.af_vcp_system.fibers
         f = fibers.add()
         f.id = f"FIBER_{len(fibers)}"
 
-        origin = Attachment(parent_id=origin_id, param=0.0)
-        insertion = Attachment(parent_id=insertion_id, param=0.0)
+        origin = Attachment(parent_id=origin_id, param=a_param)
+        insertion = Attachment(parent_id=insertion_id, param=b_param)
 
         f.a_parent_id = origin.parent_id
         f.a_attach_param = json.dumps(origin.param)
@@ -42,6 +59,8 @@ class AF_OT_AddFiberVCP(bpy.types.Operator):
 
         f.resolution = 16
         f.thickness = 0.01
+
+        register_fiber_sync().sync_root_to_scene(root=root, scene=context.scene)
 
         self.report({'INFO'}, f"Added {f.id}")
         return {'FINISHED'}

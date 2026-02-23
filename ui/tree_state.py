@@ -32,3 +32,14 @@ def toggle_collapsed(scene, scp_id):
     data[scp_id] = not bool(data.get(scp_id, False))
     _write_map(scene, data)
     return data[scp_id]
+
+
+def toggle_vcp_collapsed(scene, key):
+    import json
+    raw = (scene.af_vcp_tree_collapsed_json or "").strip()
+    try:
+        data = json.loads(raw) if raw else {}
+    except Exception:
+        data = {}
+    data[key] = not bool(data.get(key, False))
+    scene.af_vcp_tree_collapsed_json = json.dumps(data)

@@ -12,19 +12,25 @@ import bpy
 
 from .operators.create_root import AF_OT_CreateRoot
 from .operators.add_scp import AF_OT_AddSCP
-from .operators.tree import AF_OT_ToggleSCPCollapse, AF_OT_SelectSCPInTree
+from .operators.tree import (
+    AF_OT_ToggleSCPCollapse,
+    AF_OT_SelectSCPInTree,
+    AF_OT_ToggleVCPCollapse,
+    AF_OT_SelectVCPInTree,
+)
 from .operators.add_fiber_vcp import AF_OT_AddFiberVCP
 
 from .ui.main_panel import AF_PT_MainPanel
 from .ui.panels.create_panel import AF_PT_CreatePanel
 from .ui.panels.tree_panel import AF_PT_TreePanel
 from .ui.panels.edit_panel import AF_PT_EditPanel
+from .ui.panels.vcp_tree_panel import AF_PT_VCPTreePanel
 
 from .properties.scp_properties import AF_SCP_Property, AF_SCP_System_Property
 from .core.shapes import *  # registers shape classes
 from .core.visualization.sync import register_sync, unregister_sync
 from .ui.scene_props import register_scene_props, unregister_scene_props
-from .properties.vcp_properties import AF_FiberVCP_Property, AF_VCP_System_Property
+from .properties.vcp_properties import AF_FiberVCP_Property, AF_MuscleVCP_Property, AF_VCP_System_Property
 from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
 
 
@@ -41,9 +47,13 @@ classes = (
     AF_SCP_Property,
     AF_SCP_System_Property,
     AF_PT_FiberCreatePanel,
+    AF_MuscleVCP_Property,
     AF_FiberVCP_Property,
     AF_VCP_System_Property,
     AF_OT_AddFiberVCP,
+    AF_OT_ToggleVCPCollapse,
+    AF_OT_SelectVCPInTree,
+    AF_PT_VCPTreePanel,
 )
 
 
