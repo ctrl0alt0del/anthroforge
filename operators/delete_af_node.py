@@ -17,8 +17,9 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
             ("FIBER", "Fiber", ""),
         ),
         default="AUTO",
+        options={"HIDDEN", "SKIP_SAVE"},
     )
-    target_id: bpy.props.StringProperty(default="")
+    target_id: bpy.props.StringProperty(default="", options={"HIDDEN", "SKIP_SAVE"},)
 
     def _delete_scp(self, context, root, scp_id):
         scps = root.af_scp_system.scps
@@ -84,9 +85,10 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
 
     def execute(self, context):
         root = get_af_root(context.scene)
+        if not self.target_id:
+          self.target_type = "AUTO"
         if root is None:
             return bpy.ops.object.delete("INVOKE_DEFAULT")
-
         # explicit request from UI button
         if self.target_type == "SCP" and self.target_id:
             return self._delete_scp(context, root, self.target_id)

@@ -43,4 +43,4 @@ class AF_PT_EditPanel(bpy.types.Panel):
         layout.separator()
         layout.label(text="Shape Params")
         ShapeRegistry.draw_scp_ui(scp.shape_type, layout, scp, readonly=True)
-        layout.operator("af.delete_selected_scp", icon="TRASH")
+        layout.operator("af.delete_selected_af_node", icon="TRASH")
