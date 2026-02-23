@@ -48,6 +48,10 @@ def _draw_node(layout, scene, scp, children_map, depth, active_id, visited):
     )
     op.scp_id = scp.id
 
+    del_op = row.operator("af.delete_selected_af_node", text="", icon="TRASH", emboss=False)
+    del_op.target_type = "SCP"
+    del_op.target_id = scp.id
+
     right = row.row()
     right.alignment = "RIGHT"
     right.enabled = False  # lighter/grey text look

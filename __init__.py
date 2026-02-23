@@ -19,6 +19,8 @@ from .operators.tree import (
     AF_OT_SelectVCPInTree,
 )
 from .operators.add_fiber_vcp import AF_OT_AddFiberVCP
+from .operators.delete_af_node import AF_OT_DeleteSelectedAFNode
+
 
 from .ui.main_panel import AF_PT_MainPanel
 from .ui.panels.create_panel import AF_PT_CreatePanel
@@ -33,7 +35,7 @@ from .ui.scene_props import register_scene_props, unregister_scene_props
 from .properties.vcp_properties import AF_FiberVCP_Property, AF_MuscleVCP_Property, AF_VCP_System_Property
 from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
 
-
+addon_keymaps = []
 
 classes = (
     AF_OT_CreateRoot,
@@ -54,6 +56,7 @@ classes = (
     AF_OT_ToggleVCPCollapse,
     AF_OT_SelectVCPInTree,
     AF_PT_VCPTreePanel,
+    AF_OT_DeleteSelectedAFNode,
 )
 
 
@@ -65,6 +68,12 @@ def register():
     bpy.types.Object.af_vcp_system = bpy.props.PointerProperty(type=AF_VCP_System_Property)
     register_scene_props()
     register_sync()
+    wm = bpy.context.window_manager
+    kc = wm.keyconfigs.addon
+    if kc:
+        km = kc.keymaps.new(name="Object Mode", space_type="EMPTY")
+        kmi = km.keymap_items.new("af.delete_selected_af_node", "DEL", "PRESS")
+        addon_keymaps.append((km, kmi))
 
 
 def unregister():
@@ -72,5 +81,8 @@ def unregister():
     unregister_scene_props()
     del bpy.types.Object.af_scp_system
     del bpy.types.Object.af_vcp_system
+    for km, kmi in addon_keymaps:
+        km.keymap_items.remove(kmi)
+    addon_keymaps.clear()
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

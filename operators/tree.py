@@ -1,7 +1,7 @@
 import bpy
 from ..core.utils import get_af_root
 from ..ui.tree_state import toggle_collapsed, toggle_vcp_collapsed
-
+from ..core.visualization.fiber_sync import register_fiber_sync
 
 class AF_OT_ToggleSCPCollapse(bpy.types.Operator):
     bl_idname = "af.toggle_scp_collapse"
@@ -74,4 +74,5 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
         v = root.af_vcp_system
         v.active_vcp_id = self.node_id
         v.active_vcp_type = self.node_type
+        register_fiber_sync().sync_root_to_scene(root=root, scene=context.scene)
         return {'FINISHED'}

@@ -47,6 +47,10 @@ def _draw_fiber_row(layout, fiber, depth, active_id, active_type):
     op.node_id = fiber.id
     op.node_type = "FIBER"
 
+    del_op = row.operator("af.delete_selected_af_node", text="", icon="TRASH", emboss=False)
+    del_op.target_type = "FIBER"
+    del_op.target_id = fiber.id
+
     # Right-side compact endpoint info
     a = fiber.a_parent_id if fiber.a_parent_id else "?"
     b = fiber.b_parent_id if fiber.b_parent_id else "?"
