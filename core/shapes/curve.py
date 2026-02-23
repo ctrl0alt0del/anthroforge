@@ -10,6 +10,7 @@ class CurveShape(ShapeStrategy):
 
     proxy_object_type = "CURVE"
     proxy_data_type = "CURVE"
+    supports_fiber_collision = False
 
     def __init__(self, length=1.0, segments=5):
         self.length = length

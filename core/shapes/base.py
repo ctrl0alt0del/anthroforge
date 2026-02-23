@@ -8,6 +8,7 @@ class ShapeStrategy(ABC):
 
     proxy_object_type = "MESH"
     proxy_data_type = "MESH"
+    supports_fiber_collision = True
 
     @classmethod
     def from_scp_prop(cls, scp_prop):

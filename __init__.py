@@ -20,6 +20,7 @@ from .operators.tree import (
 )
 from .operators.add_fiber_vcp import AF_OT_AddFiberVCP
 from .operators.delete_af_node import AF_OT_DeleteSelectedAFNode
+from .operators.fiber_tools import AF_OT_ResetFiberRestLength, AF_OT_RecomputeFiber
 
 
 from .ui.main_panel import AF_PT_MainPanel
@@ -27,13 +28,14 @@ from .ui.panels.create_panel import AF_PT_CreatePanel
 from .ui.panels.tree_panel import AF_PT_TreePanel
 from .ui.panels.edit_panel import AF_PT_EditPanel
 from .ui.panels.vcp_tree_panel import AF_PT_VCPTreePanel
+from .ui.panels.fiber_edit_panel import AF_PT_FiberEditPanel
+from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
 
 from .properties.scp_properties import AF_SCP_Property, AF_SCP_System_Property
 from .core.shapes import *  # registers shape classes
 from .core.visualization.sync import register_sync, unregister_sync
 from .ui.scene_props import register_scene_props, unregister_scene_props
 from .properties.vcp_properties import AF_FiberVCP_Property, AF_MuscleVCP_Property, AF_VCP_System_Property
-from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
 
 addon_keymaps = []
 
@@ -48,6 +50,9 @@ classes = (
     AF_PT_EditPanel,
     AF_SCP_Property,
     AF_SCP_System_Property,
+    AF_OT_ResetFiberRestLength,
+    AF_OT_RecomputeFiber,
+    AF_PT_FiberEditPanel,
     AF_PT_FiberCreatePanel,
     AF_MuscleVCP_Property,
     AF_FiberVCP_Property,

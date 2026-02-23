@@ -1,9 +1,7 @@
-# core/visualization/fiber_sync.py
-import json
 import bpy
 
 from ..utils import get_af_root
-from ..registry import SCPRegistry
+from ..vcp.fiber_solver import FiberSolver
 
 DEFAULT_FIBER_COLOR = (0.85, 0.55, 0.20, 1.0)
 SELECTED_FIBER_COLOR = (1.0, 0.0, 0.0, 1.0)
@@ -12,6 +10,11 @@ SELECTED_FIBER_COLOR = (1.0, 0.0, 0.0, 1.0)
 class FiberSceneSync:
     def __init__(self, collection_name="AF_VCP_VIS"):
         self.collection_name = collection_name
+        self._solver = FiberSolver()
+
+    # ------------------------------
+    # Collection / Proxy
+    # ------------------------------
 
     def _get_vis_collection(self, scene):
         col = scene.collection.children.get(self.collection_name)
@@ -67,51 +70,29 @@ class FiberSceneSync:
         obj.matrix_parent_inverse = root.matrix_world.inverted()
 
         vis_col.objects.link(obj)
-
         self._set_fiber_color(obj, DEFAULT_FIBER_COLOR)
         return obj
 
-    def _get_scp_proxy(self, scene, root_name, scp_id):
-        for obj in scene.objects:
-            if (
-                obj.get("af_proxy")
-                and obj.get("af_root_name") == root_name
-                and obj.get("af_scp_id") == scp_id
-            ):
-                return obj
-        return None
+    # ------------------------------
+    # Curve update
+    # ------------------------------
 
-    def _attach_world_pos(self, root, scene, scp_id, attach_param_raw):
-        runtime = SCPRegistry(root)
-        runtime.build()
-        scp = runtime.registry.get(scp_id)
-        if scp is None:
-            return None
-
-        try:
-            param = json.loads(attach_param_raw) if attach_param_raw else 0.0
-        except Exception:
-            param = 0.0
-
-        scp_proxy = self._get_scp_proxy(scene, root.name, scp_id)
-        if scp_proxy is None:
-            return None
-
-        local_pt = scp.shape.compute_local_point(param)
-        return scp_proxy.matrix_world @ local_pt
-
-    def _update_curve(self, obj, p0, p1, thickness):
+    def _update_curve_points(self, obj, points, thickness):
         curve = obj.data
         while curve.splines:
             curve.splines.remove(curve.splines[0])
 
         spline = curve.splines.new(type="POLY")
-        spline.points.add(1)
-        spline.points[0].co = (p0.x, p0.y, p0.z, 1.0)
-        spline.points[1].co = (p1.x, p1.y, p1.z, 1.0)
+        spline.points.add(len(points) - 1)
+        for i, p in enumerate(points):
+            spline.points[i].co = (p.x, p.y, p.z, 1.0)
 
         curve.bevel_depth = max(0.0, float(thickness))
         curve.fill_mode = "FULL"
+
+    # ------------------------------
+    # Selection highlight
+    # ------------------------------
 
     def _apply_selection_highlight(self, root, scene):
         active_id = root.af_vcp_system.active_vcp_id
@@ -129,7 +110,11 @@ class FiberSceneSync:
             else:
                 self._set_fiber_color(obj, base)
 
-    def sync_root_to_scene(self, root=None, scene=None):
+    # ------------------------------
+    # Public sync
+    # ------------------------------
+
+    def sync_root_to_scene(self, root=None, scene=None, bake=False):
         scene = scene or bpy.context.scene
         root = root or get_af_root(scene)
         if root is None:
@@ -138,8 +123,10 @@ class FiberSceneSync:
             return
 
         vis_col = self._get_vis_collection(scene)
+        depsgraph = bpy.context.evaluated_depsgraph_get()
 
         live_ids = set()
+
         for fiber in root.af_vcp_system.fibers:
             live_ids.add(fiber.id)
 
@@ -147,25 +134,24 @@ class FiberSceneSync:
             if obj is None:
                 obj = self._create_fiber_proxy(vis_col, root, fiber.id)
 
-            a_proxy = self._get_scp_proxy(scene, root.name, fiber.a_parent_id)
-            b_proxy = self._get_scp_proxy(scene, root.name, fiber.b_parent_id)
-            if a_proxy is None or b_proxy is None:
+            points = self._solver.solve_points(
+                root=root,
+                fiber_prop=fiber,
+                scene=scene,
+                depsgraph=depsgraph,
+                bake=bake,
+            )
+            if len(points) < 2:
                 continue
 
-            p0 = self._attach_world_pos(root, scene, fiber.a_parent_id, fiber.a_attach_param)
-            p1 = self._attach_world_pos(root, scene, fiber.b_parent_id, fiber.b_attach_param)
-            if p0 is None or p1 is None:
-                continue
+            self._update_curve_points(obj, points, fiber.thickness)
 
-            self._update_curve(obj, p0, p1, fiber.thickness)
-
-        # cleanup stale
+        # Remove stale fiber proxies
         for obj in list(vis_col.objects):
             if obj.get("af_fiber_proxy") and obj.get("af_root_name") == root.name:
                 if obj.get("af_fiber_id") not in live_ids:
                     bpy.data.objects.remove(obj, do_unlink=True)
 
-        # selection-based color
         self._apply_selection_highlight(root, scene)
 
 
