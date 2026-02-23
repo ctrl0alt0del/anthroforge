@@ -39,10 +39,10 @@ def _draw_node(layout, scene, scp, children_map, depth, active_id, visited):
         op.scp_id = scp.id
     else:
         row.label(text="", icon="DOT")
-
+    label = scp.name if scp.name else scp.id
     op = row.operator(
         "af.select_scp_in_tree",
-        text=scp.id,
+        text=label,
         emboss=True,
         depress=(scp.id == active_id),
     )

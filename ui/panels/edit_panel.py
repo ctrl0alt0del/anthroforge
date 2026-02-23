@@ -26,8 +26,10 @@ class AF_PT_EditPanel(bpy.types.Panel):
             return
 
         row = layout.row()
-        row.prop(scp, "id")
+        row.enabled = False
+        row.prop(scp, "id", text="ID")
 
+        layout.prop(scp, "name", text="Name")
         row = layout.row()
         row.enabled = False
         row.prop(scp, "shape_type", text="Shape")

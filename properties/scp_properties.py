@@ -60,6 +60,7 @@ def _on_active_scp_index_update(self, context):
 
 class AF_SCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
+    name: bpy.props.StringProperty(name="Name", default="")
     shape_type: bpy.props.StringProperty(name="Shape Type")
 
     local_origin: bpy.props.FloatVectorProperty(

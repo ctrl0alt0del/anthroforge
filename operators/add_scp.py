@@ -22,6 +22,7 @@ class AF_OT_AddSCP(bpy.types.Operator):
         new_scp = scp_collection.add()
 
         new_scp.id = f"SCP_{len(scp_collection)}"
+        new_scp.name = new_scp.id
         new_scp.shape_type = context.scene.af_scp_type
 
         new_scp.local_origin = (0.0, 0.0, 0.0)
