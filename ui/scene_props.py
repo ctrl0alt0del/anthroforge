@@ -28,7 +28,18 @@ def register_scene_props():
         poll=_poll_parent_proxy,
     )
 
-    # UI-only tree state (scp_id -> bool collapsed)
+    # Fiber creation inputs
+    bpy.types.Scene.af_new_fiber_origin_obj = bpy.props.PointerProperty(
+        name="Fiber Origin",
+        type=bpy.types.Object,
+        poll=_poll_parent_proxy,
+    )
+    bpy.types.Scene.af_new_fiber_insertion_obj = bpy.props.PointerProperty(
+        name="Fiber Insertion",
+        type=bpy.types.Object,
+        poll=_poll_parent_proxy,
+    )
+
     bpy.types.Scene.af_tree_collapsed_json = bpy.props.StringProperty(
         name="AF Tree Collapsed",
         default="{}",
@@ -41,6 +52,8 @@ def unregister_scene_props():
     ShapeRegistry.unregister_scene_props()
 
     del bpy.types.Scene.af_tree_collapsed_json
+    del bpy.types.Scene.af_new_fiber_insertion_obj
+    del bpy.types.Scene.af_new_fiber_origin_obj
     del bpy.types.Scene.af_new_parent_obj
     del bpy.types.Scene.af_selection_sync_lock
     del bpy.types.Scene.af_scp_type
