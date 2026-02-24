@@ -20,7 +20,7 @@ from .operators.tree import (
 )
 from .operators.add_fiber_vcp import AF_OT_AddFiberVCP
 from .operators.delete_af_node import AF_OT_DeleteSelectedAFNode
-from .operators.fiber_tools import AF_OT_ResetFiberRestLength, AF_OT_RecomputeFiber
+from .operators.fiber_tools import AF_OT_ResetFiberRestLength, AF_OT_RecomputeFiber, AF_OT_ClearFiberWarmStart
 
 
 from .ui.main_panel import AF_PT_MainPanel
@@ -62,6 +62,7 @@ classes = (
     AF_OT_SelectVCPInTree,
     AF_PT_VCPTreePanel,
     AF_OT_DeleteSelectedAFNode,
+    AF_OT_ClearFiberWarmStart,
 )
 
 

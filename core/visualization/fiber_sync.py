@@ -161,9 +161,12 @@ class FiberSceneSync:
             if obj.get("af_root_name") != root.name:
                 continue
             base = tuple(obj.get("af_fiber_base_color", DEFAULT_FIBER_COLOR))
-            self._set_fiber_color(obj, SELECTED_FIBER_COLOR if active_type == "FIBER" and obj.get("af_fiber_id") == active_id else base)
+            self._set_fiber_color(
+                obj,
+                SELECTED_FIBER_COLOR if active_type == "FIBER" and obj.get("af_fiber_id") == active_id else base
+            )
 
-    def sync_root_to_scene(self, root=None, scene=None, bake=False):
+    def sync_root_to_scene(self, root=None, scene=None, bake=False, target_fiber_ids=None):
         if self._syncing:
             return
         scene = scene or bpy.context.scene
@@ -178,20 +181,34 @@ class FiberSceneSync:
             runtime = SCPRegistry(root)
             runtime.build()
 
+            if target_fiber_ids is None:
+                fibers_to_sync = list(root.af_vcp_system.fibers)
+            else:
+                target_set = set(target_fiber_ids)
+                fibers_to_sync = [f for f in root.af_vcp_system.fibers if f.id in target_set]
+
             live_ids = set()
-            for fiber in root.af_vcp_system.fibers:
+            for fiber in fibers_to_sync:
                 live_ids.add(fiber.id)
                 obj = self._find_fiber_proxy(vis_col, root.name, fiber.id)
                 if obj is None:
                     obj = self._create_fiber_proxy(vis_col, root, fiber.id)
 
-                points = self._solver.solve_points(root=root, fiber_prop=fiber, scene=scene, depsgraph=depsgraph, bake=bake)
+                points = self._solver.solve_points(
+                    root=root,
+                    fiber_prop=fiber,
+                    scene=scene,
+                    depsgraph=depsgraph,
+                    bake=bake,
+                )
                 if len(points) >= 2:
                     self._update_curve_points(obj, points, fiber.thickness)
 
-            for obj in list(vis_col.objects):
-                if obj.get("af_fiber_proxy") and obj.get("af_root_name") == root.name and obj.get("af_fiber_id") not in live_ids:
-                    bpy.data.objects.remove(obj, do_unlink=True)
+            # Full cleanup only on full sync.
+            if target_fiber_ids is None:
+                for obj in list(vis_col.objects):
+                    if obj.get("af_fiber_proxy") and obj.get("af_root_name") == root.name and obj.get("af_fiber_id") not in live_ids:
+                        bpy.data.objects.remove(obj, do_unlink=True)
 
             self._sync_endpoint_handles(root, scene, vis_col, runtime.registry)
             self._apply_selection_highlight(root, scene)
@@ -213,6 +230,8 @@ class FiberSceneSync:
         runtime.build()
 
         changed = False
+        changed_fiber_ids = set()
+
         self._syncing = True
         try:
             for upd in depsgraph.updates:
@@ -249,15 +268,17 @@ class FiberSceneSync:
                     if fiber.a_attach_param != raw:
                         fiber.a_attach_param = raw
                         changed = True
+                        changed_fiber_ids.add(fiber.id)
                 else:
                     if fiber.b_attach_param != raw:
                         fiber.b_attach_param = raw
                         changed = True
+                        changed_fiber_ids.add(fiber.id)
         finally:
             self._syncing = False
 
         if changed:
-            self.sync_root_to_scene(root=root, scene=scene)
+            self.sync_root_to_scene(root=root, scene=scene, target_fiber_ids=changed_fiber_ids)
 
 
 _FIBER_SYNC = None

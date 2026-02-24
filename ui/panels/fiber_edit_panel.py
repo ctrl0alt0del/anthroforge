@@ -86,4 +86,7 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         display_box.label(text="Display")
         display_box.prop(fiber, "thickness")
 
-        layout.operator("af.recompute_fiber", icon="FILE_REFRESH")
+        op = solver_box.operator("af.clear_fiber_warm_start", icon="TRASH")
+        op.fiber_id = fiber.id
+        op = layout.operator("af.recompute_fiber", icon="FILE_REFRESH")
+        op.fiber_id = fiber.id

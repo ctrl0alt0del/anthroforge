@@ -65,8 +65,48 @@ class AF_OT_ResetFiberRestLength(bpy.types.Operator):
             return {"CANCELLED"}
 
         fiber.rest_length = (p1 - p0).length
-        register_fiber_sync().sync_root_to_scene(root=root, scene=context.scene)
+        register_fiber_sync().sync_root_to_scene(root=root, scene=context.scene, target_fiber_ids={fiber.id})
         self.report({"INFO"}, f"Rest length reset for {fiber.id}")
+        return {"FINISHED"}
+
+
+class AF_OT_ClearFiberWarmStart(bpy.types.Operator):
+    bl_idname = "af.clear_fiber_warm_start"
+    bl_label = "Clear Warm Start"
+    bl_options = {"REGISTER", "UNDO"}
+
+    fiber_id: bpy.props.StringProperty(default="")
+
+    def execute(self, context):
+        root = get_af_root(context.scene)
+        if root is None:
+            return {"CANCELLED"}
+
+        vcp = root.af_vcp_system
+        target_id = self.fiber_id or vcp.active_vcp_id
+        if not target_id:
+            self.report({"ERROR"}, "No active fiber.")
+            return {"CANCELLED"}
+
+        fiber = None
+        for f in vcp.fibers:
+            if f.id == target_id:
+                fiber = f
+                break
+        if fiber is None:
+            self.report({"ERROR"}, "Fiber not found.")
+            return {"CANCELLED"}
+
+        sync = register_fiber_sync()
+        sync.clear_solver_cache(fiber.id)
+
+        # Optional: reset UI status so user sees fresh state before next recompute
+        fiber.last_recompute_status = "UNKNOWN"
+        fiber.last_recompute_ms = 0.0
+        fiber.last_eps_disp = 0.0
+        fiber.last_eps_pen = 0.0
+
+        self.report({"INFO"}, f"Warm-start cache cleared for {fiber.id}")
         return {"FINISHED"}
 
 
@@ -75,38 +115,54 @@ class AF_OT_RecomputeFiber(bpy.types.Operator):
     bl_label = "Recompute Fiber"
     bl_options = {"REGISTER", "UNDO"}
 
+    fiber_id: bpy.props.StringProperty(default="")
+
+    def _find_target_fiber(self, root):
+        vcp = root.af_vcp_system
+        target_id = self.fiber_id or vcp.active_vcp_id
+        if not target_id:
+            return None
+        for f in vcp.fibers:
+            if f.id == target_id:
+                return f
+        return None
+
     def execute(self, context):
         t0 = time.perf_counter()
+
         root = get_af_root(context.scene)
         if root is None:
             return {"CANCELLED"}
 
+        fiber = self._find_target_fiber(root)
+        if fiber is None:
+            self.report({"ERROR"}, "Target fiber not found.")
+            return {"CANCELLED"}
+
         sync = register_fiber_sync()
 
-        # One-click converge loop (bake mode)
         max_passes = 40
+        converged = False
+
         for _ in range(max_passes):
-            sync.sync_root_to_scene(root=root, scene=context.scene, bake=True)
-
-            # stop when all fibers converged
-            any_not_converged = False
-            for f in root.af_vcp_system.fibers:
-                if f.not_converged:
-                    any_not_converged = True
-                    break
-
-            if not any_not_converged:
-                self.report({"WARNING"}, "Reached recompute cap before full convergence")
+            sync.sync_root_to_scene(
+                root=root,
+                scene=context.scene,
+                bake=True,
+                target_fiber_ids={fiber.id},
+            )
+            if not fiber.not_converged:
+                converged = True
                 break
+
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        status = "CONVERGED"
-        for f in root.af_vcp_system.fibers:
-            if f.not_converged:
-                status = "NOT_CONVERGED"
-                break
 
-        for f in root.af_vcp_system.fibers:
-            f.last_recompute_ms = elapsed_ms
-            f.last_recompute_status = status
-        self.report({"INFO"}, "Fiber recompute finished")
+        fiber.last_recompute_ms = elapsed_ms
+        fiber.last_recompute_status = "CONVERGED" if converged else "NOT_CONVERGED"
+
+        if converged:
+            self.report({"INFO"}, f"Fiber {fiber.id} converged")
+        else:
+            self.report({"WARNING"}, f"Fiber {fiber.id} not converged after {max_passes} passes")
+
         return {"FINISHED"}
