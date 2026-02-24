@@ -6,6 +6,11 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
     name: bpy.props.StringProperty(name="Name", default="Muscle")
 
 
+class AF_FiberTouchPoint_Property(bpy.types.PropertyGroup):
+    parent_id: bpy.props.StringProperty(name="Touch SCP ID", default="")
+    attach_param: bpy.props.StringProperty(name="Touch Attach Param JSON", default="0.0")
+
+
 class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
 
@@ -15,6 +20,10 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     b_parent_id: bpy.props.StringProperty(name="Insertion SCP ID")
     b_attach_param: bpy.props.StringProperty(name="Insertion Attach Param JSON")
 
+    # Mid touch points
+    mid_touches: bpy.props.CollectionProperty(type=AF_FiberTouchPoint_Property)
+    guide_stiffness: bpy.props.FloatProperty(name="Guide Stiffness", default=1.0, min=0.0, max=1.0)
+
     # Grouping
     muscle_id: bpy.props.StringProperty(name="Muscle ID", default="")
 
@@ -22,12 +31,8 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     rest_length: bpy.props.FloatProperty(name="Rest Length", default=0.0, min=0.0)
     node_count: bpy.props.IntProperty(name="Node Count", default=64, min=8, max=512)
 
-    iterations_interactive: bpy.props.IntProperty(
-        name="Iterations (Interactive)", default=12, min=1, max=200
-    )
-    iterations_bake: bpy.props.IntProperty(
-        name="Iterations (Bake)", default=120, min=1, max=1000
-    )
+    iterations_interactive: bpy.props.IntProperty(name="Iterations (Interactive)", default=12, min=1, max=200)
+    iterations_bake: bpy.props.IntProperty(name="Iterations (Bake)", default=120, min=1, max=1000)
 
     stretch_enabled: bpy.props.BoolProperty(name="Stretch Enabled", default=True)
     max_stretch: bpy.props.FloatProperty(name="Max Stretch", default=1, min=1.0, max=10.0)
@@ -52,11 +57,7 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     )
     last_eps_disp: bpy.props.FloatProperty(name="Last Disp Eps", default=0.0)
     last_eps_pen: bpy.props.FloatProperty(name="Last Pen Eps", default=0.0)
-    use_warm_start: bpy.props.BoolProperty(
-        name="Use Warm Start",
-        default=True
-    )
-
+    use_warm_start: bpy.props.BoolProperty(name="Use Warm Start", default=True)
 
 
 class AF_VCP_System_Property(bpy.types.PropertyGroup):

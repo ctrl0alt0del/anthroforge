@@ -1,6 +1,5 @@
 import json
 import bpy
-from mathutils import Vector
 
 from ..utils import get_af_root
 from ..vcp.fiber_solver import FiberSolver
@@ -43,6 +42,17 @@ class FiberSceneSync:
                 return obj
         return None
 
+    def _find_touch_handle(self, vis_col, root_name, fiber_id, touch_index):
+        for obj in vis_col.objects:
+            if (
+                obj.get("af_fiber_touch_handle")
+                and obj.get("af_root_name") == root_name
+                and obj.get("af_fiber_id") == fiber_id
+                and int(obj.get("af_fiber_touch_index", -1)) == int(touch_index)
+            ):
+                return obj
+        return None
+
     def _create_endpoint_handle(self, vis_col, root, fiber_id, endpoint):
         obj = bpy.data.objects.new(f"AF_{fiber_id}_{endpoint}", None)
         obj.empty_display_type = "SPHERE"
@@ -51,6 +61,17 @@ class FiberSceneSync:
         obj["af_root_name"] = root.name
         obj["af_fiber_id"] = fiber_id
         obj["af_fiber_endpoint"] = endpoint
+        vis_col.objects.link(obj)
+        return obj
+
+    def _create_touch_handle(self, vis_col, root, fiber_id, touch_index):
+        obj = bpy.data.objects.new(f"AF_{fiber_id}_T{touch_index}", None)
+        obj.empty_display_type = "CUBE"
+        obj.empty_display_size = 0.03
+        obj["af_fiber_touch_handle"] = True
+        obj["af_root_name"] = root.name
+        obj["af_fiber_id"] = fiber_id
+        obj["af_fiber_touch_index"] = int(touch_index)
         vis_col.objects.link(obj)
         return obj
 
@@ -131,14 +152,16 @@ class FiberSceneSync:
                 best = p
         return best
 
-    def _sync_endpoint_handles(self, root, scene, vis_col, runtime_registry):
-        live = set()
+    def _sync_handles(self, root, scene, vis_col, runtime_registry):
+        live_endpoint_keys = set()
+        live_touch_keys = set()
+
         for fiber in root.af_vcp_system.fibers:
             for endpoint, pid, raw in (
                 ("A", fiber.a_parent_id, fiber.a_attach_param),
                 ("B", fiber.b_parent_id, fiber.b_attach_param),
             ):
-                live.add((fiber.id, endpoint))
+                live_endpoint_keys.add((fiber.id, endpoint))
                 h = self._find_endpoint_handle(vis_col, root.name, fiber.id, endpoint)
                 if h is None:
                     h = self._create_endpoint_handle(vis_col, root, fiber.id, endpoint)
@@ -146,10 +169,25 @@ class FiberSceneSync:
                 if w is not None:
                     h.location = w
 
+            for i, tp in enumerate(fiber.mid_touches):
+                live_touch_keys.add((fiber.id, i))
+                h = self._find_touch_handle(vis_col, root.name, fiber.id, i)
+                if h is None:
+                    h = self._create_touch_handle(vis_col, root, fiber.id, i)
+
+                w = self._endpoint_world(root, scene, runtime_registry, tp.parent_id, tp.attach_param)
+                if w is not None:
+                    h.location = w
+
         for obj in list(vis_col.objects):
             if obj.get("af_fiber_endpoint_handle") and obj.get("af_root_name") == root.name:
                 key = (obj.get("af_fiber_id"), obj.get("af_fiber_endpoint"))
-                if key not in live:
+                if key not in live_endpoint_keys:
+                    bpy.data.objects.remove(obj, do_unlink=True)
+
+            if obj.get("af_fiber_touch_handle") and obj.get("af_root_name") == root.name:
+                key = (obj.get("af_fiber_id"), int(obj.get("af_fiber_touch_index", -1)))
+                if key not in live_touch_keys:
                     bpy.data.objects.remove(obj, do_unlink=True)
 
     def _apply_selection_highlight(self, root, scene):
@@ -161,10 +199,7 @@ class FiberSceneSync:
             if obj.get("af_root_name") != root.name:
                 continue
             base = tuple(obj.get("af_fiber_base_color", DEFAULT_FIBER_COLOR))
-            self._set_fiber_color(
-                obj,
-                SELECTED_FIBER_COLOR if active_type == "FIBER" and obj.get("af_fiber_id") == active_id else base
-            )
+            self._set_fiber_color(obj, SELECTED_FIBER_COLOR if active_type == "FIBER" and obj.get("af_fiber_id") == active_id else base)
 
     def sync_root_to_scene(self, root=None, scene=None, bake=False, target_fiber_ids=None):
         if self._syncing:
@@ -194,23 +229,16 @@ class FiberSceneSync:
                 if obj is None:
                     obj = self._create_fiber_proxy(vis_col, root, fiber.id)
 
-                points = self._solver.solve_points(
-                    root=root,
-                    fiber_prop=fiber,
-                    scene=scene,
-                    depsgraph=depsgraph,
-                    bake=bake,
-                )
+                points = self._solver.solve_points(root=root, fiber_prop=fiber, scene=scene, depsgraph=depsgraph, bake=bake)
                 if len(points) >= 2:
                     self._update_curve_points(obj, points, fiber.thickness)
 
-            # Full cleanup only on full sync.
             if target_fiber_ids is None:
                 for obj in list(vis_col.objects):
                     if obj.get("af_fiber_proxy") and obj.get("af_root_name") == root.name and obj.get("af_fiber_id") not in live_ids:
                         bpy.data.objects.remove(obj, do_unlink=True)
 
-            self._sync_endpoint_handles(root, scene, vis_col, runtime.registry)
+            self._sync_handles(root, scene, vis_col, runtime.registry)
             self._apply_selection_highlight(root, scene)
         finally:
             self._syncing = False
@@ -238,40 +266,59 @@ class FiberSceneSync:
                 obj = upd.id
                 if not isinstance(obj, bpy.types.Object):
                     continue
-                if not obj.get("af_fiber_endpoint_handle"):
-                    continue
                 if obj.get("af_root_name") != root.name:
                     continue
                 if vis_col.objects.get(obj.name) is None:
                     continue
 
-                fiber_id = obj.get("af_fiber_id")
-                endpoint = obj.get("af_fiber_endpoint")
-                fiber = None
-                for f in root.af_vcp_system.fibers:
-                    if f.id == fiber_id:
-                        fiber = f
-                        break
-                if fiber is None:
-                    continue
+                if obj.get("af_fiber_endpoint_handle"):
+                    fiber_id = obj.get("af_fiber_id")
+                    endpoint = obj.get("af_fiber_endpoint")
+                    fiber = next((f for f in root.af_vcp_system.fibers if f.id == fiber_id), None)
+                    if fiber is None:
+                        continue
 
-                parent_id = fiber.a_parent_id if endpoint == "A" else fiber.b_parent_id
-                parent_scp = runtime.registry.get(parent_id)
-                parent_proxy = self._get_scp_proxy(scene, root.name, parent_id)
-                if parent_scp is None or parent_proxy is None:
-                    continue
+                    parent_id = fiber.a_parent_id if endpoint == "A" else fiber.b_parent_id
+                    parent_scp = runtime.registry.get(parent_id)
+                    parent_proxy = self._get_scp_proxy(scene, root.name, parent_id)
+                    if parent_scp is None or parent_proxy is None:
+                        continue
 
-                param = self._nearest_param(parent_scp, parent_proxy, obj.location.copy())
-                raw = json.dumps(param)
+                    param = self._nearest_param(parent_scp, parent_proxy, obj.location.copy())
+                    raw = json.dumps(param)
 
-                if endpoint == "A":
-                    if fiber.a_attach_param != raw:
-                        fiber.a_attach_param = raw
-                        changed = True
-                        changed_fiber_ids.add(fiber.id)
-                else:
-                    if fiber.b_attach_param != raw:
-                        fiber.b_attach_param = raw
+                    if endpoint == "A":
+                        if fiber.a_attach_param != raw:
+                            fiber.a_attach_param = raw
+                            changed = True
+                            changed_fiber_ids.add(fiber.id)
+                    else:
+                        if fiber.b_attach_param != raw:
+                            fiber.b_attach_param = raw
+                            changed = True
+                            changed_fiber_ids.add(fiber.id)
+
+                elif obj.get("af_fiber_touch_handle"):
+                    fiber_id = obj.get("af_fiber_id")
+                    touch_index = int(obj.get("af_fiber_touch_index", -1))
+                    fiber = next((f for f in root.af_vcp_system.fibers if f.id == fiber_id), None)
+                    if fiber is None:
+                        continue
+                    if touch_index < 0 or touch_index >= len(fiber.mid_touches):
+                        continue
+
+                    tp = fiber.mid_touches[touch_index]
+                    parent_id = tp.parent_id
+                    parent_scp = runtime.registry.get(parent_id)
+                    parent_proxy = self._get_scp_proxy(scene, root.name, parent_id)
+                    if parent_scp is None or parent_proxy is None:
+                        continue
+
+                    param = self._nearest_param(parent_scp, parent_proxy, obj.location.copy())
+                    raw = json.dumps(param)
+
+                    if tp.attach_param != raw:
+                        tp.attach_param = raw
                         changed = True
                         changed_fiber_ids.add(fiber.id)
         finally:

@@ -68,6 +68,21 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         solver_box.prop(fiber, "bend_stiffness")
         solver_box.prop(fiber, "collision_margin")
         solver_box.prop(fiber, "damping")
+        solver_box.prop(fiber, "guide_stiffness")
+
+        touch_box = layout.box()
+        touch_box.label(text="Mid Touch Points")
+        touch_box.label(text="Select SCP, then add touch point")
+
+        op = touch_box.operator("af.add_fiber_touch_point", icon="ADD")
+        op.fiber_id = fiber.id
+
+        for i, tp in enumerate(fiber.mid_touches):
+            row = touch_box.row(align=True)
+            row.label(text=f"{i + 1}. {_scp_label(root, tp.parent_id)}")
+            op = row.operator("af.remove_fiber_touch_point", text="", icon="X")
+            op.fiber_id = fiber.id
+            op.touch_index = i
 
         status_box = layout.box()
         status = fiber.last_recompute_status

@@ -20,8 +20,13 @@ from .operators.tree import (
 )
 from .operators.add_fiber_vcp import AF_OT_AddFiberVCP
 from .operators.delete_af_node import AF_OT_DeleteSelectedAFNode
-from .operators.fiber_tools import AF_OT_ResetFiberRestLength, AF_OT_RecomputeFiber, AF_OT_ClearFiberWarmStart
-
+from .operators.fiber_tools import (
+    AF_OT_ResetFiberRestLength,
+    AF_OT_ClearFiberWarmStart,
+    AF_OT_RecomputeFiber,
+    AF_OT_AddFiberTouchPoint,
+    AF_OT_RemoveFiberTouchPoint,
+)
 
 from .ui.main_panel import AF_PT_MainPanel
 from .ui.panels.create_panel import AF_PT_CreatePanel
@@ -32,10 +37,16 @@ from .ui.panels.fiber_edit_panel import AF_PT_FiberEditPanel
 from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
 
 from .properties.scp_properties import AF_SCP_Property, AF_SCP_System_Property
+from .properties.vcp_properties import (
+    AF_FiberTouchPoint_Property,
+    AF_FiberVCP_Property,
+    AF_MuscleVCP_Property,
+    AF_VCP_System_Property,
+)
+
 from .core.shapes import *  # registers shape classes
 from .core.visualization.sync import register_sync, unregister_sync
 from .ui.scene_props import register_scene_props, unregister_scene_props
-from .properties.vcp_properties import AF_FiberVCP_Property, AF_MuscleVCP_Property, AF_VCP_System_Property
 
 addon_keymaps = []
 
@@ -44,25 +55,35 @@ classes = (
     AF_OT_AddSCP,
     AF_OT_ToggleSCPCollapse,
     AF_OT_SelectSCPInTree,
+
     AF_PT_MainPanel,
     AF_PT_CreatePanel,
     AF_PT_TreePanel,
     AF_PT_EditPanel,
+
     AF_SCP_Property,
     AF_SCP_System_Property,
+
     AF_OT_ResetFiberRestLength,
+    AF_OT_ClearFiberWarmStart,
     AF_OT_RecomputeFiber,
+    AF_OT_AddFiberTouchPoint,
+    AF_OT_RemoveFiberTouchPoint,
+
     AF_PT_FiberEditPanel,
     AF_PT_FiberCreatePanel,
+
     AF_MuscleVCP_Property,
+    AF_FiberTouchPoint_Property,
     AF_FiberVCP_Property,
     AF_VCP_System_Property,
+
     AF_OT_AddFiberVCP,
     AF_OT_ToggleVCPCollapse,
     AF_OT_SelectVCPInTree,
     AF_PT_VCPTreePanel,
+
     AF_OT_DeleteSelectedAFNode,
-    AF_OT_ClearFiberWarmStart,
 )
 
 
@@ -72,8 +93,10 @@ def register():
 
     bpy.types.Object.af_scp_system = bpy.props.PointerProperty(type=AF_SCP_System_Property)
     bpy.types.Object.af_vcp_system = bpy.props.PointerProperty(type=AF_VCP_System_Property)
+
     register_scene_props()
     register_sync()
+
     wm = bpy.context.window_manager
     kc = wm.keyconfigs.addon
     if kc:
@@ -85,10 +108,13 @@ def register():
 def unregister():
     unregister_sync()
     unregister_scene_props()
+
     del bpy.types.Object.af_scp_system
     del bpy.types.Object.af_vcp_system
+
     for km, kmi in addon_keymaps:
         km.keymap_items.remove(kmi)
     addon_keymaps.clear()
+
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

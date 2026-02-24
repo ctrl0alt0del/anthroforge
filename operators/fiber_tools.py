@@ -166,3 +166,87 @@ class AF_OT_RecomputeFiber(bpy.types.Operator):
             self.report({"WARNING"}, f"Fiber {fiber.id} not converged after {max_passes} passes")
 
         return {"FINISHED"}
+
+class AF_OT_AddFiberTouchPoint(bpy.types.Operator):
+    bl_idname = "af.add_fiber_touch_point"
+    bl_label = "Add Mid Touch Point"
+    bl_options = {"REGISTER", "UNDO"}
+
+    fiber_id: bpy.props.StringProperty(default="")
+
+    def execute(self, context):
+        root = get_af_root(context.scene)
+        if root is None:
+            return {"CANCELLED"}
+
+        vcp = root.af_vcp_system
+        target_id = self.fiber_id or vcp.active_vcp_id
+        fiber = next((f for f in vcp.fibers if f.id == target_id), None)
+        if fiber is None:
+            self.report({"ERROR"}, "Fiber not found.")
+            return {"CANCELLED"}
+
+        scp_id = ""
+        obj = context.active_object
+        if obj and obj.get("af_proxy") and obj.get("af_root_name") == root.name:
+            scp_id = obj.get("af_scp_id", "")
+        if not scp_id:
+            idx = root.af_scp_system.active_scp_index
+            if 0 <= idx < len(root.af_scp_system.scps):
+                scp_id = root.af_scp_system.scps[idx].id
+
+        if not scp_id:
+            self.report({"ERROR"}, "Select an SCP in viewport or SCP tree first.")
+            return {"CANCELLED"}
+
+        runtime = SCPRegistry(root)
+        runtime.build()
+        parent = runtime.registry.get(scp_id)
+        if parent is None:
+            self.report({"ERROR"}, "Selected SCP not found in runtime registry.")
+            return {"CANCELLED"}
+
+        params = parent.shape.get_attach_params()
+        p = params[0] if params else 0.0
+
+        tp = fiber.mid_touches.add()
+        tp.parent_id = scp_id
+        tp.attach_param = json.dumps(p)
+
+        sync = register_fiber_sync()
+        sync.clear_solver_cache(fiber.id)
+        sync.sync_root_to_scene(root=root, scene=context.scene, target_fiber_ids={fiber.id})
+        return {"FINISHED"}
+
+
+class AF_OT_RemoveFiberTouchPoint(bpy.types.Operator):
+    bl_idname = "af.remove_fiber_touch_point"
+    bl_label = "Remove Mid Touch Point"
+    bl_options = {"REGISTER", "UNDO"}
+
+    fiber_id: bpy.props.StringProperty(default="")
+    touch_index: bpy.props.IntProperty(default=-1)
+
+    def execute(self, context):
+        root = get_af_root(context.scene)
+        if root is None:
+            return {"CANCELLED"}
+
+        vcp = root.af_vcp_system
+        target_id = self.fiber_id or vcp.active_vcp_id
+        fiber = next((f for f in vcp.fibers if f.id == target_id), None)
+        if fiber is None:
+            self.report({"ERROR"}, "Fiber not found.")
+            return {"CANCELLED"}
+
+        idx = int(self.touch_index)
+        if idx < 0 or idx >= len(fiber.mid_touches):
+            self.report({"ERROR"}, "Invalid touch index.")
+            return {"CANCELLED"}
+
+        fiber.mid_touches.remove(idx)
+
+        sync = register_fiber_sync()
+        sync.clear_solver_cache(fiber.id)
+        sync.sync_root_to_scene(root=root, scene=context.scene, target_fiber_ids={fiber.id})
+        return {"FINISHED"}

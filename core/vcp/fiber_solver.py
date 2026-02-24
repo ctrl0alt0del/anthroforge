@@ -59,24 +59,6 @@ class FiberSolver:
         iterations = int(fiber_prop.iterations_bake if bake else fiber_prop.iterations_interactive)
         iterations = max(1, iterations)
 
-        use_warm_start = bool(getattr(fiber_prop, "use_warm_start", False))
-        nodes, pinned = self._init_nodes(
-            fiber_id=fiber_prop.id,
-            a_world=a_world,
-            b_world=b_world,
-            node_count=node_count,
-            use_warm_start=use_warm_start,
-        )
-        prev_nodes = [p.copy() for p in nodes]
-
-        rest_total = float(fiber_prop.rest_length)
-        if rest_total <= 1e-8:
-            rest_total = (b_world - a_world).length
-
-        l0 = rest_total / float(node_count - 1)
-        max_total = float(fiber_prop.max_stretch) * rest_total
-        max_seg = max_total / float(node_count - 1)
-
         colliders = self._surface_colliders(root, scene, runtime.registry)
         collider_cache = self._build_collider_cache(colliders, depsgraph)
 
@@ -85,56 +67,151 @@ class FiberSolver:
         bend_stiff = float(fiber_prop.bend_stiffness)
         margin = float(fiber_prop.collision_margin)
         damping = float(fiber_prop.damping)
+        max_stretch = float(fiber_prop.max_stretch)
 
-        converged = False
         eps_disp = 1e-4
         eps_pen = 1e-5
         min_iters = max(10, iterations // 4)
 
-        max_disp = 0.0
-        max_pen = 0.0
+        guides = self._guide_worlds(root, scene, runtime.registry, fiber_prop)
+        anchors = [a_world] + guides + [b_world]
+        seg_count = len(anchors) - 1
 
-        for it in range(iterations):
-            self._apply_stretch_constraints(
-                nodes=nodes,
-                pinned=pinned,
-                l0=l0,
-                max_seg=max_seg,
-                stretch_enabled=stretch_enabled,
-                stiffness=stretch_stiff,
+        if seg_count <= 0:
+            fiber_prop.not_converged = True
+            fiber_prop.last_eps_disp = 0.0
+            fiber_prop.last_eps_pen = 0.0
+            return []
+
+        # Distances per anchor span
+        seg_dist = []
+        total_dist = 0.0
+        for i in range(seg_count):
+            d = (anchors[i + 1] - anchors[i]).length
+            seg_dist.append(d)
+            total_dist += d
+
+        if total_dist <= 1e-9:
+            total_dist = (b_world - a_world).length
+            if total_dist <= 1e-9:
+                total_dist = 1.0
+            seg_dist = [total_dist / seg_count] * seg_count
+
+        rest_total = float(fiber_prop.rest_length)
+        if rest_total <= 1e-8:
+            rest_total = total_dist
+
+        # Allocate edges per segment (sum(edges)=node_count-1), min 1 each
+        total_edges = max(seg_count, node_count - 1)
+        raw_edges = [(total_edges * (d / total_dist)) for d in seg_dist]
+        edges = [max(1, int(v)) for v in raw_edges]
+        used = sum(edges)
+
+        if used < total_edges:
+            frac = sorted(
+                [(raw_edges[i] - int(raw_edges[i]), i) for i in range(seg_count)],
+                reverse=True
+            )
+            k = 0
+            while used < total_edges:
+                edges[frac[k % len(frac)][1]] += 1
+                used += 1
+                k += 1
+        elif used > total_edges:
+            frac = sorted(
+                [(raw_edges[i] - int(raw_edges[i]), i) for i in range(seg_count)]
+            )
+            k = 0
+            while used > total_edges and k < len(frac) * 4:
+                idx = frac[k % len(frac)][1]
+                if edges[idx] > 1:
+                    edges[idx] -= 1
+                    used -= 1
+                k += 1
+
+        def solve_segment(p0, p1, seg_edges, seg_rest_total):
+            seg_nodes = [p0.lerp(p1, i / float(seg_edges)) for i in range(seg_edges + 1)]
+            pinned = [False] * len(seg_nodes)
+            pinned[0] = True
+            pinned[-1] = True
+            prev_nodes = [p.copy() for p in seg_nodes]
+
+            l0 = seg_rest_total / float(max(1, seg_edges))
+            max_total = max_stretch * seg_rest_total
+            max_seg = max_total / float(max(1, seg_edges))
+
+            converged = False
+            max_disp = 0.0
+            max_pen = 0.0
+
+            for it in range(iterations):
+                self._apply_stretch_constraints(
+                    nodes=seg_nodes,
+                    pinned=pinned,
+                    l0=l0,
+                    max_seg=max_seg,
+                    stretch_enabled=stretch_enabled,
+                    stiffness=stretch_stiff,
+                )
+
+                if (it % 2) == 0:
+                    self._apply_bend_smoothing(seg_nodes, pinned, bend_stiff)
+
+                max_pen = self._apply_collision_constraints(
+                    nodes=seg_nodes,
+                    pinned=pinned,
+                    collider_cache=collider_cache,
+                    margin=margin,
+                )
+
+                seg_nodes[0] = p0.copy()
+                seg_nodes[-1] = p1.copy()
+
+                self._apply_damping(seg_nodes, prev_nodes, pinned, damping)
+
+                max_disp = self._max_displacement(seg_nodes, prev_nodes)
+                prev_nodes = [p.copy() for p in seg_nodes]
+
+                if it >= min_iters and max_disp < eps_disp and max_pen < eps_pen:
+                    converged = True
+                    break
+
+            return seg_nodes, converged, max_disp, max_pen
+
+        out = []
+        all_converged = True
+        global_max_disp = 0.0
+        global_max_pen = 0.0
+
+        for i in range(seg_count):
+            p0 = anchors[i]
+            p1 = anchors[i + 1]
+            seg_rest = rest_total * (seg_dist[i] / total_dist)
+
+            seg_nodes, ok, md, mp = solve_segment(
+                p0=p0,
+                p1=p1,
+                seg_edges=edges[i],
+                seg_rest_total=seg_rest,
             )
 
-            # bend every second iteration (faster)
-            if (it % 2) == 0:
-                self._apply_bend_smoothing(nodes, pinned, bend_stiff)
+            if i == 0:
+                out.extend(seg_nodes)
+            else:
+                out.extend(seg_nodes[1:])  # stitch without duplicating anchor
 
-            max_pen = self._apply_collision_constraints(
-                nodes=nodes,
-                pinned=pinned,
-                collider_cache=collider_cache,
-                margin=margin,
-            )
+            all_converged = all_converged and ok
+            global_max_disp = max(global_max_disp, md)
+            global_max_pen = max(global_max_pen, mp)
 
-            # hard pin endpoints
-            nodes[0] = a_world.copy()
-            nodes[-1] = b_world.copy()
+        fiber_prop.not_converged = not all_converged
+        fiber_prop.last_eps_disp = float(global_max_disp)
+        fiber_prop.last_eps_pen = float(global_max_pen)
 
-            self._apply_damping(nodes, prev_nodes, pinned, damping)
+        self._cache[fiber_prop.id] = [p.copy() for p in out]
+        return out
 
-            max_disp = self._max_displacement(nodes, prev_nodes)
-            prev_nodes = [p.copy() for p in nodes]
 
-            if it >= min_iters and max_disp < eps_disp and max_pen < eps_pen:
-                converged = True
-                break
-
-        fiber_prop.not_converged = not converged
-        fiber_prop.last_eps_disp = float(max_disp)
-        fiber_prop.last_eps_pen = float(max_pen)
-
-        # always update cache; next solve uses it only if use_warm_start=True
-        self._cache[fiber_prop.id] = [p.copy() for p in nodes]
-        return nodes
 
     # ------------------------------
     # Initialization
@@ -396,3 +473,50 @@ class FiberSolver:
             if d > md:
                 md = d
         return md
+
+    def _guide_worlds(self, root, scene, runtime_registry, fiber_prop):
+        out = []
+        touches = getattr(fiber_prop, "mid_touches", None)
+        if not touches:
+            return out
+
+        for tp in touches:
+            w = self._endpoint_world(
+                root=root,
+                scene=scene,
+                runtime_registry=runtime_registry,
+                parent_id=tp.parent_id,
+                attach_param_raw=tp.attach_param,
+            )
+            if w is not None:
+                out.append(w)
+        return out
+
+    def _guide_indices(self, node_count, guide_count):
+        if guide_count <= 0:
+            return []
+        idxs = []
+        for k in range(guide_count):
+            idx = int(round((k + 1) * (node_count - 1) / float(guide_count + 1)))
+            idx = max(1, min(node_count - 2, idx))
+            while idx in idxs and idx < node_count - 2:
+                idx += 1
+            while idx in idxs and idx > 1:
+                idx -= 1
+            if idx not in idxs:
+                idxs.append(idx)
+        return idxs
+
+    def _apply_guide_constraints(self, nodes, pinned, guide_indices, guide_worlds, stiffness):
+        if not guide_indices or not guide_worlds:
+            return
+
+        s = max(0.0, min(1.0, float(stiffness)))
+        count = min(len(guide_indices), len(guide_worlds))
+        for i in range(count):
+            idx = guide_indices[i]
+            if idx <= 0 or idx >= len(nodes) - 1 or pinned[idx]:
+                continue
+            g = guide_worlds[i]
+            nodes[idx] = g.copy() if s >= 0.999 else nodes[idx].lerp(g, s)
+
