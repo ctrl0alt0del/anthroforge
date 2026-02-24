@@ -47,6 +47,7 @@ class AF_OT_AddFiberVCP(bpy.types.Operator):
         fibers = root.af_vcp_system.fibers
         f = fibers.add()
         f.id = f"FIBER_{len(fibers)}"
+        f.name = f.id
 
         origin = Attachment(parent_id=origin_id, param=a_param)
         insertion = Attachment(parent_id=insertion_id, param=b_param)

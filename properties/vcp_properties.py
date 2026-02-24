@@ -24,7 +24,7 @@ class AF_FiberTouchPoint_Property(bpy.types.PropertyGroup):
 
 class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
-
+    name: bpy.props.StringProperty(name="Name", default="")
     # Endpoints (attachments to SCP)
     a_parent_id: bpy.props.StringProperty(name="Origin SCP ID")
     a_attach_param: bpy.props.StringProperty(name="Origin Attach Param JSON")

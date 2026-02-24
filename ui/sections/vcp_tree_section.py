@@ -38,9 +38,10 @@ def _draw_fiber_row(layout, fiber, depth, selected_fiber_ids):
 
     row.label(text="", icon="CURVE_DATA")
 
+    label = fiber.name if getattr(fiber, "name", "") else fiber.id
     op = row.operator(
         "af.select_vcp_in_tree",
-        text=fiber.id,
+        text=label,
         emboss=True,
         depress=(fiber.id in selected_fiber_ids),
     )

@@ -35,6 +35,7 @@ from .ui.panels.edit_panel import AF_PT_EditPanel
 from .ui.panels.vcp_tree_panel import AF_PT_VCPTreePanel
 from .ui.panels.fiber_edit_panel import AF_PT_FiberEditPanel
 from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
+from .ui.panels.vcp_edit_panel import AF_PT_VCPEditPanel
 
 from .properties.scp_properties import AF_SCP_Property, AF_SCP_System_Property
 from .properties.vcp_properties import (
@@ -89,6 +90,7 @@ classes = (
     AF_PT_VCPTreePanel,
 
     AF_OT_DeleteSelectedAFNode,
+    AF_PT_VCPEditPanel,
 )
 
 
