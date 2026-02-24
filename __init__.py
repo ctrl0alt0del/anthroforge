@@ -21,7 +21,6 @@ from .operators.tree import (
 from .operators.add_fiber_vcp import AF_OT_AddFiberVCP
 from .operators.delete_af_node import AF_OT_DeleteSelectedAFNode
 from .operators.fiber_tools import (
-    AF_OT_ResetFiberRestLength,
     AF_OT_ClearFiberWarmStart,
     AF_OT_RecomputeFiber,
     AF_OT_AddFiberTouchPoint,
@@ -64,7 +63,6 @@ classes = (
     AF_SCP_Property,
     AF_SCP_System_Property,
 
-    AF_OT_ResetFiberRestLength,
     AF_OT_ClearFiberWarmStart,
     AF_OT_RecomputeFiber,
     AF_OT_AddFiberTouchPoint,

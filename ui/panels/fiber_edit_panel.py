@@ -1,4 +1,3 @@
-# ui/panels/fiber_edit_panel.py
 import bpy
 from ...core.utils import get_af_root
 
@@ -53,27 +52,22 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         solver_box = layout.box()
         solver_box.label(text="Solver")
         solver_box.prop(fiber, "use_warm_start")
-        solver_box.prop(fiber, "node_count")
-        solver_box.prop(fiber, "rest_length")
-
-        op = solver_box.operator("af.reset_fiber_rest_length", icon="FILE_REFRESH")
+        op = solver_box.operator("af.clear_fiber_warm_start", icon="TRASH")
         op.fiber_id = fiber.id
 
+        solver_box.prop(fiber, "node_count")
         solver_box.prop(fiber, "iterations_interactive")
         solver_box.prop(fiber, "iterations_bake")
-
-        solver_box.prop(fiber, "stretch_enabled")
-        solver_box.prop(fiber, "max_stretch")
-        solver_box.prop(fiber, "stretch_stiffness")
         solver_box.prop(fiber, "bend_stiffness")
         solver_box.prop(fiber, "collision_margin")
         solver_box.prop(fiber, "damping")
-        solver_box.prop(fiber, "guide_stiffness")
+
+        if hasattr(fiber, "guide_stiffness"):
+            solver_box.prop(fiber, "guide_stiffness")
 
         touch_box = layout.box()
         touch_box.label(text="Mid Touch Points")
-        touch_box.label(text="Select SCP, then add touch point")
-
+        touch_box.label(text="Select SCP, then add")
         op = touch_box.operator("af.add_fiber_touch_point", icon="ADD")
         op.fiber_id = fiber.id
 
@@ -101,7 +95,5 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         display_box.label(text="Display")
         display_box.prop(fiber, "thickness")
 
-        op = solver_box.operator("af.clear_fiber_warm_start", icon="TRASH")
-        op.fiber_id = fiber.id
         op = layout.operator("af.recompute_fiber", icon="FILE_REFRESH")
         op.fiber_id = fiber.id
