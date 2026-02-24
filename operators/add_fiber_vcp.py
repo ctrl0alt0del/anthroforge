@@ -5,6 +5,7 @@ from ..core.utils import get_af_root
 from ..core.attachment import Attachment
 from ..core.registry import SCPRegistry
 from ..core.visualization.fiber_sync import register_fiber_sync
+from ..core.visualization.muscle_sync import register_muscle_sync
 
 
 class AF_OT_AddFiberVCP(bpy.types.Operator):
@@ -40,28 +41,6 @@ class AF_OT_AddFiberVCP(bpy.types.Operator):
             params = parent.shape.get_attach_params()
             return params[0] if params else 0.0
 
-        def endpoint_world(parent_id, attach_param):
-            parent = runtime.registry.get(parent_id)
-            if not parent:
-                return None
-
-            local = parent.shape.compute_local_point(attach_param)
-
-            proxy = None
-            for obj in context.scene.objects:
-                if (
-                    obj.get("af_proxy")
-                    and obj.get("af_root_name") == root.name
-                    and obj.get("af_scp_id") == parent_id
-                ):
-                    proxy = obj
-                    break
-
-            if proxy is None:
-                return None
-
-            return proxy.matrix_world @ local
-
         a_param = first_param_for(origin_id)
         b_param = first_param_for(insertion_id)
 
@@ -78,13 +57,11 @@ class AF_OT_AddFiberVCP(bpy.types.Operator):
         f.b_parent_id = insertion.parent_id
         f.b_attach_param = json.dumps(insertion.param)
 
-        # Solver defaults
+        # Solver defaults (current model)
         f.node_count = 64
         f.iterations_interactive = 12
         f.iterations_bake = 180
-        f.stretch_enabled = True
-        f.max_stretch = 1
-        f.stretch_stiffness = 1.0
+        f.stretch_stiffness = 0.9  # used as shorten strength in current solver
         f.bend_stiffness = 0.02
         f.collision_margin = 0.002
         f.damping = 0.01
@@ -93,16 +70,8 @@ class AF_OT_AddFiberVCP(bpy.types.Operator):
         # Visual
         f.thickness = 0.01
 
-        # Rest length from initial endpoints
-        p0 = endpoint_world(origin_id, a_param)
-        p1 = endpoint_world(insertion_id, b_param)
-        if p0 is not None and p1 is not None:
-            f.rest_length = (p1 - p0).length
-        else:
-            # fallback; solver will auto-fix if still 0
-            f.rest_length = 0.0
-
         register_fiber_sync().sync_root_to_scene(root=root, scene=context.scene)
+        register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
 
         self.report({'INFO'}, f"Added {f.id}")
         return {'FINISHED'}

@@ -19,6 +19,7 @@ from .operators.tree import (
     AF_OT_SelectVCPInTree,
 )
 from .operators.add_fiber_vcp import AF_OT_AddFiberVCP
+from .operators.add_muscle_vcp import AF_OT_AddMuscleVCP
 from .operators.delete_af_node import AF_OT_DeleteSelectedAFNode
 from .operators.fiber_tools import (
     AF_OT_ClearFiberWarmStart,
@@ -37,14 +38,17 @@ from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
 
 from .properties.scp_properties import AF_SCP_Property, AF_SCP_System_Property
 from .properties.vcp_properties import (
+    AF_MuscleFiberRef_Property,
+    AF_MuscleVCP_Property,
     AF_FiberTouchPoint_Property,
     AF_FiberVCP_Property,
-    AF_MuscleVCP_Property,
     AF_VCP_System_Property,
 )
 
 from .core.shapes import *  # registers shape classes
 from .core.visualization.sync import register_sync, unregister_sync
+from .core.visualization.fiber_sync import register_fiber_sync, unregister_fiber_sync
+from .core.visualization.muscle_sync import register_muscle_sync, unregister_muscle_sync
 from .ui.scene_props import register_scene_props, unregister_scene_props
 
 addon_keymaps = []
@@ -71,12 +75,15 @@ classes = (
     AF_PT_FiberEditPanel,
     AF_PT_FiberCreatePanel,
 
+    # Register nested property item type BEFORE owner types.
+    AF_MuscleFiberRef_Property,
     AF_MuscleVCP_Property,
     AF_FiberTouchPoint_Property,
     AF_FiberVCP_Property,
     AF_VCP_System_Property,
 
     AF_OT_AddFiberVCP,
+    AF_OT_AddMuscleVCP,
     AF_OT_ToggleVCPCollapse,
     AF_OT_SelectVCPInTree,
     AF_PT_VCPTreePanel,
@@ -94,6 +101,8 @@ def register():
 
     register_scene_props()
     register_sync()
+    register_fiber_sync()
+    register_muscle_sync()
 
     wm = bpy.context.window_manager
     kc = wm.keyconfigs.addon
@@ -104,6 +113,8 @@ def register():
 
 
 def unregister():
+    unregister_muscle_sync()
+    unregister_fiber_sync()
     unregister_sync()
     unregister_scene_props()
 

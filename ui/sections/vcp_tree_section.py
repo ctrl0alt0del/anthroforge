@@ -28,7 +28,7 @@ def _build_vcp_tree(root):
     return muscles, by_muscle, free_fibers
 
 
-def _draw_fiber_row(layout, fiber, depth, active_id, active_type):
+def _draw_fiber_row(layout, fiber, depth, selected_fiber_ids):
     row = layout.row(align=True)
 
     if depth > 0:
@@ -42,7 +42,7 @@ def _draw_fiber_row(layout, fiber, depth, active_id, active_type):
         "af.select_vcp_in_tree",
         text=fiber.id,
         emboss=True,
-        depress=(active_type == "FIBER" and active_id == fiber.id),
+        depress=(fiber.id in selected_fiber_ids),
     )
     op.node_id = fiber.id
     op.node_type = "FIBER"
@@ -51,7 +51,6 @@ def _draw_fiber_row(layout, fiber, depth, active_id, active_type):
     del_op.target_type = "FIBER"
     del_op.target_id = fiber.id
 
-    # Right-side compact endpoint info
     a = fiber.a_parent_id if fiber.a_parent_id else "?"
     b = fiber.b_parent_id if fiber.b_parent_id else "?"
     right = row.row(align=True)
@@ -60,7 +59,7 @@ def _draw_fiber_row(layout, fiber, depth, active_id, active_type):
     right.label(text=f"{a} -> {b}")
 
 
-def _draw_muscle_node(layout, scene, muscle, by_muscle, active_id, active_type):
+def _draw_muscle_node(layout, scene, muscle, by_muscle, selected_muscle_ids, selected_fiber_ids):
     node_key = f"MUSCLE:{muscle.id}"
     collapsed = _is_collapsed(scene, node_key)
     children = by_muscle.get(muscle.id, [])
@@ -75,7 +74,7 @@ def _draw_muscle_node(layout, scene, muscle, by_muscle, active_id, active_type):
         "af.select_vcp_in_tree",
         text=muscle.name or muscle.id,
         emboss=True,
-        depress=(active_type == "MUSCLE" and active_id == muscle.id),
+        depress=(muscle.id in selected_muscle_ids),
     )
     op.node_id = muscle.id
     op.node_type = "MUSCLE"
@@ -87,14 +86,10 @@ def _draw_muscle_node(layout, scene, muscle, by_muscle, active_id, active_type):
 
     if not collapsed:
         for f in children:
-            _draw_fiber_row(layout, f, depth=1, active_id=active_id, active_type=active_type)
+            _draw_fiber_row(layout, f, depth=1, selected_fiber_ids=selected_fiber_ids)
 
 
-def draw_vcp_tree_section(layout, scene, root):
-    v = root.af_vcp_system
-    active_id = v.active_vcp_id
-    active_type = v.active_vcp_type
-
+def draw_vcp_tree_section(layout, scene, root, selected_fiber_ids, selected_muscle_ids):
     muscles, by_muscle, free_fibers = _build_vcp_tree(root)
 
     if not muscles and not free_fibers:
@@ -102,7 +97,7 @@ def draw_vcp_tree_section(layout, scene, root):
         return
 
     for m in muscles:
-        _draw_muscle_node(layout, scene, m, by_muscle, active_id, active_type)
+        _draw_muscle_node(layout, scene, m, by_muscle, selected_muscle_ids, selected_fiber_ids)
 
     for f in free_fibers:
-        _draw_fiber_row(layout, f, depth=0, active_id=active_id, active_type=active_type)
+        _draw_fiber_row(layout, f, depth=0, selected_fiber_ids=selected_fiber_ids)

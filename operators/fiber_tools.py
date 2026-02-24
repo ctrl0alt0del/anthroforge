@@ -5,6 +5,7 @@ import time
 from ..core.utils import get_af_root
 from ..core.registry import SCPRegistry
 from ..core.visualization.fiber_sync import register_fiber_sync
+from ..core.visualization.muscle_sync import register_muscle_sync
 
 class AF_OT_ClearFiberWarmStart(bpy.types.Operator):
     bl_idname = "af.clear_fiber_warm_start"
@@ -90,6 +91,7 @@ class AF_OT_RecomputeFiber(bpy.types.Operator):
             if not fiber.not_converged:
                 converged = True
                 break
+        register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -152,6 +154,7 @@ class AF_OT_AddFiberTouchPoint(bpy.types.Operator):
         sync = register_fiber_sync()
         sync.clear_solver_cache(fiber.id)
         sync.sync_root_to_scene(root=root, scene=context.scene, target_fiber_ids={fiber.id})
+        register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
         return {"FINISHED"}
 
 
@@ -185,4 +188,5 @@ class AF_OT_RemoveFiberTouchPoint(bpy.types.Operator):
         sync = register_fiber_sync()
         sync.clear_solver_cache(fiber.id)
         sync.sync_root_to_scene(root=root, scene=context.scene, target_fiber_ids={fiber.id})
+        register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
         return {"FINISHED"}

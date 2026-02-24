@@ -17,7 +17,7 @@ def _build_tree(root):
     return roots, children_map
 
 
-def _draw_node(layout, scene, scp, children_map, depth, active_id, visited):
+def _draw_node(layout, scene, scp, children_map, depth, active_id, selected_ids, visited):
     if scp.id in visited:
         return
     visited.add(scp.id)
@@ -39,12 +39,13 @@ def _draw_node(layout, scene, scp, children_map, depth, active_id, visited):
         op.scp_id = scp.id
     else:
         row.label(text="", icon="DOT")
+
     label = scp.name if scp.name else scp.id
     op = row.operator(
         "af.select_scp_in_tree",
         text=label,
         emboss=True,
-        depress=(scp.id == active_id),
+        depress=(scp.id in selected_ids),
     )
     op.scp_id = scp.id
 
@@ -54,15 +55,15 @@ def _draw_node(layout, scene, scp, children_map, depth, active_id, visited):
 
     right = row.row()
     right.alignment = "RIGHT"
-    right.enabled = False  # lighter/grey text look
+    right.enabled = False
     right.label(text=scp.shape_type)
 
     if has_children and not collapsed:
         for child in children:
-            _draw_node(layout, scene, child, children_map, depth + 1, active_id, visited)
+            _draw_node(layout, scene, child, children_map, depth + 1, active_id, selected_ids, visited)
 
 
-def draw_tree_section(layout, scene, root, active_scp_id):
+def draw_tree_section(layout, scene, root, active_scp_id, selected_scp_ids):
     roots, children_map = _build_tree(root)
     visited = set()
 
@@ -71,4 +72,4 @@ def draw_tree_section(layout, scene, root, active_scp_id):
         return
 
     for scp in roots:
-        _draw_node(layout, scene, scp, children_map, 0, active_scp_id, visited)
+        _draw_node(layout, scene, scp, children_map, 0, active_scp_id, selected_scp_ids, visited)

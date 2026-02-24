@@ -3,6 +3,7 @@ import bpy
 from ..core.utils import get_af_root
 from ..core.visualization.sync import register_sync
 from ..core.visualization.fiber_sync import register_fiber_sync
+from ..core.visualization.muscle_sync import register_muscle_sync
 
 
 class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
@@ -19,7 +20,7 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
         default="AUTO",
         options={"HIDDEN", "SKIP_SAVE"},
     )
-    target_id: bpy.props.StringProperty(default="", options={"HIDDEN", "SKIP_SAVE"},)
+    target_id: bpy.props.StringProperty(default="", options={"HIDDEN", "SKIP_SAVE"})
 
     def _delete_scp(self, context, root, scp_id):
         scps = root.af_scp_system.scps
@@ -58,6 +59,7 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
 
         register_sync().sync_root_to_scene(root=root, scene=context.scene)
         register_fiber_sync().sync_root_to_scene(root=root, scene=context.scene)
+        register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
         self.report({"INFO"}, f"Deleted SCP '{scp_id}'")
         return {"FINISHED"}
 
@@ -73,6 +75,12 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
             self.report({"ERROR"}, f"Fiber '{fiber_id}' not found.")
             return {"CANCELLED"}
 
+        # Remove references from all muscles first
+        for m in root.af_vcp_system.muscles:
+            to_remove = [i for i, ref in enumerate(m.fiber_refs) if ref.fiber_id == fiber_id]
+            for i in reversed(to_remove):
+                m.fiber_refs.remove(i)
+
         fibers.remove(idx)
 
         if root.af_vcp_system.active_vcp_type == "FIBER" and root.af_vcp_system.active_vcp_id == fiber_id:
@@ -80,22 +88,23 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
             root.af_vcp_system.active_vcp_id = ""
 
         register_fiber_sync().sync_root_to_scene(root=root, scene=context.scene)
+        register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
         self.report({"INFO"}, f"Deleted Fiber '{fiber_id}'")
         return {"FINISHED"}
 
     def execute(self, context):
         root = get_af_root(context.scene)
         if not self.target_id:
-          self.target_type = "AUTO"
+            self.target_type = "AUTO"
+
         if root is None:
             return bpy.ops.object.delete("INVOKE_DEFAULT")
-        # explicit request from UI button
+
         if self.target_type == "SCP" and self.target_id:
             return self._delete_scp(context, root, self.target_id)
         if self.target_type == "FIBER" and self.target_id:
             return self._delete_fiber(context, root, self.target_id)
 
-        # AUTO: from active object
         obj = context.active_object
         if obj is None:
             return bpy.ops.object.delete("INVOKE_DEFAULT")

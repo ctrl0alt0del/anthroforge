@@ -1,9 +1,20 @@
 import bpy
 
 
+class AF_MuscleFiberRef_Property(bpy.types.PropertyGroup):
+    fiber_id: bpy.props.StringProperty(name="Fiber ID", default="")
+
+
 class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="Muscle")
+
+    # Stitching behavior (v1)
+    closed_v: bpy.props.BoolProperty(name="Closed Ring (V)", default=False)
+
+    # Ordered fibers (manual order)
+    fiber_refs: bpy.props.CollectionProperty(type=AF_MuscleFiberRef_Property)
+    active_fiber_ref_index: bpy.props.IntProperty(name="Active Fiber Ref", default=-1)
 
 
 class AF_FiberTouchPoint_Property(bpy.types.PropertyGroup):
@@ -20,27 +31,25 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     b_parent_id: bpy.props.StringProperty(name="Insertion SCP ID")
     b_attach_param: bpy.props.StringProperty(name="Insertion Attach Param JSON")
 
-    # Mid touch points
+    # Mid touch points (ordered)
     mid_touches: bpy.props.CollectionProperty(type=AF_FiberTouchPoint_Property)
     guide_stiffness: bpy.props.FloatProperty(name="Guide Stiffness", default=1.0, min=0.0, max=1.0)
 
     # Grouping
     muscle_id: bpy.props.StringProperty(name="Muscle ID", default="")
 
-    # Solver state / settings
-    rest_length: bpy.props.FloatProperty(name="Rest Length", default=0.0, min=0.0)
+    # Solver settings/state
     node_count: bpy.props.IntProperty(name="Node Count", default=64, min=8, max=512)
-
     iterations_interactive: bpy.props.IntProperty(name="Iterations (Interactive)", default=12, min=1, max=200)
     iterations_bake: bpy.props.IntProperty(name="Iterations (Bake)", default=120, min=1, max=1000)
 
-    stretch_enabled: bpy.props.BoolProperty(name="Stretch Enabled", default=True)
-    max_stretch: bpy.props.FloatProperty(name="Max Stretch", default=1, min=1.0, max=10.0)
-    stretch_stiffness: bpy.props.FloatProperty(name="Stretch Stiffness", default=0.6, min=0.0, max=1.0)
-
-    bend_stiffness: bpy.props.FloatProperty(name="Bend Stiffness", default=0.25, min=0.0, max=1.0)
+    bend_stiffness: bpy.props.FloatProperty(name="Bend Stiffness", default=0.15, min=0.0, max=1.0)
     collision_margin: bpy.props.FloatProperty(name="Collision Margin", default=0.002, min=0.0, max=1.0)
-    damping: bpy.props.FloatProperty(name="Damping", default=0.15, min=0.0, max=1.0)
+    damping: bpy.props.FloatProperty(name="Damping", default=0.10, min=0.0, max=1.0)
+
+    # Kept temporarily for compatibility with existing solver/UI paths.
+    # Can be removed once all references are cleaned up.
+    stretch_stiffness: bpy.props.FloatProperty(name="Shorten Strength", default=0.9, min=0.0, max=1.0)
 
     # Visualization / status
     thickness: bpy.props.FloatProperty(name="Thickness", default=0.01, min=0.0)
@@ -57,7 +66,6 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     )
     last_eps_disp: bpy.props.FloatProperty(name="Last Disp Eps", default=0.0)
     last_eps_pen: bpy.props.FloatProperty(name="Last Pen Eps", default=0.0)
-    use_warm_start: bpy.props.BoolProperty(name="Use Warm Start", default=True)
 
 
 class AF_VCP_System_Property(bpy.types.PropertyGroup):
@@ -76,3 +84,4 @@ class AF_VCP_System_Property(bpy.types.PropertyGroup):
     )
 
     active_fiber_index: bpy.props.IntProperty(default=-1)
+    active_muscle_index: bpy.props.IntProperty(default=-1)

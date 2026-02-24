@@ -326,6 +326,8 @@ class FiberSceneSync:
 
         if changed:
             self.sync_root_to_scene(root=root, scene=scene, target_fiber_ids=changed_fiber_ids)
+            from .muscle_sync import register_muscle_sync
+            register_muscle_sync().sync_root_to_scene(root=root, scene=scene)
 
 
 _FIBER_SYNC = None
