@@ -87,7 +87,7 @@ class FiberSolver:
         bend_strength = max(0.0, min(1.0, float(getattr(fiber_prop, "bend_stiffness", 0.15))))
 
         converged = False
-        eps_disp = 1e-4
+        eps_disp = 1e-5
         eps_pen = 1e-5
         min_iters = max(8, iterations // 4)
 

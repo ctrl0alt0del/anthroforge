@@ -59,6 +59,30 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
         update=_on_muscle_prop_update,
     )
 
+    inflation_direction_depth: bpy.props.FloatProperty(
+        name="Direction Depth (L)",
+        default=0.05,
+        min=0.0001,
+        max=10.0,
+        update=_on_muscle_prop_update,
+    )
+
+    inflation_boundary_strength: bpy.props.FloatProperty(  # 1 = full lock at boundary, 0 = no lock
+        name="Boundary Strength",
+        default=0.7, min=0.0, max=1.0, update=_on_muscle_prop_update
+    )
+
+    inflation_boundary_band: bpy.props.FloatProperty(  # width of transition from boundary to interior
+        name="Boundary Band",
+        default=2.0, min=0.1, max=16.0, update=_on_muscle_prop_update
+    )
+
+    inflation_boundary_power: bpy.props.FloatProperty(  # curve sharpness of transition
+        name="Boundary Power",
+        default=1.5, min=0.1, max=8.0, update=_on_muscle_prop_update
+    )
+
+
     # Cached world-space control position (written by muscle inflation gizmo sync)
     inflation_ctrl_world: bpy.props.FloatVectorProperty(
         name="Inflation Ctrl World",

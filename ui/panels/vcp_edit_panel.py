@@ -45,6 +45,11 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
         col.prop(muscle, "inflation_max_value", text="Max Inflation")
         col.prop(muscle, "inflation_falloff_type", text="Falloff")
         col.prop(muscle, "inflation_falloff_radius", text="Radius")
+        col.prop(muscle, "inflation_direction_depth", text="Direction Depth (L)")
+        col.prop(muscle, "inflation_boundary_strength", text="Boundary Strength")
+        col.prop(muscle, "inflation_boundary_band", text="Boundary Band")
+        col.prop(muscle, "inflation_boundary_power", text="Boundary Power")
+
         op = layout.operator("af.flip_muscle_normals", icon="ARROW_LEFTRIGHT")
         op.muscle_id = muscle.id
 

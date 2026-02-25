@@ -78,7 +78,7 @@ class AF_OT_RecomputeFiber(bpy.types.Operator):
 
         sync = register_fiber_sync()
 
-        max_passes = 40
+        max_passes = 60
         converged = False
 
         for _ in range(max_passes):

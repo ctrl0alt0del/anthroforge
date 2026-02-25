@@ -210,21 +210,70 @@ class MuscleSceneSync:
 
         amount = float(muscle.inflation_max_value)
         radius = max(1e-8, float(muscle.inflation_falloff_radius))
+        b_strength = max(0.0, min(1.0, float(getattr(muscle, "inflation_boundary_strength", 0.7))))
+        b_band = max(0.1, float(getattr(muscle, "inflation_boundary_band", 2.0)))
+        b_power = max(0.1, float(getattr(muscle, "inflation_boundary_power", 1.5)))
+
+        L = max(1e-8, float(getattr(muscle, "inflation_direction_depth", 0.05)))
         if amount <= 0.0:
+            return out
+
+        m = len(base_points)
+        n = len(base_points[0]) if m > 0 else 0
+        if m == 0 or n == 0:
             return out
 
         ctrl = Vector(muscle.inflation_ctrl_world)
         falloff_type = muscle.inflation_falloff_type
         normals = self._compute_vertex_normals(base_points)
 
-        m = len(base_points)
-        n = len(base_points[0]) if m > 0 else 0
         flip = bool(getattr(muscle, "flip_normals", False))
         sign = -1.0 if flip else 1.0
+
+        # normal at max point (nearest vertex)
+        min_d2 = None
+        ci = 0
+        cj = 0
+        for i in range(m):
+            for j in range(n):
+                d2 = (base_points[i][j] - ctrl).length_squared
+                if min_d2 is None or d2 < min_d2:
+                    min_d2 = d2
+                    ci, cj = i, j
+
+        n0 = normals[ci][cj].copy()
+        if n0.length <= 1e-10:
+            n0 = Vector((0.0, 0.0, 1.0))
+        else:
+            n0.normalize()
+
+        # G point for GA direction field
+        G = ctrl - (n0 * L * sign)
+
+        def is_boundary(i, j):
+            on_u = (j == 0 or j == n - 1)
+            on_v = (not bool(muscle.closed_v)) and (i == 0 or i == m - 1)
+            return on_u or on_v
+
+        def boundary_distance(i, j):
+            du = min(j, n - 1 - j) if n > 1 else 0
+            if bool(muscle.closed_v):
+                dv = 10**9
+            else:
+                dv = min(i, m - 1 - i) if m > 1 else 0
+            return min(du, dv)
+
+        edge_band = 2  # soften only 1-2 rings after boundary
 
         for i in range(m):
             for j in range(n):
                 p = base_points[i][j]
+
+                # HARD boundary lock
+                if is_boundary(i, j):
+                    out[i][j] = p
+                    continue
+
                 d = (p - ctrl).length
                 t = d / radius
                 if falloff_type != "GAUSSIAN" and t > 1.0:
@@ -234,9 +283,28 @@ class MuscleSceneSync:
                 if w <= 1e-8:
                     continue
 
-                out[i][j] = p + normals[i][j] * (amount * w * sign)
+                # smooth ramp from locked border to full displacement
+                bd = boundary_distance(i, j)  # 0 on boundary, grows inward
+                t_edge = max(0.0, min(1.0, bd / b_band))
+                # smoothstep then power shaping
+                r = t_edge * t_edge * (3.0 - 2.0 * t_edge)
+                r = r ** b_power
+
+                # at boundary: alpha = 1 - b_strength
+                # interior: alpha -> 1
+                edge_alpha = (1.0 - b_strength) + b_strength * r
+
+                dir_vec = p - G
+                if dir_vec.length <= 1e-10:
+                    dir_vec = n0.copy()
+                else:
+                    dir_vec.normalize()
+
+                out[i][j] = p + dir_vec * (amount * w * edge_alpha)
 
         return out
+
+
 
     def _ensure_inflation_ctrl(self, vis_col, root, muscle, base_obj, base_points):
         ctrl = self._find_inflation_ctrl(vis_col, root.name, muscle.id)
