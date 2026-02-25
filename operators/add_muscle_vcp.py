@@ -90,6 +90,11 @@ class AF_OT_AddMuscleVCP(bpy.types.Operator):
         m.id = muscle_id
         m.name = self.name.strip() if self.name.strip() else muscle_id
         m.closed_v = bool(self.closed_v)
+        m.inflation_enabled = True
+        m.inflation_max_value = 0.05
+        m.inflation_falloff_type = "GAUSSIAN"
+        m.inflation_falloff_radius = 0.2
+        m.inflation_ctrl_world = (0.0, 0.0, 0.0)
 
         # Remove these fibers from previous muscle refs, then assign to new muscle in selected order
         for fid in fiber_ids:
@@ -111,6 +116,22 @@ class AF_OT_AddMuscleVCP(bpy.types.Operator):
 
         register_fiber_sync().sync_root_to_scene(root=root, scene=context.scene)
         register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
+        ctrl_name = f"AF_{muscle_id}_INFL_MAX"
+        ctrl = None
+        for obj in context.scene.objects:
+            if (
+                obj.name == ctrl_name
+                and obj.get("af_muscle_inflation_ctrl")
+                and obj.get("af_root_name") == root.name
+                and obj.get("af_muscle_id") == muscle_id
+            ):
+                ctrl = obj
+                break
 
+        if ctrl is not None:
+            for o in context.selected_objects:
+                o.select_set(False)
+            ctrl.select_set(True)
+            context.view_layer.objects.active = ctrl
         self.report({"INFO"}, f"Created {muscle_id} from {len(fiber_ids)} fibers")
         return {"FINISHED"}
