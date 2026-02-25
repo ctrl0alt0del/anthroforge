@@ -23,12 +23,13 @@ class MuscleSceneSync:
             scene.collection.children.link(col)
         return col
 
-    def _find_muscle_proxy(self, vis_col, root_name, muscle_id):
+    def _find_muscle_proxy(self, vis_col, root_name, muscle_id, surface_type="BASE"):
         for obj in vis_col.objects:
             if (
                 obj.get("af_muscle_proxy")
                 and obj.get("af_root_name") == root_name
                 and obj.get("af_muscle_id") == muscle_id
+                and obj.get("af_muscle_surface") == surface_type
             ):
                 return obj
         return None
@@ -43,12 +44,14 @@ class MuscleSceneSync:
                 return obj
         return None
 
-    def _create_muscle_proxy(self, vis_col, root, muscle_id):
-        mesh = bpy.data.meshes.new(f"AF_{muscle_id}_mesh")
-        obj = bpy.data.objects.new(f"AF_{muscle_id}", mesh)
+    def _create_muscle_proxy(self, vis_col, root, muscle_id, surface_type):
+        suffix = "" if surface_type == "BASE" else "_INFL"
+        mesh = bpy.data.meshes.new(f"AF_{muscle_id}{suffix}_mesh")
+        obj = bpy.data.objects.new(f"AF_{muscle_id}{suffix}", mesh)
         obj["af_muscle_proxy"] = True
         obj["af_root_name"] = root.name
         obj["af_muscle_id"] = muscle_id
+        obj["af_muscle_surface"] = surface_type
         vis_col.objects.link(obj)
         return obj
 
@@ -66,13 +69,17 @@ class MuscleSceneSync:
         if obj.data is None or not hasattr(obj.data, "materials"):
             return
 
-        mat_name = f"AF_MUSCLE_MAT_{obj.get('af_muscle_id', obj.name)}"
+        surf = obj.get("af_muscle_surface", "BASE")
+        mat_name = f"AF_MUSCLE_MAT_{obj.get('af_muscle_id', obj.name)}_{surf}"
         mat = bpy.data.materials.get(mat_name)
         if mat is None:
             mat = bpy.data.materials.new(mat_name)
             mat.use_nodes = False
 
-        mat.diffuse_color = (0.75, 0.25, 0.25, 0.8) if active else (0.72, 0.42, 0.32, 0.55)
+        if surf == "BASE":
+            mat.diffuse_color = (0.35, 0.20, 0.18, 0.35) if not active else (0.45, 0.25, 0.22, 0.45)
+        else:
+            mat.diffuse_color = (0.80, 0.35, 0.30, 0.80) if active else (0.72, 0.42, 0.32, 0.65)
 
         obj.data.materials.clear()
         obj.data.materials.append(mat)
@@ -98,7 +105,6 @@ class MuscleSceneSync:
         return ordered, missing
 
     def _collect_fiber_points(self, root, scene, fiber_props):
-        # local import avoids fiber_sync <-> muscle_sync circular import at module load
         from .fiber_sync import register_fiber_sync
 
         fsync = register_fiber_sync()
@@ -118,35 +124,35 @@ class MuscleSceneSync:
 
         return out
 
-    def _remove_muscle_proxy(self, obj):
+    def _remove_proxy_obj(self, obj):
         mesh = obj.data
         bpy.data.objects.remove(obj, do_unlink=True)
         if mesh and mesh.users == 0:
             bpy.data.meshes.remove(mesh)
 
-    def _remove_inflation_ctrl(self, obj):
+    def _remove_ctrl_obj(self, obj):
         bpy.data.objects.remove(obj, do_unlink=True)
 
-    def _nearest_on_muscle_surface(self, muscle_obj, world_point):
-        if muscle_obj is None or muscle_obj.type != "MESH" or muscle_obj.data is None:
+    def _nearest_on_mesh_surface(self, mesh_obj, world_point):
+        if mesh_obj is None or mesh_obj.type != "MESH" or mesh_obj.data is None:
             return None, None
 
         depsgraph = bpy.context.evaluated_depsgraph_get()
         try:
-            bvh = BVHTree.FromObject(muscle_obj, depsgraph)
+            bvh = BVHTree.FromObject(mesh_obj, depsgraph)
         except Exception:
             bvh = None
         if bvh is None:
             return None, None
 
-        local = muscle_obj.matrix_world.inverted() @ world_point
+        local = mesh_obj.matrix_world.inverted() @ world_point
         hit = bvh.find_nearest(local)
         if hit is None or hit[0] is None:
             return None, None
 
-        co_local, n_local, _face, _dist = hit
-        co_world = muscle_obj.matrix_world @ co_local
-        n_world = (muscle_obj.matrix_world.to_3x3() @ n_local).normalized()
+        co_local, n_local, _face_idx, _dist = hit
+        co_world = mesh_obj.matrix_world @ co_local
+        n_world = (mesh_obj.matrix_world.to_3x3() @ n_local).normalized()
         return co_world, n_world
 
     def _falloff_weight(self, t, falloff_type):
@@ -156,8 +162,7 @@ class MuscleSceneSync:
         if falloff_type == "SMOOTHSTEP":
             s = x * x * (3.0 - 2.0 * x)
             return 1.0 - s
-        # GAUSSIAN
-        return exp(-4.0 * x * x)
+        return exp(-4.0 * x * x)  # GAUSSIAN
 
     def _compute_vertex_normals(self, points):
         m = len(points)
@@ -165,13 +170,13 @@ class MuscleSceneSync:
         if m == 0 or n == 0:
             return []
 
-        acc = Vector((0.0, 0.0, 0.0))
+        centroid = Vector((0.0, 0.0, 0.0))
         cnt = 0
         for i in range(m):
             for j in range(n):
-                acc += points[i][j]
+                centroid += points[i][j]
                 cnt += 1
-        centroid = acc / max(1, cnt)
+        centroid /= max(1, cnt)
 
         normals = [[Vector((0.0, 0.0, 1.0)) for _ in range(n)] for _ in range(m)]
 
@@ -185,69 +190,70 @@ class MuscleSceneSync:
                 tv = points[ip1][j] - points[im1][j]
                 tu = points[i][jp1] - points[i][jm1]
                 nrm = tv.cross(tu)
+
                 if nrm.length <= 1e-10:
                     nrm = points[i][j] - centroid
                 if nrm.length <= 1e-10:
                     nrm = Vector((0.0, 0.0, 1.0))
                 else:
                     nrm.normalize()
+
                 normals[i][j] = nrm
 
         return normals
 
-    def _apply_inflation_from_ctrl(self, ordered_points, muscle):
+    def _apply_inflation_from_ctrl(self, base_points, muscle):
+        out = [[p.copy() for p in row] for row in base_points]
+
         if not muscle.inflation_enabled:
-            return ordered_points
+            return out
 
         amount = float(muscle.inflation_max_value)
         radius = max(1e-8, float(muscle.inflation_falloff_radius))
         if amount <= 0.0:
-            return ordered_points
+            return out
 
         ctrl = Vector(muscle.inflation_ctrl_world)
         falloff_type = muscle.inflation_falloff_type
+        normals = self._compute_vertex_normals(base_points)
 
-        m = len(ordered_points)
-        if m == 0:
-            return ordered_points
-        n = len(ordered_points[0])
-        if n == 0:
-            return ordered_points
-
-        normals = self._compute_vertex_normals(ordered_points)
-        out = [[p.copy() for p in row] for row in ordered_points]
+        m = len(base_points)
+        n = len(base_points[0]) if m > 0 else 0
+        flip = bool(getattr(muscle, "flip_normals", False))
+        sign = -1.0 if flip else 1.0
 
         for i in range(m):
             for j in range(n):
-                p = ordered_points[i][j]
+                p = base_points[i][j]
                 d = (p - ctrl).length
                 t = d / radius
-                if t > 1.0 and falloff_type != "GAUSSIAN":
+                if falloff_type != "GAUSSIAN" and t > 1.0:
                     continue
+
                 w = self._falloff_weight(t, falloff_type)
                 if w <= 1e-8:
                     continue
-                out[i][j] = p + normals[i][j] * (amount * w)
+
+                out[i][j] = p + normals[i][j] * (amount * w * sign)
 
         return out
 
-    def _ensure_inflation_ctrl(self, vis_col, root, muscle, muscle_obj, ordered_points):
+    def _ensure_inflation_ctrl(self, vis_col, root, muscle, base_obj, base_points):
         ctrl = self._find_inflation_ctrl(vis_col, root.name, muscle.id)
         if ctrl is None:
             ctrl = self._create_inflation_ctrl(vis_col, root, muscle.id)
 
-        # Initialize if not set yet
         if Vector(muscle.inflation_ctrl_world).length_squared == 0.0:
-            m = len(ordered_points)
-            n = len(ordered_points[0]) if m > 0 else 0
+            m = len(base_points)
+            n = len(base_points[0]) if m > 0 else 0
             if m > 0 and n > 0:
                 ci = m // 2
                 cj = n // 2
-                init_p = ordered_points[ci][cj].copy()
-                muscle.inflation_ctrl_world = (init_p.x, init_p.y, init_p.z)
+                p = base_points[ci][cj]
+                muscle.inflation_ctrl_world = (p.x, p.y, p.z)
 
         target = Vector(muscle.inflation_ctrl_world)
-        snapped, _n = self._nearest_on_muscle_surface(muscle_obj, target)
+        snapped, _n = self._nearest_on_mesh_surface(base_obj, target)
         if snapped is not None:
             target = snapped
             muscle.inflation_ctrl_world = (target.x, target.y, target.z)
@@ -274,69 +280,95 @@ class MuscleSceneSync:
             for muscle in vcp.muscles:
                 live_muscle_ids.add(muscle.id)
 
-                obj = self._find_muscle_proxy(vis_col, root.name, muscle.id)
-                if obj is None:
-                    obj = self._create_muscle_proxy(vis_col, root, muscle.id)
+                base_obj = self._find_muscle_proxy(vis_col, root.name, muscle.id, "BASE")
+                if base_obj is None:
+                    base_obj = self._create_muscle_proxy(vis_col, root, muscle.id, "BASE")
 
-                obj["af_muscle_proxy"] = True
-                obj["af_root_name"] = root.name
-                obj["af_muscle_id"] = muscle.id
+                infl_obj = self._find_muscle_proxy(vis_col, root.name, muscle.id, "INFL")
+                if infl_obj is None:
+                    infl_obj = self._create_muscle_proxy(vis_col, root, muscle.id, "INFL")
 
                 ordered_fibers, missing = self._collect_fiber_props(root, muscle)
                 if missing or len(ordered_fibers) < 2:
-                    self._update_mesh(obj, [], [])
-                    self._ensure_material(obj, active=(vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id))
+                    self._update_mesh(base_obj, [], [])
+                    self._update_mesh(infl_obj, [], [])
+                    active = (vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id)
+                    self._ensure_material(base_obj, active=active)
+                    self._ensure_material(infl_obj, active=active)
                     continue
 
                 ok, _reason, _node_count, _anchors = validate_anchor_structure(ordered_fibers)
                 if not ok:
-                    self._update_mesh(obj, [], [])
-                    self._ensure_material(obj, active=(vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id))
+                    self._update_mesh(base_obj, [], [])
+                    self._update_mesh(infl_obj, [], [])
+                    active = (vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id)
+                    self._ensure_material(base_obj, active=active)
+                    self._ensure_material(infl_obj, active=active)
                     continue
 
                 ordered_points = self._collect_fiber_points(root, scene, ordered_fibers)
                 if not ordered_points:
-                    self._update_mesh(obj, [], [])
-                    self._ensure_material(obj, active=(vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id))
+                    self._update_mesh(base_obj, [], [])
+                    self._update_mesh(infl_obj, [], [])
+                    active = (vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id)
+                    self._ensure_material(base_obj, active=active)
+                    self._ensure_material(infl_obj, active=active)
                     continue
 
-                # Surface preprocessing to reduce elongated quads
-                ordered_points = prepare_surface_rows(
+                base_points = prepare_surface_rows(
                     ordered_fiber_points=ordered_points,
                     target_n=int(ordered_fibers[0].node_count),
                     densify_v=True,
                 )
 
-                # Ensure gizmo exists / snapped before inflation
-                self._ensure_inflation_ctrl(vis_col, root, muscle, obj, ordered_points)
-
-                deformed_points = self._apply_inflation_from_ctrl(ordered_points, muscle)
-
                 try:
-                    verts, faces, _n = build_surface_data(
-                        ordered_fiber_points=deformed_points,
+                    base_verts, faces_raw, _n = build_surface_data(
+                        ordered_fiber_points=base_points,
                         closed_v=bool(muscle.closed_v),
                     )
                 except Exception:
-                    self._update_mesh(obj, [], [])
-                    self._ensure_material(obj, active=(vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id))
+                    self._update_mesh(base_obj, [], [])
+                    self._update_mesh(infl_obj, [], [])
+                    active = (vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id)
+                    self._ensure_material(base_obj, active=active)
+                    self._ensure_material(infl_obj, active=active)
                     continue
 
-                self._update_mesh(obj, verts, faces)
-                self._ensure_material(obj, active=(vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id))
+                flip = bool(getattr(muscle, "flip_normals", False))
+                faces_final = [(f[0], f[3], f[2], f[1]) for f in faces_raw] if flip else faces_raw
 
-            # Cleanup stale muscle proxies + controls
+                self._update_mesh(base_obj, base_verts, faces_final)
+
+                # snap/control point lives on base surface only
+                self._ensure_inflation_ctrl(vis_col, root, muscle, base_obj, base_points)
+                infl_points = self._apply_inflation_from_ctrl(base_points, muscle)
+
+                try:
+                    infl_verts, _faces_raw2, _n2 = build_surface_data(
+                        ordered_fiber_points=infl_points,
+                        closed_v=bool(muscle.closed_v),
+                    )
+                except Exception:
+                    infl_verts = list(base_verts)
+
+                self._update_mesh(infl_obj, infl_verts, faces_final)
+
+                active = (vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id)
+                self._ensure_material(base_obj, active=active)
+                self._ensure_material(infl_obj, active=active)
+
             for obj in list(vis_col.objects):
                 if obj.get("af_root_name") != root.name:
                     continue
 
                 if obj.get("af_muscle_proxy") and obj.get("af_muscle_id") not in live_muscle_ids:
-                    self._remove_muscle_proxy(obj)
+                    self._remove_proxy_obj(obj)
                     continue
 
                 if obj.get("af_muscle_inflation_ctrl") and obj.get("af_muscle_id") not in live_muscle_ids:
-                    self._remove_inflation_ctrl(obj)
+                    self._remove_ctrl_obj(obj)
                     continue
+
         finally:
             self._syncing = False
 
@@ -372,12 +404,11 @@ class MuscleSceneSync:
                 if muscle is None:
                     continue
 
-                # snap ctrl to nearest point on muscle surface
-                muscle_obj = self._find_muscle_proxy(vis_col, root.name, muscle_id)
-                if muscle_obj is None:
+                base_obj = self._find_muscle_proxy(vis_col, root.name, muscle_id, "BASE")
+                if base_obj is None:
                     continue
 
-                snapped, _n = self._nearest_on_muscle_surface(muscle_obj, obj.location.copy())
+                snapped, _n = self._nearest_on_mesh_surface(base_obj, obj.location.copy())
                 if snapped is None:
                     continue
 
@@ -386,6 +417,7 @@ class MuscleSceneSync:
                 if tuple(muscle.inflation_ctrl_world) != new_loc:
                     muscle.inflation_ctrl_world = new_loc
                     changed = True
+
         finally:
             self._syncing = False
 

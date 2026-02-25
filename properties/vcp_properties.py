@@ -67,6 +67,13 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
         default=(0.0, 0.0, 0.0),
     )
 
+    flip_normals: bpy.props.BoolProperty(
+        name="Flip Normals",
+        default=False,
+        update=_on_muscle_prop_update,  # if you already use this callback
+    )
+
+
 
 class AF_FiberTouchPoint_Property(bpy.types.PropertyGroup):
     parent_id: bpy.props.StringProperty(name="Touch SCP ID", default="")

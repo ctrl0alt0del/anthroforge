@@ -51,7 +51,8 @@ class AF_PT_TreePanel(bpy.types.Panel):
         box = layout.box()
         box.label(text="SCPs")
         draw_tree_section(box, scene, root, active_id, selected_scp)
-
+        
         box.separator()
         box.label(text="VCPs")
+        box.operator("af.add_muscle_vcp", icon="MESH_UVSPHERE")
         draw_vcp_tree_section(box, scene, root, selected_fibers, selected_muscles)

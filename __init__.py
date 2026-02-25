@@ -27,6 +27,7 @@ from .operators.fiber_tools import (
     AF_OT_AddFiberTouchPoint,
     AF_OT_RemoveFiberTouchPoint,
 )
+from .operators.muscle_tools import AF_OT_FlipMuscleNormals
 
 from .ui.main_panel import AF_PT_MainPanel
 from .ui.panels.create_panel import AF_PT_CreatePanel
@@ -89,6 +90,7 @@ classes = (
 
     AF_OT_DeleteSelectedAFNode,
     AF_PT_VCPEditPanel,
+    AF_OT_FlipMuscleNormals,
 )
 
 
