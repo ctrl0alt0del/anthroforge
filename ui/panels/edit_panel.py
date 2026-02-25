@@ -1,7 +1,7 @@
 import bpy
 from ...core.utils import get_af_root
 from ...core.shapes.registry import ShapeRegistry
-from ..context import get_active_scp
+from ..context import get_active_scp, get_active_af_entity
 
 
 class AF_PT_EditPanel(bpy.types.Panel):
@@ -14,7 +14,11 @@ class AF_PT_EditPanel(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        return get_af_root(context.scene) is not None
+        root = get_af_root(context.scene)
+        if root is None:
+            return False
+        kind, _ = get_active_af_entity(root, context)
+        return kind == "SCP"
 
     def draw(self, context):
         layout = self.layout
@@ -22,7 +26,7 @@ class AF_PT_EditPanel(bpy.types.Panel):
 
         scp = get_active_scp(root, context)
         if not scp:
-            layout.label(text="Select SCP from tree or viewport")
+            layout.label(text="Select SCP")
             return
 
         row = layout.row()
@@ -43,4 +47,5 @@ class AF_PT_EditPanel(bpy.types.Panel):
         layout.separator()
         layout.label(text="Shape Params")
         ShapeRegistry.draw_scp_ui(scp.shape_type, layout, scp, readonly=True)
+
         layout.operator("af.delete_selected_af_node", icon="TRASH")

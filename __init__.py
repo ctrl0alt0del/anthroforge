@@ -32,7 +32,6 @@ from .ui.main_panel import AF_PT_MainPanel
 from .ui.panels.create_panel import AF_PT_CreatePanel
 from .ui.panels.tree_panel import AF_PT_TreePanel
 from .ui.panels.edit_panel import AF_PT_EditPanel
-from .ui.panels.vcp_tree_panel import AF_PT_VCPTreePanel
 from .ui.panels.fiber_edit_panel import AF_PT_FiberEditPanel
 from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
 from .ui.panels.vcp_edit_panel import AF_PT_VCPEditPanel
@@ -87,7 +86,6 @@ classes = (
     AF_OT_AddMuscleVCP,
     AF_OT_ToggleVCPCollapse,
     AF_OT_SelectVCPInTree,
-    AF_PT_VCPTreePanel,
 
     AF_OT_DeleteSelectedAFNode,
     AF_PT_VCPEditPanel,

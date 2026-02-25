@@ -1,9 +1,10 @@
 import bpy
 from ...core.utils import get_af_root
+from ..context import get_active_af_entity
 
 
 class AF_PT_VCPEditPanel(bpy.types.Panel):
-    bl_label = "Edit VCP"
+    bl_label = "Edit Muscle VCP"
     bl_idname = "AF_PT_vcp_edit_panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -12,7 +13,9 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        return get_af_root(context.scene) is not None
+        root_is_valid = get_af_root(context.scene) is not None
+        has_vcp_selected = get_active_af_entity(get_af_root(context.scene), context)[0]== "MUSCLE"
+        return root_is_valid and has_vcp_selected
 
     def draw(self, context):
         layout = self.layout

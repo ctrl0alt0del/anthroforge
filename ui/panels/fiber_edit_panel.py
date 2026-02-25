@@ -1,6 +1,6 @@
 import bpy
 from ...core.utils import get_af_root
-
+from ..context import get_active_af_entity
 
 def _scp_label(root, scp_id):
     if not scp_id:
@@ -12,7 +12,7 @@ def _scp_label(root, scp_id):
 
 
 class AF_PT_FiberEditPanel(bpy.types.Panel):
-    bl_label = "Fiber Settings"
+    bl_label = "Edit Fiber VCP"
     bl_idname = "AF_PT_fiber_edit_panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -21,7 +21,9 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        return get_af_root(context.scene) is not None
+        root_is_valid = get_af_root(context.scene) is not None
+        has_fiber_selected = get_active_af_entity(get_af_root(context.scene), context)[0] == "FIBER"
+        return root_is_valid and has_fiber_selected
 
     def draw(self, context):
         layout = self.layout
@@ -54,7 +56,7 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         solver_box.prop(fiber, "use_warm_start")
         op = solver_box.operator("af.clear_fiber_warm_start", icon="TRASH")
         op.fiber_id = fiber.id
-
+        layout.prop(fiber, "name", text="Name")
         solver_box.prop(fiber, "node_count")
         solver_box.prop(fiber, "iterations_interactive")
         solver_box.prop(fiber, "iterations_bake")
