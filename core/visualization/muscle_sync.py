@@ -7,6 +7,7 @@ from ..utils import get_af_root
 from ..vcp.muscle_surface import (
     build_surface_data,
     validate_anchor_structure,
+    prepare_surface_rows,
 )
 
 
@@ -298,6 +299,13 @@ class MuscleSceneSync:
                     self._update_mesh(obj, [], [])
                     self._ensure_material(obj, active=(vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id))
                     continue
+
+                # Surface preprocessing to reduce elongated quads
+                ordered_points = prepare_surface_rows(
+                    ordered_fiber_points=ordered_points,
+                    target_n=int(ordered_fibers[0].node_count),
+                    densify_v=True,
+                )
 
                 # Ensure gizmo exists / snapped before inflation
                 self._ensure_inflation_ctrl(vis_col, root, muscle, obj, ordered_points)

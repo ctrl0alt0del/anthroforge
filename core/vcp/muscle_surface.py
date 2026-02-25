@@ -142,3 +142,127 @@ def validate_anchor_structure(fibers):
             return False, f"Fiber[{i}] anchor structure mismatch.", 0, []
 
     return True, "", node_count, ref_indices
+
+
+# ------------------------------
+# Surface quality helpers
+# ------------------------------
+
+def _cumlen(points):
+    out = [0.0]
+    for i in range(1, len(points)):
+        out.append(out[-1] + (points[i] - points[i - 1]).length)
+    return out
+
+
+def _sample_polyline(points, s):
+    if s <= 0.0:
+        return points[0].copy()
+
+    cum = _cumlen(points)
+    total = cum[-1]
+    if total <= 1e-9:
+        return points[0].copy()
+
+    s = max(0.0, min(total, s))
+    for i in range(1, len(points)):
+        if cum[i] >= s:
+            a = points[i - 1]
+            b = points[i]
+            span = max(1e-9, cum[i] - cum[i - 1])
+            t = (s - cum[i - 1]) / span
+            return a.lerp(b, t)
+
+    return points[-1].copy()
+
+
+def resample_uniform(points, n):
+    """
+    Arc-length uniform resample for one fiber polyline.
+    """
+    if not points:
+        return []
+    if n <= 1:
+        return [points[0].copy()]
+
+    cum = _cumlen(points)
+    total = cum[-1]
+    if total <= 1e-9:
+        return [points[0].copy() for _ in range(n)]
+
+    out = []
+    for k in range(n):
+        s = (k / float(n - 1)) * total
+        out.append(_sample_polyline(points, s))
+    return out
+
+
+def normalize_fibers_uniform(ordered_fiber_points, n):
+    """
+    Resample all fibers to same N points.
+    """
+    return [resample_uniform(pts, n) for pts in ordered_fiber_points]
+
+
+def densify_between_fibers(ordered_fiber_points):
+    """
+    Insert intermediate fiber rows so V spacing approaches U spacing.
+    This reduces elongated quads and improves isotropic inflation behavior.
+    """
+    m = len(ordered_fiber_points)
+    if m < 2:
+        return ordered_fiber_points
+
+    n = len(ordered_fiber_points[0])
+    if n < 2:
+        return ordered_fiber_points
+
+    # target U edge step from average across rows
+    u_sum = 0.0
+    u_cnt = 0
+    for row in ordered_fiber_points:
+        for j in range(n - 1):
+            u_sum += (row[j + 1] - row[j]).length
+            u_cnt += 1
+    u_step = max(1e-6, u_sum / max(1, u_cnt))
+
+    out = [ordered_fiber_points[0]]
+
+    for i in range(m - 1):
+        a = ordered_fiber_points[i]
+        b = ordered_fiber_points[i + 1]
+
+        # average V distance between these two rows
+        v_avg = 0.0
+        for j in range(n):
+            v_avg += (b[j] - a[j]).length
+        v_avg /= float(n)
+
+        inserts = max(0, int(round(v_avg / u_step)) - 1)
+
+        for k in range(1, inserts + 1):
+            t = k / float(inserts + 1)
+            row = [a[j].lerp(b[j], t) for j in range(n)]
+            out.append(row)
+
+        out.append(b)
+
+    return out
+
+
+def prepare_surface_rows(ordered_fiber_points, target_n=None, densify_v=True):
+    """
+    Full preprocessing pipeline:
+    1) uniform U resample
+    2) optional V densification
+    """
+    if not ordered_fiber_points:
+        return ordered_fiber_points
+
+    if target_n is None:
+        target_n = len(ordered_fiber_points[0])
+
+    rows = normalize_fibers_uniform(ordered_fiber_points, target_n)
+    if densify_v:
+        rows = densify_between_fibers(rows)
+    return rows
