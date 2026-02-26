@@ -116,7 +116,7 @@ class MuscleSceneSync:
                 fiber_prop=f,
                 scene=scene,
                 depsgraph=bpy.context.evaluated_depsgraph_get(),
-                bake=True,
+                bake=False,
             )
             if len(pts) < 2:
                 return None

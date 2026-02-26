@@ -9,8 +9,8 @@ def _selected_fiber_ids(context, root):
     ids = []
     seen = set()
 
-    # Put active fiber first if selected
     active = context.active_object
+    active_id = None
     if (
         active
         and active.get("af_fiber_proxy")
@@ -18,23 +18,27 @@ def _selected_fiber_ids(context, root):
         and active.get("af_fiber_id")
         and active.select_get()
     ):
-        fid = active.get("af_fiber_id")
-        ids.append(fid)
-        seen.add(fid)
+        active_id = active.get("af_fiber_id")
 
-    # Then all other selected fibers
+    # keep selected_objects order, but place active last (active is usually last-picked)
     for obj in context.selected_objects:
         if not obj.get("af_fiber_proxy"):
             continue
         if obj.get("af_root_name") != root.name:
             continue
+
         fid = obj.get("af_fiber_id")
-        if not fid or fid in seen:
+        if not fid or fid in seen or fid == active_id:
             continue
+
         ids.append(fid)
         seen.add(fid)
 
+    if active_id and active_id not in seen:
+        ids.append(active_id)
+
     return ids
+
 
 
 class AF_OT_AddMuscleVCP(bpy.types.Operator):
