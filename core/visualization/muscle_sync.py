@@ -2,7 +2,7 @@ import bpy
 from math import exp
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
-
+import json
 from ..utils import get_af_root
 from ..vcp.muscle_surface import (
     build_surface_data,
@@ -108,21 +108,33 @@ class MuscleSceneSync:
         from .fiber_sync import register_fiber_sync
 
         fsync = register_fiber_sync()
-        out = []
+        vis_col = bpy.data.collections.get(fsync.collection_name)
+        if vis_col is None:
+            return None
 
+        out = []
         for f in fiber_props:
-            pts = fsync._solver.solve_points(
-                root=root,
-                fiber_prop=f,
-                scene=scene,
-                depsgraph=bpy.context.evaluated_depsgraph_get(),
-                bake=False,
-            )
+            fobj = fsync._find_fiber_proxy(vis_col, root.name, f.id)
+            if fobj is None:
+                return None
+
+            raw = fobj.get("af_fiber_points_world", "")
+            if not raw:
+                return None
+
+            try:
+                arr = json.loads(raw)
+                pts = [Vector((float(v[0]), float(v[1]), float(v[2]))) for v in arr]
+            except Exception:
+                return None
+
             if len(pts) < 2:
                 return None
+
             out.append(pts)
 
         return out
+
 
     def _remove_proxy_obj(self, obj):
         mesh = obj.data
@@ -373,7 +385,13 @@ class MuscleSceneSync:
                     self._ensure_material(base_obj, active=active)
                     self._ensure_material(infl_obj, active=active)
                     continue
-
+                from .fiber_sync import register_fiber_sync
+                register_fiber_sync().sync_root_to_scene(
+                    root=root,
+                    scene=scene,
+                    bake=False,  # keep interactive consistency
+                    target_fiber_ids={f.id for f in ordered_fibers},
+                )
                 ordered_points = self._collect_fiber_points(root, scene, ordered_fibers)
                 if not ordered_points:
                     self._update_mesh(base_obj, [], [])

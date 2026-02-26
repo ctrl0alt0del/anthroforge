@@ -105,16 +105,23 @@ class FiberSceneSync:
         self._set_fiber_color(obj, DEFAULT_FIBER_COLOR)
         return obj
 
-    def _update_curve_points(self, obj, points, thickness):
+    def _update_curve_points(self, obj, points, thickness, bake=False):
         curve = obj.data
         while curve.splines:
             curve.splines.remove(curve.splines[0])
+
         spline = curve.splines.new(type="POLY")
         spline.points.add(len(points) - 1)
         for i, p in enumerate(points):
             spline.points[i].co = (p.x, p.y, p.z, 1.0)
+
         curve.bevel_depth = max(0.0, float(thickness))
         curve.fill_mode = "FULL"
+
+        # Single source of truth for downstream consumers (muscle sync)
+        obj["af_fiber_points_world"] = json.dumps([[float(p.x), float(p.y), float(p.z)] for p in points])
+        obj["af_fiber_points_mode"] = "BAKE" if bake else "INTERACTIVE"
+
 
     def _get_scp_proxy(self, scene, root_name, scp_id):
         for obj in scene.objects:
@@ -231,7 +238,7 @@ class FiberSceneSync:
 
                 points = self._solver.solve_points(root=root, fiber_prop=fiber, scene=scene, depsgraph=depsgraph, bake=bake)
                 if len(points) >= 2:
-                    self._update_curve_points(obj, points, fiber.thickness)
+                    self._update_curve_points(obj, points, fiber.thickness, bake=bake)
 
             if target_fiber_ids is None:
                 for obj in list(vis_col.objects):
