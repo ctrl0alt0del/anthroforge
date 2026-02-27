@@ -30,8 +30,9 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         root = get_af_root(context.scene)
         vcp = root.af_vcp_system
 
-        if vcp.active_vcp_type != "FIBER" or not vcp.active_vcp_id:
-            layout.label(text="Select a Fiber in VCP Tree")
+        kind, active_id = get_active_af_entity(root, context)
+        if kind != "FIBER" or not active_id:
+            layout.label(text="Select a Fiber")
             return
 
         fiber = None

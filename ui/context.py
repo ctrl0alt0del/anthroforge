@@ -5,11 +5,26 @@ def get_active_af_entity(root, context):
     obj = context.active_object
 
     if obj and obj.get("af_root_name") == root.name:
+        # SCP proxy
         if obj.get("af_proxy") and obj.get("af_scp_id"):
             return "SCP", obj.get("af_scp_id")
+
+        # Fiber proxy
         if obj.get("af_fiber_proxy") and obj.get("af_fiber_id"):
             return "FIBER", obj.get("af_fiber_id")
+
+        # Muscle proxy
         if obj.get("af_muscle_proxy") and obj.get("af_muscle_id"):
+            return "MUSCLE", obj.get("af_muscle_id")
+
+        # Fiber helpers: endpoint and mid-touch handles
+        if obj.get("af_fiber_endpoint_handle") and obj.get("af_fiber_id"):
+            return "FIBER", obj.get("af_fiber_id")
+        if obj.get("af_fiber_touch_handle") and obj.get("af_fiber_id"):
+            return "FIBER", obj.get("af_fiber_id")
+
+        # Muscle helper: inflation max control
+        if obj.get("af_muscle_inflation_ctrl") and obj.get("af_muscle_id"):
             return "MUSCLE", obj.get("af_muscle_id")
 
     # Fallbacks
