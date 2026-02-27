@@ -21,6 +21,13 @@ class AF_PT_CreatePanel(bpy.types.Panel):
 
         layout.prop(scene, "af_scp_type", text="Shape")
 
+        # Global mesh asset registration
+        lib = layout.box()
+        lib.label(text="SCP Mesh Library")
+        lib.prop(scene, "af_new_scp_source_mesh_obj", text="Source Mesh")
+        
+        lib.operator("af.register_mesh_scp_asset", icon="ADD")
+
         box = layout.box()
         box.label(text="New SCP Params")
         box.prop(scene, "af_new_parent_obj", text="Parent")

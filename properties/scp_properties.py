@@ -100,7 +100,11 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
     # Attachment
     parent_id: bpy.props.StringProperty(name="Parent ID")
     attach_param: bpy.props.StringProperty(name="Attach Param JSON")
-
+    mesh_asset_id: bpy.props.StringProperty(
+        name="Mesh Asset ID",
+        default="",
+        update=_on_scp_prop_update,
+    )
 
 class AF_SCP_System_Property(bpy.types.PropertyGroup):
     scps: bpy.props.CollectionProperty(type=AF_SCP_Property)

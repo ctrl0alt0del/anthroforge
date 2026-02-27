@@ -16,12 +16,17 @@ def _poll_parent_proxy(self, obj):
     )
 
 
+def _poll_any_mesh_obj(self, obj):
+    return bool(obj and obj.type == "MESH" and obj.data is not None)
+
+
 def register_scene_props():
     bpy.types.Scene.af_scp_type = bpy.props.EnumProperty(
         name="SCP Type",
         items=lambda self, context: ShapeRegistry.enum_items(),
     )
     bpy.types.Scene.af_selection_sync_lock = bpy.props.BoolProperty(default=False)
+
     bpy.types.Scene.af_new_parent_obj = bpy.props.PointerProperty(
         name="Parent",
         type=bpy.types.Object,
@@ -39,27 +44,46 @@ def register_scene_props():
         poll=_poll_parent_proxy,
     )
 
+    bpy.types.Scene.af_new_scp_source_mesh_obj = bpy.props.PointerProperty(
+        name="Source Mesh",
+        type=bpy.types.Object,
+        poll=_poll_any_mesh_obj,
+    )
+
+    bpy.types.Scene.af_new_scp_mesh_asset_id = bpy.props.StringProperty(
+        name="Mesh Asset",
+        default="",
+    )
+
     bpy.types.Scene.af_tree_collapsed_json = bpy.props.StringProperty(
         name="AF Tree Collapsed",
         default="{}",
     )
-
-    # NEW: separate collapse state for VCP tree
     bpy.types.Scene.af_vcp_tree_collapsed_json = bpy.props.StringProperty(
         name="AF VCP Tree Collapsed",
         default="{}",
     )
-
     ShapeRegistry.register_scene_props()
 
 
 def unregister_scene_props():
     ShapeRegistry.unregister_scene_props()
 
-    del bpy.types.Scene.af_vcp_tree_collapsed_json
-    del bpy.types.Scene.af_tree_collapsed_json
-    del bpy.types.Scene.af_new_fiber_insertion_obj
-    del bpy.types.Scene.af_new_fiber_origin_obj
-    del bpy.types.Scene.af_new_parent_obj
-    del bpy.types.Scene.af_selection_sync_lock
-    del bpy.types.Scene.af_scp_type
+    if hasattr(bpy.types.Scene, "af_vcp_tree_collapsed_json"):
+        del bpy.types.Scene.af_vcp_tree_collapsed_json
+    if hasattr(bpy.types.Scene, "af_tree_collapsed_json"):
+        del bpy.types.Scene.af_tree_collapsed_json
+    if hasattr(bpy.types.Scene, "af_new_scp_mesh_asset_id"):
+        del bpy.types.Scene.af_new_scp_mesh_asset_id
+    if hasattr(bpy.types.Scene, "af_new_scp_source_mesh_obj"):
+        del bpy.types.Scene.af_new_scp_source_mesh_obj
+    if hasattr(bpy.types.Scene, "af_new_fiber_insertion_obj"):
+        del bpy.types.Scene.af_new_fiber_insertion_obj
+    if hasattr(bpy.types.Scene, "af_new_fiber_origin_obj"):
+        del bpy.types.Scene.af_new_fiber_origin_obj
+    if hasattr(bpy.types.Scene, "af_new_parent_obj"):
+        del bpy.types.Scene.af_new_parent_obj
+    if hasattr(bpy.types.Scene, "af_selection_sync_lock"):
+        del bpy.types.Scene.af_selection_sync_lock
+    if hasattr(bpy.types.Scene, "af_scp_type"):
+        del bpy.types.Scene.af_scp_type

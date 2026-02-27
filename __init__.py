@@ -28,6 +28,9 @@ from .operators.fiber_tools import (
     AF_OT_RemoveFiberTouchPoint,
 )
 from .operators.muscle_tools import AF_OT_FlipMuscleNormals
+from .operators.register_mesh_scp_asset import AF_OT_RegisterMeshSCPAsset
+from .operators.mesh_asset_list import AF_OT_SelectMeshSCPAsset, AF_OT_DeleteMeshSCPAsset
+
 
 from .ui.main_panel import AF_PT_MainPanel
 from .ui.panels.create_panel import AF_PT_CreatePanel
@@ -57,9 +60,11 @@ addon_keymaps = []
 classes = (
     AF_OT_CreateRoot,
     AF_OT_AddSCP,
+    AF_OT_RegisterMeshSCPAsset,
     AF_OT_ToggleSCPCollapse,
     AF_OT_SelectSCPInTree,
-
+    AF_OT_SelectMeshSCPAsset,
+    AF_OT_DeleteMeshSCPAsset,
     AF_PT_MainPanel,
     AF_PT_CreatePanel,
     AF_PT_TreePanel,
