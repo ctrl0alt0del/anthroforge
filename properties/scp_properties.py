@@ -4,18 +4,10 @@ from ..core.utils import get_af_root
 
 
 def _sync_scene(context):
-    from ..core.visualization.sync import register_sync
-    from ..core.visualization.fiber_sync import register_fiber_sync
-    from ..core.visualization.muscle_sync import register_muscle_sync
-    from ..core.visualization.mirror_sync import register_mirror_sync
-
+    from ..core.visualization.sync_runner import sync_all
     scene = context.scene if context else None
     root = get_af_root(scene)
-
-    register_sync().sync_root_to_scene(root=root, scene=scene)
-    register_fiber_sync().sync_root_to_scene(root=root, scene=scene)
-    register_muscle_sync().sync_root_to_scene(root=root, scene=scene)
-    register_mirror_sync().sync_root_to_scene(root=root, scene=scene)
+    sync_all(root=root, scene=scene)
 
 
 def _on_scp_prop_update(self, context):
@@ -97,7 +89,6 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         name="Scale", size=3, subtype="XYZ", default=(1.0, 1.0, 1.0), update=_on_scp_prop_update
     )
 
-    # Shape params: Ellipsoid
     ellipsoid_radii: bpy.props.FloatVectorProperty(
         name="Radii", size=3, subtype="XYZ", default=(1.0, 1.0, 1.0), min=0.001, update=_on_scp_prop_update
     )
@@ -105,7 +96,6 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         name="Resolution", default=8, min=3, max=128, update=_on_scp_prop_update
     )
 
-    # Shape params: Curve
     curve_length: bpy.props.FloatProperty(
         name="Length", default=1.0, min=0.001, update=_on_scp_prop_update
     )
@@ -113,16 +103,13 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         name="Segments", default=5, min=1, max=256, update=_on_scp_prop_update
     )
 
-    # Shape params: Mesh Asset
     mesh_asset_id: bpy.props.StringProperty(
         name="Mesh Asset ID", default="", update=_on_scp_prop_update
     )
 
-    # Attachment
     parent_id: bpy.props.StringProperty(name="Parent ID")
     attach_param: bpy.props.StringProperty(name="Attach Param JSON")
 
-    # Mirror
     mirror_enabled: bpy.props.BoolProperty(
         name="Mirror Enabled", default=False, update=_on_scp_prop_update
     )

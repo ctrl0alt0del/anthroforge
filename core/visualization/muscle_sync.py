@@ -508,8 +508,8 @@ class MuscleSceneSync:
             self._syncing = False
 
         if changed:
-            self.sync_root_to_scene(root=root, scene=scene)
-
+            from .sync_runner import sync_all
+            sync_all(root=root, scene=scene)
 
 _MUSCLE_SYNC = None
 

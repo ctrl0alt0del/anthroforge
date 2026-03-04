@@ -2,19 +2,19 @@ import bpy
 from ..core.utils import get_af_root
 
 
-def _sync_muscle_scene(context):
+def _sync_vcp_scene(context):
     if context is None:
         return
     scene = context.scene
     root = get_af_root(scene)
     if root is None:
         return
-    from ..core.visualization.muscle_sync import register_muscle_sync
-    register_muscle_sync().sync_root_to_scene(root=root, scene=scene)
+    from ..core.visualization.sync_runner import sync_all
+    sync_all(root=root, scene=scene)
 
 
 def _on_muscle_prop_update(self, context):
-    _sync_muscle_scene(context)
+    _sync_vcp_scene(context)
 
 
 class AF_MuscleFiberRef_Property(bpy.types.PropertyGroup):
@@ -25,14 +25,11 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="Muscle", update=_on_muscle_prop_update)
 
-    # Stitching behavior (v1)
     closed_v: bpy.props.BoolProperty(name="Closed Ring (V)", default=False, update=_on_muscle_prop_update)
 
-    # Ordered fibers (manual order)
     fiber_refs: bpy.props.CollectionProperty(type=AF_MuscleFiberRef_Property)
     active_fiber_ref_index: bpy.props.IntProperty(name="Active Fiber Ref", default=-1)
 
-    # Inflation control (gizmo-driven max point)
     inflation_enabled: bpy.props.BoolProperty(name="Inflation Enabled", default=True, update=_on_muscle_prop_update)
     inflation_max_value: bpy.props.FloatProperty(
         name="Max Inflation",
@@ -67,23 +64,21 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
         update=_on_muscle_prop_update,
     )
 
-    inflation_boundary_strength: bpy.props.FloatProperty(  # 1 = full lock at boundary, 0 = no lock
+    inflation_boundary_strength: bpy.props.FloatProperty(
         name="Boundary Strength",
         default=0.7, min=0.0, max=1.0, update=_on_muscle_prop_update
     )
 
-    inflation_boundary_band: bpy.props.FloatProperty(  # width of transition from boundary to interior
+    inflation_boundary_band: bpy.props.FloatProperty(
         name="Boundary Band",
         default=2.0, min=0.1, max=16.0, update=_on_muscle_prop_update
     )
 
-    inflation_boundary_power: bpy.props.FloatProperty(  # curve sharpness of transition
+    inflation_boundary_power: bpy.props.FloatProperty(
         name="Boundary Power",
         default=1.5, min=0.1, max=8.0, update=_on_muscle_prop_update
     )
 
-
-    # Cached world-space control position (written by muscle inflation gizmo sync)
     inflation_ctrl_world: bpy.props.FloatVectorProperty(
         name="Inflation Ctrl World",
         size=3,
@@ -94,9 +89,8 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
     flip_normals: bpy.props.BoolProperty(
         name="Flip Normals",
         default=False,
-        update=_on_muscle_prop_update,  # if you already use this callback
+        update=_on_muscle_prop_update,
     )
-
 
 
 class AF_FiberTouchPoint_Property(bpy.types.PropertyGroup):
@@ -108,20 +102,16 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="")
 
-    # Endpoints (attachments to SCP)
     a_parent_id: bpy.props.StringProperty(name="Origin SCP ID")
     a_attach_param: bpy.props.StringProperty(name="Origin Attach Param JSON")
     b_parent_id: bpy.props.StringProperty(name="Insertion SCP ID")
     b_attach_param: bpy.props.StringProperty(name="Insertion Attach Param JSON")
 
-    # Mid touch points (ordered)
     mid_touches: bpy.props.CollectionProperty(type=AF_FiberTouchPoint_Property)
     guide_stiffness: bpy.props.FloatProperty(name="Guide Stiffness", default=1.0, min=0.0, max=1.0)
 
-    # Grouping
     muscle_id: bpy.props.StringProperty(name="Muscle ID", default="")
 
-    # Solver settings/state
     node_count: bpy.props.IntProperty(name="Node Count", default=64, min=8, max=512)
     iterations_interactive: bpy.props.IntProperty(name="Iterations (Interactive)", default=12, min=1, max=200)
     iterations_bake: bpy.props.IntProperty(name="Iterations (Bake)", default=120, min=1, max=1000)
@@ -130,10 +120,8 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     collision_margin: bpy.props.FloatProperty(name="Collision Margin", default=0.002, min=0.0, max=1.0)
     damping: bpy.props.FloatProperty(name="Damping", default=0.10, min=0.0, max=1.0)
 
-    # Kept for current solver shortening pass
     stretch_stiffness: bpy.props.FloatProperty(name="Shorten Strength", default=0.9, min=0.0, max=1.0)
 
-    # Visualization / status
     thickness: bpy.props.FloatProperty(name="Thickness", default=0.01, min=0.0)
     not_converged: bpy.props.BoolProperty(name="Not Converged", default=False)
     last_recompute_ms: bpy.props.FloatProperty(name="Last Recompute (ms)", default=0.0)
