@@ -25,8 +25,13 @@ class SCPSceneSync:
         return col
 
     def _iter_root_proxies(self, vis_col, root_name):
+        # Source proxies only (exclude mirrored)
         for obj in vis_col.objects:
-            if obj.get("af_proxy") and obj.get("af_root_name") == root_name:
+            if (
+                obj.get("af_proxy")
+                and not obj.get("af_mirror_proxy")
+                and obj.get("af_root_name") == root_name
+            ):
                 yield obj
 
     def _find_proxy(self, vis_col, root_name, scp_id):
@@ -36,9 +41,11 @@ class SCPSceneSync:
         return None
 
     def _find_proxy_in_scene(self, scene, root_name, scp_id):
+        # Source proxies only (exclude mirrored)
         for obj in scene.objects:
             if (
                 obj.get("af_proxy")
+                and not obj.get("af_mirror_proxy")
                 and obj.get("af_root_name") == root_name
                 and obj.get("af_scp_id") == scp_id
             ):
@@ -74,14 +81,13 @@ class SCPSceneSync:
         data = self._new_data_block(scp)
         obj = bpy.data.objects.new(f"AF_{scp.id}", data)
         obj["af_proxy"] = True
+        obj["af_mirror_proxy"] = False
         obj["af_root_name"] = root.name
         obj["af_scp_id"] = scp.id
 
-        # Parent under AF_ROOT (object hierarchy)
         obj.parent = root
         obj.matrix_parent_inverse = root.matrix_world.inverted()
 
-        # Assign muted color once
         color = next_color()
         mat_name = f"AF_SCP_MAT_{scp.id}"
         mat = bpy.data.materials.new(mat_name)
@@ -161,7 +167,6 @@ class SCPSceneSync:
             if parent_proxy:
                 return self._world_matrix_from_mesh_anchor(scp, parent_proxy, payload)
 
-        # Legacy fallback
         return scp.get_world_matrix(runtime_registry)
 
     # ------------------------------
@@ -193,6 +198,7 @@ class SCPSceneSync:
                     self._replace_proxy_data(obj, scp)
 
                 obj["af_proxy"] = True
+                obj["af_mirror_proxy"] = False
                 obj["af_root_name"] = root.name
                 obj["af_scp_id"] = scp.id
                 if obj.parent != root:
@@ -202,6 +208,7 @@ class SCPSceneSync:
                 scp.shape.ensure_proxy_object(obj)
                 obj.matrix_world = self._compute_visual_world_matrix(scp, runtime.registry, root, scene)
 
+            # Cleanup only source proxies, never touch mirror proxies here
             for obj in list(self._iter_root_proxies(vis_col, root.name)):
                 if obj.get("af_scp_id") not in live_ids:
                     self._remove_proxy(obj)
@@ -299,6 +306,8 @@ class SCPSceneSync:
                     continue
                 if not obj.get("af_proxy"):
                     continue
+                if obj.get("af_mirror_proxy"):
+                    continue  # ignore mirror objects for write-back
                 if obj.get("af_root_name") != root.name:
                     continue
                 if vis_col.objects.get(obj.name) is None:

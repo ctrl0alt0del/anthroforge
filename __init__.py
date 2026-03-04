@@ -53,6 +53,7 @@ from .core.shapes import *  # registers shape classes
 from .core.visualization.sync import register_sync, unregister_sync
 from .core.visualization.fiber_sync import register_fiber_sync, unregister_fiber_sync
 from .core.visualization.muscle_sync import register_muscle_sync, unregister_muscle_sync
+from .core.visualization.mirror_sync import register_mirror_sync, unregister_mirror_sync
 from .ui.scene_props import register_scene_props, unregister_scene_props
 
 addon_keymaps = []
@@ -81,7 +82,6 @@ classes = (
     AF_PT_FiberEditPanel,
     AF_PT_FiberCreatePanel,
 
-    # Register nested property item type BEFORE owner types.
     AF_MuscleFiberRef_Property,
     AF_MuscleVCP_Property,
     AF_FiberTouchPoint_Property,
@@ -110,6 +110,7 @@ def register():
     register_sync()
     register_fiber_sync()
     register_muscle_sync()
+    register_mirror_sync()
 
     wm = bpy.context.window_manager
     kc = wm.keyconfigs.addon
@@ -120,6 +121,7 @@ def register():
 
 
 def unregister():
+    unregister_mirror_sync()
     unregister_muscle_sync()
     unregister_fiber_sync()
     unregister_sync()

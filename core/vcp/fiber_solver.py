@@ -25,10 +25,6 @@ class FiberSolver:
         else:
             self._cache.pop(fiber_id, None)
 
-    # ------------------------------
-    # Public
-    # ------------------------------
-
     def solve_points(self, root, fiber_prop, scene, depsgraph, bake=False):
         runtime = SCPRegistry(root)
         runtime.build()
@@ -82,7 +78,6 @@ class FiberSolver:
         margin = float(fiber_prop.collision_margin)
         damping = float(fiber_prop.damping)
 
-        # Repurpose existing stiffness slider as shortening strength.
         shorten_strength = max(0.0, min(1.0, float(getattr(fiber_prop, "stretch_stiffness", 0.9))))
         bend_strength = max(0.0, min(1.0, float(getattr(fiber_prop, "bend_stiffness", 0.15))))
 
@@ -126,10 +121,6 @@ class FiberSolver:
         self._cache[fiber_prop.id] = [p.copy() for p in nodes]
         return nodes
 
-    # ------------------------------
-    # Anchors / initialization
-    # ------------------------------
-
     def _guide_worlds(self, root, scene, runtime_registry, fiber_prop):
         out = []
         touches = getattr(fiber_prop, "mid_touches", None)
@@ -168,7 +159,6 @@ class FiberSolver:
             seg_lengths = [1.0] * seg_count
             total_len = float(seg_count)
 
-        # Allocate >=1 edge per segment, proportional to segment length.
         edges = [1] * seg_count
         remaining = total_edges - seg_count
         if remaining > 0:
@@ -183,7 +173,6 @@ class FiberSolver:
                 for k in range(leftover):
                     edges[frac[k % len(frac)][1]] += 1
 
-        # Build stitched polyline and pin map.
         nodes = []
         pin_targets = {}
         cursor = 0
@@ -204,7 +193,6 @@ class FiberSolver:
 
             pin_targets[cursor] = anchors[si + 1].copy()
 
-        # Safety clamp length.
         if len(nodes) != node_count:
             nodes = [anchors[0].lerp(anchors[-1], i / float(max(1, node_count - 1))) for i in range(node_count)]
             pin_targets = {0: anchors[0].copy(), node_count - 1: anchors[-1].copy()}
@@ -216,23 +204,28 @@ class FiberSolver:
 
         return nodes, pin_targets
 
-    # ------------------------------
-    # Endpoint resolve
-    # ------------------------------
-
     def _parse_attach_param(self, raw):
         raw = (raw or "").strip()
         if not raw:
-            return 0.0
+            return ("legacy", 0.0)
+
         try:
-            return json.loads(raw)
+            data = json.loads(raw)
         except Exception:
-            return 0.0
+            return ("legacy", 0.0)
+
+        if isinstance(data, dict) and data.get("mode") == "mesh_anchor":
+            p = data.get("parent_local_point")
+            if isinstance(p, (list, tuple)) and len(p) == 3:
+                return ("mesh_anchor", Vector((float(p[0]), float(p[1]), float(p[2]))))
+
+        return ("legacy", data)
 
     def _get_scp_proxy(self, root, scene, scp_id):
         for obj in scene.objects:
             if (
                 obj.get("af_proxy")
+                and not obj.get("af_mirror_proxy")
                 and obj.get("af_root_name") == root.name
                 and obj.get("af_scp_id") == scp_id
             ):
@@ -251,18 +244,20 @@ class FiberSolver:
         if proxy is None:
             return None
 
-        param = self._parse_attach_param(attach_param_raw)
-        local = scp.shape.compute_local_point(param)
-        return proxy.matrix_world @ local
+        mode, payload = self._parse_attach_param(attach_param_raw)
+        if mode == "mesh_anchor":
+            local = payload
+        else:
+            local = scp.shape.compute_local_point(payload)
 
-    # ------------------------------
-    # Colliders
-    # ------------------------------
+        return proxy.matrix_world @ local
 
     def _surface_colliders(self, root, scene, runtime_registry):
         out = []
         for obj in scene.objects:
             if not obj.get("af_proxy"):
+                continue
+            if obj.get("af_mirror_proxy"):
                 continue
             if obj.get("af_root_name") != root.name:
                 continue
@@ -316,10 +311,6 @@ class FiberSolver:
             and (mn.y - margin) <= p.y <= (mx.y + margin)
             and (mn.z - margin) <= p.z <= (mx.z + margin)
         )
-
-    # ------------------------------
-    # Passes
-    # ------------------------------
 
     def _apply_length_shortening(self, nodes, pinned, strength):
         n = len(nodes)
@@ -414,10 +405,6 @@ class FiberSolver:
             if pinned[i]:
                 continue
             nodes[i] = prev_nodes[i].lerp(nodes[i], alpha)
-
-    # ------------------------------
-    # Metrics
-    # ------------------------------
 
     def _max_displacement(self, nodes, prev_nodes):
         md = 0.0

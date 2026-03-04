@@ -45,6 +45,14 @@ class AF_PT_EditPanel(bpy.types.Panel):
         layout.prop(scp, "local_scale")
 
         layout.separator()
+        layout.label(text="Mirror")
+        layout.prop(scp, "mirror_enabled", text="Enabled")
+        mcol = layout.column()
+        mcol.enabled = bool(scp.mirror_enabled)
+        mcol.prop(scp, "mirror_axis", text="Axis")
+        mcol.prop(scp, "mirror_origin", text="Origin")
+
+        layout.separator()
         layout.label(text="Shape Params")
         ShapeRegistry.draw_scp_ui(scp.shape_type, layout, scp, readonly=True)
 

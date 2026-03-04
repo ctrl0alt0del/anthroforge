@@ -35,7 +35,6 @@ class MeshAssetShape(ShapeStrategy):
 
     @classmethod
     def register_scene_props(cls):
-        # no shape-specific scene props here; uses shared Scene.af_new_scp_mesh_asset_id
         pass
 
     @classmethod
@@ -96,12 +95,26 @@ class MeshAssetShape(ShapeStrategy):
             return
         self._cached_verts = [v.co.copy() for v in obj.data.vertices]
 
+    def _ensure_cached_verts(self):
+        # Critical for runtime instances (e.g. solver registry) where ensure_proxy_object
+        # may not have run yet.
+        if self._cached_verts:
+            return
+        if not self.asset_id:
+            return
+        mesh = load_asset_mesh(self.asset_id)
+        if mesh is None:
+            return
+        self._cached_verts = [v.co.copy() for v in mesh.vertices]
+
     def get_attach_params(self):
+        self._ensure_cached_verts()
         if not self._cached_verts:
             return [0]
         return list(range(len(self._cached_verts)))
 
     def compute_local_point(self, param):
+        self._ensure_cached_verts()
         if not self._cached_verts:
             return Vector((0.0, 0.0, 0.0))
         try:
@@ -117,7 +130,6 @@ class MeshAssetShape(ShapeStrategy):
 
         mesh = load_asset_mesh(self.asset_id) if self.asset_id else None
         if mesh is None:
-            # fallback empty mesh
             if obj.data is None:
                 obj.data = bpy.data.meshes.new("AF_EMPTY_MESH_ASSET")
             else:
@@ -130,5 +142,6 @@ class MeshAssetShape(ShapeStrategy):
             obj.data = mesh
 
         self._refresh_vertex_cache_from_obj(obj)
+
 
 ShapeRegistry.register(MeshAssetShape)

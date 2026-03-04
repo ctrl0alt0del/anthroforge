@@ -1,5 +1,8 @@
 import json
 import bpy
+from mathutils import Vector
+from mathutils.bvhtree import BVHTree
+from bpy_extras import view3d_utils
 
 from ..utils import get_af_root
 from ..vcp.fiber_solver import FiberSolver
@@ -27,7 +30,12 @@ class FiberSceneSync:
 
     def _find_fiber_proxy(self, vis_col, root_name, fiber_id):
         for obj in vis_col.objects:
-            if obj.get("af_fiber_proxy") and obj.get("af_root_name") == root_name and obj.get("af_fiber_id") == fiber_id:
+            if (
+                obj.get("af_fiber_proxy")
+                and not obj.get("af_fiber_mirror_proxy")
+                and obj.get("af_root_name") == root_name
+                and obj.get("af_fiber_id") == fiber_id
+            ):
                 return obj
         return None
 
@@ -57,6 +65,8 @@ class FiberSceneSync:
         obj = bpy.data.objects.new(f"AF_{fiber_id}_{endpoint}", None)
         obj.empty_display_type = "SPHERE"
         obj.empty_display_size = 0.035
+        obj.show_in_front = True
+        obj.hide_render = True
         obj["af_fiber_endpoint_handle"] = True
         obj["af_root_name"] = root.name
         obj["af_fiber_id"] = fiber_id
@@ -68,6 +78,8 @@ class FiberSceneSync:
         obj = bpy.data.objects.new(f"AF_{fiber_id}_T{touch_index}", None)
         obj.empty_display_type = "CUBE"
         obj.empty_display_size = 0.03
+        obj.show_in_front = True
+        obj.hide_render = True
         obj["af_fiber_touch_handle"] = True
         obj["af_root_name"] = root.name
         obj["af_fiber_id"] = fiber_id
@@ -118,31 +130,67 @@ class FiberSceneSync:
         curve.bevel_depth = max(0.0, float(thickness))
         curve.fill_mode = "FULL"
 
-        # Single source of truth for downstream consumers (muscle sync)
         obj["af_fiber_points_world"] = json.dumps([[float(p.x), float(p.y), float(p.z)] for p in points])
         obj["af_fiber_points_mode"] = "BAKE" if bake else "INTERACTIVE"
 
-
     def _get_scp_proxy(self, scene, root_name, scp_id):
         for obj in scene.objects:
-            if obj.get("af_proxy") and obj.get("af_root_name") == root_name and obj.get("af_scp_id") == scp_id:
+            if (
+                obj.get("af_proxy")
+                and not obj.get("af_mirror_proxy")
+                and obj.get("af_root_name") == root_name
+                and obj.get("af_scp_id") == scp_id
+            ):
                 return obj
         return None
+
+    def _decode_attach_param(self, raw):
+        raw = (raw or "").strip()
+        if not raw:
+            return ("legacy", 0.0)
+
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return ("legacy", 0.0)
+
+        if isinstance(data, dict) and data.get("mode") == "mesh_anchor":
+            p = data.get("parent_local_point")
+            if isinstance(p, (list, tuple)) and len(p) == 3:
+                return ("mesh_anchor", Vector((float(p[0]), float(p[1]), float(p[2]))))
+
+        return ("legacy", data)
+
+    def _encode_mesh_anchor(self, parent_local_point):
+        return json.dumps(
+            {
+                "mode": "mesh_anchor",
+                "parent_local_point": [
+                    float(parent_local_point.x),
+                    float(parent_local_point.y),
+                    float(parent_local_point.z),
+                ],
+            }
+        )
 
     def _endpoint_world(self, root, scene, runtime_registry, parent_id, attach_param_raw):
         if not parent_id:
             return None
+
         scp = runtime_registry.get(parent_id)
         if scp is None:
             return None
+
         proxy = self._get_scp_proxy(scene, root.name, parent_id)
         if proxy is None:
             return None
-        try:
-            param = json.loads(attach_param_raw) if attach_param_raw else 0.0
-        except Exception:
-            param = 0.0
-        local = scp.shape.compute_local_point(param)
+
+        mode, payload = self._decode_attach_param(attach_param_raw)
+        if mode == "mesh_anchor":
+            local = payload
+        else:
+            local = scp.shape.compute_local_point(payload)
+
         return proxy.matrix_world @ local
 
     def _nearest_param(self, parent_scp, parent_proxy, moved_world):
@@ -158,6 +206,62 @@ class FiberSceneSync:
                 best_d2 = d2
                 best = p
         return best
+
+    def _nearest_parent_mesh_local_point(self, parent_proxy, moved_world):
+        if parent_proxy is None or parent_proxy.type != "MESH":
+            return None
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        try:
+            bvh = BVHTree.FromObject(parent_proxy, depsgraph)
+        except Exception:
+            return None
+        if bvh is None:
+            return None
+
+        moved_local = parent_proxy.matrix_world.inverted() @ moved_world
+        hit = bvh.find_nearest(moved_local)
+        if hit is None or hit[0] is None:
+            return None
+        return hit[0].copy()
+
+    def _get_active_view3d_region(self):
+        wm = bpy.context.window_manager
+        for win in wm.windows:
+            screen = win.screen
+            for area in screen.areas:
+                if area.type != "VIEW_3D":
+                    continue
+                rv3d = None
+                for sp in area.spaces:
+                    if sp.type == "VIEW_3D":
+                        rv3d = sp.region_3d
+                        break
+                if rv3d is None:
+                    continue
+                region = next((r for r in area.regions if r.type == "WINDOW"), None)
+                if region is None:
+                    continue
+                return region, rv3d
+        return None, None
+
+    def _world_units_per_pixel(self, world_loc):
+        region, rv3d = self._get_active_view3d_region()
+        if region is None or rv3d is None:
+            return None
+
+        p2d = view3d_utils.location_3d_to_region_2d(region, rv3d, world_loc)
+        if p2d is None:
+            return None
+
+        p2d_2 = Vector((p2d.x + 1.0, p2d.y))
+        w2 = view3d_utils.region_2d_to_location_3d(region, rv3d, p2d_2, world_loc)
+        return (w2 - world_loc).length
+
+    def _set_helper_screen_size(self, obj, px=14.0, min_size=0.005, max_size=0.25):
+        wupp = self._world_units_per_pixel(obj.location)
+        if wupp is None:
+            return
+        obj.empty_display_size = max(min_size, min(max_size, px * wupp))
 
     def _sync_handles(self, root, scene, vis_col, runtime_registry):
         live_endpoint_keys = set()
@@ -175,6 +279,7 @@ class FiberSceneSync:
                 w = self._endpoint_world(root, scene, runtime_registry, pid, raw)
                 if w is not None:
                     h.location = w
+                    self._set_helper_screen_size(h, px=14.0)
 
             for i, tp in enumerate(fiber.mid_touches):
                 live_touch_keys.add((fiber.id, i))
@@ -185,6 +290,7 @@ class FiberSceneSync:
                 w = self._endpoint_world(root, scene, runtime_registry, tp.parent_id, tp.attach_param)
                 if w is not None:
                     h.location = w
+                    self._set_helper_screen_size(h, px=12.0)
 
         for obj in list(vis_col.objects):
             if obj.get("af_fiber_endpoint_handle") and obj.get("af_root_name") == root.name:
@@ -242,7 +348,11 @@ class FiberSceneSync:
 
             if target_fiber_ids is None:
                 for obj in list(vis_col.objects):
-                    if obj.get("af_fiber_proxy") and obj.get("af_root_name") == root.name and obj.get("af_fiber_id") not in live_ids:
+                    if (
+                        obj.get("af_fiber_proxy")
+                        and obj.get("af_root_name") == root.name
+                        and obj.get("af_fiber_id") not in live_ids
+                    ):
                         bpy.data.objects.remove(obj, do_unlink=True)
 
             self._sync_handles(root, scene, vis_col, runtime.registry)
@@ -291,8 +401,12 @@ class FiberSceneSync:
                     if parent_scp is None or parent_proxy is None:
                         continue
 
-                    param = self._nearest_param(parent_scp, parent_proxy, obj.location.copy())
-                    raw = json.dumps(param)
+                    local_pt = self._nearest_parent_mesh_local_point(parent_proxy, obj.location.copy())
+                    if local_pt is not None:
+                        raw = self._encode_mesh_anchor(local_pt)
+                    else:
+                        param = self._nearest_param(parent_scp, parent_proxy, obj.location.copy())
+                        raw = json.dumps(param)
 
                     if endpoint == "A":
                         if fiber.a_attach_param != raw:
@@ -321,8 +435,12 @@ class FiberSceneSync:
                     if parent_scp is None or parent_proxy is None:
                         continue
 
-                    param = self._nearest_param(parent_scp, parent_proxy, obj.location.copy())
-                    raw = json.dumps(param)
+                    local_pt = self._nearest_parent_mesh_local_point(parent_proxy, obj.location.copy())
+                    if local_pt is not None:
+                        raw = self._encode_mesh_anchor(local_pt)
+                    else:
+                        param = self._nearest_param(parent_scp, parent_proxy, obj.location.copy())
+                        raw = json.dumps(param)
 
                     if tp.attach_param != raw:
                         tp.attach_param = raw
