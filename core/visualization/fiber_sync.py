@@ -1,7 +1,6 @@
 import json
 import bpy
 from mathutils import Vector
-from mathutils.bvhtree import BVHTree
 from bpy_extras import view3d_utils
 
 from ..utils import get_af_root
@@ -197,6 +196,7 @@ class FiberSceneSync:
         params = parent_scp.shape.get_attach_params()
         if not params:
             return 0.0
+
         best = params[0]
         best_d2 = None
         for p in params:
@@ -207,22 +207,33 @@ class FiberSceneSync:
                 best = p
         return best
 
-    def _nearest_parent_mesh_local_point(self, parent_proxy, moved_world):
-        if parent_proxy is None or parent_proxy.type != "MESH":
-            return None
-        depsgraph = bpy.context.evaluated_depsgraph_get()
-        try:
-            bvh = BVHTree.FromObject(parent_proxy, depsgraph)
-        except Exception:
-            return None
-        if bvh is None:
+    def _nearest_parent_mesh_vertex_local_point(self, parent_proxy, moved_world):
+        if parent_proxy is None or parent_proxy.type != "MESH" or parent_proxy.data is None:
             return None
 
-        moved_local = parent_proxy.matrix_world.inverted() @ moved_world
-        hit = bvh.find_nearest(moved_local)
-        if hit is None or hit[0] is None:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        obj_eval = parent_proxy.evaluated_get(depsgraph)
+        mesh_eval = obj_eval.to_mesh()
+        if mesh_eval is None or len(mesh_eval.vertices) == 0:
+            if mesh_eval is not None:
+                obj_eval.to_mesh_clear()
             return None
-        return hit[0].copy()
+
+        mw = parent_proxy.matrix_world
+        best_local = None
+        best_d2 = None
+
+        try:
+            for v in mesh_eval.vertices:
+                w = mw @ v.co
+                d2 = (w - moved_world).length_squared
+                if best_d2 is None or d2 < best_d2:
+                    best_d2 = d2
+                    best_local = v.co.copy()
+        finally:
+            obj_eval.to_mesh_clear()
+
+        return best_local
 
     def _get_active_view3d_region(self):
         wm = bpy.context.window_manager
@@ -312,7 +323,12 @@ class FiberSceneSync:
             if obj.get("af_root_name") != root.name:
                 continue
             base = tuple(obj.get("af_fiber_base_color", DEFAULT_FIBER_COLOR))
-            self._set_fiber_color(obj, SELECTED_FIBER_COLOR if active_type == "FIBER" and obj.get("af_fiber_id") == active_id else base)
+            self._set_fiber_color(
+                obj,
+                SELECTED_FIBER_COLOR
+                if active_type == "FIBER" and obj.get("af_fiber_id") == active_id
+                else base,
+            )
 
     def sync_root_to_scene(self, root=None, scene=None, bake=False, target_fiber_ids=None):
         if self._syncing:
@@ -342,7 +358,9 @@ class FiberSceneSync:
                 if obj is None:
                     obj = self._create_fiber_proxy(vis_col, root, fiber.id)
 
-                points = self._solver.solve_points(root=root, fiber_prop=fiber, scene=scene, depsgraph=depsgraph, bake=bake)
+                points = self._solver.solve_points(
+                    root=root, fiber_prop=fiber, scene=scene, depsgraph=depsgraph, bake=bake
+                )
                 if len(points) >= 2:
                     self._update_curve_points(obj, points, fiber.thickness, bake=bake)
 
@@ -401,8 +419,11 @@ class FiberSceneSync:
                     if parent_scp is None or parent_proxy is None:
                         continue
 
-                    local_pt = self._nearest_parent_mesh_local_point(parent_proxy, obj.location.copy())
-                    if local_pt is not None:
+                    # Mesh-asset parents snap to nearest mesh vertex (fixes edge-repel and no-vertex-snap behavior).
+                    if getattr(parent_scp.shape, "type_id", "") == "MESH_ASSET":
+                        local_pt = self._nearest_parent_mesh_vertex_local_point(parent_proxy, obj.location.copy())
+                        if local_pt is None:
+                            continue
                         raw = self._encode_mesh_anchor(local_pt)
                     else:
                         param = self._nearest_param(parent_scp, parent_proxy, obj.location.copy())
@@ -435,8 +456,10 @@ class FiberSceneSync:
                     if parent_scp is None or parent_proxy is None:
                         continue
 
-                    local_pt = self._nearest_parent_mesh_local_point(parent_proxy, obj.location.copy())
-                    if local_pt is not None:
+                    if getattr(parent_scp.shape, "type_id", "") == "MESH_ASSET":
+                        local_pt = self._nearest_parent_mesh_vertex_local_point(parent_proxy, obj.location.copy())
+                        if local_pt is None:
+                            continue
                         raw = self._encode_mesh_anchor(local_pt)
                     else:
                         param = self._nearest_param(parent_scp, parent_proxy, obj.location.copy())
