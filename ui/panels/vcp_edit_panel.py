@@ -50,6 +50,9 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
         col.prop(muscle, "inflation_boundary_band", text="Boundary Band")
         col.prop(muscle, "inflation_boundary_power", text="Boundary Power")
 
+        pick = infl.operator("af.select_muscle_inflation_ctrl", icon="RESTRICT_SELECT_OFF")
+        pick.muscle_id = muscle.id
+
         op = layout.operator("af.flip_muscle_normals", icon="ARROW_LEFTRIGHT")
         op.muscle_id = muscle.id
 

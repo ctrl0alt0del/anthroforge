@@ -27,7 +27,10 @@ from .operators.fiber_tools import (
     AF_OT_AddFiberTouchPoint,
     AF_OT_RemoveFiberTouchPoint,
 )
-from .operators.muscle_tools import AF_OT_FlipMuscleNormals
+from .operators.muscle_tools import (
+    AF_OT_FlipMuscleNormals,
+    AF_OT_SelectMuscleInflationCtrl,
+)
 from .operators.register_mesh_scp_asset import AF_OT_RegisterMeshSCPAsset
 from .operators.mesh_asset_list import AF_OT_SelectMeshSCPAsset, AF_OT_DeleteMeshSCPAsset
 
@@ -96,6 +99,7 @@ classes = (
     AF_OT_DeleteSelectedAFNode,
     AF_PT_VCPEditPanel,
     AF_OT_FlipMuscleNormals,
+    AF_OT_SelectMuscleInflationCtrl,
 )
 
 

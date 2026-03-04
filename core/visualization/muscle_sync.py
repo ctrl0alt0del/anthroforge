@@ -60,6 +60,8 @@ class MuscleSceneSync:
         obj = bpy.data.objects.new(f"AF_{muscle_id}_INFL_MAX", None)
         obj.empty_display_type = "SPHERE"
         obj.empty_display_size = 0.04
+        obj.show_in_front = True
+        obj.hide_render = True
         obj["af_muscle_inflation_ctrl"] = True
         obj["af_root_name"] = root.name
         obj["af_muscle_id"] = muscle_id
@@ -327,6 +329,8 @@ class MuscleSceneSync:
             muscle.inflation_ctrl_world = (target.x, target.y, target.z)
 
         ctrl.location = target
+        ctrl.show_in_front = True
+        ctrl.hide_render = True
         return ctrl
 
     def sync_root_to_scene(self, root=None, scene=None, target_muscle_ids=None):
