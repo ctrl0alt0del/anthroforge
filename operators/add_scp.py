@@ -4,7 +4,7 @@ import bpy
 from ..core.utils import get_af_root
 from ..core.registry import SCPRegistry
 from ..core.shapes.registry import ShapeRegistry
-from ..core.visualization.sync import register_sync
+from ..core.visualization.sync_runner import sync_from_scp_ids
 
 
 class AF_OT_AddSCP(bpy.types.Operator):
@@ -15,8 +15,8 @@ class AF_OT_AddSCP(bpy.types.Operator):
     def execute(self, context):
         root = get_af_root(context.scene)
         if root is None:
-            self.report({'ERROR'}, "No AF_ROOT found in scene.")
-            return {'CANCELLED'}
+            self.report({"ERROR"}, "No AF_ROOT found in scene.")
+            return {"CANCELLED"}
 
         scp_collection = root.af_scp_system.scps
         new_scp = scp_collection.add()
@@ -41,7 +41,6 @@ class AF_OT_AddSCP(bpy.types.Operator):
         if parent_id:
             new_scp.parent_id = parent_id
 
-            # Bootstrap anchor from first legacy param -> convert to mesh_anchor payload.
             runtime = SCPRegistry(root)
             runtime.build()
             parent_scp = runtime.registry.get(parent_id)
@@ -60,9 +59,8 @@ class AF_OT_AddSCP(bpy.types.Operator):
             new_scp.parent_id = ""
             new_scp.attach_param = ""
 
-        register_sync().sync_root_to_scene(root=root, scene=context.scene)
+        sync_from_scp_ids(root=root, scene=context.scene, scp_ids={new_scp.id})
 
-        # Select newly created SCP
         root.af_scp_system.active_scp_index = len(root.af_scp_system.scps) - 1
         new_id = new_scp.id
         proxy = None
@@ -71,6 +69,7 @@ class AF_OT_AddSCP(bpy.types.Operator):
                 obj.get("af_proxy")
                 and obj.get("af_root_name") == root.name
                 and obj.get("af_scp_id") == new_id
+                and not obj.get("af_mirror_proxy")
             ):
                 proxy = obj
                 break
@@ -81,5 +80,5 @@ class AF_OT_AddSCP(bpy.types.Operator):
             proxy.select_set(True)
             context.view_layer.objects.active = proxy
 
-        self.report({'INFO'}, f"Added {new_scp.shape_type} SCP")
-        return {'FINISHED'}
+        self.report({"INFO"}, f"Added {new_scp.shape_type} SCP")
+        return {"FINISHED"}

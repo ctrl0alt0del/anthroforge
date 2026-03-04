@@ -3,29 +3,36 @@ from mathutils import Euler, Quaternion
 from ..core.utils import get_af_root
 
 
-def _sync_scene(context):
-    from ..core.visualization.sync_runner import sync_all
+def _sync_scene(context, scp_id=None):
     scene = context.scene if context else None
     root = get_af_root(scene)
-    sync_all(root=root, scene=scene)
+    if root is None:
+        return
+
+    if scp_id:
+        from ..core.visualization.sync_runner import sync_from_scp_ids
+        sync_from_scp_ids(root=root, scene=scene, scp_ids={scp_id})
+    else:
+        from ..core.visualization.sync_runner import sync_all
+        sync_all(root=root, scene=scene)
 
 
 def _on_scp_prop_update(self, context):
-    _sync_scene(context)
+    _sync_scene(context, getattr(self, "id", ""))
 
 
 def _on_euler_update(self, context):
     e = Euler(self.local_rotation_euler, "XYZ")
     q = e.to_quaternion()
     self.local_rotation = (q.w, q.x, q.y, q.z)
-    _sync_scene(context)
+    _sync_scene(context, getattr(self, "id", ""))
 
 
 def _on_quat_update(self, context):
     q = Quaternion(self.local_rotation)
     e = q.to_euler("XYZ")
     self["local_rotation_euler"] = (e.x, e.y, e.z)
-    _sync_scene(context)
+    _sync_scene(context, getattr(self, "id", ""))
 
 
 def _on_active_scp_index_update(self, context):

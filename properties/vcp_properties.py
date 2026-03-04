@@ -2,19 +2,24 @@ import bpy
 from ..core.utils import get_af_root
 
 
-def _sync_vcp_scene(context):
+def _sync_vcp_scene(context, muscle_id=None):
     if context is None:
         return
     scene = context.scene
     root = get_af_root(scene)
     if root is None:
         return
-    from ..core.visualization.sync_runner import sync_all
-    sync_all(root=root, scene=scene)
+
+    if muscle_id:
+        from ..core.visualization.sync_runner import sync_from_muscle_ids
+        sync_from_muscle_ids(root=root, scene=scene, muscle_ids={muscle_id})
+    else:
+        from ..core.visualization.sync_runner import sync_all
+        sync_all(root=root, scene=scene)
 
 
 def _on_muscle_prop_update(self, context):
-    _sync_vcp_scene(context)
+    _sync_vcp_scene(context, getattr(self, "id", ""))
 
 
 class AF_MuscleFiberRef_Property(bpy.types.PropertyGroup):

@@ -4,8 +4,7 @@ import bpy
 from ..core.utils import get_af_root
 from ..core.attachment import Attachment
 from ..core.registry import SCPRegistry
-from ..core.visualization.fiber_sync import register_fiber_sync
-from ..core.visualization.muscle_sync import register_muscle_sync
+from ..core.visualization.sync_runner import sync_from_fiber_ids
 
 
 class AF_OT_AddFiberVCP(bpy.types.Operator):
@@ -15,21 +14,21 @@ class AF_OT_AddFiberVCP(bpy.types.Operator):
     def execute(self, context):
         root = get_af_root(context.scene)
         if root is None:
-            self.report({'ERROR'}, "No AF_ROOT found.")
-            return {'CANCELLED'}
+            self.report({"ERROR"}, "No AF_ROOT found.")
+            return {"CANCELLED"}
 
         origin_obj = context.scene.af_new_fiber_origin_obj
         insertion_obj = context.scene.af_new_fiber_insertion_obj
 
         if not origin_obj or not insertion_obj:
-            self.report({'ERROR'}, "Select both Origin and Insertion SCPs.")
-            return {'CANCELLED'}
+            self.report({"ERROR"}, "Select both Origin and Insertion SCPs.")
+            return {"CANCELLED"}
 
         origin_id = origin_obj.get("af_scp_id", "")
         insertion_id = insertion_obj.get("af_scp_id", "")
         if not origin_id or not insertion_id:
-            self.report({'ERROR'}, "Origin/Insertion must be SCP proxy objects.")
-            return {'CANCELLED'}
+            self.report({"ERROR"}, "Origin/Insertion must be SCP proxy objects.")
+            return {"CANCELLED"}
 
         runtime = SCPRegistry(root)
         runtime.build()
@@ -58,21 +57,20 @@ class AF_OT_AddFiberVCP(bpy.types.Operator):
         f.b_parent_id = insertion.parent_id
         f.b_attach_param = json.dumps(insertion.param)
 
-        # Solver defaults (current model)
         f.node_count = 64
         f.iterations_interactive = 12
         f.iterations_bake = 180
-        f.stretch_stiffness = 0.9  # used as shorten strength in current solver
+        f.stretch_stiffness = 0.9
         f.bend_stiffness = 0.02
         f.collision_margin = 0.002
         f.damping = 0.01
         f.not_converged = False
-
-        # Visual
         f.thickness = 0.01
 
-        register_fiber_sync().sync_root_to_scene(root=root, scene=context.scene)
-        register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
+        root.af_vcp_system.active_vcp_type = "FIBER"
+        root.af_vcp_system.active_vcp_id = f.id
 
-        self.report({'INFO'}, f"Added {f.id}")
-        return {'FINISHED'}
+        sync_from_fiber_ids(root=root, scene=context.scene, fiber_ids={f.id})
+
+        self.report({"INFO"}, f"Added {f.id}")
+        return {"FINISHED"}

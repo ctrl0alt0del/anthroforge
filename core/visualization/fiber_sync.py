@@ -20,6 +20,18 @@ class FiberSceneSync:
     def clear_solver_cache(self, fiber_id=None):
         self._solver.clear_cache(fiber_id)
 
+    def _fiber_prefer_bake(self, fiber):
+        try:
+            return bool(fiber.get("af_prefer_bake", False))
+        except Exception:
+            return False
+
+    def _set_fiber_prefer_bake(self, fiber, value):
+        try:
+            fiber["af_prefer_bake"] = bool(value)
+        except Exception:
+            pass
+
     def _get_vis_collection(self, scene):
         col = scene.collection.children.get(self.collection_name)
         if col is None:
@@ -222,7 +234,6 @@ class FiberSceneSync:
         mw = parent_proxy.matrix_world
         best_local = None
         best_d2 = None
-
         try:
             for v in mesh_eval.vertices:
                 w = mw @ v.co
@@ -358,11 +369,12 @@ class FiberSceneSync:
                 if obj is None:
                     obj = self._create_fiber_proxy(vis_col, root, fiber.id)
 
+                use_bake = bool(bake or self._fiber_prefer_bake(fiber))
                 points = self._solver.solve_points(
-                    root=root, fiber_prop=fiber, scene=scene, depsgraph=depsgraph, bake=bake
+                    root=root, fiber_prop=fiber, scene=scene, depsgraph=depsgraph, bake=use_bake
                 )
                 if len(points) >= 2:
-                    self._update_curve_points(obj, points, fiber.thickness, bake=bake)
+                    self._update_curve_points(obj, points, fiber.thickness, bake=use_bake)
 
             if target_fiber_ids is None:
                 for obj in list(vis_col.objects):
@@ -419,7 +431,6 @@ class FiberSceneSync:
                     if parent_scp is None or parent_proxy is None:
                         continue
 
-                    # Mesh-asset parents snap to nearest mesh vertex (fixes edge-repel and no-vertex-snap behavior).
                     if getattr(parent_scp.shape, "type_id", "") == "MESH_ASSET":
                         local_pt = self._nearest_parent_mesh_vertex_local_point(parent_proxy, obj.location.copy())
                         if local_pt is None:
@@ -432,11 +443,13 @@ class FiberSceneSync:
                     if endpoint == "A":
                         if fiber.a_attach_param != raw:
                             fiber.a_attach_param = raw
+                            self._set_fiber_prefer_bake(fiber, False)
                             changed = True
                             changed_fiber_ids.add(fiber.id)
                     else:
                         if fiber.b_attach_param != raw:
                             fiber.b_attach_param = raw
+                            self._set_fiber_prefer_bake(fiber, False)
                             changed = True
                             changed_fiber_ids.add(fiber.id)
 
@@ -467,15 +480,15 @@ class FiberSceneSync:
 
                     if tp.attach_param != raw:
                         tp.attach_param = raw
+                        self._set_fiber_prefer_bake(fiber, False)
                         changed = True
                         changed_fiber_ids.add(fiber.id)
         finally:
             self._syncing = False
 
         if changed:
-            from .sync_runner import sync_all
-            sync_all(root=root, scene=scene, target_fiber_ids=changed_fiber_ids)
-
+            from .sync_runner import sync_from_fiber_ids
+            sync_from_fiber_ids(root=root, scene=scene, fiber_ids=changed_fiber_ids)
 
 _FIBER_SYNC = None
 

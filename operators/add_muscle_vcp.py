@@ -1,8 +1,7 @@
 import bpy
 
 from ..core.utils import get_af_root
-from ..core.visualization.fiber_sync import register_fiber_sync
-from ..core.visualization.muscle_sync import register_muscle_sync
+from ..core.visualization.sync_runner import sync_from_muscle_ids
 
 
 def _selected_fiber_ids(context, root):
@@ -20,7 +19,6 @@ def _selected_fiber_ids(context, root):
     ):
         active_id = active.get("af_fiber_id")
 
-    # keep selected_objects order, but place active last (active is usually last-picked)
     for obj in context.selected_objects:
         if not obj.get("af_fiber_proxy"):
             continue
@@ -38,7 +36,6 @@ def _selected_fiber_ids(context, root):
         ids.append(active_id)
 
     return ids
-
 
 
 class AF_OT_AddMuscleVCP(bpy.types.Operator):
@@ -62,7 +59,6 @@ class AF_OT_AddMuscleVCP(bpy.types.Operator):
             self.report({"ERROR"}, "Select at least 2 fiber proxies in viewport (Shift-select).")
             return {"CANCELLED"}
 
-        # Validate all selected fibers exist and have identical node_count / anchor structure
         fibers_by_id = {f.id: f for f in vcp.fibers}
         fibers = []
         for fid in fiber_ids:
@@ -82,7 +78,6 @@ class AF_OT_AddMuscleVCP(bpy.types.Operator):
                 self.report({"ERROR"}, "Selected fibers must have identical anchor structure.")
                 return {"CANCELLED"}
 
-        # Create unique muscle ID
         existing_ids = {m.id for m in vcp.muscles}
         i = 1
         muscle_id = f"MUSCLE_{i}"
@@ -100,7 +95,6 @@ class AF_OT_AddMuscleVCP(bpy.types.Operator):
         m.inflation_falloff_radius = 0.2
         m.inflation_ctrl_world = (0.0, 0.0, 0.0)
 
-        # Remove these fibers from previous muscle refs, then assign to new muscle in selected order
         for fid in fiber_ids:
             for old_m in vcp.muscles:
                 if old_m.id == muscle_id:
@@ -118,8 +112,8 @@ class AF_OT_AddMuscleVCP(bpy.types.Operator):
         vcp.active_vcp_type = "MUSCLE"
         vcp.active_vcp_id = muscle_id
 
-        register_fiber_sync().sync_root_to_scene(root=root, scene=context.scene)
-        register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
+        sync_from_muscle_ids(root=root, scene=context.scene, muscle_ids={muscle_id})
+
         ctrl_name = f"AF_{muscle_id}_INFL_MAX"
         ctrl = None
         for obj in context.scene.objects:
@@ -137,5 +131,6 @@ class AF_OT_AddMuscleVCP(bpy.types.Operator):
                 o.select_set(False)
             ctrl.select_set(True)
             context.view_layer.objects.active = ctrl
+
         self.report({"INFO"}, f"Created {muscle_id} from {len(fiber_ids)} fibers")
         return {"FINISHED"}

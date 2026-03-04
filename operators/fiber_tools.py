@@ -7,6 +7,7 @@ from ..core.registry import SCPRegistry
 from ..core.visualization.fiber_sync import register_fiber_sync
 from ..core.visualization.muscle_sync import register_muscle_sync
 
+
 class AF_OT_ClearFiberWarmStart(bpy.types.Operator):
     bl_idname = "af.clear_fiber_warm_start"
     bl_label = "Clear Warm Start"
@@ -37,7 +38,6 @@ class AF_OT_ClearFiberWarmStart(bpy.types.Operator):
         sync = register_fiber_sync()
         sync.clear_solver_cache(fiber.id)
 
-        # Optional: reset UI status so user sees fresh state before next recompute
         fiber.last_recompute_status = "UNKNOWN"
         fiber.last_recompute_ms = 0.0
         fiber.last_eps_disp = 0.0
@@ -77,7 +77,6 @@ class AF_OT_RecomputeFiber(bpy.types.Operator):
             return {"CANCELLED"}
 
         sync = register_fiber_sync()
-
         max_passes = 60
         converged = False
 
@@ -91,10 +90,16 @@ class AF_OT_RecomputeFiber(bpy.types.Operator):
             if not fiber.not_converged:
                 converged = True
                 break
+
+        # Keep baked result as preferred visual state until anchors move.
+        try:
+            fiber["af_prefer_bake"] = True
+        except Exception:
+            pass
+
         register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-
         fiber.last_recompute_ms = elapsed_ms
         fiber.last_recompute_status = "CONVERGED" if converged else "NOT_CONVERGED"
 
@@ -104,6 +109,7 @@ class AF_OT_RecomputeFiber(bpy.types.Operator):
             self.report({"WARNING"}, f"Fiber {fiber.id} not converged after {max_passes} passes")
 
         return {"FINISHED"}
+
 
 class AF_OT_AddFiberTouchPoint(bpy.types.Operator):
     bl_idname = "af.add_fiber_touch_point"
@@ -151,6 +157,11 @@ class AF_OT_AddFiberTouchPoint(bpy.types.Operator):
         tp.parent_id = scp_id
         tp.attach_param = json.dumps(p)
 
+        try:
+            fiber["af_prefer_bake"] = False
+        except Exception:
+            pass
+
         sync = register_fiber_sync()
         sync.clear_solver_cache(fiber.id)
         sync.sync_root_to_scene(root=root, scene=context.scene, target_fiber_ids={fiber.id})
@@ -184,6 +195,11 @@ class AF_OT_RemoveFiberTouchPoint(bpy.types.Operator):
             return {"CANCELLED"}
 
         fiber.mid_touches.remove(idx)
+
+        try:
+            fiber["af_prefer_bake"] = False
+        except Exception:
+            pass
 
         sync = register_fiber_sync()
         sync.clear_solver_cache(fiber.id)

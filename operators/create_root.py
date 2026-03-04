@@ -1,6 +1,5 @@
 import bpy
-from ..core.visualization.sync import register_sync
-
+from ..core.visualization.sync_runner import sync_all
 class AF_OT_CreateRoot(bpy.types.Operator):
     bl_idname = "af.create_root"
     bl_label = "Create AnthroForge Root"
@@ -23,5 +22,5 @@ class AF_OT_CreateRoot(bpy.types.Operator):
       root.af_scp_system  # just ensure pointer exists
 
       self.report({'INFO'}, "AnthroForge Root created.")
-      register_sync().sync_root_to_scene(root=root, scene=context.scene)
+      sync_all(root=root, scene=context.scene)
       return {'FINISHED'}

@@ -3,6 +3,7 @@ from math import exp
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 import json
+
 from ..utils import get_af_root
 from ..vcp.muscle_surface import (
     build_surface_data,
@@ -135,7 +136,6 @@ class MuscleSceneSync:
 
         return out
 
-
     def _remove_proxy_obj(self, obj):
         mesh = obj.data
         bpy.data.objects.remove(obj, do_unlink=True)
@@ -174,7 +174,7 @@ class MuscleSceneSync:
         if falloff_type == "SMOOTHSTEP":
             s = x * x * (3.0 - 2.0 * x)
             return 1.0 - s
-        return exp(-4.0 * x * x)  # GAUSSIAN
+        return exp(-4.0 * x * x)
 
     def _compute_vertex_normals(self, points):
         m = len(points)
@@ -242,7 +242,6 @@ class MuscleSceneSync:
         flip = bool(getattr(muscle, "flip_normals", False))
         sign = -1.0 if flip else 1.0
 
-        # normal at max point (nearest vertex)
         min_d2 = None
         ci = 0
         cj = 0
@@ -259,7 +258,6 @@ class MuscleSceneSync:
         else:
             n0.normalize()
 
-        # G point for GA direction field
         G = ctrl - (n0 * L * sign)
 
         def is_boundary(i, j):
@@ -275,13 +273,10 @@ class MuscleSceneSync:
                 dv = min(i, m - 1 - i) if m > 1 else 0
             return min(du, dv)
 
-        edge_band = 2  # soften only 1-2 rings after boundary
-
         for i in range(m):
             for j in range(n):
                 p = base_points[i][j]
 
-                # HARD boundary lock
                 if is_boundary(i, j):
                     out[i][j] = p
                     continue
@@ -295,15 +290,10 @@ class MuscleSceneSync:
                 if w <= 1e-8:
                     continue
 
-                # smooth ramp from locked border to full displacement
-                bd = boundary_distance(i, j)  # 0 on boundary, grows inward
+                bd = boundary_distance(i, j)
                 t_edge = max(0.0, min(1.0, bd / b_band))
-                # smoothstep then power shaping
                 r = t_edge * t_edge * (3.0 - 2.0 * t_edge)
                 r = r ** b_power
-
-                # at boundary: alpha = 1 - b_strength
-                # interior: alpha -> 1
                 edge_alpha = (1.0 - b_strength) + b_strength * r
 
                 dir_vec = p - G
@@ -315,8 +305,6 @@ class MuscleSceneSync:
                 out[i][j] = p + dir_vec * (amount * w * edge_alpha)
 
         return out
-
-
 
     def _ensure_inflation_ctrl(self, vis_col, root, muscle, base_obj, base_points):
         ctrl = self._find_inflation_ctrl(vis_col, root.name, muscle.id)
@@ -341,7 +329,7 @@ class MuscleSceneSync:
         ctrl.location = target
         return ctrl
 
-    def sync_root_to_scene(self, root=None, scene=None):
+    def sync_root_to_scene(self, root=None, scene=None, target_muscle_ids=None):
         if self._syncing:
             return
 
@@ -355,10 +343,15 @@ class MuscleSceneSync:
             vis_col = self._get_vis_collection(scene)
             vcp = root.af_vcp_system
 
-            live_muscle_ids = set()
+            all_muscle_ids = {m.id for m in vcp.muscles}
+            if target_muscle_ids is None:
+                muscle_ids_to_sync = all_muscle_ids
+            else:
+                muscle_ids_to_sync = set(target_muscle_ids) & all_muscle_ids
 
             for muscle in vcp.muscles:
-                live_muscle_ids.add(muscle.id)
+                if muscle.id not in muscle_ids_to_sync:
+                    continue
 
                 base_obj = self._find_muscle_proxy(vis_col, root.name, muscle.id, "BASE")
                 if base_obj is None:
@@ -385,14 +378,18 @@ class MuscleSceneSync:
                     self._ensure_material(base_obj, active=active)
                     self._ensure_material(infl_obj, active=active)
                     continue
-                from .fiber_sync import register_fiber_sync
-                register_fiber_sync().sync_root_to_scene(
-                    root=root,
-                    scene=scene,
-                    bake=False,  # keep interactive consistency
-                    target_fiber_ids={f.id for f in ordered_fibers},
-                )
+
                 ordered_points = self._collect_fiber_points(root, scene, ordered_fibers)
+                if not ordered_points:
+                    from .fiber_sync import register_fiber_sync
+                    register_fiber_sync().sync_root_to_scene(
+                        root=root,
+                        scene=scene,
+                        bake=False,
+                        target_fiber_ids={f.id for f in ordered_fibers},
+                    )
+                    ordered_points = self._collect_fiber_points(root, scene, ordered_fibers)
+
                 if not ordered_points:
                     self._update_mesh(base_obj, [], [])
                     self._update_mesh(infl_obj, [], [])
@@ -424,8 +421,6 @@ class MuscleSceneSync:
                 faces_final = [(f[0], f[3], f[2], f[1]) for f in faces_raw] if flip else faces_raw
 
                 self._update_mesh(base_obj, base_verts, faces_final)
-
-                # snap/control point lives on base surface only
                 self._ensure_inflation_ctrl(vis_col, root, muscle, base_obj, base_points)
                 infl_points = self._apply_inflation_from_ctrl(base_points, muscle)
 
@@ -443,17 +438,18 @@ class MuscleSceneSync:
                 self._ensure_material(base_obj, active=active)
                 self._ensure_material(infl_obj, active=active)
 
-            for obj in list(vis_col.objects):
-                if obj.get("af_root_name") != root.name:
-                    continue
+            if target_muscle_ids is None:
+                for obj in list(vis_col.objects):
+                    if obj.get("af_root_name") != root.name:
+                        continue
 
-                if obj.get("af_muscle_proxy") and obj.get("af_muscle_id") not in live_muscle_ids:
-                    self._remove_proxy_obj(obj)
-                    continue
+                    if obj.get("af_muscle_proxy") and obj.get("af_muscle_id") not in all_muscle_ids:
+                        self._remove_proxy_obj(obj)
+                        continue
 
-                if obj.get("af_muscle_inflation_ctrl") and obj.get("af_muscle_id") not in live_muscle_ids:
-                    self._remove_ctrl_obj(obj)
-                    continue
+                    if obj.get("af_muscle_inflation_ctrl") and obj.get("af_muscle_id") not in all_muscle_ids:
+                        self._remove_ctrl_obj(obj)
+                        continue
 
         finally:
             self._syncing = False
@@ -471,6 +467,7 @@ class MuscleSceneSync:
             return
 
         changed = False
+        changed_muscle_ids = set()
 
         self._syncing = True
         try:
@@ -503,13 +500,15 @@ class MuscleSceneSync:
                 if tuple(muscle.inflation_ctrl_world) != new_loc:
                     muscle.inflation_ctrl_world = new_loc
                     changed = True
+                    changed_muscle_ids.add(muscle_id)
 
         finally:
             self._syncing = False
 
-        if changed:
-            from .sync_runner import sync_all
-            sync_all(root=root, scene=scene)
+        if changed and changed_muscle_ids:
+            from .sync_runner import sync_from_muscle_ids
+            sync_from_muscle_ids(root=root, scene=scene, muscle_ids=changed_muscle_ids)
+
 
 _MUSCLE_SYNC = None
 

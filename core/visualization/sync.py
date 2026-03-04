@@ -154,7 +154,7 @@ class SCPSceneSync:
 
         return scp.get_world_matrix(runtime_registry)
 
-    def sync_root_to_scene(self, root=None, scene=None):
+    def sync_root_to_scene(self, root=None, scene=None, target_scp_ids=None):
         if self._syncing:
             return
 
@@ -169,9 +169,18 @@ class SCPSceneSync:
 
             runtime = SCPRegistry(root)
             runtime.build()
-            live_ids = set(runtime.registry.keys())
 
-            for scp_id, scp in runtime.registry.items():
+            all_live_ids = set(runtime.registry.keys())
+            if target_scp_ids is None:
+                ids_to_sync = all_live_ids
+            else:
+                ids_to_sync = set(target_scp_ids) & all_live_ids
+
+            for scp_id in ids_to_sync:
+                scp = runtime.registry.get(scp_id)
+                if scp is None:
+                    continue
+
                 obj = self._find_proxy(vis_col, root.name, scp_id)
                 if obj is None:
                     obj = self._create_proxy(vis_col, root, scp)
@@ -188,9 +197,10 @@ class SCPSceneSync:
                 scp.shape.ensure_proxy_object(obj)
                 obj.matrix_world = self._compute_visual_world_matrix(scp, runtime.registry, root, scene)
 
-            for obj in list(self._iter_root_proxies(vis_col, root.name)):
-                if obj.get("af_scp_id") not in live_ids:
-                    self._remove_proxy(obj)
+            if target_scp_ids is None:
+                for obj in list(self._iter_root_proxies(vis_col, root.name)):
+                    if obj.get("af_scp_id") not in all_live_ids:
+                        self._remove_proxy(obj)
         finally:
             self._syncing = False
 
@@ -217,11 +227,11 @@ class SCPSceneSync:
     def _write_proxy_transform_to_data(self, root, proxy_obj, scene, depsgraph):
         scp_id = proxy_obj.get("af_scp_id")
         if not scp_id:
-            return False
+            return False, None
 
         scp_prop = self._get_scp_prop_by_id(root, scp_id)
         if scp_prop is None:
-            return False
+            return False, None
 
         runtime = SCPRegistry(root)
         runtime.build()
@@ -230,16 +240,16 @@ class SCPSceneSync:
             parent = runtime.registry.get(scp_prop.parent_id)
             child = runtime.registry.get(scp_id)
             if parent is None or child is None:
-                return False
+                return False, None
 
             parent_proxy = self._find_proxy_in_scene(scene, root.name, scp_prop.parent_id)
             if parent_proxy is None:
-                return False
+                return False, None
 
             child_world_loc = proxy_obj.matrix_world.to_translation()
             parent_local_point = self._nearest_parent_mesh_point_local(parent_proxy, child_world_loc, depsgraph)
             if parent_local_point is None:
-                return False
+                return False, None
 
             scp_prop.attach_param = self._encode_mesh_anchor(parent_local_point)
 
@@ -250,7 +260,7 @@ class SCPSceneSync:
             scp_prop.local_origin = (0.0, 0.0, 0.0)
             scp_prop.local_rotation = (rot.w, rot.x, rot.y, rot.z)
             scp_prop.local_scale = (scale.x, scale.y, scale.z)
-            return True
+            return True, scp_id
 
         local_matrix = proxy_obj.matrix_world
         loc, rot, scale = local_matrix.decompose()
@@ -258,7 +268,7 @@ class SCPSceneSync:
         scp_prop.local_origin = (loc.x, loc.y, loc.z)
         scp_prop.local_rotation = (rot.w, rot.x, rot.y, rot.z)
         scp_prop.local_scale = (scale.x, scale.y, scale.z)
-        return True
+        return True, scp_id
 
     def on_depsgraph_update(self, scene, depsgraph):
         if self._syncing:
@@ -273,6 +283,8 @@ class SCPSceneSync:
             return
 
         changed = False
+        changed_scp_ids = set()
+
         self._syncing = True
         try:
             for update in depsgraph.updates:
@@ -288,13 +300,16 @@ class SCPSceneSync:
                 if vis_col.objects.get(obj.name) is None:
                     continue
 
-                changed |= self._write_proxy_transform_to_data(root, obj, scene, depsgraph)
+                did, sid = self._write_proxy_transform_to_data(root, obj, scene, depsgraph)
+                changed |= did
+                if sid:
+                    changed_scp_ids.add(sid)
         finally:
             self._syncing = False
 
-        if changed:
-            from .sync_runner import sync_all
-            sync_all(root=root, scene=scene)
+        if changed and changed_scp_ids:
+            from .sync_runner import sync_from_scp_ids
+            sync_from_scp_ids(root=root, scene=scene, scp_ids=changed_scp_ids)
 
 
 _SYNC_MANAGER = None

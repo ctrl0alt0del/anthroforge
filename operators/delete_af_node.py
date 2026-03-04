@@ -1,9 +1,7 @@
 import bpy
 
 from ..core.utils import get_af_root
-from ..core.visualization.sync import register_sync
-from ..core.visualization.fiber_sync import register_fiber_sync
-from ..core.visualization.muscle_sync import register_muscle_sync
+from ..core.visualization.sync_runner import sync_all
 
 
 class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
@@ -57,9 +55,7 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
         else:
             root.af_scp_system.active_scp_index = min(idx, len(scps) - 1)
 
-        register_sync().sync_root_to_scene(root=root, scene=context.scene)
-        register_fiber_sync().sync_root_to_scene(root=root, scene=context.scene)
-        register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
+        sync_all(root=root, scene=context.scene)
         self.report({"INFO"}, f"Deleted SCP '{scp_id}'")
         return {"FINISHED"}
 
@@ -75,7 +71,6 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
             self.report({"ERROR"}, f"Fiber '{fiber_id}' not found.")
             return {"CANCELLED"}
 
-        # Remove references from all muscles first
         for m in root.af_vcp_system.muscles:
             to_remove = [i for i, ref in enumerate(m.fiber_refs) if ref.fiber_id == fiber_id]
             for i in reversed(to_remove):
@@ -87,8 +82,7 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
             root.af_vcp_system.active_vcp_type = "NONE"
             root.af_vcp_system.active_vcp_id = ""
 
-        register_fiber_sync().sync_root_to_scene(root=root, scene=context.scene)
-        register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
+        sync_all(root=root, scene=context.scene)
         self.report({"INFO"}, f"Deleted Fiber '{fiber_id}'")
         return {"FINISHED"}
 
