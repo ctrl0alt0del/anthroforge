@@ -60,7 +60,6 @@ class AF_OT_SelectSCPInTree(bpy.types.Operator):
         target_obj.select_set(True)
         context.view_layer.objects.active = target_obj
 
-        # Update active index without triggering selection callback logic.
         scene = context.scene
         scene.af_selection_sync_lock = True
         try:
@@ -93,6 +92,7 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
         items=(
             ("MUSCLE", "Muscle", ""),
             ("FIBER", "Fiber", ""),
+            ("BLOB", "Blob", ""),
         )
     )
     extend: bpy.props.BoolProperty(default=False, options={"HIDDEN", "SKIP_SAVE"})
@@ -122,6 +122,15 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
                     obj.get("af_muscle_proxy")
                     and obj.get("af_root_name") == root.name
                     and obj.get("af_muscle_id") == self.node_id
+                ):
+                    target_obj = obj
+                    break
+        elif self.node_type == "BLOB":
+            for obj in context.scene.objects:
+                if (
+                    obj.get("af_blob_proxy")
+                    and obj.get("af_root_name") == root.name
+                    and obj.get("af_blob_id") == self.node_id
                 ):
                     target_obj = obj
                     break

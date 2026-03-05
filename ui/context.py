@@ -5,35 +5,32 @@ def get_active_af_entity(root, context):
     obj = context.active_object
 
     if obj and obj.get("af_root_name") == root.name:
-        # SCP proxy
         if obj.get("af_proxy") and obj.get("af_scp_id"):
             return "SCP", obj.get("af_scp_id")
 
-        # Fiber proxy
         if obj.get("af_fiber_proxy") and obj.get("af_fiber_id"):
             return "FIBER", obj.get("af_fiber_id")
 
-        # Muscle proxy
         if obj.get("af_muscle_proxy") and obj.get("af_muscle_id"):
             return "MUSCLE", obj.get("af_muscle_id")
 
-        # Fiber helpers: endpoint and mid-touch handles
+        if obj.get("af_blob_proxy") and obj.get("af_blob_id"):
+            return "BLOB", obj.get("af_blob_id")
+
         if obj.get("af_fiber_endpoint_handle") and obj.get("af_fiber_id"):
             return "FIBER", obj.get("af_fiber_id")
         if obj.get("af_fiber_touch_handle") and obj.get("af_fiber_id"):
             return "FIBER", obj.get("af_fiber_id")
 
-        # Muscle helper: inflation max control
         if obj.get("af_muscle_inflation_ctrl") and obj.get("af_muscle_id"):
             return "MUSCLE", obj.get("af_muscle_id")
 
-    # Fallbacks
     idx = root.af_scp_system.active_scp_index
     if 0 <= idx < len(root.af_scp_system.scps):
         return "SCP", root.af_scp_system.scps[idx].id
 
     v = root.af_vcp_system
-    if v.active_vcp_type in {"FIBER", "MUSCLE"} and v.active_vcp_id:
+    if v.active_vcp_type in {"FIBER", "MUSCLE", "BLOB"} and v.active_vcp_id:
         return v.active_vcp_type, v.active_vcp_id
 
     return "NONE", ""

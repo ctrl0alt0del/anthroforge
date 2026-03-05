@@ -14,6 +14,7 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
             ("AUTO", "Auto", ""),
             ("SCP", "SCP", ""),
             ("FIBER", "Fiber", ""),
+            ("BLOB", "Blob", ""),
         ),
         default="AUTO",
         options={"HIDDEN", "SKIP_SAVE"},
@@ -86,6 +87,27 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
         self.report({"INFO"}, f"Deleted Fiber '{fiber_id}'")
         return {"FINISHED"}
 
+    def _delete_blob(self, context, root, blob_id):
+        blobs = root.af_vcp_system.blobs
+        idx = -1
+        for i, b in enumerate(blobs):
+            if b.id == blob_id:
+                idx = i
+                break
+        if idx < 0:
+            self.report({"ERROR"}, f"Blob '{blob_id}' not found.")
+            return {"CANCELLED"}
+
+        blobs.remove(idx)
+
+        if root.af_vcp_system.active_vcp_type == "BLOB" and root.af_vcp_system.active_vcp_id == blob_id:
+            root.af_vcp_system.active_vcp_type = "NONE"
+            root.af_vcp_system.active_vcp_id = ""
+
+        sync_all(root=root, scene=context.scene)
+        self.report({"INFO"}, f"Deleted Blob '{blob_id}'")
+        return {"FINISHED"}
+
     def execute(self, context):
         root = get_af_root(context.scene)
         if not self.target_id:
@@ -98,6 +120,8 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
             return self._delete_scp(context, root, self.target_id)
         if self.target_type == "FIBER" and self.target_id:
             return self._delete_fiber(context, root, self.target_id)
+        if self.target_type == "BLOB" and self.target_id:
+            return self._delete_blob(context, root, self.target_id)
 
         obj = context.active_object
         if obj is None:
@@ -108,5 +132,8 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
 
         if obj.get("af_fiber_proxy") and obj.get("af_root_name") == root.name and obj.get("af_fiber_id"):
             return self._delete_fiber(context, root, obj.get("af_fiber_id"))
+
+        if obj.get("af_blob_proxy") and obj.get("af_root_name") == root.name and obj.get("af_blob_id"):
+            return self._delete_blob(context, root, obj.get("af_blob_id"))
 
         return bpy.ops.object.delete("INVOKE_DEFAULT")

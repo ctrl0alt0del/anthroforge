@@ -20,6 +20,10 @@ def _poll_any_mesh_obj(self, obj):
     return bool(obj and obj.type == "MESH" and obj.data is not None)
 
 
+def _poll_any_obj(self, obj):
+    return obj is not None
+
+
 def register_scene_props():
     bpy.types.Scene.af_scp_type = bpy.props.EnumProperty(
         name="SCP Type",
@@ -42,6 +46,12 @@ def register_scene_props():
         name="Fiber Insertion",
         type=bpy.types.Object,
         poll=_poll_parent_proxy,
+    )
+
+    bpy.types.Scene.af_new_blob_target_obj = bpy.props.PointerProperty(
+        name="Blob Target",
+        type=bpy.types.Object,
+        poll=_poll_any_obj,
     )
 
     bpy.types.Scene.af_new_scp_source_mesh_obj = bpy.props.PointerProperty(
@@ -77,6 +87,8 @@ def unregister_scene_props():
         del bpy.types.Scene.af_new_scp_mesh_asset_id
     if hasattr(bpy.types.Scene, "af_new_scp_source_mesh_obj"):
         del bpy.types.Scene.af_new_scp_source_mesh_obj
+    if hasattr(bpy.types.Scene, "af_new_blob_target_obj"):
+        del bpy.types.Scene.af_new_blob_target_obj
     if hasattr(bpy.types.Scene, "af_new_fiber_insertion_obj"):
         del bpy.types.Scene.af_new_fiber_insertion_obj
     if hasattr(bpy.types.Scene, "af_new_fiber_origin_obj"):

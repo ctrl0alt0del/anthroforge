@@ -16,6 +16,7 @@ def _selected_scp_ids(context, root):
 def _selected_vcp_ids(context, root):
     sel_fibers = set()
     sel_muscles = set()
+    sel_blobs = set()
     for obj in context.selected_objects:
         if obj.get("af_root_name") != root.name:
             continue
@@ -23,7 +24,9 @@ def _selected_vcp_ids(context, root):
             sel_fibers.add(obj.get("af_fiber_id"))
         if obj.get("af_muscle_proxy") and obj.get("af_muscle_id"):
             sel_muscles.add(obj.get("af_muscle_id"))
-    return sel_fibers, sel_muscles
+        if obj.get("af_blob_proxy") and obj.get("af_blob_id"):
+            sel_blobs.add(obj.get("af_blob_id"))
+    return sel_fibers, sel_muscles, sel_blobs
 
 
 class AF_PT_TreePanel(bpy.types.Panel):
@@ -46,13 +49,15 @@ class AF_PT_TreePanel(bpy.types.Panel):
         active = get_active_scp(root, context)
         active_id = active.id if active else ""
         selected_scp = _selected_scp_ids(context, root)
-        selected_fibers, selected_muscles = _selected_vcp_ids(context, root)
+        selected_fibers, selected_muscles, selected_blobs = _selected_vcp_ids(context, root)
 
         box = layout.box()
         box.label(text="SCPs")
         draw_tree_section(box, scene, root, active_id, selected_scp)
-        
+
         box.separator()
         box.label(text="VCPs")
-        box.operator("af.add_muscle_vcp", icon="MESH_UVSPHERE")
-        draw_vcp_tree_section(box, scene, root, selected_fibers, selected_muscles)
+        row = box.row(align=True)
+        row.operator("af.add_muscle_vcp", icon="MESH_UVSPHERE")
+        row.operator("af.add_blob_vcp", icon="META_BALL")
+        draw_vcp_tree_section(box, scene, root, selected_fibers, selected_muscles, selected_blobs)

@@ -2,7 +2,7 @@ import bpy
 from ..core.utils import get_af_root
 
 
-def _sync_vcp_scene(context, muscle_id=None):
+def _sync_vcp_scene(context):
     if context is None:
         return
     scene = context.scene
@@ -10,16 +10,26 @@ def _sync_vcp_scene(context, muscle_id=None):
     if root is None:
         return
 
-    if muscle_id:
-        from ..core.visualization.sync_runner import sync_from_muscle_ids
-        sync_from_muscle_ids(root=root, scene=scene, muscle_ids={muscle_id})
-    else:
-        from ..core.visualization.sync_runner import sync_all
-        sync_all(root=root, scene=scene)
+    from ..core.visualization.sync_runner import sync_all
+    sync_all(root=root, scene=scene)
 
 
 def _on_muscle_prop_update(self, context):
-    _sync_vcp_scene(context, getattr(self, "id", ""))
+    scene = context.scene if context else None
+    root = get_af_root(scene)
+    if root is None:
+        return
+    from ..core.visualization.sync_runner import sync_from_muscle_ids
+    sync_from_muscle_ids(root=root, scene=scene, muscle_ids={self.id})
+
+
+def _on_blob_prop_update(self, context):
+    scene = context.scene if context else None
+    root = get_af_root(scene)
+    if root is None:
+        return
+    from ..core.visualization.sync_runner import sync_from_blob_ids
+    sync_from_blob_ids(root=root, scene=scene, blob_ids={self.id})
 
 
 class AF_MuscleFiberRef_Property(bpy.types.PropertyGroup):
@@ -143,9 +153,51 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     last_eps_pen: bpy.props.FloatProperty(name="Last Pen Eps", default=0.0)
 
 
+class AF_BlobVCP_Property(bpy.types.PropertyGroup):
+    id: bpy.props.StringProperty(name="ID")
+    name: bpy.props.StringProperty(name="Name", default="Blob", update=_on_blob_prop_update)
+
+    center_world: bpy.props.FloatVectorProperty(
+        name="Center", size=3, subtype="TRANSLATION", default=(0.0, 0.0, 0.0), update=_on_blob_prop_update
+    )
+    radius: bpy.props.FloatProperty(name="Radius", default=0.2, min=0.001, update=_on_blob_prop_update)
+    shape: bpy.props.EnumProperty(
+        name="Shape",
+        items=(("SPHERE", "Sphere", ""), ("ELLIPSOID", "Ellipsoid", "")),
+        default="SPHERE",
+        update=_on_blob_prop_update,
+    )
+    axis_scale: bpy.props.FloatVectorProperty(
+        name="Axis Scale", size=3, subtype="XYZ", default=(1.0, 1.0, 1.0), min=0.001, update=_on_blob_prop_update
+    )
+    resolution: bpy.props.IntProperty(name="Control Points", default=24, min=8, max=128, update=_on_blob_prop_update)
+
+    gravity_dir: bpy.props.FloatVectorProperty(
+        name="Gravity Dir", size=3, subtype="XYZ", default=(0.0, 0.0, -1.0), update=_on_blob_prop_update
+    )
+    sag_strength: bpy.props.FloatProperty(name="Sag Strength", default=0.35, min=0.0, max=10.0, update=_on_blob_prop_update)
+    sag_limit: bpy.props.FloatProperty(name="Sag Limit", default=0.35, min=0.0, max=100.0, update=_on_blob_prop_update)
+
+    attach_target_type: bpy.props.EnumProperty(
+        name="Target Type",
+        items=(("NONE", "None", ""), ("MUSCLE", "Muscle", ""), ("SCP", "SCP", ""), ("OBJECT", "Object", "")),
+        default="NONE",
+        update=_on_blob_prop_update,
+    )
+    attach_target_id: bpy.props.StringProperty(name="Target ID", default="", update=_on_blob_prop_update)
+    attach_target_object_name: bpy.props.StringProperty(name="Target Object", default="", update=_on_blob_prop_update)
+
+    stiffness: bpy.props.FloatProperty(name="Stiffness", default=0.25, min=0.0, max=1.0, update=_on_blob_prop_update)
+    iterations: bpy.props.IntProperty(name="Iterations", default=20, min=1, max=200, update=_on_blob_prop_update)
+
+    last_solve_converged: bpy.props.BoolProperty(name="Converged", default=False)
+    last_solve_max_disp: bpy.props.FloatProperty(name="Max Disp", default=0.0)
+    last_solve_iterations: bpy.props.IntProperty(name="Iterations Used", default=0)
+
 class AF_VCP_System_Property(bpy.types.PropertyGroup):
     muscles: bpy.props.CollectionProperty(type=AF_MuscleVCP_Property)
     fibers: bpy.props.CollectionProperty(type=AF_FiberVCP_Property)
+    blobs: bpy.props.CollectionProperty(type=AF_BlobVCP_Property)
 
     active_vcp_id: bpy.props.StringProperty(name="Active VCP ID", default="")
     active_vcp_type: bpy.props.EnumProperty(
@@ -154,9 +206,11 @@ class AF_VCP_System_Property(bpy.types.PropertyGroup):
             ("NONE", "None", ""),
             ("MUSCLE", "Muscle", ""),
             ("FIBER", "Fiber", ""),
+            ("BLOB", "Blob", ""),
         ),
         default="NONE",
     )
 
     active_fiber_index: bpy.props.IntProperty(default=-1)
     active_muscle_index: bpy.props.IntProperty(default=-1)
+    active_blob_index: bpy.props.IntProperty(default=-1)

@@ -14,6 +14,7 @@ def _build_vcp_tree(root):
     v = root.af_vcp_system
     muscles = list(v.muscles)
     fibers = list(v.fibers)
+    blobs = list(v.blobs)
 
     by_muscle = {}
     free_fibers = []
@@ -25,7 +26,7 @@ def _build_vcp_tree(root):
         else:
             free_fibers.append(f)
 
-    return muscles, by_muscle, free_fibers
+    return muscles, by_muscle, free_fibers, blobs
 
 
 def _draw_fiber_row(layout, fiber, depth, selected_fiber_ids):
@@ -60,6 +61,29 @@ def _draw_fiber_row(layout, fiber, depth, selected_fiber_ids):
     right.label(text=f"{a} -> {b}")
 
 
+def _draw_blob_row(layout, blob, selected_blob_ids):
+    row = layout.row(align=True)
+    row.label(text="", icon="META_BALL")
+
+    op = row.operator(
+        "af.select_vcp_in_tree",
+        text=(blob.name or blob.id),
+        emboss=True,
+        depress=(blob.id in selected_blob_ids),
+    )
+    op.node_id = blob.id
+    op.node_type = "BLOB"
+
+    del_op = row.operator("af.delete_selected_af_node", text="", icon="TRASH", emboss=False)
+    del_op.target_type = "BLOB"
+    del_op.target_id = blob.id
+
+    right = row.row(align=True)
+    right.alignment = "RIGHT"
+    right.enabled = False
+    right.label(text="BLOB")
+
+
 def _draw_muscle_node(layout, scene, muscle, by_muscle, selected_muscle_ids, selected_fiber_ids):
     node_key = f"MUSCLE:{muscle.id}"
     collapsed = _is_collapsed(scene, node_key)
@@ -90,10 +114,10 @@ def _draw_muscle_node(layout, scene, muscle, by_muscle, selected_muscle_ids, sel
             _draw_fiber_row(layout, f, depth=1, selected_fiber_ids=selected_fiber_ids)
 
 
-def draw_vcp_tree_section(layout, scene, root, selected_fiber_ids, selected_muscle_ids):
-    muscles, by_muscle, free_fibers = _build_vcp_tree(root)
+def draw_vcp_tree_section(layout, scene, root, selected_fiber_ids, selected_muscle_ids, selected_blob_ids):
+    muscles, by_muscle, free_fibers, blobs = _build_vcp_tree(root)
 
-    if not muscles and not free_fibers:
+    if not muscles and not free_fibers and not blobs:
         layout.label(text="No VCPs")
         return
 
@@ -102,3 +126,8 @@ def draw_vcp_tree_section(layout, scene, root, selected_fiber_ids, selected_musc
 
     for f in free_fibers:
         _draw_fiber_row(layout, f, depth=0, selected_fiber_ids=selected_fiber_ids)
+
+    if blobs:
+        layout.separator()
+        for b in blobs:
+            _draw_blob_row(layout, b, selected_blob_ids)
