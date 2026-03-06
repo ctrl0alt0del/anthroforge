@@ -34,6 +34,7 @@ class AF_OT_AddBlobVCP(bpy.types.Operator):
         b.shape = "SPHERE"
         b.axis_scale = (1.0, 1.0, 1.0)
         b.resolution = 24
+        b.control_point_world = context.scene.cursor.location
 
         b.gravity_dir = (0.0, 0.0, -1.0)
         b.sag_strength = 0.35

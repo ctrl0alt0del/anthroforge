@@ -38,6 +38,16 @@ class BlobSceneSync:
                 return obj
         return None
 
+    def _find_blob_control(self, vis_col, root_name, blob_id):
+        for obj in vis_col.objects:
+            if (
+                obj.get("af_blob_control_gizmo")
+                and obj.get("af_root_name") == root_name
+                and obj.get("af_blob_id") == blob_id
+            ):
+                return obj
+        return None
+
     def _create_blob_proxy(self, vis_col, root, blob_id):
         mesh = bpy.data.meshes.new(f"AF_{blob_id}_mesh")
         obj = bpy.data.objects.new(f"AF_{blob_id}", mesh)
@@ -46,6 +56,18 @@ class BlobSceneSync:
         obj["af_blob_id"] = blob_id
         vis_col.objects.link(obj)
         return obj
+
+    def _create_blob_control(self, vis_col, root, blob_id):
+        ctrl = bpy.data.objects.new(f"AF_{blob_id}_CTRL", None)
+        ctrl.empty_display_type = "SPHERE"
+        ctrl.empty_display_size = 0.04
+        ctrl.show_in_front = True
+        ctrl.hide_render = True
+        ctrl["af_blob_control_gizmo"] = True
+        ctrl["af_root_name"] = root.name
+        ctrl["af_blob_id"] = blob_id
+        vis_col.objects.link(ctrl)
+        return ctrl
 
     def _ensure_blob_material(self, obj, active=False):
         if obj.data is None or not hasattr(obj.data, "materials"):
@@ -64,6 +86,9 @@ class BlobSceneSync:
         bpy.data.objects.remove(obj, do_unlink=True)
         if mesh and mesh.users == 0:
             bpy.data.meshes.remove(mesh)
+
+    def _remove_ctrl(self, obj):
+        bpy.data.objects.remove(obj, do_unlink=True)
 
     def _target_object_for_blob(self, scene, root, blob_prop):
         t = blob_prop.attach_target_type
@@ -148,6 +173,9 @@ class BlobSceneSync:
         mesh.from_pydata(verts, [], faces)
         mesh.update()
 
+    def _vec_changed(self, a, b, eps=1e-8):
+        return (Vector(a) - Vector(b)).length > eps
+
     def sync_root_to_scene(self, root=None, scene=None, target_blob_ids=None):
         if self._syncing:
             return
@@ -178,7 +206,18 @@ class BlobSceneSync:
                 if created:
                     self._apply_initial_transform_from_prop(obj, bp)
 
+                ctrl = self._find_blob_control(vis_col, root.name, bp.id)
+                if ctrl is None:
+                    ctrl = self._create_blob_control(vis_col, root, bp.id)
+
+                ctrl_loc = Vector((bp.control_point_world[0], bp.control_point_world[1], bp.control_point_world[2]))
+                if ctrl_loc.length_squared == 0.0:
+                    ctrl_loc = obj.matrix_world.to_translation().copy()
+                ctrl.location = ctrl_loc
+
                 runtime = self._runtime_from_proxy_transform(bp, obj)
+                runtime.control_point_world = ctrl.location.copy()
+
                 target_obj = self._target_object_for_blob(scene, root, bp)
 
                 unit_local, faces = self._unit_local_mesh(runtime)
@@ -206,12 +245,13 @@ class BlobSceneSync:
 
             if target_blob_ids is None:
                 for o in list(vis_col.objects):
-                    if (
-                        o.get("af_blob_proxy")
-                        and o.get("af_root_name") == root.name
-                        and o.get("af_blob_id") not in all_blob_ids
-                    ):
+                    if o.get("af_root_name") != root.name:
+                        continue
+                    if o.get("af_blob_proxy") and o.get("af_blob_id") not in all_blob_ids:
                         self._remove_proxy(o)
+                    if o.get("af_blob_control_gizmo") and o.get("af_blob_id") not in all_blob_ids:
+                        self._remove_ctrl(o)
+
         finally:
             self._syncing = False
 
@@ -224,21 +264,44 @@ class BlobSceneSync:
             return
 
         changed_blob_ids = set()
-        for upd in depsgraph.updates:
-            obj = upd.id
-            if not isinstance(obj, bpy.types.Object):
-                continue
+        blobs_by_id = {b.id: b for b in root.af_vcp_system.blobs}
 
-            for b in root.af_vcp_system.blobs:
-                if b.attach_target_type == "OBJECT" and b.attach_target_object_name == obj.name:
-                    changed_blob_ids.add(b.id)
+        self._syncing = True
+        try:
+            for upd in depsgraph.updates:
+                obj = upd.id
+                if not isinstance(obj, bpy.types.Object):
+                    continue
 
-            if (
-                obj.get("af_blob_proxy")
-                and obj.get("af_root_name") == root.name
-                and obj.get("af_blob_id")
-            ):
-                changed_blob_ids.add(obj.get("af_blob_id"))
+                # Target object changed
+                for b in root.af_vcp_system.blobs:
+                    if b.attach_target_type == "OBJECT" and b.attach_target_object_name == obj.name:
+                        changed_blob_ids.add(b.id)
+
+                # Blob proxy transformed
+                if (
+                    obj.get("af_blob_proxy")
+                    and obj.get("af_root_name") == root.name
+                    and obj.get("af_blob_id")
+                ):
+                    changed_blob_ids.add(obj.get("af_blob_id"))
+
+                # Blob control gizmo moved
+                if (
+                    obj.get("af_blob_control_gizmo")
+                    and obj.get("af_root_name") == root.name
+                    and obj.get("af_blob_id")
+                ):
+                    bid = obj.get("af_blob_id")
+                    b = blobs_by_id.get(bid)
+                    if b is not None:
+                        new_loc = obj.location.copy()
+                        if self._vec_changed(b.control_point_world, new_loc):
+                            b.control_point_world = (new_loc.x, new_loc.y, new_loc.z)
+                            changed_blob_ids.add(bid)
+
+        finally:
+            self._syncing = False
 
         if changed_blob_ids:
             from .sync_runner import sync_from_blob_ids

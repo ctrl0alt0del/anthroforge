@@ -13,10 +13,10 @@ class BlobSolveResult:
 
 class BlobSolver:
     """
-    Blob solve in world space:
-    1) gravity step per vertex (proportional to distance to nearest surface point)
-    2) viscous smoothing
-    3) keep vertices from going below surface (snap to nearest surface point)
+    World-space blob solve.
+    Hard clamp rule:
+      For each vertex p, cast segment p -> control_point against target mesh.
+      If hit exists before control point, set p = hit_point.
     """
 
     def __init__(self):
@@ -36,25 +36,43 @@ class BlobSolver:
 
     def _nearest_surface_world(self, bvh, target_obj, world_point):
         if bvh is None or target_obj is None:
-            return None, None, None
+            return None, None
 
         local = target_obj.matrix_world.inverted() @ world_point
         hit = bvh.find_nearest(local)
-        if hit is None or hit[0] is None or hit[1] is None:
-            return None, None, None
+        if hit is None or hit[0] is None:
+            return None, None
 
-        co_local, n_local, _face_idx, dist_local = hit
+        co_local, _n_local, _face_idx, _dist_local = hit
         co_world = target_obj.matrix_world @ co_local
-
-        n_world = target_obj.matrix_world.to_3x3() @ n_local
-        if n_world.length <= 1e-10:
-            n_world = Vector((0.0, 0.0, 1.0))
-        else:
-            n_world.normalize()
-
-        # World distance is more robust than local distance when object is scaled
         dist_world = (world_point - co_world).length
-        return co_world, n_world, dist_world
+        return co_world, dist_world
+
+    def _segment_hit_to_point(self, bvh, target_obj, p_world, q_world):
+        if bvh is None or target_obj is None:
+            return None
+
+        m_inv = target_obj.matrix_world.inverted()
+        p_local = m_inv @ p_world
+        q_local = m_inv @ q_world
+
+        v_local = q_local - p_local
+        max_dist_local = v_local.length
+        if max_dist_local <= 1e-10:
+            return None
+
+        d_local = v_local.normalized()
+        hit = bvh.ray_cast(p_local, d_local, max_dist_local)
+        if hit is None or hit[0] is None:
+            return None
+
+        co_local, _n_local, _face_idx, dist_local = hit
+        if dist_local is None:
+            return None
+        if dist_local >= max_dist_local:
+            return None
+
+        return target_obj.matrix_world @ co_local
 
     def _build_adjacency(self, face_indices, vert_count):
         nbrs = [set() for _ in range(vert_count)]
@@ -107,26 +125,22 @@ class BlobSolver:
 
         neighbors = self._build_adjacency(face_indices, len(points))
 
-        iterations = max(1, int(getattr(blob, "iterations", 8)))
+        iterations = max(1, int(getattr(blob, "iterations", 20)))
         eps = 1e-6
 
-        # Tunable internal scales:
-        # base pull = classic sag
-        # distance term = stronger gravity for vertices farther from attachment surface
         sag_strength = max(0.0, float(getattr(blob, "sag_strength", 0.0)))
-        base_gravity = 0.002 * sag_strength
-        dist_gravity_k = 0.02 * sag_strength
-
-        # viscosity (low stiffness => more viscous flow)
         stiffness = max(0.0, min(1.0, float(getattr(blob, "stiffness", 0.25))))
-        viscosity_alpha = (1.0 - stiffness) * 0.18
-
         sag_limit = max(0.0, float(getattr(blob, "sag_limit", 0.0)))
+
         g = Vector(blob.gravity_dir)
         if g.length <= 1e-10:
             g = Vector((0.0, 0.0, -1.0))
         else:
             g.normalize()
+
+        base_gravity = 0.002 * sag_strength
+        dist_gravity_k = 0.02 * sag_strength
+        viscosity_alpha = (1.0 - stiffness) * 0.18
 
         converged = False
         max_disp = 0.0
@@ -135,31 +149,29 @@ class BlobSolver:
         for it in range(iterations):
             it_used = it + 1
             max_disp = 0.0
+            control = blob.control_point_world.copy()
 
-            # 1) Gravity: proportional to distance from surface
             for i, p in enumerate(points):
-                co, _n, d = self._nearest_surface_world(bvh, target_obj, p)
-                if co is None:
+                _co, d = self._nearest_surface_world(bvh, target_obj, p)
+                if d is None:
                     continue
-
                 step = base_gravity + dist_gravity_k * d
                 if sag_limit > 0.0:
                     step = min(step, sag_limit * 0.25)
                 points[i] = p + g * step
 
-            # 2) Viscosity smoothing
             self._apply_viscosity(points, neighbors, viscosity_alpha)
 
-            # 3) Surface constraint: if below surface, snap to surface
             for i, p in enumerate(points):
-                co, n, _d = self._nearest_surface_world(bvh, target_obj, p)
-                if co is None:
-                    continue
-                sd = (p - co).dot(n)
-                if sd < 0.0:
-                    points[i] = co
+                hit_world = self._segment_hit_to_point(
+                    bvh=bvh,
+                    target_obj=target_obj,
+                    p_world=p,
+                    q_world=control,
+                )
+                if hit_world is not None:
+                    points[i] = hit_world
 
-            # 4) Optional sag clamp against rest state
             if sag_limit > 0.0:
                 for i in range(len(points)):
                     drop = (points[i] - rest[i]).dot(g)

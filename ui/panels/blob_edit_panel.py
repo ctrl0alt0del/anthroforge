@@ -48,20 +48,25 @@ class AF_PT_BlobEditPanel(bpy.types.Panel):
 
         layout.prop(blob, "name", text="Name")
 
-        transform_box = layout.box()
-        transform_box.label(text="Transform (Drives Geometry)")
+        geo = layout.box()
+        geo.label(text="Geometry")
+        geo.prop(blob, "resolution", text="Control Points")
+
+        tfm = layout.box()
+        tfm.label(text="Proxy Transform")
         proxy = _find_blob_proxy(scene, root.name, blob.id)
         if proxy is None:
-            transform_box.label(text="Proxy not found")
+            tfm.label(text="Proxy not found")
         else:
-            transform_box.prop(proxy, "location", text="Center")
-            transform_box.prop(proxy, "rotation_euler", text="Rotation")
-            transform_box.prop(proxy, "scale", text="Scale")
+            tfm.prop(proxy, "location", text="Location")
+            tfm.prop(proxy, "rotation_euler", text="Rotation")
+            tfm.prop(proxy, "scale", text="Scale")
 
-        shape_box = layout.box()
-        shape_box.label(text="Shape")
-        shape_box.prop(blob, "shape", text="Shape")
-        shape_box.prop(blob, "resolution", text="Control Points")
+        ctrl = layout.box()
+        ctrl.label(text="Control Point (Ray Target)")
+        ctrl.prop(blob, "control_point_world", text="World")
+        op = ctrl.operator("af.select_blob_control", text="Select Control Point", icon="EMPTY_ARROWS")
+        op.blob_id = blob.id
 
         grav = layout.box()
         grav.label(text="Gravity")

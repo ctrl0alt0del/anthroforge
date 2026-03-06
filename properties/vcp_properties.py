@@ -172,6 +172,15 @@ class AF_BlobVCP_Property(bpy.types.PropertyGroup):
     )
     resolution: bpy.props.IntProperty(name="Control Points", default=24, min=8, max=128, update=_on_blob_prop_update)
 
+    # Explicit point used by solver ray tests.
+    control_point_world: bpy.props.FloatVectorProperty(
+        name="Control Point",
+        size=3,
+        subtype="TRANSLATION",
+        default=(0.0, 0.0, 0.0),
+        update=_on_blob_prop_update,
+    )
+
     gravity_dir: bpy.props.FloatVectorProperty(
         name="Gravity Dir", size=3, subtype="XYZ", default=(0.0, 0.0, -1.0), update=_on_blob_prop_update
     )
@@ -193,6 +202,7 @@ class AF_BlobVCP_Property(bpy.types.PropertyGroup):
     last_solve_converged: bpy.props.BoolProperty(name="Converged", default=False)
     last_solve_max_disp: bpy.props.FloatProperty(name="Max Disp", default=0.0)
     last_solve_iterations: bpy.props.IntProperty(name="Iterations Used", default=0)
+
 
 class AF_VCP_System_Property(bpy.types.PropertyGroup):
     muscles: bpy.props.CollectionProperty(type=AF_MuscleVCP_Property)

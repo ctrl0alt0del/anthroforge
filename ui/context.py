@@ -25,6 +25,9 @@ def get_active_af_entity(root, context):
         if obj.get("af_muscle_inflation_ctrl") and obj.get("af_muscle_id"):
             return "MUSCLE", obj.get("af_muscle_id")
 
+        if obj.get("af_blob_control_gizmo") and obj.get("af_blob_id"):
+            return "BLOB", obj.get("af_blob_id")
+
     idx = root.af_scp_system.active_scp_index
     if 0 <= idx < len(root.af_scp_system.scps):
         return "SCP", root.af_scp_system.scps[idx].id

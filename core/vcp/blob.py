@@ -21,6 +21,8 @@ class BlobVCPRuntime:
     attach_target_id: str
     attach_target_object_name: str
 
+    control_point_world: Vector
+
     stiffness: float
     iterations: int
 
@@ -51,6 +53,7 @@ class BlobVCPRuntime:
             attach_target_type=str(p.attach_target_type),
             attach_target_id=str(p.attach_target_id),
             attach_target_object_name=str(p.attach_target_object_name),
+            control_point_world=Vector((p.control_point_world[0], p.control_point_world[1], p.control_point_world[2])),
             stiffness=max(0.0, min(1.0, float(p.stiffness))),
             iterations=max(1, int(p.iterations)),
         )

@@ -32,6 +32,7 @@ from .operators.muscle_tools import (
     AF_OT_FlipMuscleNormals,
     AF_OT_SelectMuscleInflationCtrl,
 )
+from .operators.blob_tools import AF_OT_SelectBlobControl
 from .operators.register_mesh_scp_asset import AF_OT_RegisterMeshSCPAsset
 from .operators.mesh_asset_list import AF_OT_SelectMeshSCPAsset, AF_OT_DeleteMeshSCPAsset
 
@@ -106,6 +107,7 @@ classes = (
     AF_PT_VCPEditPanel,
     AF_OT_FlipMuscleNormals,
     AF_OT_SelectMuscleInflationCtrl,
+    AF_OT_SelectBlobControl,
     AF_PT_BlobCreatePanel,
     AF_PT_BlobEditPanel,
 )
