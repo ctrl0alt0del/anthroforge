@@ -10,6 +10,7 @@ from .scp_sync import (
     CurveSCPSyncExtension,
     EllipsoidSCPSyncExtension,
     MeshAssetSCPSyncExtension,
+    ParallelepipedSCPSyncExtension,
 )
 
 
@@ -21,6 +22,7 @@ class SCPSceneSync:
             CurveSCPSyncExtension(),
             EllipsoidSCPSyncExtension(),
             MeshAssetSCPSyncExtension(),
+            ParallelepipedSCPSyncExtension(),
         ]
 
     def _get_vis_collection(self, scene):

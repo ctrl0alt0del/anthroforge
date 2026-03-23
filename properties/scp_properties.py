@@ -116,6 +116,44 @@ class AF_CurvePoint_Property(bpy.types.PropertyGroup):
     )
 
 
+def _reset_parallelepiped_points_box(scp_prop, size):
+    sx = float(size[0]) * 0.5
+    sy = float(size[1]) * 0.5
+    sz = float(size[2]) * 0.5
+
+    pts = [
+        (-sx, -sy, -sz),
+        ( sx, -sy, -sz),
+        ( sx,  sy, -sz),
+        (-sx,  sy, -sz),
+        (-sx, -sy,  sz),
+        ( sx, -sy,  sz),
+        ( sx,  sy,  sz),
+        (-sx,  sy,  sz),
+    ]
+
+    while len(scp_prop.parallelepiped_points) > 0:
+        scp_prop.parallelepiped_points.remove(len(scp_prop.parallelepiped_points) - 1)
+    for co in pts:
+        p = scp_prop.parallelepiped_points.add()
+        p.co = co
+
+
+def _on_parallelepiped_size_update(self, context):
+    _reset_parallelepiped_points_box(self, self.parallelepiped_size)
+    _sync_scene(context, getattr(self, "id", ""))
+
+
+class AF_ParallelepipedPoint_Property(bpy.types.PropertyGroup):
+    co: bpy.props.FloatVectorProperty(
+        name="Vertex",
+        size=3,
+        subtype="TRANSLATION",
+        default=(0.0, 0.0, 0.0),
+        update=_on_scp_prop_update,
+    )
+
+
 def _on_active_scp_index_update(self, context):
     scene = context.scene if context else None
     if not scene or scene.af_selection_sync_lock:
@@ -203,6 +241,16 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
     curve_proportional_strength: bpy.props.FloatProperty(
         name="Proportional Strength", default=0.65, min=0.0, max=1.0, update=_on_scp_prop_update
     )
+
+    parallelepiped_size: bpy.props.FloatVectorProperty(
+        name="Size",
+        size=3,
+        subtype="XYZ",
+        default=(1.0, 1.0, 1.0),
+        min=0.001,
+        update=_on_parallelepiped_size_update,
+    )
+    parallelepiped_points: bpy.props.CollectionProperty(type=AF_ParallelepipedPoint_Property)
 
     mesh_asset_id: bpy.props.StringProperty(
         name="Mesh Asset ID", default="", update=_on_scp_prop_update

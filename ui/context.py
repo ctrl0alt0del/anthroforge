@@ -31,6 +31,9 @@ def get_active_af_entity(root, context):
         if obj.get("af_curve_point_handle") and obj.get("af_scp_id"):
             return "SCP", obj.get("af_scp_id")
 
+        if obj.get("af_parallelepiped_vert_handle") and obj.get("af_scp_id"):
+            return "SCP", obj.get("af_scp_id")
+
     idx = root.af_scp_system.active_scp_index
     if 0 <= idx < len(root.af_scp_system.scps):
         return "SCP", root.af_scp_system.scps[idx].id

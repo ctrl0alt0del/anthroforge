@@ -46,7 +46,12 @@ from .ui.panels.vcp_edit_panel import AF_PT_VCPEditPanel
 from .ui.panels.blob_create_panel import AF_PT_BlobCreatePanel
 from .ui.panels.blob_edit_panel import AF_PT_BlobEditPanel
 
-from .properties.scp_properties import AF_CurvePoint_Property, AF_SCP_Property, AF_SCP_System_Property
+from .properties.scp_properties import (
+    AF_CurvePoint_Property,
+    AF_ParallelepipedPoint_Property,
+    AF_SCP_Property,
+    AF_SCP_System_Property,
+)
 from .properties.vcp_properties import (
     AF_MuscleFiberRef_Property,
     AF_MuscleVCP_Property,
@@ -80,6 +85,7 @@ classes = (
     AF_PT_EditPanel,
 
     AF_CurvePoint_Property,
+    AF_ParallelepipedPoint_Property,
     AF_SCP_Property,
     AF_SCP_System_Property,
 
