@@ -50,7 +50,7 @@ class AF_PT_BlobEditPanel(bpy.types.Panel):
 
         geo = layout.box()
         geo.label(text="Geometry")
-        geo.prop(blob, "resolution", text="Control Points")
+        geo.prop(blob, "resolution", text="Resolution")
 
         tfm = layout.box()
         tfm.label(text="Proxy Transform")

@@ -35,6 +35,87 @@ def _on_quat_update(self, context):
     _sync_scene(context, getattr(self, "id", ""))
 
 
+def _curve_points_as_list(scp_prop):
+    return [(p.co[0], p.co[1], p.co[2]) for p in scp_prop.curve_points]
+
+
+def _sample_polyline(points, t):
+    if not points:
+        return (0.0, 0.0, 0.0)
+    if len(points) == 1:
+        return points[0]
+
+    t = max(0.0, min(1.0, float(t)))
+    u = t * (len(points) - 1)
+    i = int(u)
+    if i >= len(points) - 1:
+        return points[-1]
+    a = u - i
+
+    p0 = points[i]
+    p1 = points[i + 1]
+    return (
+        p0[0] + (p1[0] - p0[0]) * a,
+        p0[1] + (p1[1] - p0[1]) * a,
+        p0[2] + (p1[2] - p0[2]) * a,
+    )
+
+
+def _reset_curve_points_linear(scp_prop, length, segments):
+    while len(scp_prop.curve_points) > 0:
+        scp_prop.curve_points.remove(len(scp_prop.curve_points) - 1)
+
+    segments = max(1, int(segments))
+    length = float(length)
+    for i in range(segments + 1):
+        p = scp_prop.curve_points.add()
+        t = i / float(segments)
+        p.co = (t * length, 0.0, 0.0)
+
+
+def _on_curve_length_update(self, context):
+    old_len = float(self.get("_af_prev_curve_length", self.curve_length if self.curve_length > 0.0 else 1.0))
+    new_len = float(self.curve_length)
+
+    if len(self.curve_points) != self.curve_segments + 1:
+        _reset_curve_points_linear(self, new_len, self.curve_segments)
+    elif old_len > 1e-8 and abs(new_len - old_len) > 1e-8:
+        scale = new_len / old_len
+        for p in self.curve_points:
+            p.co = (p.co[0] * scale, p.co[1], p.co[2])
+
+    self["_af_prev_curve_length"] = new_len
+    _sync_scene(context, getattr(self, "id", ""))
+
+
+def _on_curve_segments_update(self, context):
+    new_segments = max(1, int(self.curve_segments))
+    old_points = _curve_points_as_list(self)
+
+    if not old_points or len(old_points) < 2:
+        _reset_curve_points_linear(self, self.curve_length, new_segments)
+    else:
+        while len(self.curve_points) > 0:
+            self.curve_points.remove(len(self.curve_points) - 1)
+        for i in range(new_segments + 1):
+            p = self.curve_points.add()
+            t = i / float(new_segments)
+            p.co = _sample_polyline(old_points, t)
+
+    self["_af_prev_curve_segments"] = new_segments
+    _sync_scene(context, getattr(self, "id", ""))
+
+
+class AF_CurvePoint_Property(bpy.types.PropertyGroup):
+    co: bpy.props.FloatVectorProperty(
+        name="Point",
+        size=3,
+        subtype="TRANSLATION",
+        default=(0.0, 0.0, 0.0),
+        update=_on_scp_prop_update,
+    )
+
+
 def _on_active_scp_index_update(self, context):
     scene = context.scene if context else None
     if not scene or scene.af_selection_sync_lock:
@@ -104,10 +185,23 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
     )
 
     curve_length: bpy.props.FloatProperty(
-        name="Length", default=1.0, min=0.001, update=_on_scp_prop_update
+        name="Length", default=1.0, min=0.001, update=_on_curve_length_update
     )
     curve_segments: bpy.props.IntProperty(
-        name="Segments", default=5, min=1, max=256, update=_on_scp_prop_update
+        name="Segments", default=5, min=1, max=256, update=_on_curve_segments_update
+    )
+    curve_thickness: bpy.props.FloatProperty(
+        name="Thickness", default=0.02, min=0.0, update=_on_scp_prop_update
+    )
+    curve_points: bpy.props.CollectionProperty(type=AF_CurvePoint_Property)
+    curve_proportional_enabled: bpy.props.BoolProperty(
+        name="Proportional Edit", default=True, update=_on_scp_prop_update
+    )
+    curve_proportional_radius: bpy.props.FloatProperty(
+        name="Proportional Radius", default=2.0, min=0.001, update=_on_scp_prop_update
+    )
+    curve_proportional_strength: bpy.props.FloatProperty(
+        name="Proportional Strength", default=0.65, min=0.0, max=1.0, update=_on_scp_prop_update
     )
 
     mesh_asset_id: bpy.props.StringProperty(
