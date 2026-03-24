@@ -126,12 +126,30 @@ class SCPSceneSync:
 
         if isinstance(data, dict) and data.get("mode") == "mesh_anchor":
             p = data.get("parent_local_point")
+            c = data.get("child_local_point")
+            if (
+                isinstance(p, (list, tuple)) and len(p) == 3
+                and isinstance(c, (list, tuple)) and len(c) == 3
+            ):
+                return (
+                    "mesh_anchor",
+                    (
+                        Vector((float(p[0]), float(p[1]), float(p[2]))),
+                        Vector((float(c[0]), float(c[1]), float(c[2]))),
+                    ),
+                )
             if isinstance(p, (list, tuple)) and len(p) == 3:
-                return ("mesh_anchor", Vector((float(p[0]), float(p[1]), float(p[2]))))
+                return (
+                    "mesh_anchor",
+                    (
+                        Vector((float(p[0]), float(p[1]), float(p[2]))),
+                        Vector((0.0, 0.0, 0.0)),
+                    ),
+                )
 
         return ("legacy", data)
 
-    def _encode_mesh_anchor(self, parent_local_point):
+    def _encode_mesh_anchor(self, parent_local_point, child_local_point):
         return json.dumps(
             {
                 "mode": "mesh_anchor",
@@ -140,15 +158,20 @@ class SCPSceneSync:
                     float(parent_local_point.y),
                     float(parent_local_point.z),
                 ],
+                "child_local_point": [
+                    float(child_local_point.x),
+                    float(child_local_point.y),
+                    float(child_local_point.z),
+                ],
             }
         )
 
-    def _world_matrix_from_mesh_anchor(self, scp, parent_proxy, parent_local_point):
+    def _world_matrix_from_mesh_anchor(self, scp, parent_proxy, parent_local_point, child_local_point):
         anchor_world = parent_proxy.matrix_world @ parent_local_point
-        T = Matrix.Translation(anchor_world)
-        R = scp.local_rotation.to_4x4()
-        S = Matrix.Diagonal((*scp.local_scale, 1.0))
-        return T @ R @ S
+        RS = scp.local_rotation.to_4x4() @ Matrix.Diagonal((*scp.local_scale, 1.0))
+        child_off = RS @ Vector((child_local_point.x, child_local_point.y, child_local_point.z, 1.0))
+        obj_origin = anchor_world - Vector((child_off.x, child_off.y, child_off.z))
+        return Matrix.Translation(obj_origin) @ RS
 
     def _compute_visual_world_matrix(self, scp, runtime_registry, root, scene):
         if scp.attachment is None:
@@ -162,7 +185,10 @@ class SCPSceneSync:
         if mode == "mesh_anchor":
             parent_proxy = self._find_proxy_in_scene(scene, root.name, scp.attachment.parent_id)
             if parent_proxy:
-                return self._world_matrix_from_mesh_anchor(scp, parent_proxy, payload)
+                parent_local_point, child_local_point = payload
+                return self._world_matrix_from_mesh_anchor(
+                    scp, parent_proxy, parent_local_point, child_local_point
+                )
 
         return scp.get_world_matrix(runtime_registry)
 
@@ -219,17 +245,17 @@ class SCPSceneSync:
         finally:
             self._syncing = False
 
-    def _nearest_parent_mesh_point_local(self, parent_proxy, child_world_loc, depsgraph):
+    def _nearest_mesh_point_local(self, obj, target_world, depsgraph):
         try:
-            bvh = BVHTree.FromObject(parent_proxy, depsgraph)
+            bvh = BVHTree.FromObject(obj, depsgraph)
         except Exception:
             return None
 
         if bvh is None:
             return None
 
-        child_local = parent_proxy.matrix_world.inverted() @ child_world_loc
-        nearest = bvh.find_nearest(child_local)
+        target_local = obj.matrix_world.inverted() @ target_world
+        nearest = bvh.find_nearest(target_local)
         if nearest is None:
             return None
 
@@ -262,17 +288,19 @@ class SCPSceneSync:
                 return False, None
 
             child_world_loc = proxy_obj.matrix_world.to_translation()
-            parent_local_point = self._nearest_parent_mesh_point_local(parent_proxy, child_world_loc, depsgraph)
+            parent_local_point = self._nearest_mesh_point_local(parent_proxy, child_world_loc, depsgraph)
             if parent_local_point is None:
                 return False, None
 
-            scp_prop.attach_param = self._encode_mesh_anchor(parent_local_point)
-
             anchor_world = parent_proxy.matrix_world @ parent_local_point
-            local_matrix = Matrix.Translation(anchor_world).inverted() @ proxy_obj.matrix_world
-            _loc, rot, scale = local_matrix.decompose()
+            child_local_point = self._nearest_mesh_point_local(proxy_obj, anchor_world, depsgraph)
+            if child_local_point is None:
+                child_local_point = Vector((0.0, 0.0, 0.0))
+
+            scp_prop.attach_param = self._encode_mesh_anchor(parent_local_point, child_local_point)
 
             scp_prop.local_origin = (0.0, 0.0, 0.0)
+            _loc, rot, scale = proxy_obj.matrix_world.decompose()
             scp_prop.local_rotation = (rot.w, rot.x, rot.y, rot.z)
             scp_prop.local_scale = (scale.x, scale.y, scale.z)
             return True, scp_id

@@ -53,7 +53,11 @@ class AF_OT_AddSCP(bpy.types.Operator):
                 default_local = (float(p.x), float(p.y), float(p.z))
 
             new_scp.attach_param = json.dumps(
-                {"mode": "mesh_anchor", "parent_local_point": list(default_local)}
+                {
+                    "mode": "mesh_anchor",
+                    "parent_local_point": list(default_local),
+                    "child_local_point": [0.0, 0.0, 0.0],
+                }
             )
         else:
             new_scp.parent_id = ""
