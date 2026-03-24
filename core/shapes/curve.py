@@ -1,6 +1,7 @@
 from mathutils import Vector
 import bpy
 from .base import ShapeStrategy
+from .deformers import MirrorDeformer, ResolutionDeformer
 from .registry import ShapeRegistry
 
 
@@ -11,6 +12,8 @@ class CurveShape(ShapeStrategy):
     proxy_object_type = "CURVE"
     proxy_data_type = "CURVE"
     supports_fiber_collision = False
+    _MIRROR = MirrorDeformer()
+    _RESOLUTION = ResolutionDeformer()
 
     def __init__(self, length=1.0, segments=5, thickness=0.02, points=None):
         self.length = float(length)
@@ -63,6 +66,9 @@ class CurveShape(ShapeStrategy):
     def get_attach_params(self):
         return [i / self.segments for i in range(self.segments + 1)]
 
+    def get_deformers(self):
+        return [self._MIRROR, self._RESOLUTION]
+
     def compute_local_point(self, t):
         if not self.points:
             return Vector((0.0, 0.0, 0.0))
@@ -76,7 +82,7 @@ class CurveShape(ShapeStrategy):
             return self.points[-1].copy()
 
         a = u - i
-        return self.points[i].lerp(self.points[i + 1], a)
+        return self.apply_point_deformers(self.points[i].lerp(self.points[i + 1], a))
 
     def ensure_proxy_object(self, obj):
         if obj.type != "CURVE":
@@ -97,7 +103,8 @@ class CurveShape(ShapeStrategy):
         spline.points.add(max(0, len(self.points) - 1))
 
         for i, p in enumerate(self.points):
-            spline.points[i].co = (p.x, p.y, p.z, 1.0)
+            q = self.apply_point_deformers(p.copy())
+            spline.points[i].co = (q.x, q.y, q.z, 1.0)
 
         obj.display_type = "TEXTURED"
         obj.hide_render = False

@@ -51,6 +51,27 @@ class ShapeStrategy(ABC):
     def compute_world_point(self, param, scp_matrix: Matrix):
         return scp_matrix @ self.compute_local_point(param)
 
+    # Deformation pipeline (optional per-shape)
+    def get_deformers(self):
+        return []
+
+    def apply_point_deformers(self, local_point):
+        p = local_point.copy()
+        for d in sorted(self.get_deformers(), key=lambda x: int(getattr(x, "priority", 100))):
+            p = d.forward(p, self)
+        return p
+
+    def invert_point_deformers(self, deformed_local_point):
+        p = deformed_local_point.copy()
+        for d in sorted(self.get_deformers(), key=lambda x: int(getattr(x, "priority", 100)), reverse=True):
+            p = d.inverse(p, self)
+        return p
+
+    # Optional hook for mirrored control-point propagation.
+    # Return tuple(pair_index, pair_local_base_point) or None.
+    def mirror_pair_update_from_handle(self, proxy_obj, handle_world_location, vert_index, scp_prop):
+        return None
+
     @abstractmethod
     def ensure_proxy_object(self, obj):
         pass

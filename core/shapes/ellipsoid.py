@@ -4,6 +4,7 @@ import bpy
 import bmesh
 from mathutils import Vector
 from .base import ShapeStrategy
+from .deformers import MirrorDeformer, ResolutionDeformer
 from .registry import ShapeRegistry
 
 
@@ -13,6 +14,8 @@ class EllipsoidShape(ShapeStrategy):
 
     proxy_object_type = "MESH"
     proxy_data_type = "MESH"
+    _MIRROR = MirrorDeformer()
+    _RESOLUTION = ResolutionDeformer()
 
     def __init__(self, radii=(1.0, 1.0, 1.0), resolution=8):
         self.radii = radii
@@ -63,6 +66,9 @@ class EllipsoidShape(ShapeStrategy):
         col.prop(scp_prop, "ellipsoid_radii")
         col.prop(scp_prop, "ellipsoid_resolution")
 
+    def get_deformers(self):
+        return [self._MIRROR, self._RESOLUTION]
+
     def get_attach_params(self):
         params = []
         for i in range(self.resolution):
@@ -78,7 +84,7 @@ class EllipsoidShape(ShapeStrategy):
         x = rx * math.sin(phi) * math.cos(theta)
         y = ry * math.sin(phi) * math.sin(theta)
         z = rz * math.cos(phi)
-        return Vector((x, y, z))
+        return self.apply_point_deformers(Vector((x, y, z)))
 
     def ensure_proxy_object(self, obj):
         """

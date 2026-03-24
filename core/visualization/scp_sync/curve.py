@@ -1,5 +1,6 @@
 import bpy
 from mathutils import Vector
+from ...shapes.registry import ShapeRegistry
 
 
 class CurveSCPSyncExtension:
@@ -92,13 +93,17 @@ class CurveSCPSyncExtension:
             proxy = sync_manager._find_proxy_in_scene(scene, root.name, scp_prop.id)
             if proxy is None:
                 continue
+            shape = ShapeRegistry.create_from_prop(scp_prop)
+            if shape is None:
+                continue
 
             for i, p in enumerate(scp_prop.curve_points):
                 live_keys.add((scp_prop.id, i))
                 h = self._find_curve_point_handle(vis_col, root.name, scp_prop.id, i)
                 if h is None:
                     h = self._create_curve_point_handle(vis_col, root, scp_prop.id, i)
-                h.location = proxy.matrix_world @ Vector((p.co[0], p.co[1], p.co[2]))
+                local = shape.apply_point_deformers(Vector((p.co[0], p.co[1], p.co[2])))
+                h.location = proxy.matrix_world @ local
 
         for obj in list(vis_col.objects):
             if not obj.get("af_curve_point_handle"):
@@ -129,5 +134,8 @@ class CurveSCPSyncExtension:
             return True, False, None
 
         local = proxy.matrix_world.inverted() @ obj.location
+        shape = ShapeRegistry.create_from_prop(scp_prop)
+        if shape is not None:
+            local = shape.invert_point_deformers(local)
         did = self._apply_curve_proportional_delta(scp_prop, point_index, local)
         return True, did, scp_id if did else None
