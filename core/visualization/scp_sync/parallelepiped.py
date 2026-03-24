@@ -1,5 +1,6 @@
 import bpy
 from mathutils import Vector
+from ...shapes.registry import ShapeRegistry
 
 
 class ParallelepipedSCPSyncExtension:
@@ -53,13 +54,17 @@ class ParallelepipedSCPSyncExtension:
             proxy = sync_manager._find_proxy_in_scene(scene, root.name, scp_prop.id)
             if proxy is None:
                 continue
+            shape = ShapeRegistry.create_from_prop(scp_prop)
+            if shape is None:
+                continue
 
-            for i, p in enumerate(scp_prop.parallelepiped_points):
+            for i, _p in enumerate(scp_prop.parallelepiped_points):
                 live_keys.add((scp_prop.id, i))
                 h = self._find_vertex_handle(vis_col, root.name, scp_prop.id, i)
                 if h is None:
                     h = self._create_vertex_handle(vis_col, root, scp_prop.id, i)
-                h.location = proxy.matrix_world @ Vector((p.co[0], p.co[1], p.co[2]))
+                local = shape.compute_local_point(i)
+                h.location = proxy.matrix_world @ Vector((local.x, local.y, local.z))
 
         for obj in list(vis_col.objects):
             if not obj.get("af_parallelepiped_vert_handle"):
@@ -89,7 +94,12 @@ class ParallelepipedSCPSyncExtension:
         if vert_index < 0 or vert_index >= len(scp_prop.parallelepiped_points):
             return True, False, None
 
-        local = proxy.matrix_world.inverted() @ obj.location
+        local_deformed = proxy.matrix_world.inverted() @ obj.location
+        shape = ShapeRegistry.create_from_prop(scp_prop)
+        if shape and hasattr(shape, "unbend_local_point"):
+            local = shape.unbend_local_point(local_deformed)
+        else:
+            local = local_deformed
         old = Vector((
             scp_prop.parallelepiped_points[vert_index].co[0],
             scp_prop.parallelepiped_points[vert_index].co[1],

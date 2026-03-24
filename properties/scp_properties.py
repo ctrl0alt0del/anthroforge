@@ -251,6 +251,37 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         update=_on_parallelepiped_size_update,
     )
     parallelepiped_points: bpy.props.CollectionProperty(type=AF_ParallelepipedPoint_Property)
+    parallelepiped_bend_enabled: bpy.props.BoolProperty(
+        name="Enable Bend",
+        default=False,
+        update=_on_scp_prop_update,
+    )
+    parallelepiped_bend_axis: bpy.props.EnumProperty(
+        name="Bend Axis",
+        items=[("X", "X", ""), ("Y", "Y", ""), ("Z", "Z", "")],
+        default="X",
+        update=_on_scp_prop_update,
+    )
+    parallelepiped_bend_angle_deg: bpy.props.FloatProperty(
+        name="Bend Angle",
+        default=0.0,
+        min=-360.0,
+        max=360.0,
+        update=_on_scp_prop_update,
+    )
+    parallelepiped_bend_radius: bpy.props.FloatProperty(
+        name="Bend Radius",
+        default=1.0,
+        min=0.001,
+        update=_on_scp_prop_update,
+    )
+    parallelepiped_resolution: bpy.props.IntProperty(
+        name="Resolution",
+        default=4,
+        min=1,
+        max=64,
+        update=_on_scp_prop_update,
+    )
 
     mesh_asset_id: bpy.props.StringProperty(
         name="Mesh Asset ID", default="", update=_on_scp_prop_update
