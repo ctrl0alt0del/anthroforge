@@ -57,4 +57,55 @@ class AF_PT_EditPanel(bpy.types.Panel):
         editable_shapes = {"CURVE", "PARALLELEPIPED"}
         ShapeRegistry.draw_scp_ui(scp.shape_type, layout, scp, readonly=(scp.shape_type not in editable_shapes))
 
+        layout.separator()
+        layout.label(text="Constraints")
+        row = layout.row(align=True)
+        add_op = row.operator("af.add_scp_constraint", icon="ADD", text="Add")
+        add_op.scp_id = scp.id
+        if len(scp.constraints) > 0:
+            rm_op = row.operator("af.remove_scp_constraint", icon="REMOVE", text="Remove")
+            rm_op.index = scp.active_constraint_index
+            rm_op.scp_id = scp.id
+
+        for i, c in enumerate(scp.constraints):
+            box = layout.box()
+            hdr = box.row(align=True)
+            hdr.prop(c, "enabled", text="")
+            hdr.prop(c, "priority", text="Prio")
+            del_op = hdr.operator("af.remove_scp_constraint", text="", icon="TRASH")
+            del_op.index = i
+            del_op.scp_id = scp.id
+
+            box.prop(c, "source_obj", text="Source SCP")
+            if c.source_scp_id:
+                rid = box.row()
+                rid.enabled = False
+                rid.prop(c, "source_scp_id", text="Resolved ID")
+            box.prop(c, "calculator_type", text="Calculator")
+
+            if c.calculator_type == "ARC_BRIDGE":
+                box.prop(c, "arc_source_width_prop", text="Source Width")
+                box.prop(c, "arc_dest_radius_prop", text="Destination Radius")
+                box.prop(c, "arc_dest_angle_prop", text="Destination Angle")
+                r = box.row(align=True)
+                r.prop(c, "arc_width_scale")
+                r.prop(c, "arc_width_offset")
+                box.prop(c, "arc_full_angle")
+            else:
+                box.prop(c, "source_prop", text="Source")
+                box.prop(c, "dest_prop", text="Destination")
+
+            if c.calculator_type == "RANGE_REMAP":
+                r = box.row(align=True)
+                r.prop(c, "in_min")
+                r.prop(c, "in_max")
+                r = box.row(align=True)
+                r.prop(c, "out_min")
+                r.prop(c, "out_max")
+                box.prop(c, "clamp")
+            elif c.calculator_type == "LINEAR":
+                r = box.row(align=True)
+                r.prop(c, "linear_a")
+                r.prop(c, "linear_b")
+
         layout.operator("af.delete_selected_af_node", icon="TRASH")

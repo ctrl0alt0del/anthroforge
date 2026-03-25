@@ -6,6 +6,7 @@ from .fiber_sync import register_fiber_sync
 from .muscle_sync import register_muscle_sync
 from .blob_sync import register_blob_sync
 from .mirror_sync import register_mirror_sync
+from ..constraints.scp_constraints import apply_scp_constraints
 
 
 _RUNNING = False
@@ -72,6 +73,14 @@ def sync_all(root=None, scene=None, bake=False, target_fiber_ids=None):
 
     _RUNNING = True
     try:
+        # Global constraint settle (small bounded passes)
+        pending = {s.id for s in root.af_scp_system.scps}
+        for _ in range(4):
+            changed = apply_scp_constraints(root, pending)
+            if not changed:
+                break
+            pending = changed
+
         register_sync().sync_root_to_scene(root=root, scene=scene)
         register_fiber_sync().sync_root_to_scene(root=root, scene=scene, bake=bake, target_fiber_ids=target_fiber_ids)
         register_muscle_sync().sync_root_to_scene(root=root, scene=scene)
@@ -94,6 +103,18 @@ def sync_from_scp_ids(root=None, scene=None, scp_ids=None, bake=False):
     scp_ids = set(scp_ids or [])
     if not scp_ids:
         return
+
+    # Constraint propagation: source changes can update destination SCPs.
+    pending = set(scp_ids)
+    propagated = set()
+    for _ in range(4):
+        changed = apply_scp_constraints(root, pending)
+        changed -= propagated
+        if not changed:
+            break
+        propagated |= changed
+        pending = changed
+    scp_ids |= propagated
 
     fiber_ids = _affected_fibers_for_scps(root, scp_ids)
     muscle_ids = _affected_muscles_for_fibers(root, fiber_ids)

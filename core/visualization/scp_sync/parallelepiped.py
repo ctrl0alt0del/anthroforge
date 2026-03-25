@@ -26,7 +26,6 @@ class ParallelepipedSCPSyncExtension:
         obj["af_root_name"] = root.name
         obj["af_scp_id"] = scp_id
         obj["af_parallelepiped_vert_index"] = int(vert_index)
-        obj["af_last_sync_loc"] = [0.0, 0.0, 0.0]
         vis_col.objects.link(obj)
         return obj
 
@@ -65,7 +64,6 @@ class ParallelepipedSCPSyncExtension:
                     h = self._create_vertex_handle(vis_col, root, scp_prop.id, i)
                 local = shape.compute_local_point(i)
                 h.location = proxy.matrix_world @ Vector((local.x, local.y, local.z))
-                h["af_last_sync_loc"] = [float(h.location.x), float(h.location.y), float(h.location.z)]
 
         for obj in list(vis_col.objects):
             if not obj.get("af_parallelepiped_vert_handle"):
@@ -95,12 +93,6 @@ class ParallelepipedSCPSyncExtension:
         if vert_index < 0 or vert_index >= len(scp_prop.parallelepiped_points):
             return True, False, None
 
-        last = obj.get("af_last_sync_loc")
-        if isinstance(last, (list, tuple)) and len(last) == 3:
-            last_v = Vector((float(last[0]), float(last[1]), float(last[2])))
-            if (obj.location - last_v).length_squared <= 1e-12:
-                return True, False, None
-
         local_deformed = proxy.matrix_world.inverted() @ obj.location
         shape = ShapeRegistry.create_from_prop(scp_prop)
         if shape is not None:
@@ -127,7 +119,5 @@ class ParallelepipedSCPSyncExtension:
                         mirrored_local.y,
                         mirrored_local.z,
                     )
-
-        obj["af_last_sync_loc"] = [float(obj.location.x), float(obj.location.y), float(obj.location.z)]
 
         return True, True, scp_id

@@ -21,6 +21,33 @@ def _on_scp_prop_update(self, context):
     _sync_scene(context, getattr(self, "id", ""))
 
 
+def _on_constraint_prop_update(self, context):
+    # Re-capture baseline after any constraint setting changes so
+    # edits do not cause immediate jumps.
+    try:
+        self.delta_initialized = False
+    except Exception:
+        pass
+    # Constraint sub-properties do not have direct owner id; keep it simple/safe.
+    _sync_scene(context, None)
+
+
+def _poll_constraint_source_scp_proxy(self, obj):
+    return bool(
+        obj
+        and obj.get("af_proxy")
+        and not obj.get("af_mirror_proxy")
+        and obj.get("af_scp_id")
+    )
+
+
+def _on_constraint_source_obj_update(self, context):
+    src_obj = getattr(self, "source_obj", None)
+    if src_obj and src_obj.get("af_scp_id"):
+        self.source_scp_id = str(src_obj.get("af_scp_id"))
+    _on_constraint_prop_update(self, context)
+
+
 def _on_euler_update(self, context):
     e = Euler(self.local_rotation_euler, "XYZ")
     q = e.to_quaternion()
@@ -151,6 +178,144 @@ class AF_ParallelepipedPoint_Property(bpy.types.PropertyGroup):
         subtype="TRANSLATION",
         default=(0.0, 0.0, 0.0),
         update=_on_scp_prop_update,
+    )
+
+
+class AF_SCP_Constraint_Property(bpy.types.PropertyGroup):
+    enabled: bpy.props.BoolProperty(name="Enabled", default=True, update=_on_constraint_prop_update)
+    priority: bpy.props.IntProperty(name="Priority", default=100, min=0, max=10000, update=_on_constraint_prop_update)
+
+    source_scp_id: bpy.props.StringProperty(name="Source SCP ID", default="", update=_on_constraint_prop_update)
+    source_obj: bpy.props.PointerProperty(
+        name="Source SCP",
+        type=bpy.types.Object,
+        poll=_poll_constraint_source_scp_proxy,
+        update=_on_constraint_source_obj_update,
+    )
+
+    source_prop: bpy.props.EnumProperty(
+        name="Source",
+        items=[
+            ("PAR_SIZE_X", "Parallelepiped Size X", ""),
+            ("PAR_SIZE_Y", "Parallelepiped Size Y", ""),
+            ("PAR_SIZE_Z", "Parallelepiped Size Z", ""),
+            ("ELL_RAD_X", "Ellipsoid Radius X", ""),
+            ("ELL_RAD_Y", "Ellipsoid Radius Y", ""),
+            ("ELL_RAD_Z", "Ellipsoid Radius Z", ""),
+            ("CURVE_LENGTH", "Curve Length", ""),
+            ("LOCAL_SCALE_X", "Local Scale X", ""),
+            ("LOCAL_SCALE_Y", "Local Scale Y", ""),
+            ("LOCAL_SCALE_Z", "Local Scale Z", ""),
+        ],
+        default="PAR_SIZE_X",
+        update=_on_constraint_prop_update,
+    )
+
+    dest_prop: bpy.props.EnumProperty(
+        name="Destination",
+        items=[
+            ("PAR_BEND_RADIUS", "Parallelepiped Bend Radius", ""),
+            ("PAR_BEND_ANGLE", "Parallelepiped Bend Angle", ""),
+            ("PAR_RESOLUTION", "Parallelepiped Resolution", ""),
+            ("LOCAL_SCALE_X", "Local Scale X", ""),
+            ("LOCAL_SCALE_Y", "Local Scale Y", ""),
+            ("LOCAL_SCALE_Z", "Local Scale Z", ""),
+        ],
+        default="PAR_BEND_RADIUS",
+        update=_on_constraint_prop_update,
+    )
+
+    calculator_type: bpy.props.EnumProperty(
+        name="Calculator",
+        items=[
+            ("LINEAR", "Linear", ""),
+            ("RANGE_REMAP", "Range Remap", ""),
+            ("ARC_BRIDGE", "Arc Bridge", ""),
+        ],
+        default="LINEAR",
+        update=_on_constraint_prop_update,
+    )
+
+    # LINEAR: y = a*x + b
+    linear_a: bpy.props.FloatProperty(name="a", default=1.0, update=_on_constraint_prop_update)
+    linear_b: bpy.props.FloatProperty(name="b", default=0.0, update=_on_constraint_prop_update)
+
+    # RANGE_REMAP
+    in_min: bpy.props.FloatProperty(name="In Min", default=0.0, update=_on_constraint_prop_update)
+    in_max: bpy.props.FloatProperty(name="In Max", default=1.0, update=_on_constraint_prop_update)
+    out_min: bpy.props.FloatProperty(name="Out Min", default=0.0, update=_on_constraint_prop_update)
+    out_max: bpy.props.FloatProperty(name="Out Max", default=1.0, update=_on_constraint_prop_update)
+    clamp: bpy.props.BoolProperty(name="Clamp", default=True, update=_on_constraint_prop_update)
+
+    # ARC_BRIDGE
+    arc_source_width_prop: bpy.props.EnumProperty(
+        name="Source Width",
+        items=[
+            ("PAR_SIZE_X", "Parallelepiped Size X", ""),
+            ("PAR_SIZE_Y", "Parallelepiped Size Y", ""),
+            ("PAR_SIZE_Z", "Parallelepiped Size Z", ""),
+            ("ELL_RAD_X", "Ellipsoid Radius X", ""),
+            ("ELL_RAD_Y", "Ellipsoid Radius Y", ""),
+            ("ELL_RAD_Z", "Ellipsoid Radius Z", ""),
+            ("CURVE_LENGTH", "Curve Length", ""),
+            ("LOCAL_SCALE_X", "Local Scale X", ""),
+            ("LOCAL_SCALE_Y", "Local Scale Y", ""),
+            ("LOCAL_SCALE_Z", "Local Scale Z", ""),
+        ],
+        default="PAR_SIZE_X",
+        update=_on_constraint_prop_update,
+    )
+    arc_dest_radius_prop: bpy.props.EnumProperty(
+        name="Destination Radius",
+        items=[
+            ("PAR_BEND_RADIUS", "Parallelepiped Bend Radius", ""),
+        ],
+        default="PAR_BEND_RADIUS",
+        update=_on_constraint_prop_update,
+    )
+    arc_dest_angle_prop: bpy.props.EnumProperty(
+        name="Destination Angle",
+        items=[
+            ("PAR_BEND_ANGLE", "Parallelepiped Bend Angle", ""),
+        ],
+        default="PAR_BEND_ANGLE",
+        update=_on_constraint_prop_update,
+    )
+    arc_full_angle: bpy.props.FloatProperty(
+        name="Full Angle",
+        default=360.0,
+        min=1.0,
+        max=720.0,
+        update=_on_constraint_prop_update,
+    )
+    arc_width_scale: bpy.props.FloatProperty(
+        name="Width Scale",
+        default=1.0,
+        update=_on_constraint_prop_update,
+    )
+    arc_width_offset: bpy.props.FloatProperty(
+        name="Width Offset",
+        default=0.0,
+        update=_on_constraint_prop_update,
+    )
+
+    # Hidden runtime baseline for delta-mode constraint application:
+    # dest = dest_base + (f(src_now) - f(src_base))
+    delta_initialized: bpy.props.BoolProperty(
+        default=False,
+        options={"HIDDEN"},
+    )
+    delta_src_base: bpy.props.FloatProperty(
+        default=0.0,
+        options={"HIDDEN"},
+    )
+    delta_dst_base: bpy.props.FloatProperty(
+        default=0.0,
+        options={"HIDDEN"},
+    )
+    delta_dst_base_2: bpy.props.FloatProperty(
+        default=0.0,
+        options={"HIDDEN"},
     )
 
 
@@ -303,6 +468,9 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         name="Mirror Origin", size=3, subtype="TRANSLATION",
         default=(0.0, 0.0, 0.0), update=_on_scp_prop_update
     )
+
+    constraints: bpy.props.CollectionProperty(type=AF_SCP_Constraint_Property)
+    active_constraint_index: bpy.props.IntProperty(default=0)
 
 
 class AF_SCP_System_Property(bpy.types.PropertyGroup):
