@@ -125,6 +125,132 @@ def _eval_constraint_value(c, src):
     return a * float(src) + b
 
 
+def apply_scp_input_write(root, scp_id, dest_prop, value):
+    dest = _get_scp_by_id(root, scp_id)
+    if dest is None:
+        return False
+    return _set_dest_value(dest, dest_prop, value)
+
+
+def evaluate_scp_constraints_runtime(root, changed_source_ids, is_cyclic_pair, delayed_writer):
+    """
+    Runtime evaluator for SCP constraints using cycle policy callback.
+    - is_cyclic_pair(src_id, dst_id) -> bool
+    - delayed_writer(entity_type, entity_id, input_port, value) -> None
+    Returns set of changed destination SCP ids (immediate writes only).
+    """
+    changed_source_ids = set(changed_source_ids or [])
+    if not changed_source_ids:
+        return set()
+
+    items = []
+    for dest in root.af_scp_system.scps:
+        for c in dest.constraints:
+            if not bool(c.enabled):
+                continue
+            src_id = ""
+            src_obj = getattr(c, "source_obj", None)
+            if src_obj and src_obj.get("af_scp_id"):
+                src_id = str(src_obj.get("af_scp_id"))
+            else:
+                src_id = str(getattr(c, "source_scp_id", "") or "")
+            if not src_id or src_id not in changed_source_ids:
+                continue
+            items.append((int(c.priority), str(dest.id), dest, c, src_id))
+
+    items.sort(key=lambda x: (x[0], x[1]))
+    changed_dests = set()
+
+    for _prio, _dst_sort, dest, c, src_id in items:
+        src = _get_scp_by_id(root, src_id)
+        if src is None:
+            continue
+
+        source_key = c.arc_source_width_prop if c.calculator_type == "ARC_BRIDGE" else c.source_prop
+        src_value = _get_source_value(src, source_key)
+        if src_value is None:
+            continue
+
+        cyclic = bool(is_cyclic_pair(src_id, dest.id))
+        status = "DELAYED_CYCLE" if cyclic else "OK"
+        msg = "Part of cycle, applied next tick" if cyclic else ""
+
+        if c.calculator_type == "ARC_BRIDGE":
+            dst_key_r = c.arc_dest_radius_prop
+            dst_key_a = c.arc_dest_angle_prop
+
+            if not bool(getattr(c, "delta_initialized", False)):
+                dst_now_r = _get_dest_value(dest, dst_key_r)
+                dst_now_a = _get_dest_value(dest, dst_key_a)
+                if dst_now_r is None or dst_now_a is None:
+                    continue
+                c.delta_src_base = float(src_value)
+                c.delta_dst_base = float(dst_now_r)
+                c.delta_dst_base_2 = float(dst_now_a)
+                c.delta_initialized = True
+                c.runtime_status = status
+                c.runtime_message = msg
+                continue
+
+            width_scale = float(getattr(c, "arc_width_scale", 1.0))
+            width_offset = float(getattr(c, "arc_width_offset", 0.0))
+            full_angle = max(1e-6, float(getattr(c, "arc_full_angle", 360.0)))
+
+            width_now = max(0.0, float(src_value) * width_scale + width_offset)
+            width_base = max(0.0, float(c.delta_src_base) * width_scale + width_offset)
+            fixed_radius = max(1e-6, float(c.delta_dst_base))
+
+            ratio_now = max(-1.0, min(1.0, width_now / (2.0 * fixed_radius)))
+            gap_deg_now = math.degrees(2.0 * math.asin(ratio_now))
+            target_a_now = full_angle - gap_deg_now
+
+            ratio_base = max(-1.0, min(1.0, width_base / (2.0 * fixed_radius)))
+            gap_deg_base = math.degrees(2.0 * math.asin(ratio_base))
+            target_a_base = full_angle - gap_deg_base
+            target_a = float(c.delta_dst_base_2) + (target_a_now - target_a_base)
+
+            if cyclic:
+                delayed_writer("SCP", dest.id, dst_key_r, float(c.delta_dst_base))
+                delayed_writer("SCP", dest.id, dst_key_a, target_a)
+            else:
+                did_r = _set_dest_value(dest, dst_key_r, float(c.delta_dst_base))
+                did_a = _set_dest_value(dest, dst_key_a, target_a)
+                if did_r or did_a:
+                    changed_dests.add(dest.id)
+
+            c.runtime_status = status
+            c.runtime_message = msg
+            continue
+
+        # LINEAR / RANGE_REMAP
+        if not bool(getattr(c, "delta_initialized", False)):
+            dst_now = _get_dest_value(dest, c.dest_prop)
+            if dst_now is None:
+                continue
+            c.delta_src_base = float(src_value)
+            c.delta_dst_base = float(dst_now)
+            c.delta_initialized = True
+            c.runtime_status = status
+            c.runtime_message = msg
+            continue
+
+        f_now = _eval_constraint_value(c, src_value)
+        f_base = _eval_constraint_value(c, float(c.delta_src_base))
+        target = float(c.delta_dst_base) + (f_now - f_base)
+
+        if cyclic:
+            delayed_writer("SCP", dest.id, c.dest_prop, target)
+        else:
+            did = _set_dest_value(dest, c.dest_prop, target)
+            if did:
+                changed_dests.add(dest.id)
+
+        c.runtime_status = status
+        c.runtime_message = msg
+
+    return changed_dests
+
+
 def apply_scp_constraints(root, changed_source_ids):
     """
     Apply constraints where source_scp_id in changed_source_ids.

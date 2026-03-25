@@ -58,6 +58,8 @@ class AF_OT_AddSCPConstraint(bpy.types.Operator):
         c.delta_src_base = 0.0
         c.delta_dst_base = 0.0
         c.delta_dst_base_2 = 0.0
+        c.runtime_status = "OK"
+        c.runtime_message = ""
 
         scp.active_constraint_index = len(scp.constraints) - 1
         return {"FINISHED"}

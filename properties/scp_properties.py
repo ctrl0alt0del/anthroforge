@@ -26,6 +26,8 @@ def _on_constraint_prop_update(self, context):
     # edits do not cause immediate jumps.
     try:
         self.delta_initialized = False
+        self.runtime_status = "OK"
+        self.runtime_message = ""
     except Exception:
         pass
     # Constraint sub-properties do not have direct owner id; keep it simple/safe.
@@ -315,6 +317,20 @@ class AF_SCP_Constraint_Property(bpy.types.PropertyGroup):
     )
     delta_dst_base_2: bpy.props.FloatProperty(
         default=0.0,
+        options={"HIDDEN"},
+    )
+    runtime_status: bpy.props.EnumProperty(
+        name="Status",
+        items=[
+            ("OK", "OK", ""),
+            ("DELAYED_CYCLE", "Delayed Cycle", ""),
+        ],
+        default="OK",
+        options={"HIDDEN"},
+    )
+    runtime_message: bpy.props.StringProperty(
+        name="Runtime Message",
+        default="",
         options={"HIDDEN"},
     )
 

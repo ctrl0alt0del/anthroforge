@@ -108,4 +108,12 @@ class AF_PT_EditPanel(bpy.types.Panel):
                 r.prop(c, "linear_a")
                 r.prop(c, "linear_b")
 
+            srow = box.row()
+            srow.enabled = False
+            srow.prop(c, "runtime_status", text="Runtime")
+            if c.runtime_message:
+                mrow = box.row()
+                mrow.enabled = False
+                mrow.label(text=c.runtime_message, icon="INFO")
+
         layout.operator("af.delete_selected_af_node", icon="TRASH")
