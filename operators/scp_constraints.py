@@ -42,7 +42,6 @@ class AF_OT_AddSCPConstraint(bpy.types.Operator):
         c.dest_prop = "PAR_BEND_RADIUS"
         c.calculator_type = "LINEAR"
         c.arc_source_width_prop = "PAR_SIZE_X"
-        c.arc_dest_radius_prop = "PAR_BEND_RADIUS"
         c.arc_dest_angle_prop = "PAR_BEND_ANGLE"
         c.linear_a = 1.0
         c.linear_b = 0.0

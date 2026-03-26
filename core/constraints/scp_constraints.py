@@ -15,6 +15,12 @@ def _get_source_value(scp, key):
         return float(scp.parallelepiped_size[1])
     if key == "PAR_SIZE_Z":
         return float(scp.parallelepiped_size[2])
+    if key == "PAR_BEND_RADIUS":
+        return float(scp.parallelepiped_bend_radius)
+    if key == "PAR_BEND_ANGLE":
+        return float(scp.parallelepiped_bend_angle_deg)
+    if key == "PAR_RESOLUTION":
+        return float(scp.parallelepiped_resolution)
     if key == "ELL_RAD_X":
         return float(scp.ellipsoid_radii[0])
     if key == "ELL_RAD_Y":
@@ -176,11 +182,10 @@ def evaluate_scp_constraints_runtime(root, changed_source_ids, is_cyclic_pair, d
         msg = "Part of cycle, applied next tick" if cyclic else ""
 
         if c.calculator_type == "ARC_BRIDGE":
-            dst_key_r = c.arc_dest_radius_prop
             dst_key_a = c.arc_dest_angle_prop
 
             if not bool(getattr(c, "delta_initialized", False)):
-                dst_now_r = _get_dest_value(dest, dst_key_r)
+                dst_now_r = _get_dest_value(dest, "PAR_BEND_RADIUS")
                 dst_now_a = _get_dest_value(dest, dst_key_a)
                 if dst_now_r is None or dst_now_a is None:
                     continue
@@ -210,12 +215,10 @@ def evaluate_scp_constraints_runtime(root, changed_source_ids, is_cyclic_pair, d
             target_a = float(c.delta_dst_base_2) + (target_a_now - target_a_base)
 
             if cyclic:
-                delayed_writer("SCP", dest.id, dst_key_r, float(c.delta_dst_base))
                 delayed_writer("SCP", dest.id, dst_key_a, target_a)
             else:
-                did_r = _set_dest_value(dest, dst_key_r, float(c.delta_dst_base))
                 did_a = _set_dest_value(dest, dst_key_a, target_a)
-                if did_r or did_a:
+                if did_a:
                     changed_dests.add(dest.id)
 
             c.runtime_status = status
@@ -292,12 +295,11 @@ def apply_scp_constraints(root, changed_source_ids):
             continue
 
         if c.calculator_type == "ARC_BRIDGE":
-            dst_key_r = c.arc_dest_radius_prop
             dst_key_a = c.arc_dest_angle_prop
 
             # Delta mode baseline capture for dual-output calculator.
             if not bool(getattr(c, "delta_initialized", False)):
-                dst_now_r = _get_dest_value(dest, dst_key_r)
+                dst_now_r = _get_dest_value(dest, "PAR_BEND_RADIUS")
                 dst_now_a = _get_dest_value(dest, dst_key_a)
                 if dst_now_r is None or dst_now_a is None:
                     continue
@@ -328,9 +330,8 @@ def apply_scp_constraints(root, changed_source_ids):
             target_a = float(c.delta_dst_base_2) + (target_a_now - target_a_base)
 
             # Keep radius fixed at captured baseline.
-            did_r = _set_dest_value(dest, dst_key_r, float(c.delta_dst_base))
             did_a = _set_dest_value(dest, dst_key_a, target_a)
-            if did_r or did_a:
+            if did_a:
                 changed_dests.add(dest.id)
         else:
             # Delta mode:

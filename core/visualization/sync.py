@@ -129,6 +129,50 @@ class SCPSceneSync:
             elif isinstance(old_data, bpy.types.Curve):
                 bpy.data.curves.remove(old_data)
 
+    def _matrix_to_flat(self, m):
+        return [
+            float(m[0][0]), float(m[0][1]), float(m[0][2]), float(m[0][3]),
+            float(m[1][0]), float(m[1][1]), float(m[1][2]), float(m[1][3]),
+            float(m[2][0]), float(m[2][1]), float(m[2][2]), float(m[2][3]),
+            float(m[3][0]), float(m[3][1]), float(m[3][2]), float(m[3][3]),
+        ]
+
+    def _mark_synced_matrix(self, obj):
+        try:
+            obj["af_last_synced_mw"] = self._matrix_to_flat(obj.matrix_world)
+        except Exception:
+            pass
+
+    def _is_synced_matrix(self, obj, eps=1e-6):
+        raw = obj.get("af_last_synced_mw")
+        if not isinstance(raw, (list, tuple)) or len(raw) != 16:
+            return False
+        cur = self._matrix_to_flat(obj.matrix_world)
+        for a, b in zip(cur, raw):
+            if abs(float(a) - float(b)) > eps:
+                return False
+        return True
+
+    def _is_user_translate_active(self):
+        """
+        True only while a viewport translate operation is currently active.
+        We use this as inverse-authoring intent for attached SCP reprojection.
+        """
+        try:
+            wm = bpy.context.window_manager
+            ops = getattr(wm, "operators", None) or []
+            for op in reversed(list(ops)):
+                bid = getattr(op, "bl_idname", "") or ""
+                if bid == "TRANSFORM_OT_translate":
+                    return True
+                if bid == "TRANSFORM_OT_transform":
+                    mode = str(getattr(getattr(op, "properties", None), "mode", "") or "")
+                    if mode == "TRANSLATION":
+                        return True
+            return False
+        except Exception:
+            return False
+
     def _decode_attach_param(self, raw):
         raw = (raw or "").strip()
         if not raw:
@@ -249,6 +293,7 @@ class SCPSceneSync:
 
                 scp.shape.ensure_proxy_object(obj)
                 obj.matrix_world = self._compute_visual_world_matrix(scp, runtime.registry, root, scene)
+                self._mark_synced_matrix(obj)
 
             for ext in self._shape_sync_extensions:
                 ext.sync_post(self, root, scene, vis_col)
@@ -293,6 +338,11 @@ class SCPSceneSync:
         runtime.build()
 
         if scp_prop.parent_id:
+            # Inverse attachment solve is editor-authoring only:
+            # recompute attach/local-to-parent only during direct user translate.
+            if not self._is_user_translate_active():
+                return False, None
+
             parent = runtime.registry.get(scp_prop.parent_id)
             child = runtime.registry.get(scp_id)
             if parent is None or child is None:
@@ -382,6 +432,10 @@ class SCPSceneSync:
                 if not obj.get("af_proxy"):
                     continue
                 if obj.get("af_mirror_proxy"):
+                    continue
+                # Ignore updates that only reflect our own sync-applied matrix,
+                # otherwise attached children may re-snap to another parent point.
+                if self._is_synced_matrix(obj):
                     continue
 
                 did, sid = self._write_proxy_transform_to_data(root, obj, scene, depsgraph)

@@ -54,7 +54,7 @@ class AF_PT_EditPanel(bpy.types.Panel):
 
         layout.separator()
         layout.label(text="Shape Params")
-        editable_shapes = {"CURVE", "PARALLELEPIPED"}
+        editable_shapes = {"CURVE", "PARALLELEPIPED", "ELLIPSOID"}
         ShapeRegistry.draw_scp_ui(scp.shape_type, layout, scp, readonly=(scp.shape_type not in editable_shapes))
 
         layout.separator()
@@ -85,7 +85,6 @@ class AF_PT_EditPanel(bpy.types.Panel):
 
             if c.calculator_type == "ARC_BRIDGE":
                 box.prop(c, "arc_source_width_prop", text="Source Width")
-                box.prop(c, "arc_dest_radius_prop", text="Destination Radius")
                 box.prop(c, "arc_dest_angle_prop", text="Destination Angle")
                 r = box.row(align=True)
                 r.prop(c, "arc_width_scale")

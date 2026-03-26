@@ -201,6 +201,9 @@ class AF_SCP_Constraint_Property(bpy.types.PropertyGroup):
             ("PAR_SIZE_X", "Parallelepiped Size X", ""),
             ("PAR_SIZE_Y", "Parallelepiped Size Y", ""),
             ("PAR_SIZE_Z", "Parallelepiped Size Z", ""),
+            ("PAR_BEND_RADIUS", "Parallelepiped Bend Radius", ""),
+            ("PAR_BEND_ANGLE", "Parallelepiped Bend Angle", ""),
+            ("PAR_RESOLUTION", "Parallelepiped Resolution", ""),
             ("ELL_RAD_X", "Ellipsoid Radius X", ""),
             ("ELL_RAD_Y", "Ellipsoid Radius Y", ""),
             ("ELL_RAD_Z", "Ellipsoid Radius Z", ""),
@@ -265,14 +268,6 @@ class AF_SCP_Constraint_Property(bpy.types.PropertyGroup):
             ("LOCAL_SCALE_Z", "Local Scale Z", ""),
         ],
         default="PAR_SIZE_X",
-        update=_on_constraint_prop_update,
-    )
-    arc_dest_radius_prop: bpy.props.EnumProperty(
-        name="Destination Radius",
-        items=[
-            ("PAR_BEND_RADIUS", "Parallelepiped Bend Radius", ""),
-        ],
-        default="PAR_BEND_RADIUS",
         update=_on_constraint_prop_update,
     )
     arc_dest_angle_prop: bpy.props.EnumProperty(
@@ -401,6 +396,39 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
     )
     ellipsoid_resolution: bpy.props.IntProperty(
         name="Resolution", default=8, min=3, max=128, update=_on_scp_prop_update
+    )
+    ellipsoid_clip_enabled: bpy.props.BoolProperty(
+        name="Enable Clipping", default=False, update=_on_scp_prop_update
+    )
+    ellipsoid_clip1_enabled: bpy.props.BoolProperty(
+        name="Clip Plane 1", default=False, update=_on_scp_prop_update
+    )
+    ellipsoid_clip1_normal: bpy.props.FloatVectorProperty(
+        name="Plane 1 Normal", size=3, subtype="XYZ", default=(1.0, 0.0, 0.0), update=_on_scp_prop_update
+    )
+    ellipsoid_clip1_offset: bpy.props.FloatProperty(
+        name="Plane 1 Offset", default=0.0, update=_on_scp_prop_update
+    )
+    ellipsoid_clip1_keep_side: bpy.props.EnumProperty(
+        name="Plane 1 Keep",
+        items=[("POS", "Positive Side", ""), ("NEG", "Negative Side", "")],
+        default="POS",
+        update=_on_scp_prop_update,
+    )
+    ellipsoid_clip2_enabled: bpy.props.BoolProperty(
+        name="Clip Plane 2", default=False, update=_on_scp_prop_update
+    )
+    ellipsoid_clip2_normal: bpy.props.FloatVectorProperty(
+        name="Plane 2 Normal", size=3, subtype="XYZ", default=(-1.0, 0.0, 0.0), update=_on_scp_prop_update
+    )
+    ellipsoid_clip2_offset: bpy.props.FloatProperty(
+        name="Plane 2 Offset", default=0.0, update=_on_scp_prop_update
+    )
+    ellipsoid_clip2_keep_side: bpy.props.EnumProperty(
+        name="Plane 2 Keep",
+        items=[("POS", "Positive Side", ""), ("NEG", "Negative Side", "")],
+        default="POS",
+        update=_on_scp_prop_update,
     )
 
     curve_length: bpy.props.FloatProperty(
