@@ -304,10 +304,27 @@ class EllipsoidShape(ShapeStrategy):
         )
 
         if bool(self.clip_enabled):
-            delete_verts = [v for v in bm.verts if not self._CLIP.is_kept(v.co, self)]
-            if delete_verts:
-                bmesh.ops.delete(bm, geom=delete_verts, context="VERTS")
-                bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-6)
+            for n, off, keep_pos in self._CLIP._plane_defs(self):
+                plane_co = n * off
+                geom = list(bm.verts) + list(bm.edges) + list(bm.faces)
+                # True geometric clip: bisect + clear one side.
+                bmesh.ops.bisect_plane(
+                    bm,
+                    geom=geom,
+                    plane_co=plane_co,
+                    plane_no=n,
+                    clear_inner=bool(keep_pos),   # remove negative side
+                    clear_outer=not bool(keep_pos),  # remove positive side
+                    dist=1e-6,
+                )
+                # Close cross section(s) created by the cut.
+                boundary = [e for e in bm.edges if e.is_boundary]
+                if boundary:
+                    try:
+                        bmesh.ops.holes_fill(bm, edges=boundary, sides=0)
+                    except Exception:
+                        # Non-fatal: keep open section if fill fails.
+                        pass
 
         bm.to_mesh(mesh)
         bm.free()

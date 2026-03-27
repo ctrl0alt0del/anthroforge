@@ -322,6 +322,14 @@ class AFMirrorSync:
                     if mir is not None:
                         self._remove_obj(mir)
                     continue
+            else:
+                # Inherited mirror rule from parent:
+                # if child itself crosses the inherited plane, do not create mirror.
+                axis_i, origin_i = rule
+                if self._intersects_mirror_plane(src, axis=axis_i, origin=origin_i):
+                    if mir is not None:
+                        self._remove_obj(mir)
+                    continue
 
             if mir is None:
                 mir = self._create_mirror_from_source(scp_col, src, f"{src.name}_MIR")
@@ -345,7 +353,7 @@ class AFMirrorSync:
             mir["af_source_scp_id"] = scp_id
             mir["af_scp_id"] = scp_id
 
-            self._ensure_mirror_material(mir, alpha_mult=0.35)
+            self._ensure_mirror_material(mir, alpha_mult=0.60)
             desired_ids.add(scp_id)
 
         for obj in list(scp_col.objects):
@@ -397,7 +405,7 @@ class AFMirrorSync:
             mir["af_source_fiber_id"] = fiber.id
             mir["af_fiber_id"] = fiber.id
 
-            self._ensure_mirror_material(mir, alpha_mult=0.45)
+            self._ensure_mirror_material(mir, alpha_mult=0.65)
             desired_ids.add(fiber.id)
 
         for obj in list(vcp_col.objects):
@@ -452,7 +460,7 @@ class AFMirrorSync:
                 mir["af_muscle_id"] = muscle.id
                 mir["af_muscle_surface"] = surf
 
-                self._ensure_mirror_material(mir, alpha_mult=0.40)
+                self._ensure_mirror_material(mir, alpha_mult=0.60)
                 desired_keys.add((muscle.id, surf))
 
         for obj in list(vcp_col.objects):

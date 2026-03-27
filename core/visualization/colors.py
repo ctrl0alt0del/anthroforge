@@ -11,7 +11,15 @@ AF_MUTED_COLORS = [
 _AF_COLOR_INDEX = 0
 
 
-def next_color():
+def color_for_index(index: int):
+    i = int(index) if index is not None else 0
+    return AF_MUTED_COLORS[i % len(AF_MUTED_COLORS)]
+
+
+def next_color(index=None):
+    if index is not None:
+        return color_for_index(index)
+
     global _AF_COLOR_INDEX
     c = AF_MUTED_COLORS[_AF_COLOR_INDEX % len(AF_MUTED_COLORS)]
     _AF_COLOR_INDEX += 1

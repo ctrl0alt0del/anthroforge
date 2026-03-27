@@ -36,7 +36,12 @@ class SCPSceneSync:
             return ""
 
         if active_obj.get("af_scp_id"):
-            if active_obj.get("af_proxy") or active_obj.get("af_curve_point_handle") or active_obj.get("af_parallelepiped_vert_handle"):
+            if (
+                active_obj.get("af_proxy")
+                or active_obj.get("af_curve_point_handle")
+                or active_obj.get("af_parallelepiped_vert_handle")
+                or active_obj.get("af_ellipsoid_clip_handle")
+            ):
                 return str(active_obj.get("af_scp_id"))
         return ""
 
@@ -108,7 +113,12 @@ class SCPSceneSync:
         obj.parent = root
         obj.matrix_parent_inverse = root.matrix_world.inverted()
 
-        color = next_color()
+        slot = 0
+        for i, p in enumerate(root.af_scp_system.scps):
+            if p.id == scp.id:
+                slot = i
+                break
+        color = next_color(slot)
         mat_name = f"AF_SCP_MAT_{scp.id}"
         mat = bpy.data.materials.new(mat_name)
         mat.use_nodes = False

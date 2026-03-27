@@ -78,6 +78,11 @@ class ParallelepipedSCPSyncExtension:
         if not obj.get("af_parallelepiped_vert_handle"):
             return False, False, None
 
+        # Inverse authoring for control points must happen only during direct
+        # user translate intent. Ignore depsgraph churn from regular sync.
+        if not sync_manager._is_user_translate_active():
+            return True, False, None
+
         scp_id = obj.get("af_scp_id")
         vert_index = int(obj.get("af_parallelepiped_vert_index", -1))
         scp_prop = sync_manager._get_scp_prop_by_id(root, scp_id)
@@ -104,7 +109,7 @@ class ParallelepipedSCPSyncExtension:
             scp_prop.parallelepiped_points[vert_index].co[1],
             scp_prop.parallelepiped_points[vert_index].co[2],
         ))
-        if (local - old).length_squared <= 1e-14:
+        if (local - old).length_squared <= 1e-10:
             return True, False, None
 
         scp_prop.parallelepiped_points[vert_index].co = (local.x, local.y, local.z)
