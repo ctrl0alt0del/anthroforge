@@ -27,7 +27,17 @@ class SCPRegistry:
                 raw = (scp_prop.attach_param or "").strip()
                 if raw:
                     try:
-                        param = json.loads(raw)
+                        parsed = json.loads(raw)
+                        if isinstance(parsed, dict):
+                            mode = parsed.get("mode")
+                            if mode == "surface_frame_v1":
+                                param = parsed.get("parent_param", 0.0)
+                            elif mode == "mesh_anchor":
+                                param = parsed.get("parent_param", 0.0)
+                            else:
+                                param = parsed
+                        else:
+                            param = parsed
                     except json.JSONDecodeError:
                         param = 0.0
                 else:

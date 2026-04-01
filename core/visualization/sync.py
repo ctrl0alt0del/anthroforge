@@ -193,6 +193,31 @@ class SCPSceneSync:
         except Exception:
             return ("legacy", 0.0)
 
+        def _vec3(value, fallback):
+            if isinstance(value, (list, tuple)) and len(value) == 3:
+                return Vector((float(value[0]), float(value[1]), float(value[2])))
+            return fallback.copy()
+
+        if isinstance(data, dict) and data.get("mode") == "surface_frame_v1":
+            return (
+                "surface_frame_v1",
+                {
+                    "parent_param": data.get("parent_param", 0.0),
+                    "child_origin_local": _vec3(
+                        data.get("child_origin_local", data.get("child_local_point")),
+                        Vector((0.0, 0.0, 0.0)),
+                    ),
+                    "child_tangent_local": _vec3(
+                        data.get("child_tangent_local"),
+                        Vector((1.0, 0.0, 0.0)),
+                    ),
+                    "child_normal_local": _vec3(
+                        data.get("child_normal_local"),
+                        Vector((0.0, 0.0, 1.0)),
+                    ),
+                },
+            )
+
         if isinstance(data, dict) and data.get("mode") == "mesh_anchor":
             p = data.get("parent_local_point")
             c = data.get("child_local_point")
@@ -218,6 +243,53 @@ class SCPSceneSync:
 
         return ("legacy", data)
 
+    def _json_safe_param(self, value):
+        if isinstance(value, dict):
+            out = {}
+            for k, v in value.items():
+                out[str(k)] = self._json_safe_param(v)
+            return out
+        if isinstance(value, Vector):
+            return [float(value.x), float(value.y), float(value.z)]
+        if isinstance(value, (list, tuple)):
+            return [self._json_safe_param(v) for v in value]
+        if isinstance(value, (int, float, str, bool)) or value is None:
+            return value
+        try:
+            return float(value)
+        except Exception:
+            return 0.0
+
+    def _encode_surface_frame(
+        self, parent_param, child_origin_local, child_tangent_local, child_normal_local, parent_local_point=None
+    ):
+        payload = {
+            "mode": "surface_frame_v1",
+            "parent_param": self._json_safe_param(parent_param),
+            "child_origin_local": [
+                float(child_origin_local.x),
+                float(child_origin_local.y),
+                float(child_origin_local.z),
+            ],
+            "child_tangent_local": [
+                float(child_tangent_local.x),
+                float(child_tangent_local.y),
+                float(child_tangent_local.z),
+            ],
+            "child_normal_local": [
+                float(child_normal_local.x),
+                float(child_normal_local.y),
+                float(child_normal_local.z),
+            ],
+        }
+        if parent_local_point is not None:
+            payload["parent_local_point"] = [
+                float(parent_local_point.x),
+                float(parent_local_point.y),
+                float(parent_local_point.z),
+            ]
+        return json.dumps(payload)
+
     def _encode_mesh_anchor(self, parent_local_point, child_local_point):
         return json.dumps(
             {
@@ -242,6 +314,62 @@ class SCPSceneSync:
         obj_origin = anchor_world - Vector((child_off.x, child_off.y, child_off.z))
         return Matrix.Translation(obj_origin) @ RS
 
+    def _safe_normalize(self, v, fallback):
+        out = v.copy()
+        if out.length <= 1e-8:
+            return fallback.copy()
+        out.normalize()
+        return out
+
+    def _frame_basis3(self, tangent, normal):
+        t = self._safe_normalize(tangent, Vector((1.0, 0.0, 0.0)))
+        n = normal - t * t.dot(normal)
+        n = self._safe_normalize(n, Vector((0.0, 0.0, 1.0)))
+        if abs(t.dot(n)) > 0.999:
+            n = self._safe_normalize(t.cross(Vector((0.0, 1.0, 0.0))), Vector((0.0, 0.0, 1.0)))
+        b = self._safe_normalize(n.cross(t), Vector((0.0, 1.0, 0.0)))
+        n = self._safe_normalize(t.cross(b), Vector((0.0, 0.0, 1.0)))
+        return Matrix((t, b, n)).transposed()
+
+    def _nearest_parent_param(self, parent_scp, parent_proxy, target_world):
+        params = parent_scp.shape.get_attach_params() or [0.0]
+        best_param = params[0]
+        best_d2 = None
+        for p in params:
+            lp = parent_scp.shape.compute_local_point(p)
+            wp = parent_proxy.matrix_world @ lp
+            d2 = (wp - target_world).length_squared
+            if best_d2 is None or d2 < best_d2:
+                best_d2 = d2
+                best_param = p
+        return best_param
+
+    def _world_matrix_from_surface_frame(self, scp, parent_scp, parent_proxy, payload):
+        parent_param = payload.get("parent_param", 0.0)
+        child_origin_local = payload.get("child_origin_local", Vector((0.0, 0.0, 0.0)))
+        child_tangent_local = payload.get("child_tangent_local", Vector((1.0, 0.0, 0.0)))
+        child_normal_local = payload.get("child_normal_local", Vector((0.0, 0.0, 1.0)))
+
+        p_origin_local, p_tangent_local, p_normal_local = parent_scp.shape.sample_attachment_frame_local(parent_param)
+        mw = parent_proxy.matrix_world
+        mw3 = mw.to_3x3()
+        p_origin_world = mw @ p_origin_local
+        p_tangent_world = mw3 @ p_tangent_local
+        p_normal_world = mw3 @ p_normal_local
+
+        parent_basis = self._frame_basis3(p_tangent_world, p_normal_world)
+        child_basis_local = self._frame_basis3(child_tangent_local, child_normal_local)
+        attach_rot = parent_basis @ child_basis_local.inverted()
+        final_rot = attach_rot @ scp.local_rotation
+
+        sx, sy, sz = float(scp.local_scale.x), float(scp.local_scale.y), float(scp.local_scale.z)
+        child_off_world = final_rot @ (Matrix.Diagonal((sx, sy, sz)) @ child_origin_local)
+        obj_origin = p_origin_world - child_off_world
+
+        out = final_rot.to_4x4()
+        out.translation = obj_origin
+        return out
+
     def _compute_visual_world_matrix(self, scp, runtime_registry, root, scene):
         if scp.attachment is None:
             return scp.get_world_matrix(runtime_registry)
@@ -251,6 +379,13 @@ class SCPSceneSync:
             return scp.get_world_matrix(runtime_registry)
 
         mode, payload = self._decode_attach_param(scp_prop.attach_param)
+        if mode == "surface_frame_v1":
+            parent_proxy = self._find_proxy_in_scene(scene, root.name, scp.attachment.parent_id)
+            parent_scp = runtime_registry.get(scp.attachment.parent_id)
+            if parent_proxy and parent_scp:
+                return self._world_matrix_from_surface_frame(
+                    scp, parent_scp, parent_proxy, payload
+                )
         if mode == "mesh_anchor":
             parent_proxy = self._find_proxy_in_scene(scene, root.name, scp.attachment.parent_id)
             if parent_proxy:
@@ -363,21 +498,30 @@ class SCPSceneSync:
                 return False, None
 
             child_world_loc = proxy_obj.matrix_world.to_translation()
-            parent_local_point = self._nearest_mesh_point_local(parent_proxy, child_world_loc, depsgraph)
-            if parent_local_point is None:
-                return False, None
-
+            parent_param = self._nearest_parent_param(parent, parent_proxy, child_world_loc)
+            parent_local_point, _pt, _pn = parent.shape.sample_attachment_frame_local(parent_param)
             anchor_world = parent_proxy.matrix_world @ parent_local_point
-            child_local_point = self._nearest_mesh_point_local(proxy_obj, anchor_world, depsgraph)
-            if child_local_point is None:
-                child_local_point = Vector((0.0, 0.0, 0.0))
 
-            scp_prop.attach_param = self._encode_mesh_anchor(parent_local_point, child_local_point)
+            child_origin_local = self._nearest_mesh_point_local(proxy_obj, anchor_world, depsgraph)
+            if child_origin_local is None:
+                child_origin_local = Vector((0.0, 0.0, 0.0))
 
+            mode, payload = self._decode_attach_param(scp_prop.attach_param)
+            if mode == "surface_frame_v1":
+                child_tangent_local = payload.get("child_tangent_local", Vector((1.0, 0.0, 0.0)))
+                child_normal_local = payload.get("child_normal_local", Vector((0.0, 0.0, 1.0)))
+            else:
+                child_tangent_local = Vector((1.0, 0.0, 0.0))
+                child_normal_local = Vector((0.0, 0.0, 1.0))
+
+            scp_prop.attach_param = self._encode_surface_frame(
+                parent_param=parent_param,
+                child_origin_local=child_origin_local,
+                child_tangent_local=child_tangent_local,
+                child_normal_local=child_normal_local,
+                parent_local_point=parent_local_point,
+            )
             scp_prop.local_origin = (0.0, 0.0, 0.0)
-            _loc, rot, scale = proxy_obj.matrix_world.decompose()
-            scp_prop.local_rotation = (rot.w, rot.x, rot.y, rot.z)
-            scp_prop.local_scale = (scale.x, scale.y, scale.z)
             return True, scp_id
 
         local_matrix = proxy_obj.matrix_world

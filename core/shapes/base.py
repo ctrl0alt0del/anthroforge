@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from mathutils import Matrix
+from mathutils import Matrix, Vector
 
 
 class ShapeStrategy(ABC):
@@ -47,6 +47,27 @@ class ShapeStrategy(ABC):
     @abstractmethod
     def compute_local_point(self, param):
         pass
+
+    def sample_attachment_frame_local(self, param):
+        """
+        Returns (origin, tangent, normal) in local space.
+        Subclasses should override for higher-quality frames.
+        """
+        origin = self.compute_local_point(param)
+        normal = origin.copy()
+        if normal.length <= 1e-8:
+            normal = Vector((0.0, 0.0, 1.0))
+        else:
+            normal.normalize()
+
+        tangent = normal.cross(Vector((0.0, 0.0, 1.0)))
+        if tangent.length <= 1e-8:
+            tangent = normal.cross(Vector((0.0, 1.0, 0.0)))
+        if tangent.length <= 1e-8:
+            tangent = Vector((1.0, 0.0, 0.0))
+        else:
+            tangent.normalize()
+        return origin, tangent, normal
 
     def compute_world_point(self, param, scp_matrix: Matrix):
         return scp_matrix @ self.compute_local_point(param)

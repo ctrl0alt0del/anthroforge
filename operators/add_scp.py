@@ -51,12 +51,17 @@ class AF_OT_AddSCP(bpy.types.Operator):
                 first_param = params[0] if params else 0.0
                 p = parent_scp.shape.compute_local_point(first_param)
                 default_local = (float(p.x), float(p.y), float(p.z))
+            else:
+                first_param = 0.0
 
             new_scp.attach_param = json.dumps(
                 {
-                    "mode": "mesh_anchor",
-                    "parent_local_point": list(default_local),
-                    "child_local_point": [0.0, 0.0, 0.0],
+                    "mode": "surface_frame_v1",
+                    "parent_param": first_param,
+                    "parent_local_point": list(default_local),  # legacy fallback hint
+                    "child_origin_local": [0.0, 0.0, 0.0],
+                    "child_tangent_local": [1.0, 0.0, 0.0],
+                    "child_normal_local": [0.0, 0.0, 1.0],
                 }
             )
         else:

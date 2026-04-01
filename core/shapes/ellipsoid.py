@@ -276,6 +276,48 @@ class EllipsoidShape(ShapeStrategy):
             p = self._CLIP.project_to_boundary(p, self)
         return self.apply_point_deformers(p)
 
+    def sample_attachment_frame_local(self, param):
+        try:
+            theta, phi = param
+            theta = float(theta)
+            phi = float(phi)
+        except Exception:
+            theta = 0.0
+            phi = math.pi * 0.5
+
+        base = self._compute_base_local_point(theta, phi)
+        if not self._CLIP.is_kept(base, self):
+            base = self._CLIP.project_to_boundary(base, self)
+        origin = self.apply_point_deformers(base.copy())
+
+        rx, ry, rz = self.radii
+        nx = (base.x / max(1e-8, rx * rx))
+        ny = (base.y / max(1e-8, ry * ry))
+        nz = (base.z / max(1e-8, rz * rz))
+        normal = self.apply_point_deformers(Vector((nx, ny, nz)))
+        if normal.length <= 1e-8:
+            normal = origin.copy()
+        if normal.length <= 1e-8:
+            normal = Vector((0.0, 0.0, 1.0))
+        else:
+            normal.normalize()
+
+        dtheta = Vector((
+            -rx * math.sin(phi) * math.sin(theta),
+            ry * math.sin(phi) * math.cos(theta),
+            0.0,
+        ))
+        tangent = self.apply_point_deformers(dtheta)
+        if tangent.length <= 1e-8:
+            tangent = normal.cross(Vector((0.0, 0.0, 1.0)))
+        if tangent.length <= 1e-8:
+            tangent = normal.cross(Vector((0.0, 1.0, 0.0)))
+        if tangent.length <= 1e-8:
+            tangent = Vector((1.0, 0.0, 0.0))
+        else:
+            tangent.normalize()
+        return origin, tangent, normal
+
     def ensure_proxy_object(self, obj):
         """
         Build ellipsoid geometry in mesh data (baked radii),

@@ -130,6 +130,45 @@ class MeshAssetShape(ShapeStrategy):
         idx = max(0, min(len(self._cached_verts) - 1, idx))
         return self.apply_point_deformers(self._cached_verts[idx].copy())
 
+    def sample_attachment_frame_local(self, param):
+        origin = self.compute_local_point(param)
+        self._ensure_cached_verts()
+        if len(self._cached_verts) < 2:
+            return origin, Vector((1.0, 0.0, 0.0)), Vector((0.0, 0.0, 1.0))
+
+        try:
+            idx = int(param)
+        except Exception:
+            idx = 0
+        idx = max(0, min(len(self._cached_verts) - 1, idx))
+        j = (idx + 1) % len(self._cached_verts)
+        k = (idx + 2) % len(self._cached_verts)
+        pj = self.apply_point_deformers(self._cached_verts[j].copy())
+        pk = self.apply_point_deformers(self._cached_verts[k].copy())
+
+        tangent = pj - origin
+        if tangent.length <= 1e-8:
+            tangent = Vector((1.0, 0.0, 0.0))
+        else:
+            tangent.normalize()
+
+        normal = tangent.cross(pk - origin)
+        if normal.length <= 1e-8:
+            center = Vector((0.0, 0.0, 0.0))
+            for v in self._cached_verts:
+                center += v
+            center /= max(1, len(self._cached_verts))
+            normal = origin - center
+        if normal.length <= 1e-8:
+            normal = tangent.cross(Vector((0.0, 0.0, 1.0)))
+        if normal.length <= 1e-8:
+            normal = tangent.cross(Vector((0.0, 1.0, 0.0)))
+        if normal.length <= 1e-8:
+            normal = Vector((0.0, 0.0, 1.0))
+        else:
+            normal.normalize()
+        return origin, tangent, normal
+
     def ensure_proxy_object(self, obj):
         if obj.type != "MESH":
             return

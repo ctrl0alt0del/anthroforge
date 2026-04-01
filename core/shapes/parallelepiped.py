@@ -101,6 +101,7 @@ class ParallelepipedShape(ShapeStrategy):
 
     _BEND = _BendDeformer()
     _RES = _ResolutionDeformer()
+    _SURFACE_FACES = ("X_MIN", "X_MAX", "Y_MIN", "Y_MAX", "Z_MIN", "Z_MAX")
 
     def __init__(
         self,
@@ -264,10 +265,70 @@ class ParallelepipedShape(ShapeStrategy):
             row.label(text=f"V{i}")
             row.prop(p, "co", text="")
 
+    def _uvw_from_surface_param(self, param):
+        if not isinstance(param, dict):
+            return None
+        if str(param.get("mode", "")) != "surface_uv":
+            return None
+
+        face = str(param.get("face", "X_MIN"))
+        su = max(0.0, min(1.0, float(param.get("u", 0.5))))
+        sv = max(0.0, min(1.0, float(param.get("v", 0.5))))
+
+        if face == "X_MIN":
+            return 0.0, su, sv
+        if face == "X_MAX":
+            return 1.0, su, sv
+        if face == "Y_MIN":
+            return su, 0.0, sv
+        if face == "Y_MAX":
+            return su, 1.0, sv
+        if face == "Z_MIN":
+            return su, sv, 0.0
+        if face == "Z_MAX":
+            return su, sv, 1.0
+        return None
+
+    def _surface_point(self, face, su, sv):
+        if face == "X_MIN":
+            p = self._trilinear_point(0.0, su, sv)
+        elif face == "X_MAX":
+            p = self._trilinear_point(1.0, su, sv)
+        elif face == "Y_MIN":
+            p = self._trilinear_point(su, 0.0, sv)
+        elif face == "Y_MAX":
+            p = self._trilinear_point(su, 1.0, sv)
+        elif face == "Z_MIN":
+            p = self._trilinear_point(su, sv, 0.0)
+        else:
+            p = self._trilinear_point(su, sv, 1.0)
+        return self.apply_point_deformers(p)
+
     def get_attach_params(self):
-        return list(range(len(self.points)))
+        # Dense surface samples to avoid corner-only snapping.
+        grid = max(6, int(self.resolution) * 2)
+        params = []
+        for face in self._SURFACE_FACES:
+            for i in range(grid + 1):
+                for j in range(grid + 1):
+                    params.append(
+                        {
+                            "mode": "surface_uv",
+                            "face": face,
+                            "u": i / float(grid),
+                            "v": j / float(grid),
+                        }
+                    )
+        # Keep legacy vertex params for backwards compatibility.
+        params.extend(list(range(len(self.points))))
+        return params
 
     def compute_local_point(self, param):
+        uvw = self._uvw_from_surface_param(param)
+        if uvw is not None:
+            u, v, w = uvw
+            return self.apply_point_deformers(self._trilinear_point(u, v, w))
+
         try:
             idx = int(param)
         except Exception:
@@ -276,6 +337,66 @@ class ParallelepipedShape(ShapeStrategy):
             return Vector((0.0, 0.0, 0.0))
         idx = max(0, min(len(self.points) - 1, idx))
         return self.apply_point_deformers(self.points[idx].copy())
+
+    def sample_attachment_frame_local(self, param):
+        if isinstance(param, dict) and str(param.get("mode", "")) == "surface_uv":
+            face = str(param.get("face", "X_MIN"))
+            su = max(0.0, min(1.0, float(param.get("u", 0.5))))
+            sv = max(0.0, min(1.0, float(param.get("v", 0.5))))
+            eps = 0.02
+
+            origin = self._surface_point(face, su, sv)
+            p_u = self._surface_point(face, min(1.0, su + eps), sv)
+            p_v = self._surface_point(face, su, min(1.0, sv + eps))
+
+            tangent = p_u - origin
+            if tangent.length <= 1e-8:
+                tangent = Vector((1.0, 0.0, 0.0))
+            else:
+                tangent.normalize()
+
+            normal = tangent.cross(p_v - origin)
+            if normal.length <= 1e-8:
+                normal = tangent.cross(Vector((0.0, 0.0, 1.0)))
+            if normal.length <= 1e-8:
+                normal = tangent.cross(Vector((0.0, 1.0, 0.0)))
+            if normal.length <= 1e-8:
+                normal = Vector((0.0, 0.0, 1.0))
+            else:
+                normal.normalize()
+            return origin, tangent, normal
+
+        origin = self.compute_local_point(param)
+        if not self.points:
+            return origin, Vector((1.0, 0.0, 0.0)), Vector((0.0, 0.0, 1.0))
+
+        try:
+            idx = int(param)
+        except Exception:
+            idx = 0
+        idx = max(0, min(len(self.points) - 1, idx))
+
+        j = (idx + 1) % len(self.points)
+        k = (idx + 2) % len(self.points)
+        pj = self.apply_point_deformers(self.points[j].copy())
+        pk = self.apply_point_deformers(self.points[k].copy())
+
+        tangent = pj - origin
+        if tangent.length <= 1e-8:
+            tangent = Vector((1.0, 0.0, 0.0))
+        else:
+            tangent.normalize()
+
+        normal = tangent.cross(pk - origin)
+        if normal.length <= 1e-8:
+            normal = tangent.cross(Vector((0.0, 0.0, 1.0)))
+        if normal.length <= 1e-8:
+            normal = tangent.cross(Vector((0.0, 1.0, 0.0)))
+        if normal.length <= 1e-8:
+            normal = Vector((0.0, 0.0, 1.0))
+        else:
+            normal.normalize()
+        return origin, tangent, normal
 
     def unbend_local_point(self, p):
         # Backward-compatible alias used by existing sync code.

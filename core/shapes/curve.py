@@ -84,6 +84,35 @@ class CurveShape(ShapeStrategy):
         a = u - i
         return self.apply_point_deformers(self.points[i].lerp(self.points[i + 1], a))
 
+    def sample_attachment_frame_local(self, t):
+        origin = self.compute_local_point(t)
+        if len(self.points) < 2:
+            return origin, Vector((1.0, 0.0, 0.0)), Vector((0.0, 0.0, 1.0))
+
+        t = max(0.0, min(1.0, float(t)))
+        u = t * self.segments
+        i = int(u)
+        if i >= self.segments:
+            i = self.segments - 1
+        i = max(0, min(len(self.points) - 2, i))
+
+        p0 = self.apply_point_deformers(self.points[i].copy())
+        p1 = self.apply_point_deformers(self.points[i + 1].copy())
+        tangent = (p1 - p0)
+        if tangent.length <= 1e-8:
+            tangent = Vector((1.0, 0.0, 0.0))
+        else:
+            tangent.normalize()
+
+        normal = tangent.cross(Vector((0.0, 0.0, 1.0)))
+        if normal.length <= 1e-8:
+            normal = tangent.cross(Vector((0.0, 1.0, 0.0)))
+        if normal.length <= 1e-8:
+            normal = Vector((0.0, 0.0, 1.0))
+        else:
+            normal.normalize()
+        return origin, tangent, normal
+
     def ensure_proxy_object(self, obj):
         if obj.type != "CURVE":
             curve_data = bpy.data.curves.new(f"{obj.name}_curve", type="CURVE")
