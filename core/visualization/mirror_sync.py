@@ -203,9 +203,16 @@ class AFMirrorSync:
 
             dirty = self._collect_dirty_hints(root, depsgraph)
             if dirty is None:
-                sync_all(root=root, scene=scene, bake=False)
+                sync_all(root=root, scene=scene, bake=False, source="depsgraph", event_type="TRANSFORM")
             else:
-                sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty, bake=False)
+                sync_from_dirty_hints(
+                    root=root,
+                    scene=scene,
+                    dirty_hints=dirty,
+                    bake=False,
+                    source="depsgraph",
+                    event_type="TRANSFORM",
+                )
 
 
 _MIRROR_SYNC = None

@@ -155,4 +155,10 @@ def on_depsgraph_update(sync, scene, depsgraph):
     if changed_blob_ids:
         from .sync_runner import sync_from_dirty_hints
 
-        sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("BLOB", changed_blob_ids))
+        sync_from_dirty_hints(
+            root=root,
+            scene=scene,
+            dirty_hints=dirty_hints_for("BLOB", changed_blob_ids),
+            source="depsgraph",
+            event_type="TRANSFORM",
+        )

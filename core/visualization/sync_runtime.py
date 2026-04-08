@@ -3,6 +3,7 @@ from mathutils import Matrix, Vector
 
 from ..attachment_codec import parse_scp_attach_param, encode_surface_frame, encode_scp_mesh_anchor
 from ..deps.dirty_hints import dirty_hints_for
+from ..deps.gates import allow_writeback
 from ..registry import SCPRegistry
 from ..utils import get_af_root
 from .scp_sync_helpers import frame_basis3
@@ -84,8 +85,19 @@ def _get_child_surface_frame(payload):
     return tangent, normal
 
 
-def _write_parented_transform(sync, runtime, scp_prop, proxy_obj, scene, depsgraph):
-    if not sync._is_user_translate_active():
+def _write_parented_transform(sync, root, runtime, scp_prop, proxy_obj, scene, depsgraph):
+    if not allow_writeback(
+        root=root,
+        scene=scene,
+        source="depsgraph",
+        event_type="TRANSFORM",
+        entity_type="SCP",
+        entity_id=scp_prop.id,
+        payload={
+            "require_user_transform": "TRANSLATE",
+            "is_user_transform_active": lambda _req: bool(sync._is_user_translate_active()),
+        },
+    ):
         return False, None
     parent = runtime.registry.get(scp_prop.parent_id)
     child = runtime.registry.get(scp_prop.id)
@@ -158,7 +170,7 @@ def write_proxy_transform_to_data(sync, root, proxy_obj, scene, depsgraph):
     runtime.build()
 
     if scp_prop.parent_id:
-        return _write_parented_transform(sync, runtime, scp_prop, proxy_obj, scene, depsgraph)
+        return _write_parented_transform(sync, root, runtime, scp_prop, proxy_obj, scene, depsgraph)
     return _write_root_transform(scp_prop, proxy_obj)
 
 
@@ -176,9 +188,15 @@ def _handle_active_switch(sync, root, scene):
     from .sync_runner import sync_all, sync_from_dirty_hints
 
     if changed_ids:
-        sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("SCP", changed_ids))
+        sync_from_dirty_hints(
+            root=root,
+            scene=scene,
+            dirty_hints=dirty_hints_for("SCP", changed_ids),
+            source="depsgraph",
+            event_type="SELECTION",
+        )
     else:
-        sync_all(root=root, scene=scene, bake=False)
+        sync_all(root=root, scene=scene, bake=False, source="depsgraph", event_type="SELECTION")
 
 
 def _is_relevant_proxy_update(root, vis_col, obj):
@@ -201,7 +219,21 @@ def _handle_extension_updates(sync, root, scene, vis_col, obj, depsgraph, change
 
 
 def _handle_proxy_transform_update(sync, root, scene, obj, depsgraph, changed_ids):
-    if not obj.get("af_proxy") or obj.get("af_mirror_proxy") or sync._is_synced_matrix(obj):
+    if not obj.get("af_proxy") or obj.get("af_mirror_proxy"):
+        return False
+    if not allow_writeback(
+        root=root,
+        scene=scene,
+        source="depsgraph",
+        event_type="TRANSFORM",
+        entity_type="SCP",
+        entity_id=str(obj.get("af_scp_id") or ""),
+        payload={
+            "check_synced_matrix": True,
+            "obj": obj,
+            "is_synced_matrix_fn": lambda o: bool(sync._is_synced_matrix(o)),
+        },
+    ):
         return False
     did, sid = sync._write_proxy_transform_to_data(root, obj, scene, depsgraph)
     if did and sid:
@@ -247,4 +279,10 @@ def on_depsgraph_update(sync, scene, depsgraph):
     if changed and changed_scp_ids:
         from .sync_runner import sync_from_dirty_hints
 
-        sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("SCP", changed_scp_ids))
+        sync_from_dirty_hints(
+            root=root,
+            scene=scene,
+            dirty_hints=dirty_hints_for("SCP", changed_scp_ids),
+            source="depsgraph",
+            event_type="TRANSFORM",
+        )

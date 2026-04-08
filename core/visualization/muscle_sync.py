@@ -257,6 +257,8 @@ class MuscleSceneSync:
                 root=root,
                 scene=scene,
                 dirty_hints=dirty_hints_for("MUSCLE", changed_muscle_ids),
+                source="depsgraph",
+                event_type="TRANSFORM",
             )
 
 

@@ -2,6 +2,13 @@ from collections import OrderedDict
 
 from .runtime_graph import RuntimeGraph, tarjan_scc
 from .adapters import build_runtime_graph, get_registered_entity_types
+from .gates import (
+    GateContext,
+    evaluate_gates,
+    PHASE_PRE_INGEST,
+    PHASE_PRE_CONSTRAINT,
+    PHASE_PRE_SYNC,
+)
 from ..constraints.scp_constraints import (
     evaluate_scp_constraints_runtime,
     apply_scp_input_write,
@@ -100,11 +107,35 @@ def _update_delayed_writes(new_delayed):
     _DELAYED_WRITES.update(new_delayed)
 
 
-def _apply_constraints(root, dirty, is_full, entity_sets, delayed_changed_scps, adjacency, scc_idx, scc_sizes):
+def _apply_constraints(
+    root, scene, dirty, is_full, entity_sets, delayed_changed_scps, adjacency, scc_idx, scc_sizes, gate_meta=None
+):
+    gate_meta = gate_meta or {}
     scp_all = entity_sets.get("SCP", set())
     scp_dirty = dirty.get("SCP", set())
     changed_source_scps = set(scp_all) if is_full else set(scp_dirty)
     changed_source_scps |= delayed_changed_scps
+
+    g = evaluate_gates(
+        GateContext(
+            phase=PHASE_PRE_CONSTRAINT,
+            root=root,
+            scene=scene,
+            source=str(gate_meta.get("source", "unknown")),
+            event_type=str(gate_meta.get("event_type", "UPDATE")),
+            entity_type="SCP",
+            entity_ids=changed_source_scps,
+            payload=dict(gate_meta.get("payload", {}) or {}),
+        )
+    )
+    if not g.allow:
+        return set()
+    if g.filtered_ids is not None:
+        changed_source_scps = set(g.filtered_ids)
+
+    if not changed_source_scps:
+        return set()
+
     new_delayed = {}
 
     def delayed_writer(etype, eid, port, value):
@@ -130,12 +161,29 @@ def _apply_constraints(root, dirty, is_full, entity_sets, delayed_changed_scps, 
     return changed_dest_scps
 
 
-def _run_visual_sync(root, scene, is_full, impacted, bake):
+def _run_visual_sync(root, scene, is_full, impacted, bake, gate_meta=None):
+    gate_meta = gate_meta or {}
     for et in get_registered_entity_types():
         handler = _ENTITY_SYNC_HANDLERS.get(et)
         if handler is None:
             continue
         target_ids = set(impacted.get(et, set()) or set())
+        g = evaluate_gates(
+            GateContext(
+                phase=PHASE_PRE_SYNC,
+                root=root,
+                scene=scene,
+                source=str(gate_meta.get("source", "unknown")),
+                event_type=str(gate_meta.get("event_type", "UPDATE")),
+                entity_type=et,
+                entity_ids=target_ids,
+                payload=dict(gate_meta.get("payload", {}) or {}),
+            )
+        )
+        if not g.allow:
+            continue
+        if g.filtered_ids is not None:
+            target_ids = set(g.filtered_ids)
         if is_full or target_ids:
             handler(root=root, scene=scene, is_full=is_full, target_ids=target_ids, bake=bake)
 
@@ -143,7 +191,8 @@ def _run_visual_sync(root, scene, is_full, impacted, bake):
         handler(root=root, scene=scene, is_full=is_full, impacted=impacted, bake=bake)
 
 
-def _build_runtime_context(root, dirty_hints):
+def _build_runtime_context(root, scene, dirty_hints, gate_meta=None):
+    gate_meta = gate_meta or {}
     delayed_changed_scps = _apply_delayed_queue(root)
     graph = RuntimeGraph()
     entity_sets = build_runtime_graph(root, graph)
@@ -152,6 +201,32 @@ def _build_runtime_context(root, dirty_hints):
     dirty, is_full = _normalize_dirty_hints(entity_sets, dirty_hints)
     if "SCP" in dirty:
         dirty["SCP"] |= delayed_changed_scps
+
+    all_dirty_ids = set()
+    for ids in dirty.values():
+        all_dirty_ids |= set(ids or set())
+    g = evaluate_gates(
+        GateContext(
+            phase=PHASE_PRE_INGEST,
+            root=root,
+            scene=scene,
+            source=str(gate_meta.get("source", "unknown")),
+            event_type=str(gate_meta.get("event_type", "UPDATE")),
+            entity_type="*",
+            entity_ids=all_dirty_ids,
+            payload=dict(gate_meta.get("payload", {}) or {}),
+        )
+    )
+    if not g.allow:
+        for et in dirty.keys():
+            dirty[et] = set()
+        is_full = False
+    elif g.filtered_ids is not None:
+        allowed = set(g.filtered_ids)
+        for et in dirty.keys():
+            dirty[et] &= allowed
+        is_full = False
+
     return delayed_changed_scps, graph, entity_sets, adjacency, scc_idx, scc_sizes, dirty, is_full
 
 
@@ -172,13 +247,14 @@ def _merge_constraint_impacts(graph, impacted_sets, changed_dest_scps):
         impacted_sets[et] |= extra.get(et, set())
 
 
-def run_dependency_runtime(root, scene, dirty_hints=None, bake=False):
+def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=None):
     delayed_changed_scps, graph, entity_sets, adjacency, scc_idx, scc_sizes, dirty, is_full = _build_runtime_context(
-        root, dirty_hints
+        root, scene, dirty_hints, gate_meta=gate_meta
     )
     impacted_sets = _compute_impacted_sets(graph, dirty)
     changed_dest_scps = _apply_constraints(
         root=root,
+        scene=scene,
         dirty=dirty,
         is_full=is_full,
         entity_sets=entity_sets,
@@ -186,9 +262,10 @@ def run_dependency_runtime(root, scene, dirty_hints=None, bake=False):
         adjacency=adjacency,
         scc_idx=scc_idx,
         scc_sizes=scc_sizes,
+        gate_meta=gate_meta,
     )
     _merge_constraint_impacts(graph, impacted_sets, changed_dest_scps)
-    _run_visual_sync(root=root, scene=scene, is_full=is_full, impacted=impacted_sets, bake=bake)
+    _run_visual_sync(root=root, scene=scene, is_full=is_full, impacted=impacted_sets, bake=bake, gate_meta=gate_meta)
 
 
 def _sync_scp_handler(root, scene, is_full, target_ids, bake):

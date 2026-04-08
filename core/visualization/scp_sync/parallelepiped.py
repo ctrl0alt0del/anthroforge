@@ -1,5 +1,6 @@
 import bpy
 from mathutils import Vector
+from ...deps.gates import allow_writeback
 from ...shapes.registry import ShapeRegistry
 
 
@@ -77,7 +78,18 @@ class ParallelepipedSCPSyncExtension:
         if not obj.get("af_parallelepiped_vert_handle"):
             return False, False, None
 
-        if not sync_manager._is_user_translate_active():
+        if not allow_writeback(
+            root=root,
+            scene=scene,
+            source="depsgraph",
+            event_type="TRANSFORM",
+            entity_type="SCP",
+            entity_id=str(obj.get("af_scp_id") or ""),
+            payload={
+                "require_user_transform": "TRANSLATE",
+                "is_user_transform_active": lambda _req: bool(sync_manager._is_user_translate_active()),
+            },
+        ):
             return True, False, None
         scp_id = obj.get("af_scp_id")
         vert_index = int(obj.get("af_parallelepiped_vert_index", -1))
