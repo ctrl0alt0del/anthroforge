@@ -1,9 +1,11 @@
-from .runtime import (
-    run_dependency_runtime,
-    register_runtime_sync_handler,
-    register_post_sync_handler,
+from .runtime import run_dependency_runtime
+from .drivers import (
+    DependencyDriver,
+    DependencyRuntimeContext,
+    register_dependency_driver,
+    get_dependency_drivers,
+    get_registered_entity_types,
 )
-from .adapters import register_runtime_graph_builder, get_registered_entity_types
 from .dirty_hints import empty_dirty_hints, dirty_hints_for
 from .gates import (
     PHASE_PRE_INGEST,
@@ -19,10 +21,11 @@ from .gates import (
 
 __all__ = [
     "run_dependency_runtime",
-    "register_runtime_sync_handler",
-    "register_post_sync_handler",
-    "register_runtime_graph_builder",
     "get_registered_entity_types",
+    "DependencyDriver",
+    "DependencyRuntimeContext",
+    "register_dependency_driver",
+    "get_dependency_drivers",
     "empty_dirty_hints",
     "dirty_hints_for",
     "PHASE_PRE_INGEST",

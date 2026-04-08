@@ -1,7 +1,19 @@
-from collections import OrderedDict
-
 from .runtime_graph import RuntimeGraph, tarjan_scc
-from .adapters import build_runtime_graph, get_registered_entity_types
+from .drivers import (
+    DependencyRuntimeContext,
+    get_dependency_drivers,
+    get_registered_entity_types,
+    register_dependency_driver,
+)
+from .builtin_drivers import (
+    RuntimeGraphDriver,
+    SCPConstraintDriver,
+    SCPSyncDriver,
+    FiberSyncDriver,
+    MuscleSyncDriver,
+    BlobSyncDriver,
+    MirrorPostSyncDriver,
+)
 from .gates import (
     GateContext,
     evaluate_gates,
@@ -9,38 +21,6 @@ from .gates import (
     PHASE_PRE_CONSTRAINT,
     PHASE_PRE_SYNC,
 )
-from ..constraints.scp_constraints import (
-    evaluate_scp_constraints_runtime,
-    apply_scp_input_write,
-)
-from ..visualization.sync import register_sync
-from ..visualization.fiber_sync import register_fiber_sync
-from ..visualization.muscle_sync import register_muscle_sync
-from ..visualization.blob_sync import register_blob_sync
-from ..visualization.mirror_sync import register_mirror_sync
-
-
-_DELAYED_WRITES = {}
-_ENTITY_SYNC_HANDLERS = OrderedDict()
-_POST_SYNC_HANDLERS = []
-
-
-def register_runtime_sync_handler(entity_type, handler, replace=False):
-    et = str(entity_type or "").strip().upper()
-    if not et:
-        raise ValueError("entity_type is required")
-    if not callable(handler):
-        raise TypeError("handler must be callable")
-    if et in _ENTITY_SYNC_HANDLERS and not replace:
-        raise ValueError(f"sync handler already registered for {et}")
-    _ENTITY_SYNC_HANDLERS[et] = handler
-
-
-def register_post_sync_handler(handler):
-    if not callable(handler):
-        raise TypeError("handler must be callable")
-    _POST_SYNC_HANDLERS.append(handler)
-
 
 def _normalize_dirty_hints(entity_sets, dirty_hints):
     all_ids = {et: set(ids) for et, ids in entity_sets.items()}
@@ -70,22 +50,6 @@ def _compute_scc_index(adjacency):
     return scc_index, scc_sizes
 
 
-def _has_self_loop(adjacency, node):
-    return node in adjacency.get(node, set())
-
-
-def _apply_delayed_queue(root):
-    if not _DELAYED_WRITES:
-        return set()
-    changed_scps = set()
-    for (etype, eid, port), value in list(_DELAYED_WRITES.items()):
-        if etype == "SCP":
-            if apply_scp_input_write(root, eid, port, value):
-                changed_scps.add(eid)
-    _DELAYED_WRITES.clear()
-    return changed_scps
-
-
 def _dirty_start_nodes(dirty):
     starts = set()
     for et in dirty.keys():
@@ -102,72 +66,84 @@ def _impact_sets(impacted):
     return out
 
 
-def _update_delayed_writes(new_delayed):
-    _DELAYED_WRITES.clear()
-    _DELAYED_WRITES.update(new_delayed)
+def _merge_impacts(base, extra):
+    for et in set(base.keys()) | set(extra.keys()):
+        base.setdefault(et, set())
+        base[et] |= set(extra.get(et, set()) or set())
 
 
-def _apply_constraints(
-    root, scene, dirty, is_full, entity_sets, delayed_changed_scps, adjacency, scc_idx, scc_sizes, gate_meta=None
-):
+def _apply_constraint_drivers(root, scene, dirty, is_full, entity_sets, adjacency, scc_idx, scc_sizes, bake, gate_meta):
     gate_meta = gate_meta or {}
-    scp_all = entity_sets.get("SCP", set())
-    scp_dirty = dirty.get("SCP", set())
-    changed_source_scps = set(scp_all) if is_full else set(scp_dirty)
-    changed_source_scps |= delayed_changed_scps
+    extra_impacts = {et: set() for et in get_registered_entity_types()}
 
-    g = evaluate_gates(
-        GateContext(
-            phase=PHASE_PRE_CONSTRAINT,
+    for d in get_dependency_drivers():
+        etypes = tuple(d.entity_types() or tuple())
+        et = etypes[0] if len(etypes) == 1 else "*"
+
+        source_ids = set()
+        if et == "*":
+            for ids in dirty.values():
+                source_ids |= set(ids or set())
+        else:
+            source_ids = set(dirty.get(et, set()) or set())
+
+        g = evaluate_gates(
+            GateContext(
+                phase=PHASE_PRE_CONSTRAINT,
+                root=root,
+                scene=scene,
+                source=str(gate_meta.get("source", "unknown")),
+                event_type=str(gate_meta.get("event_type", "UPDATE")),
+                entity_type=et,
+                entity_ids=source_ids,
+                payload=dict(gate_meta.get("payload", {}) or {}),
+            )
+        )
+        if not g.allow:
+            continue
+
+        d_dirty = {k: set(v or set()) for k, v in dirty.items()}
+        if g.filtered_ids is not None:
+            allowed = set(g.filtered_ids)
+            for k in d_dirty.keys():
+                d_dirty[k] &= allowed
+
+        ctx = DependencyRuntimeContext(
             root=root,
             scene=scene,
-            source=str(gate_meta.get("source", "unknown")),
-            event_type=str(gate_meta.get("event_type", "UPDATE")),
-            entity_type="SCP",
-            entity_ids=changed_source_scps,
-            payload=dict(gate_meta.get("payload", {}) or {}),
+            dirty=d_dirty,
+            is_full=is_full,
+            entity_sets=entity_sets,
+            adjacency=adjacency,
+            scc_idx=scc_idx,
+            scc_sizes=scc_sizes,
+            gate_meta=dict(gate_meta or {}),
+            bake=bool(bake),
         )
-    )
-    if not g.allow:
-        return set()
-    if g.filtered_ids is not None:
-        changed_source_scps = set(g.filtered_ids)
+        out = d.apply_constraints(ctx) or {}
+        _merge_impacts(extra_impacts, out)
 
-    if not changed_source_scps:
-        return set()
-
-    new_delayed = {}
-
-    def delayed_writer(etype, eid, port, value):
-        new_delayed[(etype, eid, port)] = value
-
-    def is_cyclic_pair(src_id, dst_id):
-        src_node = ("SCP", src_id)
-        dst_node = ("SCP", dst_id)
-        if src_node not in scc_idx or dst_node not in scc_idx:
-            return False
-        if scc_idx[src_node] != scc_idx[dst_node]:
-            return False
-        size = scc_sizes.get(scc_idx[src_node], 1)
-        return size > 1 or _has_self_loop(adjacency, src_node)
-
-    changed_dest_scps = evaluate_scp_constraints_runtime(
-        root=root,
-        changed_source_ids=changed_source_scps,
-        is_cyclic_pair=is_cyclic_pair,
-        delayed_writer=delayed_writer,
-    )
-    _update_delayed_writes(new_delayed)
-    return changed_dest_scps
+    return extra_impacts
 
 
-def _run_visual_sync(root, scene, is_full, impacted, bake, gate_meta=None):
+def _run_sync_drivers(root, scene, is_full, impacted, bake, gate_meta):
     gate_meta = gate_meta or {}
-    for et in get_registered_entity_types():
-        handler = _ENTITY_SYNC_HANDLERS.get(et)
-        if handler is None:
-            continue
-        target_ids = set(impacted.get(et, set()) or set())
+    for d in get_dependency_drivers():
+        etypes = tuple(d.entity_types() or tuple())
+        if not etypes:
+            et = "*"
+            ids = set()
+            for vals in impacted.values():
+                ids |= set(vals or set())
+        elif len(etypes) == 1:
+            et = etypes[0]
+            ids = set(impacted.get(et, set()) or set())
+        else:
+            et = "*"
+            ids = set()
+            for t in etypes:
+                ids |= set(impacted.get(t, set()) or set())
+
         g = evaluate_gates(
             GateContext(
                 phase=PHASE_PRE_SYNC,
@@ -176,31 +152,48 @@ def _run_visual_sync(root, scene, is_full, impacted, bake, gate_meta=None):
                 source=str(gate_meta.get("source", "unknown")),
                 event_type=str(gate_meta.get("event_type", "UPDATE")),
                 entity_type=et,
-                entity_ids=target_ids,
+                entity_ids=ids,
                 payload=dict(gate_meta.get("payload", {}) or {}),
             )
         )
         if not g.allow:
             continue
-        if g.filtered_ids is not None:
-            target_ids = set(g.filtered_ids)
-        if is_full or target_ids:
-            handler(root=root, scene=scene, is_full=is_full, target_ids=target_ids, bake=bake)
 
-    for handler in _POST_SYNC_HANDLERS:
-        handler(root=root, scene=scene, is_full=is_full, impacted=impacted, bake=bake)
+        d_impacted = {k: set(v or set()) for k, v in impacted.items()}
+        d_is_full = bool(is_full)
+        if g.filtered_ids is not None:
+            allowed = set(g.filtered_ids)
+            for k in d_impacted.keys():
+                d_impacted[k] &= allowed
+            d_is_full = False
+
+        any_ids = any(bool(v) for v in d_impacted.values())
+        if d_is_full or any_ids:
+            d.sync(root=root, scene=scene, is_full=d_is_full, impacted=d_impacted, bake=bake)
+
+    for d in get_dependency_drivers():
+        d.post_sync(root=root, scene=scene, is_full=is_full, impacted=impacted, bake=bake)
 
 
 def _build_runtime_context(root, scene, dirty_hints, gate_meta=None):
     gate_meta = gate_meta or {}
-    delayed_changed_scps = _apply_delayed_queue(root)
+
     graph = RuntimeGraph()
-    entity_sets = build_runtime_graph(root, graph)
+    entity_sets = {et: set() for et in get_registered_entity_types()}
+    for d in get_dependency_drivers():
+        d.build_graph(root, graph, entity_sets)
+
     adjacency = graph.entity_adjacency()
     scc_idx, scc_sizes = _compute_scc_index(adjacency)
     dirty, is_full = _normalize_dirty_hints(entity_sets, dirty_hints)
-    if "SCP" in dirty:
-        dirty["SCP"] |= delayed_changed_scps
+
+    # Let drivers inject delayed/derived dirty inputs before ingest gating.
+    for d in get_dependency_drivers():
+        if hasattr(d, "inject_delayed_dirty"):
+            try:
+                d.inject_delayed_dirty(root, dirty)
+            except Exception:
+                continue
 
     all_dirty_ids = set()
     for ids in dirty.values():
@@ -227,7 +220,7 @@ def _build_runtime_context(root, scene, dirty_hints, gate_meta=None):
             dirty[et] &= allowed
         is_full = False
 
-    return delayed_changed_scps, graph, entity_sets, adjacency, scc_idx, scc_sizes, dirty, is_full
+    return graph, entity_sets, adjacency, scc_idx, scc_sizes, dirty, is_full
 
 
 def _compute_impacted_sets(graph, dirty):
@@ -237,71 +230,44 @@ def _compute_impacted_sets(graph, dirty):
     return _impact_sets(impacted)
 
 
-def _merge_constraint_impacts(graph, impacted_sets, changed_dest_scps):
-    if not changed_dest_scps:
-        return
-    impacted2 = graph.downstream_entities({("SCP", sid) for sid in changed_dest_scps})
-    impacted2 |= {("SCP", sid) for sid in changed_dest_scps}
-    extra = _impact_sets(impacted2)
-    for et in impacted_sets.keys():
-        impacted_sets[et] |= extra.get(et, set())
-
-
 def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=None):
-    delayed_changed_scps, graph, entity_sets, adjacency, scc_idx, scc_sizes, dirty, is_full = _build_runtime_context(
+    graph, entity_sets, adjacency, scc_idx, scc_sizes, dirty, is_full = _build_runtime_context(
         root, scene, dirty_hints, gate_meta=gate_meta
     )
+
     impacted_sets = _compute_impacted_sets(graph, dirty)
-    changed_dest_scps = _apply_constraints(
+
+    constraint_impacts = _apply_constraint_drivers(
         root=root,
         scene=scene,
         dirty=dirty,
         is_full=is_full,
         entity_sets=entity_sets,
-        delayed_changed_scps=delayed_changed_scps,
         adjacency=adjacency,
         scc_idx=scc_idx,
         scc_sizes=scc_sizes,
+        bake=bake,
         gate_meta=gate_meta,
     )
-    _merge_constraint_impacts(graph, impacted_sets, changed_dest_scps)
-    _run_visual_sync(root=root, scene=scene, is_full=is_full, impacted=impacted_sets, bake=bake, gate_meta=gate_meta)
+
+    if constraint_impacts:
+        starts = set()
+        for et, ids in constraint_impacts.items():
+            for eid in ids:
+                starts.add((et, eid))
+        if starts:
+            impacted2 = graph.downstream_entities(starts)
+            impacted2 |= starts
+            _merge_impacts(impacted_sets, _impact_sets(impacted2))
+
+    _run_sync_drivers(root=root, scene=scene, is_full=is_full, impacted=impacted_sets, bake=bake, gate_meta=gate_meta)
 
 
-def _sync_scp_handler(root, scene, is_full, target_ids, bake):
-    if is_full:
-        register_sync().sync_root_to_scene(root=root, scene=scene)
-    else:
-        register_sync().sync_root_to_scene(root=root, scene=scene, target_scp_ids=target_ids)
-
-
-def _sync_fiber_handler(root, scene, is_full, target_ids, bake):
-    if is_full:
-        register_fiber_sync().sync_root_to_scene(root=root, scene=scene, bake=bake)
-    else:
-        register_fiber_sync().sync_root_to_scene(root=root, scene=scene, bake=bake, target_fiber_ids=target_ids)
-
-
-def _sync_muscle_handler(root, scene, is_full, target_ids, bake):
-    if is_full:
-        register_muscle_sync().sync_root_to_scene(root=root, scene=scene)
-    else:
-        register_muscle_sync().sync_root_to_scene(root=root, scene=scene, target_muscle_ids=target_ids)
-
-
-def _sync_blob_handler(root, scene, is_full, target_ids, bake):
-    if is_full:
-        register_blob_sync().sync_root_to_scene(root=root, scene=scene)
-    else:
-        register_blob_sync().sync_root_to_scene(root=root, scene=scene, target_blob_ids=target_ids)
-
-
-def _sync_mirror_post_handler(root, scene, is_full, impacted, bake):
-    register_mirror_sync().sync_root_to_scene(root=root, scene=scene)
-
-
-register_runtime_sync_handler("SCP", _sync_scp_handler)
-register_runtime_sync_handler("FIBER", _sync_fiber_handler)
-register_runtime_sync_handler("MUSCLE", _sync_muscle_handler)
-register_runtime_sync_handler("BLOB", _sync_blob_handler)
-register_post_sync_handler(_sync_mirror_post_handler)
+# Register built-in drivers.
+register_dependency_driver(RuntimeGraphDriver(), replace=True)
+register_dependency_driver(SCPConstraintDriver(), replace=True)
+register_dependency_driver(SCPSyncDriver(), replace=True)
+register_dependency_driver(FiberSyncDriver(), replace=True)
+register_dependency_driver(MuscleSyncDriver(), replace=True)
+register_dependency_driver(BlobSyncDriver(), replace=True)
+register_dependency_driver(MirrorPostSyncDriver(), replace=True)

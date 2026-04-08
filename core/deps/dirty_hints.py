@@ -1,4 +1,4 @@
-from .adapters import get_registered_entity_types
+from .drivers import get_registered_entity_types
 
 
 def empty_dirty_hints():
@@ -11,4 +11,3 @@ def dirty_hints_for(entity_type, ids):
     if et in dirty:
         dirty[et] = set(ids or set())
     return dirty
-
