@@ -1,10 +1,11 @@
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
-from ..attachment_codec import parse_scp_attach_param, encode_surface_frame
+from ..attachment_codec import parse_scp_attach_param, encode_surface_frame, encode_scp_mesh_anchor
 from ..deps.dirty_hints import dirty_hints_for
 from ..registry import SCPRegistry
 from ..utils import get_af_root
+from .scp_sync_helpers import frame_basis3
 
 
 def _resolve_sync_inputs(root, scene):
@@ -91,14 +92,47 @@ def _write_parented_transform(sync, runtime, scp_prop, proxy_obj, scene, depsgra
     parent_proxy = sync._find_proxy_in_scene(scene, proxy_obj.get("af_root_name"), scp_prop.parent_id)
     if parent is None or child is None or parent_proxy is None:
         return False, None
-    child_world_loc = proxy_obj.matrix_world.to_translation()
-    parent_param = sync._nearest_parent_param(parent, parent_proxy, child_world_loc)
-    parent_local_point, _pt, _pn = parent.shape.sample_attachment_frame_local(parent_param)
-    anchor_world = parent_proxy.matrix_world @ parent_local_point
-    child_origin_local = sync._nearest_mesh_point_local(proxy_obj, anchor_world, depsgraph) or Vector((0.0, 0.0, 0.0))
     mode, payload = parse_scp_attach_param(scp_prop.attach_param)
-    tangent, normal = _get_child_surface_frame(payload if mode == "surface_frame_v1" else {})
-    scp_prop.attach_param = encode_surface_frame(parent_param, child_origin_local, tangent, normal)
+    obj_origin = proxy_obj.matrix_world.to_translation()
+    parent_param = sync._nearest_parent_param(parent, parent_proxy, obj_origin)
+
+    if mode == "mesh_anchor":
+        parent_local_point = parent.shape.compute_local_point(parent_param)
+        anchor_world = parent_proxy.matrix_world @ parent_local_point
+        rs = child.local_rotation.to_4x4() @ Matrix.Diagonal((*child.local_scale, 1.0))
+        off4 = rs.inverted_safe() @ Vector((anchor_world.x - obj_origin.x, anchor_world.y - obj_origin.y, anchor_world.z - obj_origin.z, 1.0))
+        child_local_point = Vector((off4.x, off4.y, off4.z))
+        scp_prop.attach_param = encode_scp_mesh_anchor(parent_local_point, child_local_point)
+    else:
+        child_tangent_local, child_normal_local = _get_child_surface_frame(payload)
+
+        p_origin_local, p_tangent_local, p_normal_local = parent.shape.sample_attachment_frame_local(parent_param)
+        mw = parent_proxy.matrix_world
+        mw3 = mw.to_3x3()
+        p_origin_world = mw @ p_origin_local
+        p_tangent_world = mw3 @ p_tangent_local
+        p_normal_world = mw3 @ p_normal_local
+
+        parent_basis = frame_basis3(p_tangent_world, p_normal_world)
+        child_basis_local = frame_basis3(child_tangent_local, child_normal_local)
+        attach_rot = parent_basis @ child_basis_local.inverted()
+        final_rot = attach_rot @ child.local_rotation
+
+        off_world = p_origin_world - obj_origin
+        off_local_scaled = final_rot.inverted() @ off_world
+
+        sx = max(1e-9, float(child.local_scale.x))
+        sy = max(1e-9, float(child.local_scale.y))
+        sz = max(1e-9, float(child.local_scale.z))
+        child_origin_local = Vector((off_local_scaled.x / sx, off_local_scaled.y / sy, off_local_scaled.z / sz))
+
+        scp_prop.attach_param = encode_surface_frame(
+            parent_param=parent_param,
+            child_origin_local=child_origin_local,
+            child_tangent_local=child_tangent_local,
+            child_normal_local=child_normal_local,
+        )
+
     scp_prop.local_origin = (0.0, 0.0, 0.0)
     return True, scp_prop.id
 
