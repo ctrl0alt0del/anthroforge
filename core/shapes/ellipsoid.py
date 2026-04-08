@@ -127,6 +127,11 @@ class EllipsoidShape(ShapeStrategy):
 
     @classmethod
     def register_scene_props(cls):
+        cls._register_base_scene_props()
+        cls._register_clip_scene_props()
+
+    @classmethod
+    def _register_base_scene_props(cls):
         bpy.types.Scene.af_new_ellipsoid_radii = bpy.props.FloatVectorProperty(
             name="Radii", size=3, default=(1.0, 1.0, 1.0), min=0.001, subtype="XYZ"
         )
@@ -136,6 +141,9 @@ class EllipsoidShape(ShapeStrategy):
         bpy.types.Scene.af_new_ellipsoid_clip_enabled = bpy.props.BoolProperty(
             name="Enable Clipping", default=False
         )
+
+    @classmethod
+    def _register_clip_scene_props(cls):
         bpy.types.Scene.af_new_ellipsoid_clip1_enabled = bpy.props.BoolProperty(
             name="Clip Plane 1", default=False
         )
@@ -277,46 +285,59 @@ class EllipsoidShape(ShapeStrategy):
         return self.apply_point_deformers(p)
 
     def sample_attachment_frame_local(self, param):
+        theta, phi = self._parse_attach_param(param)
+        base = self._attachment_base(theta, phi)
+        origin = self.apply_point_deformers(base.copy())
+        normal = self._stable_normal(base, origin)
+        tangent = self._stable_tangent(theta, phi, normal)
+        return origin, tangent, normal
+
+    def _parse_attach_param(self, param):
         try:
             theta, phi = param
-            theta = float(theta)
-            phi = float(phi)
+            return float(theta), float(phi)
         except Exception:
-            theta = 0.0
-            phi = math.pi * 0.5
+            return 0.0, math.pi * 0.5
 
+    def _attachment_base(self, theta, phi):
         base = self._compute_base_local_point(theta, phi)
-        if not self._CLIP.is_kept(base, self):
-            base = self._CLIP.project_to_boundary(base, self)
-        origin = self.apply_point_deformers(base.copy())
+        return base if self._CLIP.is_kept(base, self) else self._CLIP.project_to_boundary(base, self)
 
-        rx, ry, rz = self.radii
-        nx = (base.x / max(1e-8, rx * rx))
-        ny = (base.y / max(1e-8, ry * ry))
-        nz = (base.z / max(1e-8, rz * rz))
-        normal = self.apply_point_deformers(Vector((nx, ny, nz)))
+    def _stable_normal(self, base, origin):
+        normal = self._surface_normal(base)
         if normal.length <= 1e-8:
             normal = origin.copy()
         if normal.length <= 1e-8:
-            normal = Vector((0.0, 0.0, 1.0))
-        else:
-            normal.normalize()
+            return Vector((0.0, 0.0, 1.0))
+        normal.normalize()
+        return normal
 
-        dtheta = Vector((
-            -rx * math.sin(phi) * math.sin(theta),
-            ry * math.sin(phi) * math.cos(theta),
-            0.0,
-        ))
-        tangent = self.apply_point_deformers(dtheta)
+    def _stable_tangent(self, theta, phi, normal):
+        tangent = self._surface_tangent(theta, phi)
         if tangent.length <= 1e-8:
             tangent = normal.cross(Vector((0.0, 0.0, 1.0)))
         if tangent.length <= 1e-8:
             tangent = normal.cross(Vector((0.0, 1.0, 0.0)))
         if tangent.length <= 1e-8:
-            tangent = Vector((1.0, 0.0, 0.0))
-        else:
-            tangent.normalize()
-        return origin, tangent, normal
+            return Vector((1.0, 0.0, 0.0))
+        tangent.normalize()
+        return tangent
+
+    def _surface_normal(self, base):
+        rx, ry, rz = self.radii
+        nx = (base.x / max(1e-8, rx * rx))
+        ny = (base.y / max(1e-8, ry * ry))
+        nz = (base.z / max(1e-8, rz * rz))
+        return self.apply_point_deformers(Vector((nx, ny, nz)))
+
+    def _surface_tangent(self, theta, phi):
+        rx, ry, _rz = self.radii
+        dtheta = Vector((
+            -rx * math.sin(phi) * math.sin(theta),
+            ry * math.sin(phi) * math.cos(theta),
+            0.0,
+        ))
+        return self.apply_point_deformers(dtheta)
 
     def ensure_proxy_object(self, obj):
         """
@@ -328,10 +349,15 @@ class EllipsoidShape(ShapeStrategy):
 
         if obj.data is None:
             obj.data = bpy.data.meshes.new(f"{obj.name}_mesh")
-
         mesh = obj.data
-        rx, ry, rz = self.radii
+        bm = self._build_ellipsoid_bmesh()
+        self._apply_clip_planes(bm)
+        bm.to_mesh(mesh)
+        bm.free()
+        self._finalize_proxy_object(obj, mesh)
 
+    def _build_ellipsoid_bmesh(self):
+        rx, ry, rz = self.radii
         bm = bmesh.new()
         bmesh.ops.create_uvsphere(
             bm,
@@ -339,44 +365,40 @@ class EllipsoidShape(ShapeStrategy):
             v_segments=max(4, int(self.resolution)),
             radius=1.0,
         )
-        bmesh.ops.scale(
-            bm,
-            vec=(rx, ry, rz),
-            verts=bm.verts
-        )
+        bmesh.ops.scale(bm, vec=(rx, ry, rz), verts=bm.verts)
+        return bm
 
-        if bool(self.clip_enabled):
-            for n, off, keep_pos in self._CLIP._plane_defs(self):
-                plane_co = n * off
-                geom = list(bm.verts) + list(bm.edges) + list(bm.faces)
-                # True geometric clip: bisect + clear one side.
-                bmesh.ops.bisect_plane(
-                    bm,
-                    geom=geom,
-                    plane_co=plane_co,
-                    plane_no=n,
-                    clear_inner=bool(keep_pos),   # remove negative side
-                    clear_outer=not bool(keep_pos),  # remove positive side
-                    dist=1e-6,
-                )
-                # Close cross section(s) created by the cut.
-                boundary = [e for e in bm.edges if e.is_boundary]
-                if boundary:
-                    try:
-                        bmesh.ops.holes_fill(bm, edges=boundary, sides=0)
-                    except Exception:
-                        # Non-fatal: keep open section if fill fails.
-                        pass
-
-        bm.to_mesh(mesh)
-        bm.free()
+    def _finalize_proxy_object(self, obj, mesh):
         mesh.update()
-
         obj.display_type = "SOLID"
         obj.hide_render = False
-
-        # Keep transform scale neutral; SCP transform controls world scale
         obj.scale = (1.0, 1.0, 1.0)
+
+    def _apply_clip_planes(self, bm):
+        if not bool(self.clip_enabled):
+            return
+        for n, off, keep_pos in self._CLIP._plane_defs(self):
+            self._apply_single_clip_plane(bm, n, off, keep_pos)
+
+    def _apply_single_clip_plane(self, bm, n, off, keep_pos):
+        plane_co = n * off
+        geom = list(bm.verts) + list(bm.edges) + list(bm.faces)
+        bmesh.ops.bisect_plane(
+            bm,
+            geom=geom,
+            plane_co=plane_co,
+            plane_no=n,
+            clear_inner=bool(keep_pos),
+            clear_outer=not bool(keep_pos),
+            dist=1e-6,
+        )
+        boundary = [e for e in bm.edges if e.is_boundary]
+        if not boundary:
+            return
+        try:
+            bmesh.ops.holes_fill(bm, edges=boundary, sides=0)
+        except Exception:
+            pass
 
 
 ShapeRegistry.register(EllipsoidShape)

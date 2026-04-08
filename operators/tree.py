@@ -28,45 +28,44 @@ class AF_OT_SelectSCPInTree(bpy.types.Operator):
         self.extend = bool(event.shift)
         return self.execute(context)
 
+    def _target_index(self, root):
+        for i, scp in enumerate(root.af_scp_system.scps):
+            if scp.id == self.scp_id:
+                return i
+        return -1
+
+    def _find_scp_proxy(self, context, root_name):
+        for obj in context.scene.objects:
+            if obj.get("af_proxy") and obj.get("af_root_name") == root_name and obj.get("af_scp_id") == self.scp_id:
+                return obj
+        return None
+
+    def _select_only(self, context, obj):
+        if not self.extend:
+            for o in context.selected_objects:
+                o.select_set(False)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+
+    def _set_active_scp_index(self, scene, root, index):
+        scene.af_selection_sync_lock = True
+        try:
+            root.af_scp_system.active_scp_index = index
+        finally:
+            scene.af_selection_sync_lock = False
+
     def execute(self, context):
         root = get_af_root(context.scene)
         if root is None:
             return {"CANCELLED"}
-
-        target_index = -1
-        for i, scp in enumerate(root.af_scp_system.scps):
-            if scp.id == self.scp_id:
-                target_index = i
-                break
+        target_index = self._target_index(root)
         if target_index < 0:
             return {"CANCELLED"}
-
-        target_obj = None
-        for obj in context.scene.objects:
-            if (
-                obj.get("af_proxy")
-                and obj.get("af_root_name") == root.name
-                and obj.get("af_scp_id") == self.scp_id
-            ):
-                target_obj = obj
-                break
+        target_obj = self._find_scp_proxy(context, root.name)
         if target_obj is None:
             return {"CANCELLED"}
-
-        if not self.extend:
-            for o in context.selected_objects:
-                o.select_set(False)
-
-        target_obj.select_set(True)
-        context.view_layer.objects.active = target_obj
-
-        scene = context.scene
-        scene.af_selection_sync_lock = True
-        try:
-            root.af_scp_system.active_scp_index = target_index
-        finally:
-            scene.af_selection_sync_lock = False
-
+        self._select_only(context, target_obj)
+        self._set_active_scp_index(context.scene, root, target_index)
         return {"FINISHED"}
 
 
@@ -101,50 +100,36 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
         self.extend = bool(event.shift)
         return self.execute(context)
 
+    def _match_vcp_obj(self, obj, root_name):
+        if self.node_type == "FIBER":
+            return obj.get("af_fiber_proxy") and obj.get("af_root_name") == root_name and obj.get("af_fiber_id") == self.node_id
+        if self.node_type == "MUSCLE":
+            return obj.get("af_muscle_proxy") and obj.get("af_root_name") == root_name and obj.get("af_muscle_id") == self.node_id
+        if self.node_type == "BLOB":
+            return obj.get("af_blob_proxy") and obj.get("af_root_name") == root_name and obj.get("af_blob_id") == self.node_id
+        return False
+
+    def _find_target_obj(self, context, root_name):
+        for obj in context.scene.objects:
+            if self._match_vcp_obj(obj, root_name):
+                return obj
+        return None
+
+    def _select_target(self, context, obj):
+        if not self.extend:
+            for o in context.selected_objects:
+                o.select_set(False)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+
     def execute(self, context):
         root = get_af_root(context.scene)
         if root is None:
             return {"CANCELLED"}
-
-        target_obj = None
-        if self.node_type == "FIBER":
-            for obj in context.scene.objects:
-                if (
-                    obj.get("af_fiber_proxy")
-                    and obj.get("af_root_name") == root.name
-                    and obj.get("af_fiber_id") == self.node_id
-                ):
-                    target_obj = obj
-                    break
-        elif self.node_type == "MUSCLE":
-            for obj in context.scene.objects:
-                if (
-                    obj.get("af_muscle_proxy")
-                    and obj.get("af_root_name") == root.name
-                    and obj.get("af_muscle_id") == self.node_id
-                ):
-                    target_obj = obj
-                    break
-        elif self.node_type == "BLOB":
-            for obj in context.scene.objects:
-                if (
-                    obj.get("af_blob_proxy")
-                    and obj.get("af_root_name") == root.name
-                    and obj.get("af_blob_id") == self.node_id
-                ):
-                    target_obj = obj
-                    break
-
+        target_obj = self._find_target_obj(context, root.name)
         if target_obj is None:
             return {"CANCELLED"}
-
-        if not self.extend:
-            for o in context.selected_objects:
-                o.select_set(False)
-
-        target_obj.select_set(True)
-        context.view_layer.objects.active = target_obj
-
+        self._select_target(context, target_obj)
         v = root.af_vcp_system
         v.active_vcp_id = self.node_id
         v.active_vcp_type = self.node_type

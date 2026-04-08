@@ -158,24 +158,36 @@ def copy_curve_data(src_obj, dst_obj):
 
     for s in src.splines:
         ns = dst.splines.new(type=s.type)
-        if s.type == "BEZIER":
-            ns.bezier_points.add(len(s.bezier_points) - 1)
-            for i, bp in enumerate(s.bezier_points):
-                nbp = ns.bezier_points[i]
-                nbp.co = bp.co.copy()
-                nbp.handle_left = bp.handle_left.copy()
-                nbp.handle_right = bp.handle_right.copy()
-                nbp.handle_left_type = bp.handle_left_type
-                nbp.handle_right_type = bp.handle_right_type
-                nbp.radius = bp.radius
-                nbp.tilt = bp.tilt
-        else:
-            ns.points.add(len(s.points) - 1)
-            for i, p in enumerate(s.points):
-                ns.points[i].co = p.co[:]
-                ns.points[i].radius = p.radius
-                ns.points[i].tilt = p.tilt
+        _copy_spline_points(s, ns)
         ns.use_cyclic_u = s.use_cyclic_u
+
+
+def _copy_spline_points(src_spline, dst_spline):
+    if src_spline.type == "BEZIER":
+        _copy_bezier_points(src_spline, dst_spline)
+        return
+    _copy_poly_points(src_spline, dst_spline)
+
+
+def _copy_bezier_points(src_spline, dst_spline):
+    dst_spline.bezier_points.add(len(src_spline.bezier_points) - 1)
+    for i, bp in enumerate(src_spline.bezier_points):
+        nbp = dst_spline.bezier_points[i]
+        nbp.co = bp.co.copy()
+        nbp.handle_left = bp.handle_left.copy()
+        nbp.handle_right = bp.handle_right.copy()
+        nbp.handle_left_type = bp.handle_left_type
+        nbp.handle_right_type = bp.handle_right_type
+        nbp.radius = bp.radius
+        nbp.tilt = bp.tilt
+
+
+def _copy_poly_points(src_spline, dst_spline):
+    dst_spline.points.add(len(src_spline.points) - 1)
+    for i, p in enumerate(src_spline.points):
+        dst_spline.points[i].co = p.co[:]
+        dst_spline.points[i].radius = p.radius
+        dst_spline.points[i].tilt = p.tilt
 
 
 def copy_data(src_obj, dst_obj):

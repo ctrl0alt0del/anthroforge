@@ -76,130 +76,150 @@ class MuscleSceneSync:
             nearest_on_mesh_surface_fn=self._nearest_on_mesh_surface,
         )
 
+    def _resolve_root_scene(self, root, scene):
+        scene = scene or bpy.context.scene
+        root = root or get_af_root(scene)
+        if root is None or not hasattr(root, "af_vcp_system"):
+            return None, None
+        return root, scene
+
+    def _muscle_ids_to_sync(self, vcp, target_muscle_ids):
+        all_muscle_ids = {m.id for m in vcp.muscles}
+        if target_muscle_ids is None:
+            return all_muscle_ids, all_muscle_ids
+        return all_muscle_ids, set(target_muscle_ids) & all_muscle_ids
+
+    def _ensure_muscle_meshes(self, vis_col, root, muscle_id):
+        base_obj = self._find_muscle_proxy(vis_col, root.name, muscle_id, "BASE")
+        if base_obj is None:
+            base_obj = self._create_muscle_proxy(vis_col, root, muscle_id, "BASE")
+        infl_obj = self._find_muscle_proxy(vis_col, root.name, muscle_id, "INFL")
+        if infl_obj is None:
+            infl_obj = self._create_muscle_proxy(vis_col, root, muscle_id, "INFL")
+        return base_obj, infl_obj
+
+    def _set_muscle_active_materials(self, vcp, muscle_id, base_obj, infl_obj):
+        active = (vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle_id)
+        self._ensure_material(base_obj, active=active)
+        self._ensure_material(infl_obj, active=active)
+
+    def _clear_muscle_meshes(self, vcp, muscle_id, base_obj, infl_obj):
+        self._update_mesh(base_obj, [], [])
+        self._update_mesh(infl_obj, [], [])
+        self._set_muscle_active_materials(vcp, muscle_id, base_obj, infl_obj)
+
+    def _collect_points_with_fallback(self, root, scene, ordered_fibers):
+        ordered_points = collect_fiber_points(root, scene, ordered_fibers)
+        if ordered_points:
+            return ordered_points
+        from .fiber_sync import register_fiber_sync
+        register_fiber_sync().sync_root_to_scene(
+            root=root, scene=scene, bake=False, target_fiber_ids={f.id for f in ordered_fibers}
+        )
+        return collect_fiber_points(root, scene, ordered_fibers)
+
+    def _build_surface(self, points, closed_v):
+        try:
+            verts, faces_raw, _n = build_surface_data(ordered_fiber_points=points, closed_v=bool(closed_v))
+        except Exception:
+            return None, None
+        return verts, faces_raw
+
+    def _sync_single_muscle(self, vis_col, root, scene, vcp, muscle):
+        base_obj, infl_obj = self._ensure_muscle_meshes(vis_col, root, muscle.id)
+        ordered_fibers, missing = self._collect_fiber_props(root, muscle)
+        if missing or len(ordered_fibers) < 2:
+            self._clear_muscle_meshes(vcp, muscle.id, base_obj, infl_obj)
+            return
+        ok, _reason, _node_count, _anchors = validate_anchor_structure(ordered_fibers)
+        if not ok:
+            self._clear_muscle_meshes(vcp, muscle.id, base_obj, infl_obj)
+            return
+        ordered_points = self._collect_points_with_fallback(root, scene, ordered_fibers)
+        if not ordered_points:
+            self._clear_muscle_meshes(vcp, muscle.id, base_obj, infl_obj)
+            return
+        base_points = prepare_surface_rows(ordered_points, int(ordered_fibers[0].node_count), densify_v=True)
+        self._apply_muscle_surface(vis_col, root, vcp, muscle, base_obj, infl_obj, base_points)
+
+    def _apply_muscle_surface(self, vis_col, root, vcp, muscle, base_obj, infl_obj, base_points):
+        base_verts, faces_raw = self._build_surface(base_points, muscle.closed_v)
+        if base_verts is None:
+            self._clear_muscle_meshes(vcp, muscle.id, base_obj, infl_obj)
+            return
+        flip = bool(getattr(muscle, "flip_normals", False))
+        faces_final = [(f[0], f[3], f[2], f[1]) for f in faces_raw] if flip else faces_raw
+        self._update_mesh(base_obj, base_verts, faces_final)
+        self._ensure_inflation_ctrl(vis_col, root, muscle, base_obj, base_points)
+        infl_points = apply_inflation_from_ctrl(base_points, muscle)
+        infl_verts, _faces_raw = self._build_surface(infl_points, muscle.closed_v)
+        self._update_mesh(infl_obj, list(base_verts) if infl_verts is None else infl_verts, faces_final)
+        self._set_muscle_active_materials(vcp, muscle.id, base_obj, infl_obj)
+
+    def _cleanup_removed_muscles(self, vis_col, root_name, all_muscle_ids):
+        for obj in list(vis_col.objects):
+            if obj.get("af_root_name") != root_name:
+                continue
+            if obj.get("af_muscle_proxy") and obj.get("af_muscle_id") not in all_muscle_ids:
+                self._remove_proxy_obj(obj)
+            if obj.get("af_muscle_inflation_ctrl") and obj.get("af_muscle_id") not in all_muscle_ids:
+                self._remove_ctrl_obj(obj)
+
     def sync_root_to_scene(self, root=None, scene=None, target_muscle_ids=None):
         if self._syncing:
             return
 
-        scene = scene or bpy.context.scene
-        root = root or get_af_root(scene)
-        if root is None or not hasattr(root, "af_vcp_system"):
+        root, scene = self._resolve_root_scene(root, scene)
+        if root is None:
             return
 
         self._syncing = True
         try:
             vis_col = self._get_vis_collection(scene)
             vcp = root.af_vcp_system
-
-            all_muscle_ids = {m.id for m in vcp.muscles}
-            if target_muscle_ids is None:
-                muscle_ids_to_sync = all_muscle_ids
-            else:
-                muscle_ids_to_sync = set(target_muscle_ids) & all_muscle_ids
+            all_muscle_ids, muscle_ids_to_sync = self._muscle_ids_to_sync(vcp, target_muscle_ids)
 
             for muscle in vcp.muscles:
                 if muscle.id not in muscle_ids_to_sync:
                     continue
-
-                base_obj = self._find_muscle_proxy(vis_col, root.name, muscle.id, "BASE")
-                if base_obj is None:
-                    base_obj = self._create_muscle_proxy(vis_col, root, muscle.id, "BASE")
-
-                infl_obj = self._find_muscle_proxy(vis_col, root.name, muscle.id, "INFL")
-                if infl_obj is None:
-                    infl_obj = self._create_muscle_proxy(vis_col, root, muscle.id, "INFL")
-
-                ordered_fibers, missing = self._collect_fiber_props(root, muscle)
-                if missing or len(ordered_fibers) < 2:
-                    self._update_mesh(base_obj, [], [])
-                    self._update_mesh(infl_obj, [], [])
-                    active = (vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id)
-                    self._ensure_material(base_obj, active=active)
-                    self._ensure_material(infl_obj, active=active)
-                    continue
-
-                ok, _reason, _node_count, _anchors = validate_anchor_structure(ordered_fibers)
-                if not ok:
-                    self._update_mesh(base_obj, [], [])
-                    self._update_mesh(infl_obj, [], [])
-                    active = (vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id)
-                    self._ensure_material(base_obj, active=active)
-                    self._ensure_material(infl_obj, active=active)
-                    continue
-
-                ordered_points = collect_fiber_points(root, scene, ordered_fibers)
-                if not ordered_points:
-                    from .fiber_sync import register_fiber_sync
-                    register_fiber_sync().sync_root_to_scene(
-                        root=root,
-                        scene=scene,
-                        bake=False,
-                        target_fiber_ids={f.id for f in ordered_fibers},
-                    )
-                    ordered_points = collect_fiber_points(root, scene, ordered_fibers)
-
-                if not ordered_points:
-                    self._update_mesh(base_obj, [], [])
-                    self._update_mesh(infl_obj, [], [])
-                    active = (vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id)
-                    self._ensure_material(base_obj, active=active)
-                    self._ensure_material(infl_obj, active=active)
-                    continue
-
-                base_points = prepare_surface_rows(
-                    ordered_fiber_points=ordered_points,
-                    target_n=int(ordered_fibers[0].node_count),
-                    densify_v=True,
-                )
-
-                try:
-                    base_verts, faces_raw, _n = build_surface_data(
-                        ordered_fiber_points=base_points,
-                        closed_v=bool(muscle.closed_v),
-                    )
-                except Exception:
-                    self._update_mesh(base_obj, [], [])
-                    self._update_mesh(infl_obj, [], [])
-                    active = (vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id)
-                    self._ensure_material(base_obj, active=active)
-                    self._ensure_material(infl_obj, active=active)
-                    continue
-
-                flip = bool(getattr(muscle, "flip_normals", False))
-                faces_final = [(f[0], f[3], f[2], f[1]) for f in faces_raw] if flip else faces_raw
-
-                self._update_mesh(base_obj, base_verts, faces_final)
-                self._ensure_inflation_ctrl(vis_col, root, muscle, base_obj, base_points)
-                infl_points = apply_inflation_from_ctrl(base_points, muscle)
-
-                try:
-                    infl_verts, _faces_raw2, _n2 = build_surface_data(
-                        ordered_fiber_points=infl_points,
-                        closed_v=bool(muscle.closed_v),
-                    )
-                except Exception:
-                    infl_verts = list(base_verts)
-
-                self._update_mesh(infl_obj, infl_verts, faces_final)
-
-                active = (vcp.active_vcp_type == "MUSCLE" and vcp.active_vcp_id == muscle.id)
-                self._ensure_material(base_obj, active=active)
-                self._ensure_material(infl_obj, active=active)
+                self._sync_single_muscle(vis_col, root, scene, vcp, muscle)
 
             if target_muscle_ids is None:
-                for obj in list(vis_col.objects):
-                    if obj.get("af_root_name") != root.name:
-                        continue
-
-                    if obj.get("af_muscle_proxy") and obj.get("af_muscle_id") not in all_muscle_ids:
-                        self._remove_proxy_obj(obj)
-                        continue
-
-                    if obj.get("af_muscle_inflation_ctrl") and obj.get("af_muscle_id") not in all_muscle_ids:
-                        self._remove_ctrl_obj(obj)
-                        continue
+                self._cleanup_removed_muscles(vis_col, root.name, all_muscle_ids)
 
         finally:
             self._syncing = False
+
+    def _is_relevant_inflation_update(self, root, vis_col, obj):
+        if not isinstance(obj, bpy.types.Object):
+            return False
+        if not obj.get("af_muscle_inflation_ctrl"):
+            return False
+        if obj.get("af_root_name") != root.name:
+            return False
+        return vis_col.objects.get(obj.name) is not None
+
+    def _find_muscle(self, root, muscle_id):
+        return next((m for m in root.af_vcp_system.muscles if m.id == muscle_id), None)
+
+    def _process_inflation_ctrl_update(self, root, vis_col, obj, changed_muscle_ids):
+        muscle_id = obj.get("af_muscle_id")
+        muscle = self._find_muscle(root, muscle_id)
+        if muscle is None:
+            return False
+        base_obj = self._find_muscle_proxy(vis_col, root.name, muscle_id, "BASE")
+        if base_obj is None:
+            return False
+        snapped, _n = self._nearest_on_mesh_surface(base_obj, obj.location.copy())
+        if snapped is None:
+            return False
+        obj.location = snapped
+        new_loc = (snapped.x, snapped.y, snapped.z)
+        if tuple(muscle.inflation_ctrl_world) == new_loc:
+            return False
+        muscle.inflation_ctrl_world = new_loc
+        changed_muscle_ids.add(muscle_id)
+        return True
 
     def on_depsgraph_update(self, scene, depsgraph):
         if self._syncing:
@@ -213,46 +233,19 @@ class MuscleSceneSync:
         if vis_col is None:
             return
 
-        changed = False
         changed_muscle_ids = set()
 
         self._syncing = True
         try:
             for upd in depsgraph.updates:
                 obj = upd.id
-                if not isinstance(obj, bpy.types.Object):
-                    continue
-                if not obj.get("af_muscle_inflation_ctrl"):
-                    continue
-                if obj.get("af_root_name") != root.name:
-                    continue
-                if vis_col.objects.get(obj.name) is None:
-                    continue
-
-                muscle_id = obj.get("af_muscle_id")
-                muscle = next((m for m in root.af_vcp_system.muscles if m.id == muscle_id), None)
-                if muscle is None:
-                    continue
-
-                base_obj = self._find_muscle_proxy(vis_col, root.name, muscle_id, "BASE")
-                if base_obj is None:
-                    continue
-
-                snapped, _n = self._nearest_on_mesh_surface(base_obj, obj.location.copy())
-                if snapped is None:
-                    continue
-
-                obj.location = snapped
-                new_loc = (snapped.x, snapped.y, snapped.z)
-                if tuple(muscle.inflation_ctrl_world) != new_loc:
-                    muscle.inflation_ctrl_world = new_loc
-                    changed = True
-                    changed_muscle_ids.add(muscle_id)
+                if self._is_relevant_inflation_update(root, vis_col, obj):
+                    self._process_inflation_ctrl_update(root, vis_col, obj, changed_muscle_ids)
 
         finally:
             self._syncing = False
 
-        if changed and changed_muscle_ids:
+        if changed_muscle_ids:
             from .sync_runner import sync_from_muscle_ids
             sync_from_muscle_ids(root=root, scene=scene, muscle_ids=changed_muscle_ids)
 

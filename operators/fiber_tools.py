@@ -64,6 +64,23 @@ class AF_OT_RecomputeFiber(bpy.types.Operator):
                 return f
         return None
 
+    def _run_bake_passes(self, sync, root, scene, fiber, max_passes):
+        for _ in range(max_passes):
+            sync.sync_root_to_scene(root=root, scene=scene, bake=True, target_fiber_ids={fiber.id})
+            if not fiber.not_converged:
+                return True
+        return False
+
+    def _set_prefer_bake(self, fiber):
+        try:
+            fiber["af_prefer_bake"] = True
+        except Exception:
+            pass
+
+    def _update_recompute_stats(self, fiber, elapsed_ms, converged):
+        fiber.last_recompute_ms = elapsed_ms
+        fiber.last_recompute_status = "CONVERGED" if converged else "NOT_CONVERGED"
+
     def execute(self, context):
         t0 = time.perf_counter()
 
@@ -78,36 +95,15 @@ class AF_OT_RecomputeFiber(bpy.types.Operator):
 
         sync = register_fiber_sync()
         max_passes = 60
-        converged = False
-
-        for _ in range(max_passes):
-            sync.sync_root_to_scene(
-                root=root,
-                scene=context.scene,
-                bake=True,
-                target_fiber_ids={fiber.id},
-            )
-            if not fiber.not_converged:
-                converged = True
-                break
-
-        # Keep baked result as preferred visual state until anchors move.
-        try:
-            fiber["af_prefer_bake"] = True
-        except Exception:
-            pass
-
+        converged = self._run_bake_passes(sync, root, context.scene, fiber, max_passes)
+        self._set_prefer_bake(fiber)
         register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
-
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        fiber.last_recompute_ms = elapsed_ms
-        fiber.last_recompute_status = "CONVERGED" if converged else "NOT_CONVERGED"
-
+        self._update_recompute_stats(fiber, elapsed_ms, converged)
         if converged:
             self.report({"INFO"}, f"Fiber {fiber.id} converged")
         else:
             self.report({"WARNING"}, f"Fiber {fiber.id} not converged after {max_passes} passes")
-
         return {"FINISHED"}
 
 
@@ -117,6 +113,30 @@ class AF_OT_AddFiberTouchPoint(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     fiber_id: bpy.props.StringProperty(default="")
+
+    def _resolve_touch_parent_id(self, context, root):
+        obj = context.active_object
+        if obj and obj.get("af_proxy") and obj.get("af_root_name") == root.name:
+            return obj.get("af_scp_id", "")
+        idx = root.af_scp_system.active_scp_index
+        if 0 <= idx < len(root.af_scp_system.scps):
+            return root.af_scp_system.scps[idx].id
+        return ""
+
+    def _first_attach_param(self, root, scp_id):
+        runtime = SCPRegistry(root)
+        runtime.build()
+        parent = runtime.registry.get(scp_id)
+        if parent is None:
+            return None
+        params = parent.shape.get_attach_params()
+        return params[0] if params else 0.0
+
+    def _mark_interactive_preferred(self, fiber):
+        try:
+            fiber["af_prefer_bake"] = False
+        except Exception:
+            pass
 
     def execute(self, context):
         root = get_af_root(context.scene)
@@ -129,39 +149,19 @@ class AF_OT_AddFiberTouchPoint(bpy.types.Operator):
         if fiber is None:
             self.report({"ERROR"}, "Fiber not found.")
             return {"CANCELLED"}
-
-        scp_id = ""
-        obj = context.active_object
-        if obj and obj.get("af_proxy") and obj.get("af_root_name") == root.name:
-            scp_id = obj.get("af_scp_id", "")
-        if not scp_id:
-            idx = root.af_scp_system.active_scp_index
-            if 0 <= idx < len(root.af_scp_system.scps):
-                scp_id = root.af_scp_system.scps[idx].id
-
+        scp_id = self._resolve_touch_parent_id(context, root)
         if not scp_id:
             self.report({"ERROR"}, "Select an SCP in viewport or SCP tree first.")
             return {"CANCELLED"}
-
-        runtime = SCPRegistry(root)
-        runtime.build()
-        parent = runtime.registry.get(scp_id)
-        if parent is None:
+        p = self._first_attach_param(root, scp_id)
+        if p is None:
             self.report({"ERROR"}, "Selected SCP not found in runtime registry.")
             return {"CANCELLED"}
-
-        params = parent.shape.get_attach_params()
-        p = params[0] if params else 0.0
 
         tp = fiber.mid_touches.add()
         tp.parent_id = scp_id
         tp.attach_param = json.dumps(p)
-
-        try:
-            fiber["af_prefer_bake"] = False
-        except Exception:
-            pass
-
+        self._mark_interactive_preferred(fiber)
         sync = register_fiber_sync()
         sync.clear_solver_cache(fiber.id)
         sync.sync_root_to_scene(root=root, scene=context.scene, target_fiber_ids={fiber.id})

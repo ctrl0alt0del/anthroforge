@@ -48,36 +48,29 @@ class MeshAssetShape(ShapeStrategy):
     def draw_creation_ui(cls, layout, scene):
         assets = list_assets()
         selected = getattr(scene, "af_new_scp_mesh_asset_id", "")
-
         box = layout.box()
         box.label(text="Mesh Assets")
-
         if not assets:
             box.label(text="No assets. Register one above.", icon="INFO")
             return
-
         for a in assets:
-            row = box.row(align=True)
-
-            op = row.operator(
-                "af.select_mesh_scp_asset",
-                text=a["name"],
-                emboss=True,
-                depress=(a["id"] == selected),
-                icon="MESH_DATA",
-            )
-            op.asset_id = a["id"]
-
-            del_op = row.operator(
-                "af.delete_mesh_scp_asset",
-                text="",
-                icon="TRASH",
-                emboss=False,
-            )
-            del_op.asset_id = a["id"]
-
+            cls._draw_asset_row(box, a, selected)
         if selected:
             box.label(text=f"Selected: {selected}")
+
+    @classmethod
+    def _draw_asset_row(cls, box, asset, selected):
+        row = box.row(align=True)
+        op = row.operator(
+            "af.select_mesh_scp_asset",
+            text=asset["name"],
+            emboss=True,
+            depress=(asset["id"] == selected),
+            icon="MESH_DATA",
+        )
+        op.asset_id = asset["id"]
+        del_op = row.operator("af.delete_mesh_scp_asset", text="", icon="TRASH", emboss=False)
+        del_op.asset_id = asset["id"]
 
     @classmethod
     def apply_creation_to_scp(cls, scene, scp_prop):
@@ -135,29 +128,18 @@ class MeshAssetShape(ShapeStrategy):
         self._ensure_cached_verts()
         if len(self._cached_verts) < 2:
             return origin, Vector((1.0, 0.0, 0.0)), Vector((0.0, 0.0, 1.0))
-
-        try:
-            idx = int(param)
-        except Exception:
-            idx = 0
-        idx = max(0, min(len(self._cached_verts) - 1, idx))
-        j = (idx + 1) % len(self._cached_verts)
-        k = (idx + 2) % len(self._cached_verts)
+        idx = self._safe_index(param)
+        j, k = self._neighbor_indices(idx)
         pj = self.apply_point_deformers(self._cached_verts[j].copy())
         pk = self.apply_point_deformers(self._cached_verts[k].copy())
-
         tangent = pj - origin
         if tangent.length <= 1e-8:
             tangent = Vector((1.0, 0.0, 0.0))
         else:
             tangent.normalize()
-
         normal = tangent.cross(pk - origin)
         if normal.length <= 1e-8:
-            center = Vector((0.0, 0.0, 0.0))
-            for v in self._cached_verts:
-                center += v
-            center /= max(1, len(self._cached_verts))
+            center = self._cached_center()
             normal = origin - center
         if normal.length <= 1e-8:
             normal = tangent.cross(Vector((0.0, 0.0, 1.0)))
@@ -168,6 +150,23 @@ class MeshAssetShape(ShapeStrategy):
         else:
             normal.normalize()
         return origin, tangent, normal
+
+    def _safe_index(self, param):
+        try:
+            idx = int(param)
+        except Exception:
+            idx = 0
+        return max(0, min(len(self._cached_verts) - 1, idx))
+
+    def _neighbor_indices(self, idx):
+        n = len(self._cached_verts)
+        return (idx + 1) % n, (idx + 2) % n
+
+    def _cached_center(self):
+        center = Vector((0.0, 0.0, 0.0))
+        for v in self._cached_verts:
+            center += v
+        return center / max(1, len(self._cached_verts))
 
     def ensure_proxy_object(self, obj):
         if obj.type != "MESH":

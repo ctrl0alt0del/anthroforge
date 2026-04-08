@@ -17,6 +17,39 @@ def _build_tree(root):
     return roots, children_map
 
 
+def _draw_indent(row, depth):
+    if depth <= 0:
+        return
+    indent = row.row(align=True)
+    indent.ui_units_x = depth * 1.2
+    indent.label(text="")
+
+
+def _draw_expand_toggle(row, scene, scp_id, has_children, collapsed):
+    if has_children:
+        icon = "TRIA_RIGHT" if collapsed else "TRIA_DOWN"
+        op = row.operator("af.toggle_scp_collapse", text="", icon=icon, emboss=False)
+        op.scp_id = scp_id
+    else:
+        row.label(text="", icon="DOT")
+
+
+def _draw_select_and_delete(row, scp, selected_ids):
+    label = scp.name if scp.name else scp.id
+    op = row.operator("af.select_scp_in_tree", text=label, emboss=True, depress=(scp.id in selected_ids))
+    op.scp_id = scp.id
+    del_op = row.operator("af.delete_selected_af_node", text="", icon="TRASH", emboss=False)
+    del_op.target_type = "SCP"
+    del_op.target_id = scp.id
+
+
+def _draw_shape_tag(row, scp):
+    right = row.row()
+    right.alignment = "RIGHT"
+    right.enabled = False
+    right.label(text=scp.shape_type)
+
+
 def _draw_node(layout, scene, scp, children_map, depth, active_id, selected_ids, visited):
     if scp.id in visited:
         return
@@ -28,35 +61,10 @@ def _draw_node(layout, scene, scp, children_map, depth, active_id, selected_ids,
 
     row = layout.row(align=True)
 
-    if depth > 0:
-        indent = row.row(align=True)
-        indent.ui_units_x = depth * 1.2
-        indent.label(text="")
-
-    if has_children:
-        icon = "TRIA_RIGHT" if collapsed else "TRIA_DOWN"
-        op = row.operator("af.toggle_scp_collapse", text="", icon=icon, emboss=False)
-        op.scp_id = scp.id
-    else:
-        row.label(text="", icon="DOT")
-
-    label = scp.name if scp.name else scp.id
-    op = row.operator(
-        "af.select_scp_in_tree",
-        text=label,
-        emboss=True,
-        depress=(scp.id in selected_ids),
-    )
-    op.scp_id = scp.id
-
-    del_op = row.operator("af.delete_selected_af_node", text="", icon="TRASH", emboss=False)
-    del_op.target_type = "SCP"
-    del_op.target_id = scp.id
-
-    right = row.row()
-    right.alignment = "RIGHT"
-    right.enabled = False
-    right.label(text=scp.shape_type)
+    _draw_indent(row, depth)
+    _draw_expand_toggle(row, scene, scp.id, has_children, collapsed)
+    _draw_select_and_delete(row, scp, selected_ids)
+    _draw_shape_tag(row, scp)
 
     if has_children and not collapsed:
         for child in children:

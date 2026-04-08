@@ -126,6 +126,25 @@ class AFMirrorSync:
         finally:
             self._syncing = False
 
+    def _is_relevant_update_obj(self, root, obj):
+        if not isinstance(obj, bpy.types.Object):
+            return False
+        if obj.get("af_root_name") != root.name:
+            return False
+        if obj.get("af_proxy") and not obj.get("af_mirror_proxy"):
+            return True
+        if obj.get("af_fiber_proxy") and not obj.get("af_fiber_mirror_proxy"):
+            return True
+        if obj.get("af_muscle_proxy") and not obj.get("af_muscle_mirror_proxy"):
+            return True
+        return bool(obj.get("af_muscle_inflation_ctrl"))
+
+    def _has_relevant_updates(self, root, depsgraph):
+        for upd in depsgraph.updates:
+            if self._is_relevant_update_obj(root, upd.id):
+                return True
+        return False
+
     def on_depsgraph_update(self, scene, depsgraph):
         if self._syncing:
             return
@@ -134,28 +153,7 @@ class AFMirrorSync:
         if root is None:
             return
 
-        relevant = False
-        for upd in depsgraph.updates:
-            obj = upd.id
-            if not isinstance(obj, bpy.types.Object):
-                continue
-            if obj.get("af_root_name") != root.name:
-                continue
-
-            if obj.get("af_proxy") and not obj.get("af_mirror_proxy"):
-                relevant = True
-                break
-            if obj.get("af_fiber_proxy") and not obj.get("af_fiber_mirror_proxy"):
-                relevant = True
-                break
-            if obj.get("af_muscle_proxy") and not obj.get("af_muscle_mirror_proxy"):
-                relevant = True
-                break
-            if obj.get("af_muscle_inflation_ctrl"):
-                relevant = True
-                break
-
-        if relevant:
+        if self._has_relevant_updates(root, depsgraph):
             self.sync_root_to_scene(root=root, scene=scene)
 
 

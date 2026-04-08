@@ -24,55 +24,44 @@ def _poll_any_obj(self, obj):
     return obj is not None
 
 
-def register_scene_props():
+def _register_scene_core_props():
     bpy.types.Scene.af_scp_type = bpy.props.EnumProperty(
         name="SCP Type",
         items=lambda self, context: ShapeRegistry.enum_items(),
     )
     bpy.types.Scene.af_selection_sync_lock = bpy.props.BoolProperty(default=False)
 
-    bpy.types.Scene.af_new_parent_obj = bpy.props.PointerProperty(
-        name="Parent",
-        type=bpy.types.Object,
-        poll=_poll_parent_proxy,
-    )
 
+def _register_scene_pointer_props():
+    bpy.types.Scene.af_new_parent_obj = bpy.props.PointerProperty(
+        name="Parent", type=bpy.types.Object, poll=_poll_parent_proxy
+    )
     bpy.types.Scene.af_new_fiber_origin_obj = bpy.props.PointerProperty(
-        name="Fiber Origin",
-        type=bpy.types.Object,
-        poll=_poll_parent_proxy,
+        name="Fiber Origin", type=bpy.types.Object, poll=_poll_parent_proxy
     )
     bpy.types.Scene.af_new_fiber_insertion_obj = bpy.props.PointerProperty(
-        name="Fiber Insertion",
-        type=bpy.types.Object,
-        poll=_poll_parent_proxy,
+        name="Fiber Insertion", type=bpy.types.Object, poll=_poll_parent_proxy
     )
-
     bpy.types.Scene.af_new_blob_target_obj = bpy.props.PointerProperty(
-        name="Blob Target",
-        type=bpy.types.Object,
-        poll=_poll_any_obj,
+        name="Blob Target", type=bpy.types.Object, poll=_poll_any_obj
     )
-
     bpy.types.Scene.af_new_scp_source_mesh_obj = bpy.props.PointerProperty(
-        name="Source Mesh",
-        type=bpy.types.Object,
-        poll=_poll_any_mesh_obj,
+        name="Source Mesh", type=bpy.types.Object, poll=_poll_any_mesh_obj
     )
 
-    bpy.types.Scene.af_new_scp_mesh_asset_id = bpy.props.StringProperty(
-        name="Mesh Asset",
-        default="",
-    )
 
-    bpy.types.Scene.af_tree_collapsed_json = bpy.props.StringProperty(
-        name="AF Tree Collapsed",
-        default="{}",
-    )
+def _register_scene_string_props():
+    bpy.types.Scene.af_new_scp_mesh_asset_id = bpy.props.StringProperty(name="Mesh Asset", default="")
+    bpy.types.Scene.af_tree_collapsed_json = bpy.props.StringProperty(name="AF Tree Collapsed", default="{}")
     bpy.types.Scene.af_vcp_tree_collapsed_json = bpy.props.StringProperty(
-        name="AF VCP Tree Collapsed",
-        default="{}",
+        name="AF VCP Tree Collapsed", default="{}"
     )
+
+
+def register_scene_props():
+    _register_scene_core_props()
+    _register_scene_pointer_props()
+    _register_scene_string_props()
     ShapeRegistry.register_scene_props()
 
 

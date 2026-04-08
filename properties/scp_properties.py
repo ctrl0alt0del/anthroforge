@@ -344,22 +344,21 @@ def _on_active_scp_index_update(self, context):
         return
 
     scp_id = self.scps[idx].id
-    proxy = None
-    for obj in scene.objects:
-        if not obj.get("af_proxy"):
-            continue
-        if obj.get("af_mirror_proxy"):
-            continue
-        if obj.get("af_root_name") != root.name:
-            continue
-        if obj.get("af_scp_id") != scp_id:
-            continue
-        proxy = obj
-        break
-
+    proxy = _find_scene_scp_proxy(scene, root.name, scp_id)
     if proxy is None:
         return
+    _select_only_proxy(scene, context, proxy)
 
+
+def _find_scene_scp_proxy(scene, root_name, scp_id):
+    for obj in scene.objects:
+        if obj.get("af_proxy") and not obj.get("af_mirror_proxy") and obj.get("af_root_name") == root_name:
+            if obj.get("af_scp_id") == scp_id:
+                return obj
+    return None
+
+
+def _select_only_proxy(scene, context, proxy):
     scene.af_selection_sync_lock = True
     try:
         for o in context.selected_objects:

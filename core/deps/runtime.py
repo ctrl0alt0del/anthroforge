@@ -67,42 +67,31 @@ def _apply_delayed_queue(root):
     return changed_scps
 
 
-def run_dependency_runtime(root, scene, dirty_hints=None, bake=False):
-    # Phase 1: INPUT - consume delayed writes.
-    delayed_changed_scps = _apply_delayed_queue(root)
-
-    graph = RuntimeGraph()
-    entity_sets = build_runtime_graph(root, graph)
-    adjacency = graph.entity_adjacency()
-    scc_idx, scc_sizes = _compute_scc_index(adjacency)
-
-    dirty, is_full = _normalize_dirty_hints(root, dirty_hints)
-    dirty["SCP"] |= delayed_changed_scps
-
+def _dirty_start_nodes(dirty):
     starts = set()
-    for sid in dirty["SCP"]:
-        starts.add(("SCP", sid))
-    for fid in dirty["FIBER"]:
-        starts.add(("FIBER", fid))
-    for mid in dirty["MUSCLE"]:
-        starts.add(("MUSCLE", mid))
-    for bid in dirty["BLOB"]:
-        starts.add(("BLOB", bid))
+    for et in ("SCP", "FIBER", "MUSCLE", "BLOB"):
+        for eid in dirty[et]:
+            starts.add((et, eid))
+    return starts
 
-    impacted = graph.downstream_entities(starts) if starts else set()
-    impacted |= starts
 
-    impacted_scps = {eid for et, eid in impacted if et == "SCP"}
-    impacted_fibers = {eid for et, eid in impacted if et == "FIBER"}
-    impacted_muscles = {eid for et, eid in impacted if et == "MUSCLE"}
-    impacted_blobs = {eid for et, eid in impacted if et == "BLOB"}
+def _impact_sets(impacted):
+    return {
+        "SCP": {eid for et, eid in impacted if et == "SCP"},
+        "FIBER": {eid for et, eid in impacted if et == "FIBER"},
+        "MUSCLE": {eid for et, eid in impacted if et == "MUSCLE"},
+        "BLOB": {eid for et, eid in impacted if et == "BLOB"},
+    }
 
-    # Phase 5: CONSTRAINT_APPLY
-    changed_source_scps = set(dirty["SCP"])
-    if is_full:
-        changed_source_scps = set(entity_sets["SCP"])
+
+def _update_delayed_writes(new_delayed):
+    _DELAYED_WRITES.clear()
+    _DELAYED_WRITES.update(new_delayed)
+
+
+def _apply_constraints(root, dirty, is_full, entity_sets, delayed_changed_scps, adjacency, scc_idx, scc_sizes):
+    changed_source_scps = set(entity_sets["SCP"]) if is_full else set(dirty["SCP"])
     changed_source_scps |= delayed_changed_scps
-
     new_delayed = {}
 
     def delayed_writer(etype, eid, port, value):
@@ -124,43 +113,80 @@ def run_dependency_runtime(root, scene, dirty_hints=None, bake=False):
         is_cyclic_pair=is_cyclic_pair,
         delayed_writer=delayed_writer,
     )
+    _update_delayed_writes(new_delayed)
+    return changed_dest_scps
 
-    _DELAYED_WRITES.clear()
-    _DELAYED_WRITES.update(new_delayed)
 
-    if changed_dest_scps:
-        impacted2 = graph.downstream_entities({("SCP", sid) for sid in changed_dest_scps})
-        impacted2 |= {("SCP", sid) for sid in changed_dest_scps}
-        impacted_scps |= {eid for et, eid in impacted2 if et == "SCP"}
-        impacted_fibers |= {eid for et, eid in impacted2 if et == "FIBER"}
-        impacted_muscles |= {eid for et, eid in impacted2 if et == "MUSCLE"}
-        impacted_blobs |= {eid for et, eid in impacted2 if et == "BLOB"}
-
-    # Phase 6: VIS_SYNC
+def _run_visual_sync(root, scene, is_full, impacted, bake):
     if is_full:
         register_sync().sync_root_to_scene(root=root, scene=scene)
-    elif impacted_scps:
-        register_sync().sync_root_to_scene(root=root, scene=scene, target_scp_ids=impacted_scps)
+    elif impacted["SCP"]:
+        register_sync().sync_root_to_scene(root=root, scene=scene, target_scp_ids=impacted["SCP"])
 
     if is_full:
         register_fiber_sync().sync_root_to_scene(root=root, scene=scene, bake=bake)
-    elif impacted_fibers:
+    elif impacted["FIBER"]:
         register_fiber_sync().sync_root_to_scene(
-            root=root, scene=scene, bake=bake, target_fiber_ids=impacted_fibers
+            root=root, scene=scene, bake=bake, target_fiber_ids=impacted["FIBER"]
         )
 
     if is_full:
         register_muscle_sync().sync_root_to_scene(root=root, scene=scene)
-    elif impacted_muscles:
+    elif impacted["MUSCLE"]:
         register_muscle_sync().sync_root_to_scene(
-            root=root, scene=scene, target_muscle_ids=impacted_muscles
+            root=root, scene=scene, target_muscle_ids=impacted["MUSCLE"]
         )
 
     if is_full:
         register_blob_sync().sync_root_to_scene(root=root, scene=scene)
-    elif impacted_blobs:
-        register_blob_sync().sync_root_to_scene(
-            root=root, scene=scene, target_blob_ids=impacted_blobs
-        )
+    elif impacted["BLOB"]:
+        register_blob_sync().sync_root_to_scene(root=root, scene=scene, target_blob_ids=impacted["BLOB"])
 
     register_mirror_sync().sync_root_to_scene(root=root, scene=scene)
+
+
+def _build_runtime_context(root, dirty_hints):
+    delayed_changed_scps = _apply_delayed_queue(root)
+    graph = RuntimeGraph()
+    entity_sets = build_runtime_graph(root, graph)
+    adjacency = graph.entity_adjacency()
+    scc_idx, scc_sizes = _compute_scc_index(adjacency)
+    dirty, is_full = _normalize_dirty_hints(root, dirty_hints)
+    dirty["SCP"] |= delayed_changed_scps
+    return delayed_changed_scps, graph, entity_sets, adjacency, scc_idx, scc_sizes, dirty, is_full
+
+
+def _compute_impacted_sets(graph, dirty):
+    starts = _dirty_start_nodes(dirty)
+    impacted = graph.downstream_entities(starts) if starts else set()
+    impacted |= starts
+    return _impact_sets(impacted)
+
+
+def _merge_constraint_impacts(graph, impacted_sets, changed_dest_scps):
+    if not changed_dest_scps:
+        return
+    impacted2 = graph.downstream_entities({("SCP", sid) for sid in changed_dest_scps})
+    impacted2 |= {("SCP", sid) for sid in changed_dest_scps}
+    extra = _impact_sets(impacted2)
+    for et in ("SCP", "FIBER", "MUSCLE", "BLOB"):
+        impacted_sets[et] |= extra[et]
+
+
+def run_dependency_runtime(root, scene, dirty_hints=None, bake=False):
+    delayed_changed_scps, graph, entity_sets, adjacency, scc_idx, scc_sizes, dirty, is_full = _build_runtime_context(
+        root, dirty_hints
+    )
+    impacted_sets = _compute_impacted_sets(graph, dirty)
+    changed_dest_scps = _apply_constraints(
+        root=root,
+        dirty=dirty,
+        is_full=is_full,
+        entity_sets=entity_sets,
+        delayed_changed_scps=delayed_changed_scps,
+        adjacency=adjacency,
+        scc_idx=scc_idx,
+        scc_sizes=scc_sizes,
+    )
+    _merge_constraint_impacts(graph, impacted_sets, changed_dest_scps)
+    _run_visual_sync(root=root, scene=scene, is_full=is_full, impacted=impacted_sets, bake=bake)

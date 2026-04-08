@@ -92,44 +92,48 @@ def save_asset_from_object(obj, display_name=None):
     if obj is None or obj.type != "MESH" or obj.data is None:
         raise ValueError("Selected object must be a mesh object.")
 
-    src_mesh = obj.data
     base_name = display_name or obj.name or "Mesh Asset"
-
-    slug = _safe_slug(base_name)
-    asset_id = f"{slug}_{uuid.uuid4().hex[:8]}"
-    file_name = f"{asset_id}.blend"
-    file_path = os.path.join(_assets_dir(), file_name)
-
-    mesh_copy = src_mesh.copy()
-    mesh_copy.name = f"AF_ASSET_{asset_id}"
-
-    # Bake object's rotation+scale into mesh data (ignore translation)
-    m = obj.matrix_world.copy()
-    m.translation = (0.0, 0.0, 0.0)
-    mesh_copy.transform(m)
-    mesh_copy.update()
-
+    asset_id, file_name, file_path = _new_asset_paths(base_name)
+    mesh_copy = _baked_mesh_copy(obj, asset_id)
     try:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-
+        _replace_existing_file(file_path)
         bpy.data.libraries.write(file_path, {mesh_copy}, fake_user=True)
-
-        data = _read_index()
-        data["assets"].append(
-            {
-                "id": asset_id,
-                "name": base_name,
-                "file": file_name,
-                "mesh_name": mesh_copy.name,
-            }
-        )
-        _write_index(data)
-
+        _append_asset_index(asset_id, base_name, file_name, mesh_copy.name)
         return asset_id
     finally:
         if mesh_copy.users == 0 and mesh_copy.name in bpy.data.meshes:
             bpy.data.meshes.remove(mesh_copy)
+
+
+def _new_asset_paths(base_name):
+    slug = _safe_slug(base_name)
+    asset_id = f"{slug}_{uuid.uuid4().hex[:8]}"
+    file_name = f"{asset_id}.blend"
+    file_path = os.path.join(_assets_dir(), file_name)
+    return asset_id, file_name, file_path
+
+
+def _baked_mesh_copy(obj, asset_id):
+    mesh_copy = obj.data.copy()
+    mesh_copy.name = f"AF_ASSET_{asset_id}"
+    m = obj.matrix_world.copy()
+    m.translation = (0.0, 0.0, 0.0)
+    mesh_copy.transform(m)
+    mesh_copy.update()
+    return mesh_copy
+
+
+def _replace_existing_file(file_path):
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+
+def _append_asset_index(asset_id, base_name, file_name, mesh_name):
+    data = _read_index()
+    data["assets"].append(
+        {"id": asset_id, "name": base_name, "file": file_name, "mesh_name": mesh_name}
+    )
+    _write_index(data)
 
 
 def load_asset_mesh(asset_id):

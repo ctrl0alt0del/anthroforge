@@ -25,38 +25,41 @@ class FiberSolver:
         else:
             self._cache.pop(fiber_id, None)
 
-    def solve_points(self, root, fiber_prop, scene, depsgraph, bake=False):
-        runtime = SCPRegistry(root)
-        runtime.build()
-
+    def _endpoint_pair(self, root, scene, runtime_registry, fiber_prop):
         a_world = self._endpoint_world(
             root=root,
             scene=scene,
-            runtime_registry=runtime.registry,
+            runtime_registry=runtime_registry,
             parent_id=fiber_prop.a_parent_id,
             attach_param_raw=fiber_prop.a_attach_param,
         )
         b_world = self._endpoint_world(
             root=root,
             scene=scene,
-            runtime_registry=runtime.registry,
+            runtime_registry=runtime_registry,
             parent_id=fiber_prop.b_parent_id,
             attach_param_raw=fiber_prop.b_attach_param,
         )
+        return a_world, b_world
 
-        if a_world is None or b_world is None:
-            fiber_prop.not_converged = True
-            fiber_prop.last_eps_disp = 0.0
-            fiber_prop.last_eps_pen = 0.0
-            return []
-
+    def _runtime_params(self, fiber_prop, bake):
         node_count = max(8, int(fiber_prop.node_count))
         iterations = int(fiber_prop.iterations_bake if bake else fiber_prop.iterations_interactive)
         iterations = max(1, iterations)
+        params = {
+            "node_count": node_count,
+            "iterations": iterations,
+            "margin": float(fiber_prop.collision_margin),
+            "damping": float(fiber_prop.damping),
+            "shorten_strength": max(0.0, min(1.0, float(getattr(fiber_prop, "stretch_stiffness", 0.9)))),
+            "bend_strength": max(0.0, min(1.0, float(getattr(fiber_prop, "bend_stiffness", 0.15)))),
+            "eps_disp": 1e-5,
+            "eps_pen": 1e-5,
+        }
+        params["min_iters"] = max(8, params["iterations"] // 4)
+        return params
 
-        guide_worlds = self._guide_worlds(root, scene, runtime.registry, fiber_prop)
-        nodes_init, pin_targets = self._build_chain_with_anchors(a_world, b_world, guide_worlds, node_count)
-
+    def _initialize_nodes(self, fiber_prop, nodes_init, pin_targets, node_count):
         use_warm_start = bool(getattr(fiber_prop, "use_warm_start", False))
         cached = self._cache.get(fiber_prop.id) if use_warm_start else None
         if cached and len(cached) == node_count:
@@ -69,57 +72,74 @@ class FiberSolver:
         pinned = [False] * node_count
         for idx in pin_targets.keys():
             pinned[idx] = True
+        return nodes, pinned
 
+    def _solver_iteration(self, nodes, prev_nodes, pinned, pin_targets, collider_cache, params, it):
+        self._apply_length_shortening(nodes, pinned, params["shorten_strength"])
+        if params["bend_strength"] > 0.0 and (it % 2) == 0:
+            self._apply_bend_smoothing(nodes, pinned, params["bend_strength"])
+
+        max_pen = self._apply_collision_constraints(
+            nodes=nodes,
+            pinned=pinned,
+            collider_cache=collider_cache,
+            margin=params["margin"],
+        )
+        for idx, pt in pin_targets.items():
+            nodes[idx] = pt.copy()
+
+        self._apply_damping(nodes, prev_nodes, pinned, params["damping"])
+        max_disp = self._max_displacement(nodes, prev_nodes)
+        return max_disp, max_pen
+
+    def solve_points(self, root, fiber_prop, scene, depsgraph, bake=False):
+        runtime = self._runtime_registry(root)
+        a_world, b_world = self._endpoint_pair(root, scene, runtime, fiber_prop)
+        if a_world is None or b_world is None:
+            self._mark_failed(fiber_prop)
+            return []
+        params = self._runtime_params(fiber_prop, bake)
+        guide_worlds = self._guide_worlds(root, scene, runtime, fiber_prop)
+        nodes, pinned, pin_targets = self._build_initialized_nodes(fiber_prop, a_world, b_world, guide_worlds, params)
         prev_nodes = [p.copy() for p in nodes]
-
-        colliders = self._surface_colliders(root, scene, runtime.registry)
+        colliders = self._surface_colliders(root, scene, runtime)
         collider_cache = self._build_collider_cache(colliders, depsgraph)
+        converged, max_disp, max_pen = self._run_iterations(nodes, prev_nodes, pinned, pin_targets, collider_cache, params)
+        self._store_status(fiber_prop, converged, max_disp, max_pen)
+        self._cache[fiber_prop.id] = [p.copy() for p in nodes]
+        return nodes
 
-        margin = float(fiber_prop.collision_margin)
-        damping = float(fiber_prop.damping)
+    def _runtime_registry(self, root):
+        runtime = SCPRegistry(root)
+        runtime.build()
+        return runtime.registry
 
-        shorten_strength = max(0.0, min(1.0, float(getattr(fiber_prop, "stretch_stiffness", 0.9))))
-        bend_strength = max(0.0, min(1.0, float(getattr(fiber_prop, "bend_stiffness", 0.15))))
+    def _mark_failed(self, fiber_prop):
+        fiber_prop.not_converged = True
+        fiber_prop.last_eps_disp = 0.0
+        fiber_prop.last_eps_pen = 0.0
 
+    def _build_initialized_nodes(self, fiber_prop, a_world, b_world, guide_worlds, params):
+        nodes_init, pin_targets = self._build_chain_with_anchors(a_world, b_world, guide_worlds, params["node_count"])
+        nodes, pinned = self._initialize_nodes(fiber_prop, nodes_init, pin_targets, params["node_count"])
+        return nodes, pinned, pin_targets
+
+    def _run_iterations(self, nodes, prev_nodes, pinned, pin_targets, collider_cache, params):
         converged = False
-        eps_disp = 1e-5
-        eps_pen = 1e-5
-        min_iters = max(8, iterations // 4)
-
         max_disp = 0.0
         max_pen = 0.0
-
-        for it in range(iterations):
-            self._apply_length_shortening(nodes, pinned, shorten_strength)
-
-            if bend_strength > 0.0 and (it % 2) == 0:
-                self._apply_bend_smoothing(nodes, pinned, bend_strength)
-
-            max_pen = self._apply_collision_constraints(
-                nodes=nodes,
-                pinned=pinned,
-                collider_cache=collider_cache,
-                margin=margin,
-            )
-
-            for idx, pt in pin_targets.items():
-                nodes[idx] = pt.copy()
-
-            self._apply_damping(nodes, prev_nodes, pinned, damping)
-
-            max_disp = self._max_displacement(nodes, prev_nodes)
+        for it in range(params["iterations"]):
+            max_disp, max_pen = self._solver_iteration(nodes, prev_nodes, pinned, pin_targets, collider_cache, params, it)
             prev_nodes = [p.copy() for p in nodes]
-
-            if it >= min_iters and max_disp < eps_disp and max_pen < eps_pen:
+            if it >= params["min_iters"] and max_disp < params["eps_disp"] and max_pen < params["eps_pen"]:
                 converged = True
                 break
+        return converged, max_disp, max_pen
 
+    def _store_status(self, fiber_prop, converged, max_disp, max_pen):
         fiber_prop.not_converged = not converged
         fiber_prop.last_eps_disp = float(max_disp)
         fiber_prop.last_eps_pen = float(max_pen)
-
-        self._cache[fiber_prop.id] = [p.copy() for p in nodes]
-        return nodes
 
     def _guide_worlds(self, root, scene, runtime_registry, fiber_prop):
         out = []
@@ -148,40 +168,40 @@ class FiberSolver:
             nodes = [a_world.lerp(b_world, i / float(max(1, total_edges))) for i in range(node_count)]
             return nodes, {0: a_world.copy(), node_count - 1: b_world.copy()}
 
-        seg_lengths = []
-        total_len = 0.0
-        for i in range(seg_count):
-            d = (anchors[i + 1] - anchors[i]).length
-            seg_lengths.append(d)
-            total_len += d
+        edges = self._distribute_segment_edges(anchors, seg_count, total_edges)
+        nodes, pin_targets = self._compose_nodes_from_edges(anchors, edges)
+        if len(nodes) == node_count:
+            return nodes, pin_targets
+        return self._fallback_nodes_with_pins(anchors, node_count)
 
+    def _distribute_segment_edges(self, anchors, seg_count, total_edges):
+        seg_lengths = [(anchors[i + 1] - anchors[i]).length for i in range(seg_count)]
+        total_len = sum(seg_lengths)
         if total_len <= 1e-9:
             seg_lengths = [1.0] * seg_count
             total_len = float(seg_count)
 
         edges = [1] * seg_count
         remaining = total_edges - seg_count
-        if remaining > 0:
-            raw = [remaining * (d / total_len) for d in seg_lengths]
-            add = [int(v) for v in raw]
-            for i in range(seg_count):
-                edges[i] += add[i]
-            used = sum(add)
-            leftover = remaining - used
-            if leftover > 0:
-                frac = sorted([(raw[i] - int(raw[i]), i) for i in range(seg_count)], reverse=True)
-                for k in range(leftover):
-                    edges[frac[k % len(frac)][1]] += 1
+        if remaining <= 0:
+            return edges
 
-        nodes = []
-        pin_targets = {}
-        cursor = 0
+        raw = [remaining * (d / total_len) for d in seg_lengths]
+        add = [int(v) for v in raw]
+        for i in range(seg_count):
+            edges[i] += add[i]
+        leftover = remaining - sum(add)
+        if leftover > 0:
+            frac = sorted([(raw[i] - int(raw[i]), i) for i in range(seg_count)], reverse=True)
+            for k in range(leftover):
+                edges[frac[k % len(frac)][1]] += 1
+        return edges
 
-        for si in range(seg_count):
-            p0 = anchors[si]
-            p1 = anchors[si + 1]
-            e = max(1, edges[si])
-
+    def _compose_nodes_from_edges(self, anchors, edges):
+        nodes, pin_targets, cursor = [], {}, 0
+        for si, e in enumerate(edges):
+            p0, p1 = anchors[si], anchors[si + 1]
+            e = max(1, e)
             seg_nodes = [p0.lerp(p1, j / float(e)) for j in range(e + 1)]
             if si == 0:
                 nodes.extend(seg_nodes)
@@ -190,18 +210,17 @@ class FiberSolver:
             else:
                 nodes.extend(seg_nodes[1:])
                 cursor += e
-
             pin_targets[cursor] = anchors[si + 1].copy()
+        return nodes, pin_targets
 
-        if len(nodes) != node_count:
-            nodes = [anchors[0].lerp(anchors[-1], i / float(max(1, node_count - 1))) for i in range(node_count)]
-            pin_targets = {0: anchors[0].copy(), node_count - 1: anchors[-1].copy()}
-            if len(anchors) > 2:
-                for k in range(1, len(anchors) - 1):
-                    idx = int(round(k * (node_count - 1) / float(len(anchors) - 1)))
-                    idx = max(1, min(node_count - 2, idx))
-                    pin_targets[idx] = anchors[k].copy()
-
+    def _fallback_nodes_with_pins(self, anchors, node_count):
+        nodes = [anchors[0].lerp(anchors[-1], i / float(max(1, node_count - 1))) for i in range(node_count)]
+        pin_targets = {0: anchors[0].copy(), node_count - 1: anchors[-1].copy()}
+        if len(anchors) > 2:
+            for k in range(1, len(anchors) - 1):
+                idx = int(round(k * (node_count - 1) / float(len(anchors) - 1)))
+                idx = max(1, min(node_count - 2, idx))
+                pin_targets[idx] = anchors[k].copy()
         return nodes, pin_targets
 
     def _get_scp_proxy(self, root, scene, scp_id):

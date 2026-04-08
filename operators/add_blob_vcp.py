@@ -5,6 +5,33 @@ from ..core.utils import get_af_root
 from ..core.visualization.sync_runner import sync_from_blob_ids
 
 
+def _init_blob_defaults(blob, scene):
+    blob.center_world = scene.cursor.location
+    blob.radius = 0.2
+    blob.shape = "SPHERE"
+    blob.axis_scale = (1.0, 1.0, 1.0)
+    blob.resolution = 24
+    blob.control_point_world = scene.cursor.location
+    blob.gravity_dir = (0.0, 0.0, -1.0)
+    blob.sag_strength = 0.35
+    blob.sag_limit = 0.35
+    blob.stiffness = 0.25
+    blob.iterations = 20
+
+
+def _set_blob_target(blob, target):
+    if not target:
+        blob.attach_target_type, blob.attach_target_id, blob.attach_target_object_name = "NONE", "", ""
+        return
+    if target.get("af_muscle_proxy") and target.get("af_muscle_id"):
+        blob.attach_target_type, blob.attach_target_id, blob.attach_target_object_name = "MUSCLE", target.get("af_muscle_id"), ""
+        return
+    if target.get("af_proxy") and target.get("af_scp_id"):
+        blob.attach_target_type, blob.attach_target_id, blob.attach_target_object_name = "SCP", target.get("af_scp_id"), ""
+        return
+    blob.attach_target_type, blob.attach_target_id, blob.attach_target_object_name = "OBJECT", "", target.name
+
+
 class AF_OT_AddBlobVCP(bpy.types.Operator):
     bl_idname = "af.add_blob_vcp"
     bl_label = "Add Blob VCP"
@@ -18,45 +45,12 @@ class AF_OT_AddBlobVCP(bpy.types.Operator):
 
         vcp = root.af_vcp_system
         blobs = vcp.blobs
-
         blob_id = next_prefixed_id(blobs, "BLOB")
-
         b = blobs.add()
         b.id = blob_id
         b.name = blob_id
-
-        b.center_world = context.scene.cursor.location
-        b.radius = 0.2
-        b.shape = "SPHERE"
-        b.axis_scale = (1.0, 1.0, 1.0)
-        b.resolution = 24
-        b.control_point_world = context.scene.cursor.location
-
-        b.gravity_dir = (0.0, 0.0, -1.0)
-        b.sag_strength = 0.35
-        b.sag_limit = 0.35
-
-        b.stiffness = 0.25
-        b.iterations = 20
-
-        target = context.scene.af_new_blob_target_obj or context.active_object
-        if target:
-            if target.get("af_muscle_proxy") and target.get("af_muscle_id"):
-                b.attach_target_type = "MUSCLE"
-                b.attach_target_id = target.get("af_muscle_id")
-                b.attach_target_object_name = ""
-            elif target.get("af_proxy") and target.get("af_scp_id"):
-                b.attach_target_type = "SCP"
-                b.attach_target_id = target.get("af_scp_id")
-                b.attach_target_object_name = ""
-            else:
-                b.attach_target_type = "OBJECT"
-                b.attach_target_id = ""
-                b.attach_target_object_name = target.name
-        else:
-            b.attach_target_type = "NONE"
-            b.attach_target_id = ""
-            b.attach_target_object_name = ""
+        _init_blob_defaults(b, context.scene)
+        _set_blob_target(b, context.scene.af_new_blob_target_obj or context.active_object)
 
         vcp.active_vcp_type = "BLOB"
         vcp.active_vcp_id = b.id

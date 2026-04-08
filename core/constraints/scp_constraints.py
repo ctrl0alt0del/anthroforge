@@ -40,60 +40,50 @@ def _get_source_value(scp, key):
 
 def _set_dest_value(scp, key, value):
     if key == "PAR_BEND_RADIUS":
-        old = float(scp.parallelepiped_bend_radius)
-        new = max(0.001, float(value))
-        if abs(new - old) <= 1e-9:
-            return False
-        scp.parallelepiped_bend_radius = new
-        return True
-
+        return _set_float_attr(scp, "parallelepiped_bend_radius", value, lo=0.001)
     if key == "PAR_BEND_ANGLE":
-        old = float(scp.parallelepiped_bend_angle_deg)
-        new = max(-360.0, min(360.0, float(value)))
-        if abs(new - old) <= 1e-9:
-            return False
-        scp.parallelepiped_bend_angle_deg = new
-        return True
-
+        return _set_float_attr(scp, "parallelepiped_bend_angle_deg", value, lo=-360.0, hi=360.0)
     if key == "PAR_RESOLUTION":
-        old = int(scp.parallelepiped_resolution)
-        new = max(1, min(64, int(round(float(value)))))
-        if new == old:
-            return False
-        scp.parallelepiped_resolution = new
-        return True
+        return _set_int_attr(scp, "parallelepiped_resolution", value, lo=1, hi=64)
+    scale_axis = {"LOCAL_SCALE_X": 0, "LOCAL_SCALE_Y": 1, "LOCAL_SCALE_Z": 2}.get(key, None)
+    return _set_scale_axis(scp, scale_axis, value) if scale_axis is not None else False
 
-    if key == "LOCAL_SCALE_X":
-        old = float(scp.local_scale[0])
-        new = max(1e-6, float(value))
-        if abs(new - old) <= 1e-9:
-            return False
-        sc = list(scp.local_scale)
-        sc[0] = new
-        scp.local_scale = tuple(sc)
-        return True
 
-    if key == "LOCAL_SCALE_Y":
-        old = float(scp.local_scale[1])
-        new = max(1e-6, float(value))
-        if abs(new - old) <= 1e-9:
-            return False
-        sc = list(scp.local_scale)
-        sc[1] = new
-        scp.local_scale = tuple(sc)
-        return True
+def _set_float_attr(scp, attr, value, lo=None, hi=None):
+    old = float(getattr(scp, attr))
+    new = float(value)
+    if lo is not None:
+        new = max(lo, new)
+    if hi is not None:
+        new = min(hi, new)
+    if abs(new - old) <= 1e-9:
+        return False
+    setattr(scp, attr, new)
+    return True
 
-    if key == "LOCAL_SCALE_Z":
-        old = float(scp.local_scale[2])
-        new = max(1e-6, float(value))
-        if abs(new - old) <= 1e-9:
-            return False
-        sc = list(scp.local_scale)
-        sc[2] = new
-        scp.local_scale = tuple(sc)
-        return True
 
-    return False
+def _set_int_attr(scp, attr, value, lo=None, hi=None):
+    old = int(getattr(scp, attr))
+    new = int(round(float(value)))
+    if lo is not None:
+        new = max(lo, new)
+    if hi is not None:
+        new = min(hi, new)
+    if new == old:
+        return False
+    setattr(scp, attr, new)
+    return True
+
+
+def _set_scale_axis(scp, axis, value):
+    old = float(scp.local_scale[axis])
+    new = max(1e-6, float(value))
+    if abs(new - old) <= 1e-9:
+        return False
+    sc = list(scp.local_scale)
+    sc[axis] = new
+    scp.local_scale = tuple(sc)
+    return True
 
 
 def _get_dest_value(scp, key):
@@ -149,107 +139,93 @@ def evaluate_scp_constraints_runtime(root, changed_source_ids, is_cyclic_pair, d
     if not changed_source_ids:
         return set()
 
+    items = _collect_runtime_items(root, changed_source_ids)
+    items.sort(key=lambda x: (x[0], x[1]))
+    changed_dests = set()
+
+    for _prio, _dst_sort, dest, c, src_id in items:
+        _evaluate_single_constraint(root, is_cyclic_pair, delayed_writer, changed_dests, dest, c, src_id)
+    return changed_dests
+
+
+def _evaluate_single_constraint(root, is_cyclic_pair, delayed_writer, changed_dests, dest, c, src_id):
+    src = _get_scp_by_id(root, src_id)
+    if src is None:
+        return
+    source_key = c.arc_source_width_prop if c.calculator_type == "ARC_BRIDGE" else c.source_prop
+    src_value = _get_source_value(src, source_key)
+    if src_value is None:
+        return
+    cyclic = bool(is_cyclic_pair(src_id, dest.id))
+    if c.calculator_type == "ARC_BRIDGE":
+        _apply_arc_bridge_constraint(c, dest, src_value, cyclic, delayed_writer, changed_dests)
+    else:
+        _apply_linear_like_constraint(c, dest, src_value, cyclic, delayed_writer, changed_dests)
+    c.runtime_status = "DELAYED_CYCLE" if cyclic else "OK"
+    c.runtime_message = "Part of cycle, applied next tick" if cyclic else ""
+
+
+def _collect_runtime_items(root, changed_source_ids):
     items = []
     for dest in root.af_scp_system.scps:
         for c in dest.constraints:
             if not bool(c.enabled):
                 continue
-            src_id = ""
             src_obj = getattr(c, "source_obj", None)
-            if src_obj and src_obj.get("af_scp_id"):
-                src_id = str(src_obj.get("af_scp_id"))
-            else:
-                src_id = str(getattr(c, "source_scp_id", "") or "")
-            if not src_id or src_id not in changed_source_ids:
-                continue
-            items.append((int(c.priority), str(dest.id), dest, c, src_id))
+            src_id = str(src_obj.get("af_scp_id")) if (src_obj and src_obj.get("af_scp_id")) else str(getattr(c, "source_scp_id", "") or "")
+            if src_id and src_id in changed_source_ids:
+                items.append((int(c.priority), str(dest.id), dest, c, src_id))
+    return items
 
-    items.sort(key=lambda x: (x[0], x[1]))
-    changed_dests = set()
 
-    for _prio, _dst_sort, dest, c, src_id in items:
-        src = _get_scp_by_id(root, src_id)
-        if src is None:
-            continue
+def _apply_arc_bridge_constraint(c, dest, src_value, cyclic, delayed_writer, changed_dests):
+    dst_key_a = c.arc_dest_angle_prop
+    if not bool(getattr(c, "delta_initialized", False)):
+        dst_now_r = _get_dest_value(dest, "PAR_BEND_RADIUS")
+        dst_now_a = _get_dest_value(dest, dst_key_a)
+        if dst_now_r is None or dst_now_a is None:
+            return
+        c.delta_src_base = float(src_value)
+        c.delta_dst_base = float(dst_now_r)
+        c.delta_dst_base_2 = float(dst_now_a)
+        c.delta_initialized = True
+        return
 
-        source_key = c.arc_source_width_prop if c.calculator_type == "ARC_BRIDGE" else c.source_prop
-        src_value = _get_source_value(src, source_key)
-        if src_value is None:
-            continue
+    width_scale = float(getattr(c, "arc_width_scale", 1.0))
+    width_offset = float(getattr(c, "arc_width_offset", 0.0))
+    full_angle = max(1e-6, float(getattr(c, "arc_full_angle", 360.0)))
+    width_now = max(0.0, float(src_value) * width_scale + width_offset)
+    width_base = max(0.0, float(c.delta_src_base) * width_scale + width_offset)
+    fixed_radius = max(1e-6, float(c.delta_dst_base))
+    target_a_now = _arc_target_angle(full_angle, width_now, fixed_radius)
+    target_a_base = _arc_target_angle(full_angle, width_base, fixed_radius)
+    target_a = float(c.delta_dst_base_2) + (target_a_now - target_a_base)
+    if cyclic:
+        delayed_writer("SCP", dest.id, dst_key_a, target_a)
+    elif _set_dest_value(dest, dst_key_a, target_a):
+        changed_dests.add(dest.id)
 
-        cyclic = bool(is_cyclic_pair(src_id, dest.id))
-        status = "DELAYED_CYCLE" if cyclic else "OK"
-        msg = "Part of cycle, applied next tick" if cyclic else ""
 
-        if c.calculator_type == "ARC_BRIDGE":
-            dst_key_a = c.arc_dest_angle_prop
+def _arc_target_angle(full_angle, width, radius):
+    ratio = max(-1.0, min(1.0, width / (2.0 * radius)))
+    gap_deg = math.degrees(2.0 * math.asin(ratio))
+    return full_angle - gap_deg
 
-            if not bool(getattr(c, "delta_initialized", False)):
-                dst_now_r = _get_dest_value(dest, "PAR_BEND_RADIUS")
-                dst_now_a = _get_dest_value(dest, dst_key_a)
-                if dst_now_r is None or dst_now_a is None:
-                    continue
-                c.delta_src_base = float(src_value)
-                c.delta_dst_base = float(dst_now_r)
-                c.delta_dst_base_2 = float(dst_now_a)
-                c.delta_initialized = True
-                c.runtime_status = status
-                c.runtime_message = msg
-                continue
 
-            width_scale = float(getattr(c, "arc_width_scale", 1.0))
-            width_offset = float(getattr(c, "arc_width_offset", 0.0))
-            full_angle = max(1e-6, float(getattr(c, "arc_full_angle", 360.0)))
+def _apply_linear_like_constraint(c, dest, src_value, cyclic, delayed_writer, changed_dests):
+    if not bool(getattr(c, "delta_initialized", False)):
+        dst_now = _get_dest_value(dest, c.dest_prop)
+        if dst_now is None:
+            return
+        c.delta_src_base = float(src_value)
+        c.delta_dst_base = float(dst_now)
+        c.delta_initialized = True
+        return
 
-            width_now = max(0.0, float(src_value) * width_scale + width_offset)
-            width_base = max(0.0, float(c.delta_src_base) * width_scale + width_offset)
-            fixed_radius = max(1e-6, float(c.delta_dst_base))
-
-            ratio_now = max(-1.0, min(1.0, width_now / (2.0 * fixed_radius)))
-            gap_deg_now = math.degrees(2.0 * math.asin(ratio_now))
-            target_a_now = full_angle - gap_deg_now
-
-            ratio_base = max(-1.0, min(1.0, width_base / (2.0 * fixed_radius)))
-            gap_deg_base = math.degrees(2.0 * math.asin(ratio_base))
-            target_a_base = full_angle - gap_deg_base
-            target_a = float(c.delta_dst_base_2) + (target_a_now - target_a_base)
-
-            if cyclic:
-                delayed_writer("SCP", dest.id, dst_key_a, target_a)
-            else:
-                did_a = _set_dest_value(dest, dst_key_a, target_a)
-                if did_a:
-                    changed_dests.add(dest.id)
-
-            c.runtime_status = status
-            c.runtime_message = msg
-            continue
-
-        # LINEAR / RANGE_REMAP
-        if not bool(getattr(c, "delta_initialized", False)):
-            dst_now = _get_dest_value(dest, c.dest_prop)
-            if dst_now is None:
-                continue
-            c.delta_src_base = float(src_value)
-            c.delta_dst_base = float(dst_now)
-            c.delta_initialized = True
-            c.runtime_status = status
-            c.runtime_message = msg
-            continue
-
-        f_now = _eval_constraint_value(c, src_value)
-        f_base = _eval_constraint_value(c, float(c.delta_src_base))
-        target = float(c.delta_dst_base) + (f_now - f_base)
-
-        if cyclic:
-            delayed_writer("SCP", dest.id, c.dest_prop, target)
-        else:
-            did = _set_dest_value(dest, c.dest_prop, target)
-            if did:
-                changed_dests.add(dest.id)
-
-        c.runtime_status = status
-        c.runtime_message = msg
-
-    return changed_dests
-
+    f_now = _eval_constraint_value(c, src_value)
+    f_base = _eval_constraint_value(c, float(c.delta_src_base))
+    target = float(c.delta_dst_base) + (f_now - f_base)
+    if cyclic:
+        delayed_writer("SCP", dest.id, c.dest_prop, target)
+    elif _set_dest_value(dest, c.dest_prop, target):
+        changed_dests.add(dest.id)

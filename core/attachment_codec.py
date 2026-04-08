@@ -8,18 +8,38 @@ def _vec3(value, fallback):
     return fallback.copy()
 
 
+def _default_surface_frame_payload():
+    return {
+        "parent_param": 0.0,
+        "child_origin_local": Vector((0.0, 0.0, 0.0)),
+        "child_tangent_local": Vector((1.0, 0.0, 0.0)),
+        "child_normal_local": Vector((0.0, 0.0, 1.0)),
+    }
+
+
+def _surface_frame_from_data(data):
+    payload = _default_surface_frame_payload()
+    payload["parent_param"] = data.get("parent_param", 0.0)
+    payload["child_origin_local"] = _vec3(data.get("child_origin_local"), payload["child_origin_local"])
+    payload["child_tangent_local"] = _vec3(data.get("child_tangent_local"), payload["child_tangent_local"])
+    payload["child_normal_local"] = _vec3(data.get("child_normal_local"), payload["child_normal_local"])
+    return "surface_frame_v1", payload
+
+
+def _mesh_anchor_from_data(data):
+    p = data.get("parent_local_point")
+    c = data.get("child_local_point")
+    if isinstance(p, (list, tuple)) and len(p) == 3 and isinstance(c, (list, tuple)) and len(c) == 3:
+        return "mesh_anchor", (Vector((float(p[0]), float(p[1]), float(p[2]))), Vector((float(c[0]), float(c[1]), float(c[2]))))
+    if isinstance(p, (list, tuple)) and len(p) == 3:
+        return "mesh_anchor", (Vector((float(p[0]), float(p[1]), float(p[2]))), Vector((0.0, 0.0, 0.0)))
+    return None
+
+
 def parse_scp_attach_param(raw):
     raw = (raw or "").strip()
     if not raw:
-        return (
-            "surface_frame_v1",
-            {
-                "parent_param": 0.0,
-                "child_origin_local": Vector((0.0, 0.0, 0.0)),
-                "child_tangent_local": Vector((1.0, 0.0, 0.0)),
-                "child_normal_local": Vector((0.0, 0.0, 1.0)),
-            },
-        )
+        return "surface_frame_v1", _default_surface_frame_payload()
 
     try:
         data = json.loads(raw)
@@ -27,45 +47,12 @@ def parse_scp_attach_param(raw):
         data = {}
 
     if isinstance(data, dict) and data.get("mode") == "surface_frame_v1":
-        return (
-            "surface_frame_v1",
-            {
-                "parent_param": data.get("parent_param", 0.0),
-                "child_origin_local": _vec3(data.get("child_origin_local"), Vector((0.0, 0.0, 0.0))),
-                "child_tangent_local": _vec3(data.get("child_tangent_local"), Vector((1.0, 0.0, 0.0))),
-                "child_normal_local": _vec3(data.get("child_normal_local"), Vector((0.0, 0.0, 1.0))),
-            },
-        )
-
+        return _surface_frame_from_data(data)
     if isinstance(data, dict) and data.get("mode") == "mesh_anchor":
-        p = data.get("parent_local_point")
-        c = data.get("child_local_point")
-        if isinstance(p, (list, tuple)) and len(p) == 3 and isinstance(c, (list, tuple)) and len(c) == 3:
-            return (
-                "mesh_anchor",
-                (
-                    Vector((float(p[0]), float(p[1]), float(p[2]))),
-                    Vector((float(c[0]), float(c[1]), float(c[2]))),
-                ),
-            )
-        if isinstance(p, (list, tuple)) and len(p) == 3:
-            return (
-                "mesh_anchor",
-                (
-                    Vector((float(p[0]), float(p[1]), float(p[2]))),
-                    Vector((0.0, 0.0, 0.0)),
-                ),
-            )
-
-    return (
-        "surface_frame_v1",
-        {
-            "parent_param": 0.0,
-            "child_origin_local": Vector((0.0, 0.0, 0.0)),
-            "child_tangent_local": Vector((1.0, 0.0, 0.0)),
-            "child_normal_local": Vector((0.0, 0.0, 1.0)),
-        },
-    )
+        parsed = _mesh_anchor_from_data(data)
+        if parsed is not None:
+            return parsed
+    return "surface_frame_v1", _default_surface_frame_payload()
 
 
 def encode_surface_frame(parent_param, child_origin_local, child_tangent_local, child_normal_local):

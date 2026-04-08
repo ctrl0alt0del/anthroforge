@@ -217,37 +217,37 @@ def densify_between_fibers(ordered_fiber_points):
     if n < 2:
         return ordered_fiber_points
 
-    # target U edge step from average across rows
-    u_sum = 0.0
-    u_cnt = 0
-    for row in ordered_fiber_points:
-        for j in range(n - 1):
-            u_sum += (row[j + 1] - row[j]).length
-            u_cnt += 1
-    u_step = max(1e-6, u_sum / max(1, u_cnt))
+    u_step = _avg_u_step(ordered_fiber_points, n)
 
     out = [ordered_fiber_points[0]]
-
     for i in range(m - 1):
         a = ordered_fiber_points[i]
         b = ordered_fiber_points[i + 1]
-
-        # average V distance between these two rows
-        v_avg = 0.0
-        for j in range(n):
-            v_avg += (b[j] - a[j]).length
-        v_avg /= float(n)
-
-        inserts = max(0, int(round(v_avg / u_step)) - 1)
-
+        inserts = _inserts_for_row_pair(a, b, n, u_step)
         for k in range(1, inserts + 1):
             t = k / float(inserts + 1)
             row = [a[j].lerp(b[j], t) for j in range(n)]
             out.append(row)
-
         out.append(b)
-
     return out
+
+
+def _avg_u_step(rows, n):
+    u_sum = 0.0
+    u_cnt = 0
+    for row in rows:
+        for j in range(n - 1):
+            u_sum += (row[j + 1] - row[j]).length
+            u_cnt += 1
+    return max(1e-6, u_sum / max(1, u_cnt))
+
+
+def _inserts_for_row_pair(a, b, n, u_step):
+    v_avg = 0.0
+    for j in range(n):
+        v_avg += (b[j] - a[j]).length
+    v_avg /= float(n)
+    return max(0, int(round(v_avg / u_step)) - 1)
 
 
 def prepare_surface_rows(ordered_fiber_points, target_n=None, densify_v=True):

@@ -83,36 +83,31 @@ def remove_ctrl(obj):
     bpy.data.objects.remove(obj, do_unlink=True)
 
 
+def _find_muscle_surface(scene, root_name, muscle_id, surface):
+    for o in scene.objects:
+        if o.get("af_muscle_proxy") and o.get("af_root_name") == root_name and o.get("af_muscle_id") == muscle_id:
+            if o.get("af_muscle_surface") == surface:
+                return o
+    return None
+
+
+def _find_scp_target(scene, root_name, scp_id):
+    for o in scene.objects:
+        if o.get("af_proxy") and not o.get("af_mirror_proxy") and o.get("af_root_name") == root_name:
+            if o.get("af_scp_id") == scp_id:
+                return o
+    return None
+
+
 def target_object_for_blob(scene, root, blob_prop):
     t = blob_prop.attach_target_type
     if t == "MUSCLE" and blob_prop.attach_target_id:
-        for o in scene.objects:
-            if (
-                o.get("af_muscle_proxy")
-                and o.get("af_root_name") == root.name
-                and o.get("af_muscle_id") == blob_prop.attach_target_id
-                and o.get("af_muscle_surface") == "INFL"
-            ):
-                return o
-        for o in scene.objects:
-            if (
-                o.get("af_muscle_proxy")
-                and o.get("af_root_name") == root.name
-                and o.get("af_muscle_id") == blob_prop.attach_target_id
-                and o.get("af_muscle_surface") == "BASE"
-            ):
-                return o
-
+        infl = _find_muscle_surface(scene, root.name, blob_prop.attach_target_id, "INFL")
+        if infl is not None:
+            return infl
+        return _find_muscle_surface(scene, root.name, blob_prop.attach_target_id, "BASE")
     if t == "SCP" and blob_prop.attach_target_id:
-        for o in scene.objects:
-            if (
-                o.get("af_proxy")
-                and not o.get("af_mirror_proxy")
-                and o.get("af_root_name") == root.name
-                and o.get("af_scp_id") == blob_prop.attach_target_id
-            ):
-                return o
-
+        return _find_scp_target(scene, root.name, blob_prop.attach_target_id)
     if t == "OBJECT" and blob_prop.attach_target_object_name:
         return scene.objects.get(blob_prop.attach_target_object_name)
     return None

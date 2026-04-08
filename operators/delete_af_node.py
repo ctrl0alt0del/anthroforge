@@ -21,25 +21,31 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
     )
     target_id: bpy.props.StringProperty(default="", options={"HIDDEN", "SKIP_SAVE"})
 
-    def _delete_scp(self, context, root, scp_id):
-        scps = root.af_scp_system.scps
-
-        idx = -1
+    def _find_scp_index(self, scps, scp_id):
         for i, scp in enumerate(scps):
             if scp.id == scp_id:
-                idx = i
-                break
-        if idx < 0:
-            self.report({"ERROR"}, f"SCP '{scp_id}' not found.")
-            return {"CANCELLED"}
+                return i
+        return -1
 
+    def _collect_scp_children(self, root, scps, scp_id):
         child_scps = [scp.id for scp in scps if scp.parent_id == scp_id]
         child_fibers = []
         if hasattr(root, "af_vcp_system"):
             for fiber in root.af_vcp_system.fibers:
                 if fiber.a_parent_id == scp_id or fiber.b_parent_id == scp_id:
                     child_fibers.append(fiber.id)
+        return child_scps, child_fibers
 
+    def _set_active_scp_after_remove(self, root, scps, idx):
+        root.af_scp_system.active_scp_index = -1 if len(scps) == 0 else min(idx, len(scps) - 1)
+
+    def _delete_scp(self, context, root, scp_id):
+        scps = root.af_scp_system.scps
+        idx = self._find_scp_index(scps, scp_id)
+        if idx < 0:
+            self.report({"ERROR"}, f"SCP '{scp_id}' not found.")
+            return {"CANCELLED"}
+        child_scps, child_fibers = self._collect_scp_children(root, scps, scp_id)
         if child_scps or child_fibers:
             parts = []
             if child_scps:
@@ -48,14 +54,8 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
                 parts.append(f"Fiber children: {', '.join(child_fibers[:5])}")
             self.report({"ERROR"}, "Cannot delete SCP with children. " + " | ".join(parts))
             return {"CANCELLED"}
-
         scps.remove(idx)
-
-        if len(scps) == 0:
-            root.af_scp_system.active_scp_index = -1
-        else:
-            root.af_scp_system.active_scp_index = min(idx, len(scps) - 1)
-
+        self._set_active_scp_after_remove(root, scps, idx)
         sync_all(root=root, scene=context.scene)
         self.report({"INFO"}, f"Deleted SCP '{scp_id}'")
         return {"FINISHED"}

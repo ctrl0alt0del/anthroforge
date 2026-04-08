@@ -9,6 +9,28 @@ from .registry import ShapeRegistry
 class _BendDeformer:
     priority = 20
 
+    @staticmethod
+    def _axis_components(axis, p):
+        if axis == "Y":
+            return p.y, p.z, p.x
+        if axis == "Z":
+            return p.z, p.x, p.y
+        return p.x, p.y, p.z
+
+    @staticmethod
+    def _axis_vector(axis, u, v, w):
+        if axis == "Y":
+            return Vector((w, u, v))
+        if axis == "Z":
+            return Vector((v, w, u))
+        return Vector((u, v, w))
+
+    def _bend_basis(self, p, shape):
+        axis = shape.bend_axis
+        u_center, span, v_center = shape._bend_frame(axis)
+        u, v, w = self._axis_components(axis, p)
+        return axis, u_center, span, v_center, u, v, w
+
     def forward(self, p, shape):
         if not shape.bend_enabled:
             return p
@@ -17,29 +39,14 @@ class _BendDeformer:
         if abs(angle_rad) <= 1e-9:
             return p
 
-        axis = shape.bend_axis
-        u_center, span, v_center = shape._bend_frame(axis)
-
-        if axis == "Y":
-            u, v, w = p.y, p.z, p.x
-        elif axis == "Z":
-            u, v, w = p.z, p.x, p.y
-        else:
-            u, v, w = p.x, p.y, p.z
-
+        axis, u_center, span, v_center, u, v, w = self._bend_basis(p, shape)
         theta = ((u - u_center) / span) * angle_rad
         r0 = max(1e-6, shape.bend_radius)
         v_local = v - v_center
         r = max(1e-6, r0 + v_local)
-
         new_u = u_center + (sin(theta) * r)
         new_v = v_center + ((cos(theta) * r) - r0)
-
-        if axis == "Y":
-            return Vector((w, new_u, new_v))
-        if axis == "Z":
-            return Vector((new_v, w, new_u))
-        return Vector((new_u, new_v, w))
+        return self._axis_vector(axis, new_u, new_v, w)
 
     def inverse(self, p, shape):
         if not shape.bend_enabled:
@@ -49,30 +56,15 @@ class _BendDeformer:
         if abs(angle_rad) <= 1e-9:
             return p.copy()
 
-        axis = shape.bend_axis
-        u_center, span, v_center = shape._bend_frame(axis)
-
-        if axis == "Y":
-            new_u, new_v, w = p.y, p.z, p.x
-        elif axis == "Z":
-            new_u, new_v, w = p.z, p.x, p.y
-        else:
-            new_u, new_v, w = p.x, p.y, p.z
-
+        axis, u_center, span, v_center, new_u, new_v, w = self._bend_basis(p, shape)
         r0 = max(1e-6, shape.bend_radius)
         su = new_u - u_center
         cv = (new_v - v_center) + r0
         r = max(1e-6, sqrt((su * su) + (cv * cv)))
         theta = atan2(su, cv)
-
         u = u_center + (theta / angle_rad) * span
         v = v_center + (r - r0)
-
-        if axis == "Y":
-            return Vector((w, u, v))
-        if axis == "Z":
-            return Vector((v, w, u))
-        return Vector((u, v, w))
+        return self._axis_vector(axis, u, v, w)
 
 
 class _ResolutionDeformer:
@@ -340,54 +332,44 @@ class ParallelepipedShape(ShapeStrategy):
 
     def sample_attachment_frame_local(self, param):
         if isinstance(param, dict) and str(param.get("mode", "")) == "surface_uv":
-            face = str(param.get("face", "X_MIN"))
-            su = max(0.0, min(1.0, float(param.get("u", 0.5))))
-            sv = max(0.0, min(1.0, float(param.get("v", 0.5))))
-            eps = 0.02
+            return self._surface_attachment_frame(param)
+        return self._vertex_attachment_frame(param)
 
-            origin = self._surface_point(face, su, sv)
-            p_u = self._surface_point(face, min(1.0, su + eps), sv)
-            p_v = self._surface_point(face, su, min(1.0, sv + eps))
+    def _surface_attachment_frame(self, param):
+        face = str(param.get("face", "X_MIN"))
+        su = max(0.0, min(1.0, float(param.get("u", 0.5))))
+        sv = max(0.0, min(1.0, float(param.get("v", 0.5))))
+        eps = 0.02
+        origin = self._surface_point(face, su, sv)
+        p_u = self._surface_point(face, min(1.0, su + eps), sv)
+        p_v = self._surface_point(face, su, min(1.0, sv + eps))
+        return self._stable_frame(origin, p_u, p_v)
 
-            tangent = p_u - origin
-            if tangent.length <= 1e-8:
-                tangent = Vector((1.0, 0.0, 0.0))
-            else:
-                tangent.normalize()
-
-            normal = tangent.cross(p_v - origin)
-            if normal.length <= 1e-8:
-                normal = tangent.cross(Vector((0.0, 0.0, 1.0)))
-            if normal.length <= 1e-8:
-                normal = tangent.cross(Vector((0.0, 1.0, 0.0)))
-            if normal.length <= 1e-8:
-                normal = Vector((0.0, 0.0, 1.0))
-            else:
-                normal.normalize()
-            return origin, tangent, normal
-
+    def _vertex_attachment_frame(self, param):
         origin = self.compute_local_point(param)
         if not self.points:
             return origin, Vector((1.0, 0.0, 0.0)), Vector((0.0, 0.0, 1.0))
-
-        try:
-            idx = int(param)
-        except Exception:
-            idx = 0
-        idx = max(0, min(len(self.points) - 1, idx))
-
+        idx = self._safe_point_index(param)
         j = (idx + 1) % len(self.points)
         k = (idx + 2) % len(self.points)
         pj = self.apply_point_deformers(self.points[j].copy())
         pk = self.apply_point_deformers(self.points[k].copy())
+        return self._stable_frame(origin, pj, pk)
 
-        tangent = pj - origin
+    def _safe_point_index(self, param):
+        try:
+            idx = int(param)
+        except Exception:
+            idx = 0
+        return max(0, min(len(self.points) - 1, idx))
+
+    def _stable_frame(self, origin, p_u, p_v):
+        tangent = p_u - origin
         if tangent.length <= 1e-8:
             tangent = Vector((1.0, 0.0, 0.0))
         else:
             tangent.normalize()
-
-        normal = tangent.cross(pk - origin)
+        normal = tangent.cross(p_v - origin)
         if normal.length <= 1e-8:
             normal = tangent.cross(Vector((0.0, 0.0, 1.0)))
         if normal.length <= 1e-8:
@@ -470,49 +452,29 @@ class ParallelepipedShape(ShapeStrategy):
             vmap[key] = idx
             return idx
 
-        for iv in range(n):
-            for iw in range(n):
-                a = add_lattice(0, iv, iw)
-                b = add_lattice(0, iv + 1, iw)
-                c = add_lattice(0, iv + 1, iw + 1)
-                d = add_lattice(0, iv, iw + 1)
-                faces.append((a, b, c, d))
-
-                a = add_lattice(n, iv, iw)
-                b = add_lattice(n, iv, iw + 1)
-                c = add_lattice(n, iv + 1, iw + 1)
-                d = add_lattice(n, iv + 1, iw)
-                faces.append((a, b, c, d))
-
-        for iu in range(n):
-            for iw in range(n):
-                a = add_lattice(iu, 0, iw)
-                b = add_lattice(iu + 1, 0, iw)
-                c = add_lattice(iu + 1, 0, iw + 1)
-                d = add_lattice(iu, 0, iw + 1)
-                faces.append((a, b, c, d))
-
-                a = add_lattice(iu, n, iw)
-                b = add_lattice(iu, n, iw + 1)
-                c = add_lattice(iu + 1, n, iw + 1)
-                d = add_lattice(iu + 1, n, iw)
-                faces.append((a, b, c, d))
-
-        for iu in range(n):
-            for iv in range(n):
-                a = add_lattice(iu, iv, 0)
-                b = add_lattice(iu, iv + 1, 0)
-                c = add_lattice(iu + 1, iv + 1, 0)
-                d = add_lattice(iu + 1, iv, 0)
-                faces.append((a, b, c, d))
-
-                a = add_lattice(iu, iv, n)
-                b = add_lattice(iu + 1, iv, n)
-                c = add_lattice(iu + 1, iv + 1, n)
-                d = add_lattice(iu, iv + 1, n)
-                faces.append((a, b, c, d))
+        self._append_x_faces(n, add_lattice, faces)
+        self._append_y_faces(n, add_lattice, faces)
+        self._append_z_faces(n, add_lattice, faces)
 
         return verts, faces
+
+    def _append_x_faces(self, n, add_lattice, faces):
+        for iv in range(n):
+            for iw in range(n):
+                faces.append((add_lattice(0, iv, iw), add_lattice(0, iv + 1, iw), add_lattice(0, iv + 1, iw + 1), add_lattice(0, iv, iw + 1)))
+                faces.append((add_lattice(n, iv, iw), add_lattice(n, iv, iw + 1), add_lattice(n, iv + 1, iw + 1), add_lattice(n, iv + 1, iw)))
+
+    def _append_y_faces(self, n, add_lattice, faces):
+        for iu in range(n):
+            for iw in range(n):
+                faces.append((add_lattice(iu, 0, iw), add_lattice(iu + 1, 0, iw), add_lattice(iu + 1, 0, iw + 1), add_lattice(iu, 0, iw + 1)))
+                faces.append((add_lattice(iu, n, iw), add_lattice(iu, n, iw + 1), add_lattice(iu + 1, n, iw + 1), add_lattice(iu + 1, n, iw)))
+
+    def _append_z_faces(self, n, add_lattice, faces):
+        for iu in range(n):
+            for iv in range(n):
+                faces.append((add_lattice(iu, iv, 0), add_lattice(iu, iv + 1, 0), add_lattice(iu + 1, iv + 1, 0), add_lattice(iu + 1, iv, 0)))
+                faces.append((add_lattice(iu, iv, n), add_lattice(iu + 1, iv, n), add_lattice(iu + 1, iv + 1, n), add_lattice(iu, iv + 1, n)))
 
     def ensure_proxy_object(self, obj):
         if obj.type != "MESH":

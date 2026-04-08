@@ -25,16 +25,7 @@ class AF_OT_AddSCPConstraint(bpy.types.Operator):
             return root.af_scp_system.scps[idx]
         return None
 
-    def execute(self, context):
-        root = get_af_root(context.scene)
-        if root is None:
-            return {"CANCELLED"}
-
-        scp = self._resolve_target_scp(root, context)
-        if scp is None:
-            return {"CANCELLED"}
-
-        c = scp.constraints.add()
+    def _init_constraint_defaults(self, c):
         c.enabled = True
         c.priority = 100
         c.source_scp_id = ""
@@ -60,6 +51,17 @@ class AF_OT_AddSCPConstraint(bpy.types.Operator):
         c.runtime_status = "OK"
         c.runtime_message = ""
 
+    def execute(self, context):
+        root = get_af_root(context.scene)
+        if root is None:
+            return {"CANCELLED"}
+
+        scp = self._resolve_target_scp(root, context)
+        if scp is None:
+            return {"CANCELLED"}
+
+        c = scp.constraints.add()
+        self._init_constraint_defaults(c)
         scp.active_constraint_index = len(scp.constraints) - 1
         return {"FINISHED"}
 

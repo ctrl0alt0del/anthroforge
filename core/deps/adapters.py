@@ -21,15 +21,7 @@ def _src_id_from_constraint(c):
     return str(getattr(c, "source_scp_id", "") or "")
 
 
-def build_runtime_graph(root, graph):
-    entity_sets = {
-        "SCP": set(),
-        "FIBER": set(),
-        "MUSCLE": set(),
-        "BLOB": set(),
-    }
-
-    # SCP ports + attachment edges + constraint edges.
+def _add_scp_entities(root, graph, entity_sets):
     for scp in root.af_scp_system.scps:
         sid = scp.id
         entity_sets["SCP"].add(sid)
@@ -38,15 +30,12 @@ def build_runtime_graph(root, graph):
         p_local = graph.add_port(PortRef("SCP", sid, "local_eval", PHASE_LOCAL_EVAL, MUT_DERIVED))
         p_att = graph.add_port(PortRef("SCP", sid, "attachment_world", PHASE_ATTACHMENT_WORLD, MUT_DERIVED))
         p_probe = graph.add_port(PortRef("SCP", sid, "probe", PHASE_PROBES, MUT_PROBE))
-
         graph.add_edge(Edge(p_in, p_local, EDGE_EVAL))
         graph.add_edge(Edge(p_local, p_att, EDGE_EVAL))
         graph.add_edge(Edge(p_att, p_probe, EDGE_EVAL))
 
         if scp.parent_id:
-            parent_probe = graph.add_port(
-                PortRef("SCP", scp.parent_id, "probe", PHASE_PROBES, MUT_PROBE)
-            )
+            parent_probe = graph.add_port(PortRef("SCP", scp.parent_id, "probe", PHASE_PROBES, MUT_PROBE))
             graph.add_edge(Edge(parent_probe, p_att, EDGE_ATTACHMENT))
             graph.add_entity_edge(("SCP", scp.parent_id), ("SCP", sid))
 
@@ -56,13 +45,12 @@ def build_runtime_graph(root, graph):
             src_id = _src_id_from_constraint(c)
             if not src_id:
                 continue
-            src_probe = graph.add_port(
-                PortRef("SCP", src_id, "probe", PHASE_PROBES, MUT_PROBE)
-            )
+            src_probe = graph.add_port(PortRef("SCP", src_id, "probe", PHASE_PROBES, MUT_PROBE))
             graph.add_edge(Edge(src_probe, p_in, EDGE_CONSTRAINT_READ))
             graph.add_entity_edge(("SCP", src_id), ("SCP", sid))
 
-    # Fibers.
+
+def _add_fiber_entities(root, graph, entity_sets):
     for f in root.af_vcp_system.fibers:
         fid = f.id
         entity_sets["FIBER"].add(fid)
@@ -72,11 +60,7 @@ def build_runtime_graph(root, graph):
         graph.add_edge(Edge(fp_in, fp_local, EDGE_EVAL))
         graph.add_edge(Edge(fp_local, fp_probe, EDGE_EVAL))
 
-        parents = set()
-        if f.a_parent_id:
-            parents.add(f.a_parent_id)
-        if f.b_parent_id:
-            parents.add(f.b_parent_id)
+        parents = {sid for sid in (f.a_parent_id, f.b_parent_id) if sid}
         for tp in f.mid_touches:
             if tp.parent_id:
                 parents.add(tp.parent_id)
@@ -85,7 +69,8 @@ def build_runtime_graph(root, graph):
             graph.add_edge(Edge(sp, fp_local, EDGE_ATTACHMENT))
             graph.add_entity_edge(("SCP", sid), ("FIBER", fid))
 
-    # Muscles.
+
+def _add_muscle_entities(root, graph, entity_sets):
     for m in root.af_vcp_system.muscles:
         mid = m.id
         entity_sets["MUSCLE"].add(mid)
@@ -102,7 +87,8 @@ def build_runtime_graph(root, graph):
             graph.add_edge(Edge(fp, mp_local, EDGE_EVAL))
             graph.add_entity_edge(("FIBER", ref.fiber_id), ("MUSCLE", mid))
 
-    # Blobs.
+
+def _add_blob_entities(root, graph, entity_sets):
     for b in root.af_vcp_system.blobs:
         bid = b.id
         entity_sets["BLOB"].add(bid)
@@ -119,4 +105,16 @@ def build_runtime_graph(root, graph):
             graph.add_edge(Edge(mp, bp_local, EDGE_ATTACHMENT))
             graph.add_entity_edge(("MUSCLE", b.attach_target_id), ("BLOB", bid))
 
+
+def build_runtime_graph(root, graph):
+    entity_sets = {
+        "SCP": set(),
+        "FIBER": set(),
+        "MUSCLE": set(),
+        "BLOB": set(),
+    }
+    _add_scp_entities(root, graph, entity_sets)
+    _add_fiber_entities(root, graph, entity_sets)
+    _add_muscle_entities(root, graph, entity_sets)
+    _add_blob_entities(root, graph, entity_sets)
     return entity_sets

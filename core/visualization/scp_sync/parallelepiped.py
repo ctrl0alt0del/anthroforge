@@ -29,100 +29,99 @@ class ParallelepipedSCPSyncExtension:
         vis_col.objects.link(obj)
         return obj
 
-    def sync_post(self, sync_manager, root, scene, vis_col):
-        live_keys = set()
-        active_id = ""
-
+    def _active_scp_id(self, root):
         active_obj = bpy.context.view_layer.objects.active if bpy.context and bpy.context.view_layer else None
         if active_obj and active_obj.get("af_root_name") == root.name:
             if active_obj.get("af_parallelepiped_vert_handle") and active_obj.get("af_scp_id"):
-                active_id = active_obj.get("af_scp_id")
-            elif active_obj.get("af_proxy") and active_obj.get("af_scp_id"):
-                active_id = active_obj.get("af_scp_id")
-
+                return active_obj.get("af_scp_id")
+            if active_obj.get("af_proxy") and active_obj.get("af_scp_id"):
+                return active_obj.get("af_scp_id")
         idx = root.af_scp_system.active_scp_index
-        if not active_id and 0 <= idx < len(root.af_scp_system.scps):
-            active_id = root.af_scp_system.scps[idx].id
+        if 0 <= idx < len(root.af_scp_system.scps):
+            return root.af_scp_system.scps[idx].id
+        return ""
 
-        for scp_prop in root.af_scp_system.scps:
-            if scp_prop.id != active_id:
-                continue
-            if scp_prop.shape_type != self.shape_type:
-                continue
+    def _sync_vertex_handles(self, sync_manager, root, scene, vis_col, scp_prop, live_keys):
+        proxy = sync_manager._find_proxy_in_scene(scene, root.name, scp_prop.id)
+        shape = ShapeRegistry.create_from_prop(scp_prop) if proxy is not None else None
+        if proxy is None or shape is None:
+            return
+        for i, _p in enumerate(scp_prop.parallelepiped_points):
+            live_keys.add((scp_prop.id, i))
+            h = self._find_vertex_handle(vis_col, root.name, scp_prop.id, i)
+            if h is None:
+                h = self._create_vertex_handle(vis_col, root, scp_prop.id, i)
+            local = shape.compute_local_point(i)
+            h.location = proxy.matrix_world @ Vector((local.x, local.y, local.z))
 
-            proxy = sync_manager._find_proxy_in_scene(scene, root.name, scp_prop.id)
-            if proxy is None:
-                continue
-            shape = ShapeRegistry.create_from_prop(scp_prop)
-            if shape is None:
-                continue
-
-            for i, _p in enumerate(scp_prop.parallelepiped_points):
-                live_keys.add((scp_prop.id, i))
-                h = self._find_vertex_handle(vis_col, root.name, scp_prop.id, i)
-                if h is None:
-                    h = self._create_vertex_handle(vis_col, root, scp_prop.id, i)
-                local = shape.compute_local_point(i)
-                h.location = proxy.matrix_world @ Vector((local.x, local.y, local.z))
-
+    def _cleanup_stale_vertex_handles(self, vis_col, root_name, live_keys):
         for obj in list(vis_col.objects):
             if not obj.get("af_parallelepiped_vert_handle"):
                 continue
-            if obj.get("af_root_name") != root.name:
+            if obj.get("af_root_name") != root_name:
                 continue
             key = (obj.get("af_scp_id"), int(obj.get("af_parallelepiped_vert_index", -1)))
             if key not in live_keys:
                 bpy.data.objects.remove(obj, do_unlink=True)
 
+    def sync_post(self, sync_manager, root, scene, vis_col):
+        live_keys = set()
+        active_id = self._active_scp_id(root)
+
+        for scp_prop in root.af_scp_system.scps:
+            if scp_prop.id == active_id and scp_prop.shape_type == self.shape_type:
+                self._sync_vertex_handles(sync_manager, root, scene, vis_col, scp_prop, live_keys)
+        self._cleanup_stale_vertex_handles(vis_col, root.name, live_keys)
+
     def handle_object_update(self, sync_manager, root, scene, vis_col, obj, depsgraph):
         if not obj.get("af_parallelepiped_vert_handle"):
             return False, False, None
 
-        # Inverse authoring for control points must happen only during direct
-        # user translate intent. Ignore depsgraph churn from regular sync.
         if not sync_manager._is_user_translate_active():
             return True, False, None
-
         scp_id = obj.get("af_scp_id")
         vert_index = int(obj.get("af_parallelepiped_vert_index", -1))
         scp_prop = sync_manager._get_scp_prop_by_id(root, scp_id)
         proxy = sync_manager._find_proxy_in_scene(scene, root.name, scp_id)
         if scp_prop is None or proxy is None or scp_prop.shape_type != self.shape_type:
             return True, False, None
+        self._activate_scp(root, scp_id)
+        if not self._valid_vert_index(scp_prop, vert_index):
+            return True, False, None
+        local = self._target_local_point(scp_prop, proxy, obj.location)
+        old = self._point_vec(scp_prop.parallelepiped_points[vert_index])
+        if (local - old).length_squared <= 1e-10:
+            return True, False, None
+        scp_prop.parallelepiped_points[vert_index].co = (local.x, local.y, local.z)
+        self._apply_pair_update_if_needed(scp_prop, proxy, obj.location, vert_index)
+        return True, True, scp_id
 
+    def _activate_scp(self, root, scp_id):
         for i, s in enumerate(root.af_scp_system.scps):
             if s.id == scp_id:
                 root.af_scp_system.active_scp_index = i
-                break
+                return
 
-        if vert_index < 0 or vert_index >= len(scp_prop.parallelepiped_points):
-            return True, False, None
+    def _valid_vert_index(self, scp_prop, vert_index):
+        return 0 <= vert_index < len(scp_prop.parallelepiped_points)
 
-        local_deformed = proxy.matrix_world.inverted() @ obj.location
+    def _point_vec(self, p):
+        return Vector((p.co[0], p.co[1], p.co[2]))
+
+    def _target_local_point(self, scp_prop, proxy, world_location):
+        local_deformed = proxy.matrix_world.inverted() @ world_location
         shape = ShapeRegistry.create_from_prop(scp_prop)
-        if shape is not None:
-            local = shape.invert_point_deformers(local_deformed)
-        else:
-            local = local_deformed
-        old = Vector((
-            scp_prop.parallelepiped_points[vert_index].co[0],
-            scp_prop.parallelepiped_points[vert_index].co[1],
-            scp_prop.parallelepiped_points[vert_index].co[2],
-        ))
-        if (local - old).length_squared <= 1e-10:
-            return True, False, None
+        if shape is None:
+            return local_deformed
+        return shape.invert_point_deformers(local_deformed)
 
-        scp_prop.parallelepiped_points[vert_index].co = (local.x, local.y, local.z)
-
-        if shape is not None:
-            pair_update = shape.mirror_pair_update_from_handle(proxy, obj.location, vert_index, scp_prop)
-            if pair_update is not None:
-                pair_index, mirrored_local = pair_update
-                if 0 <= pair_index < len(scp_prop.parallelepiped_points):
-                    scp_prop.parallelepiped_points[pair_index].co = (
-                        mirrored_local.x,
-                        mirrored_local.y,
-                        mirrored_local.z,
-                    )
-
-        return True, True, scp_id
+    def _apply_pair_update_if_needed(self, scp_prop, proxy, world_location, vert_index):
+        shape = ShapeRegistry.create_from_prop(scp_prop)
+        if shape is None:
+            return
+        pair_update = shape.mirror_pair_update_from_handle(proxy, world_location, vert_index, scp_prop)
+        if pair_update is None:
+            return
+        pair_index, mirrored_local = pair_update
+        if 0 <= pair_index < len(scp_prop.parallelepiped_points):
+            scp_prop.parallelepiped_points[pair_index].co = (mirrored_local.x, mirrored_local.y, mirrored_local.z)

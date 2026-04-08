@@ -41,41 +41,53 @@ class RuntimeGraph:
 
 
 def tarjan_scc(adjacency):
-    index = 0
-    indices = {}
-    low = {}
-    stack = []
-    on_stack = set()
-    sccs = []
+    ctx = _TarjanContext(adjacency)
+    return ctx.run()
 
-    def strongconnect(v):
-        nonlocal index
-        indices[v] = index
-        low[v] = index
-        index += 1
-        stack.append(v)
-        on_stack.add(v)
 
-        for w in adjacency.get(v, ()):
-            if w not in indices:
-                strongconnect(w)
-                low[v] = min(low[v], low[w])
-            elif w in on_stack:
-                low[v] = min(low[v], indices[w])
+class _TarjanContext:
+    def __init__(self, adjacency):
+        self.adjacency = adjacency
+        self.index = 0
+        self.indices = {}
+        self.low = {}
+        self.stack = []
+        self.on_stack = set()
+        self.sccs = []
 
-        if low[v] == indices[v]:
-            comp = []
-            while True:
-                w = stack.pop()
-                on_stack.remove(w)
-                comp.append(w)
-                if w == v:
-                    break
-            sccs.append(comp)
+    def _visit(self, v):
+        self.indices[v] = self.index
+        self.low[v] = self.index
+        self.index += 1
+        self.stack.append(v)
+        self.on_stack.add(v)
 
-    for v in adjacency.keys():
-        if v not in indices:
-            strongconnect(v)
+    def _visit_neighbor(self, v, w):
+        if w not in self.indices:
+            self._strongconnect(w)
+            self.low[v] = min(self.low[v], self.low[w])
+            return
+        if w in self.on_stack:
+            self.low[v] = min(self.low[v], self.indices[w])
 
-    return sccs
+    def _pop_component(self, v):
+        comp = []
+        while True:
+            w = self.stack.pop()
+            self.on_stack.remove(w)
+            comp.append(w)
+            if w == v:
+                return comp
 
+    def _strongconnect(self, v):
+        self._visit(v)
+        for w in self.adjacency.get(v, ()):
+            self._visit_neighbor(v, w)
+        if self.low[v] == self.indices[v]:
+            self.sccs.append(self._pop_component(v))
+
+    def run(self):
+        for v in self.adjacency.keys():
+            if v not in self.indices:
+                self._strongconnect(v)
+        return self.sccs

@@ -105,29 +105,14 @@ class BlobSolver:
         for i in range(len(points)):
             points[i] = new_pts[i]
 
-    def solve(self, blob, target_obj, rest_world_verts, face_indices):
-        if not rest_world_verts:
-            return BlobSolveResult(points=[])
-
+    def _init_solve_state(self, rest_world_verts):
         points = [p.copy() for p in rest_world_verts]
         rest = [p.copy() for p in rest_world_verts]
         prev = [p.copy() for p in points]
+        return points, rest, prev
 
-        bvh = self._build_target_bvh(target_obj)
-        if bvh is None or target_obj is None:
-            return BlobSolveResult(
-                points=points,
-                converged=True,
-                max_disp=0.0,
-                iterations_used=1,
-                patch_size=0,
-            )
-
-        neighbors = self._build_adjacency(face_indices, len(points))
-
+    def _solver_params(self, blob):
         iterations = max(1, int(getattr(blob, "iterations", 20)))
-        eps = 1e-6
-
         sag_strength = max(0.0, float(getattr(blob, "sag_strength", 0.0)))
         stiffness = max(0.0, min(1.0, float(getattr(blob, "stiffness", 0.25))))
         sag_limit = max(0.0, float(getattr(blob, "sag_limit", 0.0)))
@@ -138,60 +123,85 @@ class BlobSolver:
         else:
             g.normalize()
 
-        base_gravity = 0.002 * sag_strength
-        dist_gravity_k = 0.02 * sag_strength
-        viscosity_alpha = (1.0 - stiffness) * 0.18
+        return {
+            "iterations": iterations,
+            "eps": 1e-6,
+            "g": g,
+            "sag_limit": sag_limit,
+            "base_gravity": 0.002 * sag_strength,
+            "dist_gravity_k": 0.02 * sag_strength,
+            "viscosity_alpha": (1.0 - stiffness) * 0.18,
+        }
 
+    def _apply_gravity(self, points, bvh, target_obj, params):
+        g = params["g"]
+        base_gravity = params["base_gravity"]
+        dist_gravity_k = params["dist_gravity_k"]
+        sag_limit = params["sag_limit"]
+        for i, p in enumerate(points):
+            _co, d = self._nearest_surface_world(bvh, target_obj, p)
+            if d is None:
+                continue
+            step = base_gravity + dist_gravity_k * d
+            if sag_limit > 0.0:
+                step = min(step, sag_limit * 0.25)
+            points[i] = p + g * step
+
+    def _project_to_control_segment(self, points, bvh, target_obj, control):
+        for i, p in enumerate(points):
+            hit_world = self._segment_hit_to_point(bvh=bvh, target_obj=target_obj, p_world=p, q_world=control)
+            if hit_world is not None:
+                points[i] = hit_world
+
+    def _apply_sag_limit(self, points, rest, params):
+        sag_limit = params["sag_limit"]
+        if sag_limit <= 0.0:
+            return
+        g = params["g"]
+        for i in range(len(points)):
+            drop = (points[i] - rest[i]).dot(g)
+            if drop > sag_limit:
+                points[i] -= g * (drop - sag_limit)
+
+    def _max_disp_and_store_prev(self, points, prev):
+        max_disp = 0.0
+        for i in range(len(points)):
+            d = (points[i] - prev[i]).length
+            if d > max_disp:
+                max_disp = d
+            prev[i] = points[i].copy()
+        return max_disp
+
+    def solve(self, blob, target_obj, rest_world_verts, face_indices):
+        if not rest_world_verts:
+            return BlobSolveResult(points=[])
+        points, rest, prev = self._init_solve_state(rest_world_verts)
+        bvh = self._build_target_bvh(target_obj)
+        if bvh is None or target_obj is None:
+            return self._early_result(points)
+        neighbors = self._build_adjacency(face_indices, len(points))
+        params = self._solver_params(blob)
+        converged, max_disp, it_used = self._iterate(points, rest, prev, bvh, target_obj, neighbors, params, blob)
+        return BlobSolveResult(points=points, converged=converged, max_disp=max_disp, iterations_used=it_used, patch_size=0)
+
+    def _early_result(self, points):
+        return BlobSolveResult(points=points, converged=True, max_disp=0.0, iterations_used=1, patch_size=0)
+
+    def _iterate(self, points, rest, prev, bvh, target_obj, neighbors, params, blob):
         converged = False
         max_disp = 0.0
         it_used = 0
-
-        for it in range(iterations):
+        for it in range(params["iterations"]):
             it_used = it + 1
-            max_disp = 0.0
-            control = blob.control_point_world.copy()
-
-            for i, p in enumerate(points):
-                _co, d = self._nearest_surface_world(bvh, target_obj, p)
-                if d is None:
-                    continue
-                step = base_gravity + dist_gravity_k * d
-                if sag_limit > 0.0:
-                    step = min(step, sag_limit * 0.25)
-                points[i] = p + g * step
-
-            self._apply_viscosity(points, neighbors, viscosity_alpha)
-
-            for i, p in enumerate(points):
-                hit_world = self._segment_hit_to_point(
-                    bvh=bvh,
-                    target_obj=target_obj,
-                    p_world=p,
-                    q_world=control,
-                )
-                if hit_world is not None:
-                    points[i] = hit_world
-
-            if sag_limit > 0.0:
-                for i in range(len(points)):
-                    drop = (points[i] - rest[i]).dot(g)
-                    if drop > sag_limit:
-                        points[i] -= g * (drop - sag_limit)
-
-            for i in range(len(points)):
-                d = (points[i] - prev[i]).length
-                if d > max_disp:
-                    max_disp = d
-                prev[i] = points[i].copy()
-
-            if max_disp < eps:
+            self._step(points, rest, prev, bvh, target_obj, neighbors, params, blob.control_point_world.copy())
+            max_disp = self._max_disp_and_store_prev(points, prev)
+            if max_disp < params["eps"]:
                 converged = True
                 break
+        return converged, max_disp, it_used
 
-        return BlobSolveResult(
-            points=points,
-            converged=converged,
-            max_disp=max_disp,
-            iterations_used=it_used,
-            patch_size=0,
-        )
+    def _step(self, points, rest, prev, bvh, target_obj, neighbors, params, control):
+        self._apply_gravity(points, bvh, target_obj, params)
+        self._apply_viscosity(points, neighbors, params["viscosity_alpha"])
+        self._project_to_control_segment(points, bvh, target_obj, control)
+        self._apply_sag_limit(points, rest, params)

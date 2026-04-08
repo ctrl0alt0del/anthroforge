@@ -105,6 +105,36 @@ class EllipsoidSCPSyncExtension:
             return root.af_scp_system.scps[idx].id
         return ""
 
+    def _is_editing_handle(self, handle):
+        active_obj = bpy.context.view_layer.objects.active if bpy.context and bpy.context.view_layer else None
+        return active_obj is not None and active_obj == handle and self._is_user_transform_active()
+
+    def _sync_clip_handle(self, sync_manager, root, scene, vis_col, scp_prop, clip_index, avg_r, live):
+        live.add((scp_prop.id, clip_index))
+        h = self._find_clip_handle(vis_col, root.name, scp_prop.id, clip_index)
+        if h is None:
+            h = self._create_clip_handle(vis_col, root, scp_prop.id, clip_index)
+        h.scale = (avg_r, avg_r, avg_r)
+        if self._is_editing_handle(h):
+            return
+        n = Vector(getattr(scp_prop, f"ellipsoid_clip{clip_index}_normal", (1.0, 0.0, 0.0)))
+        n = n.normalized() if n.length > 1e-9 else Vector((1.0, 0.0, 0.0))
+        off = float(getattr(scp_prop, f"ellipsoid_clip{clip_index}_offset", 0.0))
+        n_world, p_world = self._local_plane_to_world(sync_manager._find_proxy_in_scene(scene, root.name, scp_prop.id), n, off)
+        h.location = p_world
+        h.rotation_mode = "QUATERNION"
+        h.rotation_quaternion = n_world.to_track_quat("Z", "Y")
+
+    def _cleanup_stale_handles(self, vis_col, root_name, live):
+        for obj in list(vis_col.objects):
+            if not obj.get("af_ellipsoid_clip_handle"):
+                continue
+            if obj.get("af_root_name") != root_name:
+                continue
+            key = (obj.get("af_scp_id"), int(obj.get("af_ellipsoid_clip_index", -1)))
+            if key not in live:
+                self._remove_obj(obj)
+
     def sync_post(self, sync_manager, root, scene, vis_col):
         active_id = self._active_scp_id(root)
         live = set()
@@ -116,55 +146,23 @@ class EllipsoidSCPSyncExtension:
             proxy = sync_manager._find_proxy_in_scene(scene, root.name, scp_prop.id)
             if proxy is None:
                 continue
-
             if not bool(getattr(scp_prop, "ellipsoid_clip_enabled", False)):
                 continue
-
             shape = ShapeRegistry.create_from_prop(scp_prop)
             if shape is None:
                 continue
-
             avg_r = max(0.1, (shape.radii[0] + shape.radii[1] + shape.radii[2]) / 3.0)
-
             for clip_index in (1, 2):
                 if not bool(getattr(scp_prop, f"ellipsoid_clip{clip_index}_enabled", False)):
                     continue
+                self._sync_clip_handle(sync_manager, root, scene, vis_col, scp_prop, clip_index, avg_r, live)
+        self._cleanup_stale_handles(vis_col, root.name, live)
 
-                live.add((scp_prop.id, clip_index))
-                h = self._find_clip_handle(vis_col, root.name, scp_prop.id, clip_index)
-                if h is None:
-                    h = self._create_clip_handle(vis_col, root, scp_prop.id, clip_index)
-
-                h.scale = (avg_r, avg_r, avg_r)
-
-                active_obj = bpy.context.view_layer.objects.active if bpy.context and bpy.context.view_layer else None
-                editing_this = (
-                    active_obj is not None
-                    and active_obj == h
-                    and self._is_user_transform_active()
-                )
-                if editing_this:
-                    continue
-
-                n = Vector(getattr(scp_prop, f"ellipsoid_clip{clip_index}_normal", (1.0, 0.0, 0.0)))
-                if n.length <= 1e-9:
-                    n = Vector((1.0, 0.0, 0.0))
-                n.normalize()
-                off = float(getattr(scp_prop, f"ellipsoid_clip{clip_index}_offset", 0.0))
-
-                n_world, p_world = self._local_plane_to_world(proxy, n, off)
-                h.location = p_world
-                h.rotation_mode = "QUATERNION"
-                h.rotation_quaternion = n_world.to_track_quat("Z", "Y")
-
-        for obj in list(vis_col.objects):
-            if not obj.get("af_ellipsoid_clip_handle"):
-                continue
-            if obj.get("af_root_name") != root.name:
-                continue
-            key = (obj.get("af_scp_id"), int(obj.get("af_ellipsoid_clip_index", -1)))
-            if key not in live:
-                self._remove_obj(obj)
+    def _activate_scp_in_tree(self, root, scp_id):
+        for i, s in enumerate(root.af_scp_system.scps):
+            if s.id == scp_id:
+                root.af_scp_system.active_scp_index = i
+                return
 
     def handle_object_update(self, sync_manager, root, scene, vis_col, obj, depsgraph):
         if not obj.get("af_ellipsoid_clip_handle"):
@@ -182,22 +180,18 @@ class EllipsoidSCPSyncExtension:
         proxy = sync_manager._find_proxy_in_scene(scene, root.name, scp_id)
         if scp_prop is None or proxy is None or scp_prop.shape_type != self.shape_type:
             return True, False, None
-
-        for i, s in enumerate(root.af_scp_system.scps):
-            if s.id == scp_id:
-                root.af_scp_system.active_scp_index = i
-                break
-
+        self._activate_scp_in_tree(root, scp_id)
         mw = obj.matrix_world.copy()
         n = (mw.to_quaternion() @ Vector((0.0, 0.0, 1.0)))
         if n.length <= 1e-9:
             n = Vector((1.0, 0.0, 0.0))
         n.normalize()
         n_local, off = self._world_plane_to_local(proxy, n, mw.translation)
+        self._write_clip_props(scp_prop, clip_index, n_local, off)
+        return True, True, scp_id
 
+    def _write_clip_props(self, scp_prop, clip_index, n_local, off):
         setattr(scp_prop, "ellipsoid_clip_enabled", True)
         setattr(scp_prop, f"ellipsoid_clip{clip_index}_enabled", True)
         setattr(scp_prop, f"ellipsoid_clip{clip_index}_normal", (n_local.x, n_local.y, n_local.z))
         setattr(scp_prop, f"ellipsoid_clip{clip_index}_offset", float(off))
-
-        return True, True, scp_id

@@ -47,23 +47,29 @@ def ensure_inflation_ctrl(
     ctrl = find_inflation_ctrl_fn(vis_col, root.name, muscle.id)
     if ctrl is None:
         ctrl = create_inflation_ctrl_fn(vis_col, root, muscle.id)
-
-    if Vector(muscle.inflation_ctrl_world).length_squared == 0.0:
-        m = len(base_points)
-        n = len(base_points[0]) if m > 0 else 0
-        if m > 0 and n > 0:
-            ci = m // 2
-            cj = n // 2
-            p = base_points[ci][cj]
-            muscle.inflation_ctrl_world = (p.x, p.y, p.z)
-
-    target = Vector(muscle.inflation_ctrl_world)
-    snapped, _n = nearest_on_mesh_surface_fn(base_obj, target)
-    if snapped is not None:
-        target = snapped
-        muscle.inflation_ctrl_world = (target.x, target.y, target.z)
-
+    _ensure_initial_ctrl_world(muscle, base_points)
+    target = _snap_ctrl_to_surface(muscle, base_obj, nearest_on_mesh_surface_fn)
     ctrl.location = target
     ctrl.show_in_front = True
     ctrl.hide_render = True
     return ctrl
+
+
+def _ensure_initial_ctrl_world(muscle, base_points):
+    if Vector(muscle.inflation_ctrl_world).length_squared != 0.0:
+        return
+    rows = len(base_points)
+    cols = len(base_points[0]) if rows > 0 else 0
+    if rows <= 0 or cols <= 0:
+        return
+    p = base_points[rows // 2][cols // 2]
+    muscle.inflation_ctrl_world = (p.x, p.y, p.z)
+
+
+def _snap_ctrl_to_surface(muscle, base_obj, nearest_on_mesh_surface_fn):
+    target = Vector(muscle.inflation_ctrl_world)
+    snapped, _n = nearest_on_mesh_surface_fn(base_obj, target)
+    if snapped is None:
+        return target
+    muscle.inflation_ctrl_world = (snapped.x, snapped.y, snapped.z)
+    return snapped
