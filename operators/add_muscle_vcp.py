@@ -1,6 +1,7 @@
 import bpy
 
 from ..core.utils import get_af_root
+from ..core.id_utils import next_prefixed_id
 from ..core.visualization.sync_runner import sync_from_muscle_ids
 
 
@@ -78,12 +79,7 @@ class AF_OT_AddMuscleVCP(bpy.types.Operator):
                 self.report({"ERROR"}, "Selected fibers must have identical anchor structure.")
                 return {"CANCELLED"}
 
-        existing_ids = {m.id for m in vcp.muscles}
-        i = 1
-        muscle_id = f"MUSCLE_{i}"
-        while muscle_id in existing_ids:
-            i += 1
-            muscle_id = f"MUSCLE_{i}"
+        muscle_id = next_prefixed_id(vcp.muscles, "MUSCLE")
 
         m = vcp.muscles.add()
         m.id = muscle_id

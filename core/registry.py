@@ -1,7 +1,7 @@
-import json
 from mathutils import Vector, Quaternion
 from .scp import SCP
 from .attachment import Attachment
+from .attachment_codec import parse_scp_attach_param
 from .shapes.registry import ShapeRegistry
 
 
@@ -24,22 +24,11 @@ class SCPRegistry:
 
             attachment = None
             if scp_prop.parent_id:
-                raw = (scp_prop.attach_param or "").strip()
-                if raw:
-                    try:
-                        parsed = json.loads(raw)
-                        if isinstance(parsed, dict):
-                            mode = parsed.get("mode")
-                            if mode == "surface_frame_v1":
-                                param = parsed.get("parent_param", 0.0)
-                            elif mode == "mesh_anchor":
-                                param = parsed.get("parent_param", 0.0)
-                            else:
-                                param = parsed
-                        else:
-                            param = parsed
-                    except json.JSONDecodeError:
-                        param = 0.0
+                mode, payload = parse_scp_attach_param(scp_prop.attach_param)
+                if mode == "surface_frame_v1":
+                    param = payload.get("parent_param", 0.0)
+                elif mode == "mesh_anchor":
+                    param = 0.0
                 else:
                     param = 0.0
                 attachment = Attachment(scp_prop.parent_id, param)

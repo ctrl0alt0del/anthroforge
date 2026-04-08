@@ -1,7 +1,6 @@
 import bpy
 
 from ..core.assets.scp_mesh_library import save_asset_from_object
-from ..core.utils import get_af_root
 
 
 class AF_OT_RegisterMeshSCPAsset(bpy.types.Operator):

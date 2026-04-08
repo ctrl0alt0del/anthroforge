@@ -221,6 +221,3 @@ class AF_VCP_System_Property(bpy.types.PropertyGroup):
         default="NONE",
     )
 
-    active_fiber_index: bpy.props.IntProperty(default=-1)
-    active_muscle_index: bpy.props.IntProperty(default=-1)
-    active_blob_index: bpy.props.IntProperty(default=-1)

@@ -63,7 +63,11 @@ from .properties.vcp_properties import (
     AF_VCP_System_Property,
 )
 
-from .core.shapes import *
+# Import shape modules for registration side-effects.
+from .core.shapes import curve as _shape_curve
+from .core.shapes import ellipsoid as _shape_ellipsoid
+from .core.shapes import mesh_asset as _shape_mesh_asset
+from .core.shapes import parallelepiped as _shape_parallelepiped
 from .core.visualization.sync import register_sync, unregister_sync
 from .core.visualization.fiber_sync import register_fiber_sync, unregister_fiber_sync
 from .core.visualization.muscle_sync import register_muscle_sync, unregister_muscle_sync

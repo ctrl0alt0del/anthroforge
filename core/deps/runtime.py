@@ -1,5 +1,3 @@
-from collections import defaultdict
-
 from .runtime_graph import RuntimeGraph, tarjan_scc
 from .adapters import build_runtime_graph
 from ..constraints.scp_constraints import (
@@ -166,4 +164,3 @@ def run_dependency_runtime(root, scene, dirty_hints=None, bake=False):
         )
 
     register_mirror_sync().sync_root_to_scene(root=root, scene=scene)
-

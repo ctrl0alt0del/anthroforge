@@ -1,9 +1,10 @@
-import json
 import bpy
 
 from ..core.utils import get_af_root
 from ..core.attachment import Attachment
+from ..core.attachment_codec import encode_fiber_shape_param
 from ..core.registry import SCPRegistry
+from ..core.id_utils import next_prefixed_id
 from ..core.visualization.sync_runner import sync_from_fiber_ids
 
 
@@ -45,17 +46,17 @@ class AF_OT_AddFiberVCP(bpy.types.Operator):
 
         fibers = root.af_vcp_system.fibers
         f = fibers.add()
-        f.id = f"FIBER_{len(fibers)}"
+        f.id = next_prefixed_id(fibers, "FIBER")
         f.name = f.id
 
         origin = Attachment(parent_id=origin_id, param=a_param)
         insertion = Attachment(parent_id=insertion_id, param=b_param)
 
         f.a_parent_id = origin.parent_id
-        f.a_attach_param = json.dumps(origin.param)
+        f.a_attach_param = encode_fiber_shape_param(origin.param)
 
         f.b_parent_id = insertion.parent_id
-        f.b_attach_param = json.dumps(insertion.param)
+        f.b_attach_param = encode_fiber_shape_param(insertion.param)
 
         f.node_count = 64
         f.iterations_interactive = 12

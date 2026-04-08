@@ -1,6 +1,3 @@
-from ..core.utils import get_af_root
-
-
 def get_active_af_entity(root, context):
     obj = context.active_object
 

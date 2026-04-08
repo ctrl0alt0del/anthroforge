@@ -1,9 +1,11 @@
-import json
 import bpy
+from mathutils import Vector
 
+from ..core.attachment_codec import encode_surface_frame
 from ..core.utils import get_af_root
 from ..core.registry import SCPRegistry
 from ..core.shapes.registry import ShapeRegistry
+from ..core.id_utils import next_prefixed_id
 from ..core.visualization.sync_runner import sync_from_scp_ids
 
 
@@ -21,7 +23,7 @@ class AF_OT_AddSCP(bpy.types.Operator):
         scp_collection = root.af_scp_system.scps
         new_scp = scp_collection.add()
 
-        new_scp.id = f"SCP_{len(scp_collection)}"
+        new_scp.id = next_prefixed_id(scp_collection, "SCP")
         new_scp.name = new_scp.id
         new_scp.shape_type = context.scene.af_scp_type
 
@@ -45,24 +47,17 @@ class AF_OT_AddSCP(bpy.types.Operator):
             runtime.build()
             parent_scp = runtime.registry.get(parent_id)
 
-            default_local = (0.0, 0.0, 0.0)
             if parent_scp:
                 params = parent_scp.shape.get_attach_params()
                 first_param = params[0] if params else 0.0
-                p = parent_scp.shape.compute_local_point(first_param)
-                default_local = (float(p.x), float(p.y), float(p.z))
             else:
                 first_param = 0.0
 
-            new_scp.attach_param = json.dumps(
-                {
-                    "mode": "surface_frame_v1",
-                    "parent_param": first_param,
-                    "parent_local_point": list(default_local),  # legacy fallback hint
-                    "child_origin_local": [0.0, 0.0, 0.0],
-                    "child_tangent_local": [1.0, 0.0, 0.0],
-                    "child_normal_local": [0.0, 0.0, 1.0],
-                }
+            new_scp.attach_param = encode_surface_frame(
+                parent_param=first_param,
+                child_origin_local=Vector((0.0, 0.0, 0.0)),
+                child_tangent_local=Vector((1.0, 0.0, 0.0)),
+                child_normal_local=Vector((0.0, 0.0, 1.0)),
             )
         else:
             new_scp.parent_id = ""

@@ -319,7 +319,7 @@ class ParallelepipedShape(ShapeStrategy):
                             "v": j / float(grid),
                         }
                     )
-        # Keep legacy vertex params for backwards compatibility.
+        # Keep explicit per-vertex params synchronized with size.
         params.extend(list(range(len(self.points))))
         return params
 

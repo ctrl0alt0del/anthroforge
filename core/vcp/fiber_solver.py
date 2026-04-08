@@ -1,7 +1,7 @@
-import json
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
+from ..attachment_codec import parse_fiber_attach_param
 from ..registry import SCPRegistry
 
 
@@ -204,23 +204,6 @@ class FiberSolver:
 
         return nodes, pin_targets
 
-    def _parse_attach_param(self, raw):
-        raw = (raw or "").strip()
-        if not raw:
-            return ("legacy", 0.0)
-
-        try:
-            data = json.loads(raw)
-        except Exception:
-            return ("legacy", 0.0)
-
-        if isinstance(data, dict) and data.get("mode") == "mesh_anchor":
-            p = data.get("parent_local_point")
-            if isinstance(p, (list, tuple)) and len(p) == 3:
-                return ("mesh_anchor", Vector((float(p[0]), float(p[1]), float(p[2]))))
-
-        return ("legacy", data)
-
     def _get_scp_proxy(self, root, scene, scp_id):
         for obj in scene.objects:
             if (
@@ -244,11 +227,13 @@ class FiberSolver:
         if proxy is None:
             return None
 
-        mode, payload = self._parse_attach_param(attach_param_raw)
+        mode, payload = parse_fiber_attach_param(attach_param_raw)
         if mode == "mesh_anchor":
             local = payload
-        else:
+        elif mode == "shape_param_v1":
             local = scp.shape.compute_local_point(payload)
+        else:
+            return None
 
         return proxy.matrix_world @ local
 

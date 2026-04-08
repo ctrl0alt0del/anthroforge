@@ -21,12 +21,6 @@ def is_collapsed(scene, scp_id):
     return bool(data.get(scp_id, False))
 
 
-def set_collapsed(scene, scp_id, value):
-    data = _read_map(scene)
-    data[scp_id] = bool(value)
-    _write_map(scene, data)
-
-
 def toggle_collapsed(scene, scp_id):
     data = _read_map(scene)
     data[scp_id] = not bool(data.get(scp_id, False))

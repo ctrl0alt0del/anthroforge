@@ -1,5 +1,6 @@
 import bpy
 
+from ..core.id_utils import next_prefixed_id
 from ..core.utils import get_af_root
 from ..core.visualization.sync_runner import sync_from_blob_ids
 
@@ -18,12 +19,7 @@ class AF_OT_AddBlobVCP(bpy.types.Operator):
         vcp = root.af_vcp_system
         blobs = vcp.blobs
 
-        i = 1
-        existing = {b.id for b in blobs}
-        blob_id = f"BLOB_{i}"
-        while blob_id in existing:
-            i += 1
-            blob_id = f"BLOB_{i}"
+        blob_id = next_prefixed_id(blobs, "BLOB")
 
         b = blobs.add()
         b.id = blob_id

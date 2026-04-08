@@ -11,7 +11,6 @@ from .types import (
     EDGE_EVAL,
     EDGE_ATTACHMENT,
     EDGE_CONSTRAINT_READ,
-    EDGE_CONSTRAINT_WRITE,
 )
 
 
@@ -121,4 +120,3 @@ def build_runtime_graph(root, graph):
             graph.add_entity_edge(("MUSCLE", b.attach_target_id), ("BLOB", bid))
 
     return entity_sets
-
