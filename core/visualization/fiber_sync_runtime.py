@@ -1,5 +1,6 @@
 import bpy
 
+from ..deps.dirty_hints import dirty_hints_for
 from ..registry import SCPRegistry
 from ..utils import get_af_root
 from ..attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param
@@ -223,6 +224,6 @@ def on_depsgraph_update(sync, scene, depsgraph):
         sync._syncing = False
 
     if changed_fiber_ids:
-        from .sync_runner import sync_from_fiber_ids
+        from .sync_runner import sync_from_dirty_hints
 
-        sync_from_fiber_ids(root=root, scene=scene, fiber_ids=changed_fiber_ids)
+        sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("FIBER", changed_fiber_ids))

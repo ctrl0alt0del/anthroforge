@@ -1,5 +1,7 @@
+from collections import OrderedDict
+
 from .runtime_graph import RuntimeGraph, tarjan_scc
-from .adapters import build_runtime_graph
+from .adapters import build_runtime_graph, get_registered_entity_types
 from ..constraints.scp_constraints import (
     evaluate_scp_constraints_runtime,
     apply_scp_input_write,
@@ -12,25 +14,35 @@ from ..visualization.mirror_sync import register_mirror_sync
 
 
 _DELAYED_WRITES = {}
+_ENTITY_SYNC_HANDLERS = OrderedDict()
+_POST_SYNC_HANDLERS = []
 
 
-def _collect_all_ids(root):
-    return {
-        "SCP": {s.id for s in root.af_scp_system.scps},
-        "FIBER": {f.id for f in root.af_vcp_system.fibers},
-        "MUSCLE": {m.id for m in root.af_vcp_system.muscles},
-        "BLOB": {b.id for b in root.af_vcp_system.blobs},
-    }
+def register_runtime_sync_handler(entity_type, handler, replace=False):
+    et = str(entity_type or "").strip().upper()
+    if not et:
+        raise ValueError("entity_type is required")
+    if not callable(handler):
+        raise TypeError("handler must be callable")
+    if et in _ENTITY_SYNC_HANDLERS and not replace:
+        raise ValueError(f"sync handler already registered for {et}")
+    _ENTITY_SYNC_HANDLERS[et] = handler
 
 
-def _normalize_dirty_hints(root, dirty_hints):
-    all_ids = _collect_all_ids(root)
+def register_post_sync_handler(handler):
+    if not callable(handler):
+        raise TypeError("handler must be callable")
+    _POST_SYNC_HANDLERS.append(handler)
+
+
+def _normalize_dirty_hints(entity_sets, dirty_hints):
+    all_ids = {et: set(ids) for et, ids in entity_sets.items()}
     if not dirty_hints:
         return all_ids, True
 
     out = {}
     any_set = False
-    for k in ("SCP", "FIBER", "MUSCLE", "BLOB"):
+    for k in all_ids.keys():
         vals = set(dirty_hints.get(k, set()) or set()) & all_ids[k]
         out[k] = vals
         any_set = any_set or bool(vals)
@@ -69,19 +81,18 @@ def _apply_delayed_queue(root):
 
 def _dirty_start_nodes(dirty):
     starts = set()
-    for et in ("SCP", "FIBER", "MUSCLE", "BLOB"):
+    for et in dirty.keys():
         for eid in dirty[et]:
             starts.add((et, eid))
     return starts
 
 
 def _impact_sets(impacted):
-    return {
-        "SCP": {eid for et, eid in impacted if et == "SCP"},
-        "FIBER": {eid for et, eid in impacted if et == "FIBER"},
-        "MUSCLE": {eid for et, eid in impacted if et == "MUSCLE"},
-        "BLOB": {eid for et, eid in impacted if et == "BLOB"},
-    }
+    out = {et: set() for et in get_registered_entity_types()}
+    for et, eid in impacted:
+        if et in out:
+            out[et].add(eid)
+    return out
 
 
 def _update_delayed_writes(new_delayed):
@@ -90,7 +101,9 @@ def _update_delayed_writes(new_delayed):
 
 
 def _apply_constraints(root, dirty, is_full, entity_sets, delayed_changed_scps, adjacency, scc_idx, scc_sizes):
-    changed_source_scps = set(entity_sets["SCP"]) if is_full else set(dirty["SCP"])
+    scp_all = entity_sets.get("SCP", set())
+    scp_dirty = dirty.get("SCP", set())
+    changed_source_scps = set(scp_all) if is_full else set(scp_dirty)
     changed_source_scps |= delayed_changed_scps
     new_delayed = {}
 
@@ -118,31 +131,16 @@ def _apply_constraints(root, dirty, is_full, entity_sets, delayed_changed_scps, 
 
 
 def _run_visual_sync(root, scene, is_full, impacted, bake):
-    if is_full:
-        register_sync().sync_root_to_scene(root=root, scene=scene)
-    elif impacted["SCP"]:
-        register_sync().sync_root_to_scene(root=root, scene=scene, target_scp_ids=impacted["SCP"])
+    for et in get_registered_entity_types():
+        handler = _ENTITY_SYNC_HANDLERS.get(et)
+        if handler is None:
+            continue
+        target_ids = set(impacted.get(et, set()) or set())
+        if is_full or target_ids:
+            handler(root=root, scene=scene, is_full=is_full, target_ids=target_ids, bake=bake)
 
-    if is_full:
-        register_fiber_sync().sync_root_to_scene(root=root, scene=scene, bake=bake)
-    elif impacted["FIBER"]:
-        register_fiber_sync().sync_root_to_scene(
-            root=root, scene=scene, bake=bake, target_fiber_ids=impacted["FIBER"]
-        )
-
-    if is_full:
-        register_muscle_sync().sync_root_to_scene(root=root, scene=scene)
-    elif impacted["MUSCLE"]:
-        register_muscle_sync().sync_root_to_scene(
-            root=root, scene=scene, target_muscle_ids=impacted["MUSCLE"]
-        )
-
-    if is_full:
-        register_blob_sync().sync_root_to_scene(root=root, scene=scene)
-    elif impacted["BLOB"]:
-        register_blob_sync().sync_root_to_scene(root=root, scene=scene, target_blob_ids=impacted["BLOB"])
-
-    register_mirror_sync().sync_root_to_scene(root=root, scene=scene)
+    for handler in _POST_SYNC_HANDLERS:
+        handler(root=root, scene=scene, is_full=is_full, impacted=impacted, bake=bake)
 
 
 def _build_runtime_context(root, dirty_hints):
@@ -151,8 +149,9 @@ def _build_runtime_context(root, dirty_hints):
     entity_sets = build_runtime_graph(root, graph)
     adjacency = graph.entity_adjacency()
     scc_idx, scc_sizes = _compute_scc_index(adjacency)
-    dirty, is_full = _normalize_dirty_hints(root, dirty_hints)
-    dirty["SCP"] |= delayed_changed_scps
+    dirty, is_full = _normalize_dirty_hints(entity_sets, dirty_hints)
+    if "SCP" in dirty:
+        dirty["SCP"] |= delayed_changed_scps
     return delayed_changed_scps, graph, entity_sets, adjacency, scc_idx, scc_sizes, dirty, is_full
 
 
@@ -169,8 +168,8 @@ def _merge_constraint_impacts(graph, impacted_sets, changed_dest_scps):
     impacted2 = graph.downstream_entities({("SCP", sid) for sid in changed_dest_scps})
     impacted2 |= {("SCP", sid) for sid in changed_dest_scps}
     extra = _impact_sets(impacted2)
-    for et in ("SCP", "FIBER", "MUSCLE", "BLOB"):
-        impacted_sets[et] |= extra[et]
+    for et in impacted_sets.keys():
+        impacted_sets[et] |= extra.get(et, set())
 
 
 def run_dependency_runtime(root, scene, dirty_hints=None, bake=False):
@@ -190,3 +189,42 @@ def run_dependency_runtime(root, scene, dirty_hints=None, bake=False):
     )
     _merge_constraint_impacts(graph, impacted_sets, changed_dest_scps)
     _run_visual_sync(root=root, scene=scene, is_full=is_full, impacted=impacted_sets, bake=bake)
+
+
+def _sync_scp_handler(root, scene, is_full, target_ids, bake):
+    if is_full:
+        register_sync().sync_root_to_scene(root=root, scene=scene)
+    else:
+        register_sync().sync_root_to_scene(root=root, scene=scene, target_scp_ids=target_ids)
+
+
+def _sync_fiber_handler(root, scene, is_full, target_ids, bake):
+    if is_full:
+        register_fiber_sync().sync_root_to_scene(root=root, scene=scene, bake=bake)
+    else:
+        register_fiber_sync().sync_root_to_scene(root=root, scene=scene, bake=bake, target_fiber_ids=target_ids)
+
+
+def _sync_muscle_handler(root, scene, is_full, target_ids, bake):
+    if is_full:
+        register_muscle_sync().sync_root_to_scene(root=root, scene=scene)
+    else:
+        register_muscle_sync().sync_root_to_scene(root=root, scene=scene, target_muscle_ids=target_ids)
+
+
+def _sync_blob_handler(root, scene, is_full, target_ids, bake):
+    if is_full:
+        register_blob_sync().sync_root_to_scene(root=root, scene=scene)
+    else:
+        register_blob_sync().sync_root_to_scene(root=root, scene=scene, target_blob_ids=target_ids)
+
+
+def _sync_mirror_post_handler(root, scene, is_full, impacted, bake):
+    register_mirror_sync().sync_root_to_scene(root=root, scene=scene)
+
+
+register_runtime_sync_handler("SCP", _sync_scp_handler)
+register_runtime_sync_handler("FIBER", _sync_fiber_handler)
+register_runtime_sync_handler("MUSCLE", _sync_muscle_handler)
+register_runtime_sync_handler("BLOB", _sync_blob_handler)
+register_post_sync_handler(_sync_mirror_post_handler)

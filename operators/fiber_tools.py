@@ -4,8 +4,9 @@ import time
 
 from ..core.utils import get_af_root
 from ..core.registry import SCPRegistry
+from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.visualization.fiber_sync import register_fiber_sync
-from ..core.visualization.muscle_sync import register_muscle_sync
+from ..core.visualization.sync_runner import sync_from_dirty_hints
 
 
 class AF_OT_ClearFiberWarmStart(bpy.types.Operator):
@@ -64,9 +65,14 @@ class AF_OT_RecomputeFiber(bpy.types.Operator):
                 return f
         return None
 
-    def _run_bake_passes(self, sync, root, scene, fiber, max_passes):
+    def _run_bake_passes(self, root, scene, fiber, max_passes):
         for _ in range(max_passes):
-            sync.sync_root_to_scene(root=root, scene=scene, bake=True, target_fiber_ids={fiber.id})
+            sync_from_dirty_hints(
+                root=root,
+                scene=scene,
+                dirty_hints=dirty_hints_for("FIBER", {fiber.id}),
+                bake=True,
+            )
             if not fiber.not_converged:
                 return True
         return False
@@ -93,11 +99,9 @@ class AF_OT_RecomputeFiber(bpy.types.Operator):
             self.report({"ERROR"}, "Target fiber not found.")
             return {"CANCELLED"}
 
-        sync = register_fiber_sync()
         max_passes = 60
-        converged = self._run_bake_passes(sync, root, context.scene, fiber, max_passes)
+        converged = self._run_bake_passes(root, context.scene, fiber, max_passes)
         self._set_prefer_bake(fiber)
-        register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         self._update_recompute_stats(fiber, elapsed_ms, converged)
         if converged:
@@ -164,8 +168,12 @@ class AF_OT_AddFiberTouchPoint(bpy.types.Operator):
         self._mark_interactive_preferred(fiber)
         sync = register_fiber_sync()
         sync.clear_solver_cache(fiber.id)
-        sync.sync_root_to_scene(root=root, scene=context.scene, target_fiber_ids={fiber.id})
-        register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
+        sync_from_dirty_hints(
+            root=root,
+            scene=context.scene,
+            dirty_hints=dirty_hints_for("FIBER", {fiber.id}),
+            bake=False,
+        )
         return {"FINISHED"}
 
 
@@ -203,6 +211,10 @@ class AF_OT_RemoveFiberTouchPoint(bpy.types.Operator):
 
         sync = register_fiber_sync()
         sync.clear_solver_cache(fiber.id)
-        sync.sync_root_to_scene(root=root, scene=context.scene, target_fiber_ids={fiber.id})
-        register_muscle_sync().sync_root_to_scene(root=root, scene=context.scene)
+        sync_from_dirty_hints(
+            root=root,
+            scene=context.scene,
+            dirty_hints=dirty_hints_for("FIBER", {fiber.id}),
+            bake=False,
+        )
         return {"FINISHED"}

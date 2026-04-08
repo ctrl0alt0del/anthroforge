@@ -1,7 +1,8 @@
 import bpy
 
 from ..core.utils import get_af_root
-from ..core.visualization.sync_runner import sync_from_muscle_ids
+from ..core.deps.dirty_hints import dirty_hints_for
+from ..core.visualization.sync_runner import sync_from_dirty_hints
 
 
 class AF_OT_FlipMuscleNormals(bpy.types.Operator):
@@ -24,7 +25,11 @@ class AF_OT_FlipMuscleNormals(bpy.types.Operator):
             return {"CANCELLED"}
 
         m.flip_normals = not m.flip_normals
-        sync_from_muscle_ids(root=root, scene=context.scene, muscle_ids={m.id})
+        sync_from_dirty_hints(
+            root=root,
+            scene=context.scene,
+            dirty_hints=dirty_hints_for("MUSCLE", {m.id}),
+        )
         return {"FINISHED"}
 
 
@@ -61,7 +66,11 @@ class AF_OT_SelectMuscleInflationCtrl(bpy.types.Operator):
         if m is None:
             self.report({"ERROR"}, "Muscle not found.")
             return {"CANCELLED"}
-        sync_from_muscle_ids(root=root, scene=context.scene, muscle_ids={m.id})
+        sync_from_dirty_hints(
+            root=root,
+            scene=context.scene,
+            dirty_hints=dirty_hints_for("MUSCLE", {m.id}),
+        )
         ctrl = self._find_ctrl(context, root.name, m.id)
         if ctrl is None:
             self.report({"ERROR"}, "Inflation control not found.")

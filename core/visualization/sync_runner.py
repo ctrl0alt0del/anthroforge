@@ -2,6 +2,7 @@ import bpy
 
 from ..utils import get_af_root
 from ..deps import run_dependency_runtime
+from ..deps.dirty_hints import dirty_hints_for
 
 
 _RUNNING = False
@@ -27,42 +28,9 @@ def _run(root=None, scene=None, dirty_hints=None, bake=False):
 def sync_all(root=None, scene=None, bake=False, target_fiber_ids=None):
     dirty = None
     if target_fiber_ids:
-        dirty = {"SCP": set(), "FIBER": set(target_fiber_ids), "MUSCLE": set(), "BLOB": set()}
+        dirty = dirty_hints_for("FIBER", target_fiber_ids)
     _run(root=root, scene=scene, dirty_hints=dirty, bake=bake)
 
 
-def sync_from_scp_ids(root=None, scene=None, scp_ids=None, bake=False):
-    _run(
-        root=root,
-        scene=scene,
-        dirty_hints={"SCP": set(scp_ids or []), "FIBER": set(), "MUSCLE": set(), "BLOB": set()},
-        bake=bake,
-    )
-
-
-def sync_from_fiber_ids(root=None, scene=None, fiber_ids=None, bake=False):
-    _run(
-        root=root,
-        scene=scene,
-        dirty_hints={"SCP": set(), "FIBER": set(fiber_ids or []), "MUSCLE": set(), "BLOB": set()},
-        bake=bake,
-    )
-
-
-def sync_from_muscle_ids(root=None, scene=None, muscle_ids=None):
-    _run(
-        root=root,
-        scene=scene,
-        dirty_hints={"SCP": set(), "FIBER": set(), "MUSCLE": set(muscle_ids or []), "BLOB": set()},
-        bake=False,
-    )
-
-
-def sync_from_blob_ids(root=None, scene=None, blob_ids=None):
-    _run(
-        root=root,
-        scene=scene,
-        dirty_hints={"SCP": set(), "FIBER": set(), "MUSCLE": set(), "BLOB": set(blob_ids or [])},
-        bake=False,
-    )
-
+def sync_from_dirty_hints(root=None, scene=None, dirty_hints=None, bake=False):
+    _run(root=root, scene=scene, dirty_hints=dirty_hints, bake=bake)

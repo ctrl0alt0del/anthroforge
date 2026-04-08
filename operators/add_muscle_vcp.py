@@ -2,7 +2,8 @@ import bpy
 
 from ..core.utils import get_af_root
 from ..core.id_utils import next_prefixed_id
-from ..core.visualization.sync_runner import sync_from_muscle_ids
+from ..core.deps.dirty_hints import dirty_hints_for
+from ..core.visualization.sync_runner import sync_from_dirty_hints
 
 
 def _selected_fiber_ids(context, root):
@@ -141,7 +142,11 @@ class AF_OT_AddMuscleVCP(bpy.types.Operator):
         m = self._init_muscle(vcp, muscle_id)
         self._assign_fibers_to_muscle(vcp, m, muscle_id, fiber_ids, fibers_by_id)
         self._set_active_muscle(vcp, muscle_id)
-        sync_from_muscle_ids(root=root, scene=context.scene, muscle_ids={muscle_id})
+        sync_from_dirty_hints(
+            root=root,
+            scene=context.scene,
+            dirty_hints=dirty_hints_for("MUSCLE", {muscle_id}),
+        )
         self._select_object(context, self._find_inflation_ctrl(context, root.name, muscle_id))
         self.report({"INFO"}, f"Created {muscle_id} from {len(fiber_ids)} fibers")
         return {"FINISHED"}

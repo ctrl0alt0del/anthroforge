@@ -1,5 +1,6 @@
 import bpy
 
+from ..deps.dirty_hints import dirty_hints_for
 from ..utils import get_af_root
 from ..vcp.muscle_surface import (
     build_surface_data,
@@ -112,9 +113,14 @@ class MuscleSceneSync:
         ordered_points = collect_fiber_points(root, scene, ordered_fibers)
         if ordered_points:
             return ordered_points
-        from .fiber_sync import register_fiber_sync
-        register_fiber_sync().sync_root_to_scene(
-            root=root, scene=scene, bake=False, target_fiber_ids={f.id for f in ordered_fibers}
+        # Route fallback updates through dependency runtime so downstream impacts
+        # stay centralized in one scheduler.
+        from .sync_runner import sync_from_dirty_hints
+        sync_from_dirty_hints(
+            root=root,
+            scene=scene,
+            dirty_hints=dirty_hints_for("FIBER", {f.id for f in ordered_fibers}),
+            bake=False,
         )
         return collect_fiber_points(root, scene, ordered_fibers)
 
@@ -246,8 +252,12 @@ class MuscleSceneSync:
             self._syncing = False
 
         if changed_muscle_ids:
-            from .sync_runner import sync_from_muscle_ids
-            sync_from_muscle_ids(root=root, scene=scene, muscle_ids=changed_muscle_ids)
+            from .sync_runner import sync_from_dirty_hints
+            sync_from_dirty_hints(
+                root=root,
+                scene=scene,
+                dirty_hints=dirty_hints_for("MUSCLE", changed_muscle_ids),
+            )
 
 
 _MUSCLE_SYNC = None

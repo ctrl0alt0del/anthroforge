@@ -1,6 +1,7 @@
 import bpy
 
 from ..utils import get_af_root
+from ..deps.dirty_hints import empty_dirty_hints
 from .mirror_rules import (
     explicit_mirror_rule_for_scp,
     effective_rule_for_scp,
@@ -145,6 +146,49 @@ class AFMirrorSync:
                 return True
         return False
 
+    def _collect_dirty_hints(self, root, depsgraph):
+        dirty = empty_dirty_hints()
+        unresolved = False
+
+        for upd in depsgraph.updates:
+            obj = upd.id
+            if not self._is_relevant_update_obj(root, obj):
+                continue
+
+            if obj.get("af_proxy") and not obj.get("af_mirror_proxy"):
+                sid = obj.get("af_scp_id")
+                if sid:
+                    dirty["SCP"].add(str(sid))
+                else:
+                    unresolved = True
+                continue
+
+            if obj.get("af_fiber_proxy") and not obj.get("af_fiber_mirror_proxy"):
+                fid = obj.get("af_fiber_id")
+                if fid:
+                    dirty["FIBER"].add(str(fid))
+                else:
+                    unresolved = True
+                continue
+
+            if obj.get("af_muscle_proxy") and not obj.get("af_muscle_mirror_proxy"):
+                mid = obj.get("af_muscle_id")
+                if mid:
+                    dirty["MUSCLE"].add(str(mid))
+                else:
+                    unresolved = True
+                continue
+
+            if obj.get("af_muscle_inflation_ctrl"):
+                mid = obj.get("af_muscle_id")
+                if mid:
+                    dirty["MUSCLE"].add(str(mid))
+                else:
+                    unresolved = True
+
+        has_any = any(bool(v) for v in dirty.values())
+        return dirty if has_any and not unresolved else None
+
     def on_depsgraph_update(self, scene, depsgraph):
         if self._syncing:
             return
@@ -154,7 +198,14 @@ class AFMirrorSync:
             return
 
         if self._has_relevant_updates(root, depsgraph):
-            self.sync_root_to_scene(root=root, scene=scene)
+            # Use dependency runtime as the single scheduler for all update paths.
+            from .sync_runner import sync_all, sync_from_dirty_hints
+
+            dirty = self._collect_dirty_hints(root, depsgraph)
+            if dirty is None:
+                sync_all(root=root, scene=scene, bake=False)
+            else:
+                sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty, bake=False)
 
 
 _MIRROR_SYNC = None

@@ -1,3 +1,5 @@
+from collections import OrderedDict
+
 from .types import (
     PortRef,
     Edge,
@@ -12,6 +14,24 @@ from .types import (
     EDGE_ATTACHMENT,
     EDGE_CONSTRAINT_READ,
 )
+
+
+_GRAPH_BUILDERS = OrderedDict()
+
+
+def register_runtime_graph_builder(entity_type, builder, replace=False):
+    et = str(entity_type or "").strip().upper()
+    if not et:
+        raise ValueError("entity_type is required")
+    if not callable(builder):
+        raise TypeError("builder must be callable")
+    if et in _GRAPH_BUILDERS and not replace:
+        raise ValueError(f"graph builder already registered for {et}")
+    _GRAPH_BUILDERS[et] = builder
+
+
+def get_registered_entity_types():
+    return tuple(_GRAPH_BUILDERS.keys())
 
 
 def _src_id_from_constraint(c):
@@ -107,14 +127,14 @@ def _add_blob_entities(root, graph, entity_sets):
 
 
 def build_runtime_graph(root, graph):
-    entity_sets = {
-        "SCP": set(),
-        "FIBER": set(),
-        "MUSCLE": set(),
-        "BLOB": set(),
-    }
-    _add_scp_entities(root, graph, entity_sets)
-    _add_fiber_entities(root, graph, entity_sets)
-    _add_muscle_entities(root, graph, entity_sets)
-    _add_blob_entities(root, graph, entity_sets)
+    entity_sets = {et: set() for et in get_registered_entity_types()}
+    for et, builder in _GRAPH_BUILDERS.items():
+        entity_sets.setdefault(et, set())
+        builder(root, graph, entity_sets)
     return entity_sets
+
+
+register_runtime_graph_builder("SCP", _add_scp_entities)
+register_runtime_graph_builder("FIBER", _add_fiber_entities)
+register_runtime_graph_builder("MUSCLE", _add_muscle_entities)
+register_runtime_graph_builder("BLOB", _add_blob_entities)

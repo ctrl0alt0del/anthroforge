@@ -1,7 +1,8 @@
 import bpy
 
 from ..core.utils import get_af_root
-from ..core.visualization.sync_runner import sync_from_blob_ids
+from ..core.deps.dirty_hints import dirty_hints_for
+from ..core.visualization.sync_runner import sync_from_dirty_hints
 
 
 class AF_OT_SelectBlobControl(bpy.types.Operator):
@@ -37,7 +38,11 @@ class AF_OT_SelectBlobControl(bpy.types.Operator):
         if b is None:
             self.report({"ERROR"}, "Blob not found.")
             return {"CANCELLED"}
-        sync_from_blob_ids(root=root, scene=context.scene, blob_ids={b.id})
+        sync_from_dirty_hints(
+            root=root,
+            scene=context.scene,
+            dirty_hints=dirty_hints_for("BLOB", {b.id}),
+        )
         ctrl = self._find_control(context, root.name, b.id)
         if ctrl is None:
             self.report({"ERROR"}, "Blob control point not found.")

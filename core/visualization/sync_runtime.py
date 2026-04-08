@@ -2,6 +2,7 @@ import bpy
 from mathutils import Vector
 
 from ..attachment_codec import parse_scp_attach_param, encode_surface_frame
+from ..deps.dirty_hints import dirty_hints_for
 from ..registry import SCPRegistry
 from ..utils import get_af_root
 
@@ -137,7 +138,13 @@ def _handle_active_switch(sync, root, scene):
     if active_scp_id:
         changed_ids.add(active_scp_id)
     sync._last_active_scp_id = active_scp_id
-    sync.sync_root_to_scene(root=root, scene=scene, target_scp_ids=changed_ids or None)
+    # Route active selection refresh through dependency runtime.
+    from .sync_runner import sync_all, sync_from_dirty_hints
+
+    if changed_ids:
+        sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("SCP", changed_ids))
+    else:
+        sync_all(root=root, scene=scene, bake=False)
 
 
 def _is_relevant_proxy_update(root, vis_col, obj):
@@ -204,6 +211,6 @@ def on_depsgraph_update(sync, scene, depsgraph):
         sync._syncing = False
 
     if changed and changed_scp_ids:
-        from .sync_runner import sync_from_scp_ids
+        from .sync_runner import sync_from_dirty_hints
 
-        sync_from_scp_ids(root=root, scene=scene, scp_ids=changed_scp_ids)
+        sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("SCP", changed_scp_ids))

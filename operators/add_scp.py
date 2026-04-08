@@ -6,7 +6,8 @@ from ..core.utils import get_af_root
 from ..core.registry import SCPRegistry
 from ..core.shapes.registry import ShapeRegistry
 from ..core.id_utils import next_prefixed_id
-from ..core.visualization.sync_runner import sync_from_scp_ids
+from ..core.deps.dirty_hints import dirty_hints_for
+from ..core.visualization.sync_runner import sync_from_dirty_hints
 
 
 class AF_OT_AddSCP(bpy.types.Operator):
@@ -75,7 +76,11 @@ class AF_OT_AddSCP(bpy.types.Operator):
             return {"CANCELLED"}
         new_scp = self._init_scp(context, root)
         self._apply_parent_attachment(context, root, new_scp)
-        sync_from_scp_ids(root=root, scene=context.scene, scp_ids={new_scp.id})
+        sync_from_dirty_hints(
+            root=root,
+            scene=context.scene,
+            dirty_hints=dirty_hints_for("SCP", {new_scp.id}),
+        )
         root.af_scp_system.active_scp_index = len(root.af_scp_system.scps) - 1
         self._select_proxy(context, self._find_proxy(context.scene, root.name, new_scp.id))
         self.report({"INFO"}, f"Added {new_scp.shape_type} SCP")

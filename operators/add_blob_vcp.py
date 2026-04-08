@@ -2,7 +2,8 @@ import bpy
 
 from ..core.id_utils import next_prefixed_id
 from ..core.utils import get_af_root
-from ..core.visualization.sync_runner import sync_from_blob_ids
+from ..core.deps.dirty_hints import dirty_hints_for
+from ..core.visualization.sync_runner import sync_from_dirty_hints
 
 
 def _init_blob_defaults(blob, scene):
@@ -55,7 +56,11 @@ class AF_OT_AddBlobVCP(bpy.types.Operator):
         vcp.active_vcp_type = "BLOB"
         vcp.active_vcp_id = b.id
 
-        sync_from_blob_ids(root=root, scene=context.scene, blob_ids={b.id})
+        sync_from_dirty_hints(
+            root=root,
+            scene=context.scene,
+            dirty_hints=dirty_hints_for("BLOB", {b.id}),
+        )
 
         self.report({"INFO"}, f"Added {b.id}")
         return {"FINISHED"}

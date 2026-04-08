@@ -1,5 +1,6 @@
 import bpy
 from ..core.utils import get_af_root
+from ..core.deps.dirty_hints import dirty_hints_for
 
 
 def _sync_vcp_scene(context):
@@ -19,8 +20,8 @@ def _on_muscle_prop_update(self, context):
     root = get_af_root(scene)
     if root is None:
         return
-    from ..core.visualization.sync_runner import sync_from_muscle_ids
-    sync_from_muscle_ids(root=root, scene=scene, muscle_ids={self.id})
+    from ..core.visualization.sync_runner import sync_from_dirty_hints
+    sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("MUSCLE", {self.id}))
 
 
 def _on_blob_prop_update(self, context):
@@ -28,8 +29,8 @@ def _on_blob_prop_update(self, context):
     root = get_af_root(scene)
     if root is None:
         return
-    from ..core.visualization.sync_runner import sync_from_blob_ids
-    sync_from_blob_ids(root=root, scene=scene, blob_ids={self.id})
+    from ..core.visualization.sync_runner import sync_from_dirty_hints
+    sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("BLOB", {self.id}))
 
 
 class AF_MuscleFiberRef_Property(bpy.types.PropertyGroup):

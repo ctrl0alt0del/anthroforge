@@ -1,6 +1,7 @@
 import bpy
 from mathutils import Vector
 
+from ..deps.dirty_hints import dirty_hints_for
 from ..utils import get_af_root
 from .blob_sync_helpers import target_object_for_blob
 
@@ -152,6 +153,6 @@ def on_depsgraph_update(sync, scene, depsgraph):
         sync._syncing = False
 
     if changed_blob_ids:
-        from .sync_runner import sync_from_blob_ids
+        from .sync_runner import sync_from_dirty_hints
 
-        sync_from_blob_ids(root=root, scene=scene, blob_ids=changed_blob_ids)
+        sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("BLOB", changed_blob_ids))

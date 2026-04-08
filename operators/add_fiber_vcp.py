@@ -5,7 +5,8 @@ from ..core.attachment import Attachment
 from ..core.attachment_codec import encode_fiber_shape_param
 from ..core.registry import SCPRegistry
 from ..core.id_utils import next_prefixed_id
-from ..core.visualization.sync_runner import sync_from_fiber_ids
+from ..core.deps.dirty_hints import dirty_hints_for
+from ..core.visualization.sync_runner import sync_from_dirty_hints
 
 
 class AF_OT_AddFiberVCP(bpy.types.Operator):
@@ -58,6 +59,10 @@ class AF_OT_AddFiberVCP(bpy.types.Operator):
         f.b_parent_id, f.b_attach_param = insertion.parent_id, encode_fiber_shape_param(insertion.param)
         self._init_fiber_defaults(f)
         root.af_vcp_system.active_vcp_type, root.af_vcp_system.active_vcp_id = "FIBER", f.id
-        sync_from_fiber_ids(root=root, scene=context.scene, fiber_ids={f.id})
+        sync_from_dirty_hints(
+            root=root,
+            scene=context.scene,
+            dirty_hints=dirty_hints_for("FIBER", {f.id}),
+        )
         self.report({"INFO"}, f"Added {f.id}")
         return {"FINISHED"}
