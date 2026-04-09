@@ -1,6 +1,7 @@
 import bpy
 
 from ..deps.dirty_hints import dirty_hints_for
+from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..utils import get_af_root
 from ..vcp.muscle_surface import (
     build_surface_data,
@@ -244,8 +245,13 @@ class MuscleSceneSync:
         try:
             for upd in depsgraph.updates:
                 obj = upd.id
-                if self._is_relevant_inflation_update(root, vis_col, obj):
-                    self._process_inflation_ctrl_update(root, vis_col, obj, changed_muscle_ids)
+                if not self._is_relevant_inflation_update(root, vis_col, obj):
+                    continue
+                classified = classify_control_object(obj)
+                if not classified or str(classified["control_type"]) != "MUSCLE_INFLATION":
+                    continue
+                if enqueue_control_intent(root, classified["control_type"], classified["payload"]):
+                    changed_muscle_ids |= set(classified["dirty_hints"].get("MUSCLE", set()) or set())
 
         finally:
             self._syncing = False
@@ -259,6 +265,15 @@ class MuscleSceneSync:
                 source="depsgraph",
                 event_type="TRANSFORM",
             )
+
+
+def apply_muscle_control_update(sync, root, scene, obj):
+    vis_col = bpy.data.collections.get(sync.collection_name)
+    if vis_col is None:
+        return None
+    changed = set()
+    sync._process_inflation_ctrl_update(root, vis_col, obj, changed)
+    return next(iter(changed), None)
 
 
 _MUSCLE_SYNC = None

@@ -1,5 +1,7 @@
 from .adapters import build_runtime_graph
 from .drivers import DependencyDriver
+from .controls import pop_control_intents
+from .control_behaviors import apply_control_intent
 from ..constraints.scp_constraints import evaluate_scp_constraints_runtime, apply_scp_input_write
 from .transform_intents import pop_scp_transform_intents
 from .scp_transform_intent_apply import apply_scp_transform_intent
@@ -14,7 +16,7 @@ class RuntimeGraphDriver(DependencyDriver):
     name = "runtime_graph_driver"
 
     def entity_types(self):
-        return ("SCP", "FIBER", "MUSCLE", "BLOB")
+        return ("SCP", "FIBER", "MUSCLE", "BLOB", "CONTROL")
 
     def build_graph(self, root, graph, entity_sets):
         built = build_runtime_graph(root, graph)
@@ -96,6 +98,22 @@ class SCPTransformIntentDriver(DependencyDriver):
         if not changed:
             return {}
         return {"SCP": changed}
+
+
+class ControlIntentDriver(DependencyDriver):
+    name = "control_intent_driver"
+
+    def entity_types(self):
+        return ("CONTROL",)
+
+    def apply_constraints(self, ctx):
+        merged = {}
+        for intent in pop_control_intents(ctx.root):
+            impacts = apply_control_intent(ctx.root, ctx.scene, intent) or {}
+            for et, ids in impacts.items():
+                merged.setdefault(et, set())
+                merged[et] |= set(ids or set())
+        return merged
 
 
 class SCPSyncDriver(DependencyDriver):

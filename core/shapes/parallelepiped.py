@@ -1,80 +1,10 @@
 import bpy
-from math import atan2, cos, radians, sin, sqrt
 from mathutils import Vector
 
 from .base import ShapeStrategy
+from .deformer_impl import ParallelepipedBendDeformer, ParallelepipedMirrorPairDeformer
+from .deformers import ResolutionDeformer
 from .registry import ShapeRegistry
-
-
-class _BendDeformer:
-    priority = 20
-
-    @staticmethod
-    def _axis_components(axis, p):
-        if axis == "Y":
-            return p.y, p.z, p.x
-        if axis == "Z":
-            return p.z, p.x, p.y
-        return p.x, p.y, p.z
-
-    @staticmethod
-    def _axis_vector(axis, u, v, w):
-        if axis == "Y":
-            return Vector((w, u, v))
-        if axis == "Z":
-            return Vector((v, w, u))
-        return Vector((u, v, w))
-
-    def _bend_basis(self, p, shape):
-        axis = shape.bend_axis
-        u_center, span, v_center = shape._bend_frame(axis)
-        u, v, w = self._axis_components(axis, p)
-        return axis, u_center, span, v_center, u, v, w
-
-    def forward(self, p, shape):
-        if not shape.bend_enabled:
-            return p
-
-        angle_rad = radians(shape.bend_angle_deg)
-        if abs(angle_rad) <= 1e-9:
-            return p
-
-        axis, u_center, span, v_center, u, v, w = self._bend_basis(p, shape)
-        theta = ((u - u_center) / span) * angle_rad
-        r0 = max(1e-6, shape.bend_radius)
-        v_local = v - v_center
-        r = max(1e-6, r0 + v_local)
-        new_u = u_center + (sin(theta) * r)
-        new_v = v_center + ((cos(theta) * r) - r0)
-        return self._axis_vector(axis, new_u, new_v, w)
-
-    def inverse(self, p, shape):
-        if not shape.bend_enabled:
-            return p.copy()
-
-        angle_rad = radians(shape.bend_angle_deg)
-        if abs(angle_rad) <= 1e-9:
-            return p.copy()
-
-        axis, u_center, span, v_center, new_u, new_v, w = self._bend_basis(p, shape)
-        r0 = max(1e-6, shape.bend_radius)
-        su = new_u - u_center
-        cv = (new_v - v_center) + r0
-        r = max(1e-6, sqrt((su * su) + (cv * cv)))
-        theta = atan2(su, cv)
-        u = u_center + (theta / angle_rad) * span
-        v = v_center + (r - r0)
-        return self._axis_vector(axis, u, v, w)
-
-
-class _ResolutionDeformer:
-    priority = 30
-
-    def forward(self, p, _shape):
-        return p
-
-    def inverse(self, p, _shape):
-        return p
 
 
 class ParallelepipedShape(ShapeStrategy):
@@ -85,14 +15,9 @@ class ParallelepipedShape(ShapeStrategy):
     proxy_data_type = "MESH"
     supports_fiber_collision = True
 
-    _PAIR_MAP = {
-        "X": {0: 1, 1: 0, 2: 3, 3: 2, 4: 5, 5: 4, 6: 7, 7: 6},
-        "Y": {0: 3, 3: 0, 1: 2, 2: 1, 4: 7, 7: 4, 5: 6, 6: 5},
-        "Z": {0: 4, 4: 0, 1: 5, 5: 1, 2: 6, 6: 2, 3: 7, 7: 3},
-    }
-
-    _BEND = _BendDeformer()
-    _RES = _ResolutionDeformer()
+    _MIRROR_PAIR = ParallelepipedMirrorPairDeformer()
+    _BEND = ParallelepipedBendDeformer()
+    _RES = ResolutionDeformer()
     _SURFACE_FACES = ("X_MIN", "X_MAX", "Y_MIN", "Y_MAX", "Z_MIN", "Z_MAX")
 
     def __init__(
@@ -114,8 +39,8 @@ class ParallelepipedShape(ShapeStrategy):
         self.resolution = max(1, int(resolution))
 
     def get_deformers(self):
-        # Priority: mirror(handled by pair propagation) -> bend -> resolution
-        return [self._BEND, self._RES]
+        # Priority: mirror pair request -> bend -> resolution
+        return [self._MIRROR_PAIR, self._BEND, self._RES]
 
     @staticmethod
     def _default_points(size):
@@ -384,7 +309,7 @@ class ParallelepipedShape(ShapeStrategy):
         # Backward-compatible alias used by existing sync code.
         return self.invert_point_deformers(p)
 
-    def _bend_frame(self, axis):
+    def bend_frame(self, axis):
         sx, sy, sz = self.size
         if axis == "Y":
             span = max(1e-8, float(sy))
@@ -394,28 +319,9 @@ class ParallelepipedShape(ShapeStrategy):
             span = max(1e-8, float(sx))
         return 0.0, span, 0.0
 
-    def mirror_pair_update_from_handle(self, proxy_obj, handle_world_location, vert_index, scp_prop):
-        if not bool(getattr(scp_prop, "mirror_enabled", False)):
-            return None
-
-        axis = str(getattr(scp_prop, "mirror_axis", "X"))
-        origin = getattr(scp_prop, "mirror_origin", (0.0, 0.0, 0.0))
-        pair_map = self._PAIR_MAP.get(axis, self._PAIR_MAP["X"])
-        pair_index = pair_map.get(int(vert_index), -1)
-        if pair_index < 0 or pair_index >= len(self.points):
-            return None
-
-        q = handle_world_location.copy()
-        if axis == "Y":
-            q.y = (2.0 * float(origin[1])) - q.y
-        elif axis == "Z":
-            q.z = (2.0 * float(origin[2])) - q.z
-        else:
-            q.x = (2.0 * float(origin[0])) - q.x
-
-        mirrored_local_deformed = proxy_obj.matrix_world.inverted() @ q
-        mirrored_local_base = self.invert_point_deformers(mirrored_local_deformed)
-        return pair_index, mirrored_local_base
+    def world_handle_to_base_point(self, proxy_obj, world_location):
+        local_deformed = proxy_obj.matrix_world.inverted() @ world_location
+        return self.invert_point_deformers(local_deformed)
 
     def _trilinear_point(self, u, v, w):
         p = self.points

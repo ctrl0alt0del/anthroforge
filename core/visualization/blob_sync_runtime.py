@@ -2,6 +2,7 @@ import bpy
 from mathutils import Vector
 
 from ..deps.dirty_hints import dirty_hints_for
+from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..utils import get_af_root
 from .blob_sync_helpers import target_object_for_blob
 
@@ -114,17 +115,26 @@ def _mark_changed_by_proxy(root, obj, changed_blob_ids):
 
 
 def _mark_changed_by_ctrl(sync, root, obj, blobs_by_id, changed_blob_ids):
-    if not obj.get("af_blob_control_gizmo") or obj.get("af_root_name") != root.name or not obj.get("af_blob_id"):
+    classified = classify_control_object(obj)
+    if not classified or str(classified["control_type"]) != "BLOB_CONTROL":
         return
+    if enqueue_control_intent(root, classified["control_type"], classified["payload"]):
+        changed_blob_ids |= set(classified["dirty_hints"].get("BLOB", set()) or set())
+
+
+def apply_blob_control_update(sync, root, scene, obj):
+    if not obj.get("af_blob_control_gizmo") or obj.get("af_root_name") != root.name or not obj.get("af_blob_id"):
+        return None
     bid = obj.get("af_blob_id")
+    blobs_by_id = {b.id: b for b in root.af_vcp_system.blobs}
     b = blobs_by_id.get(bid)
     if b is None:
-        return
+        return None
     new_loc = obj.location.copy()
     if not sync._vec_changed(b.control_point_world, new_loc):
-        return
+        return None
     b.control_point_world = (new_loc.x, new_loc.y, new_loc.z)
-    changed_blob_ids.add(bid)
+    return bid
 
 
 def on_depsgraph_update(sync, scene, depsgraph):

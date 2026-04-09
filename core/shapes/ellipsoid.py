@@ -4,59 +4,9 @@ import bpy
 import bmesh
 from mathutils import Vector
 from .base import ShapeStrategy
-from .deformers import MirrorDeformer, ResolutionDeformer
+from .deformers import MirrorDeformer, ResolutionDeformer, ShapeDeformer
+from .deformer_impl import EllipsoidClipDeformer
 from .registry import ShapeRegistry
-
-
-class _EllipsoidClipDeformer:
-    priority = 20
-
-    def forward(self, p, _shape):
-        return p
-
-    def inverse(self, p, _shape):
-        return p
-
-    @staticmethod
-    def _plane_defs(shape):
-        if not bool(getattr(shape, "clip_enabled", False)):
-            return []
-        out = []
-        for i in (1, 2):
-            if not bool(getattr(shape, f"clip{i}_enabled", False)):
-                continue
-            n = Vector(getattr(shape, f"clip{i}_normal", (1.0, 0.0, 0.0)))
-            if n.length <= 1e-9:
-                continue
-            n.normalize()
-            off = float(getattr(shape, f"clip{i}_offset", 0.0))
-            keep_side = str(getattr(shape, f"clip{i}_keep_side", "POS"))
-            keep_pos = (keep_side != "NEG")
-            out.append((n, off, keep_pos))
-        return out
-
-    def is_kept(self, p, shape):
-        for n, off, keep_pos in self._plane_defs(shape):
-            s = n.dot(p) - off
-            if keep_pos:
-                if s < 0.0:
-                    return False
-            else:
-                if s > 0.0:
-                    return False
-        return True
-
-    def project_to_boundary(self, p, shape):
-        q = p.copy()
-        for n, off, keep_pos in self._plane_defs(shape):
-            s = n.dot(q) - off
-            if keep_pos:
-                if s < 0.0:
-                    q -= n * s
-            else:
-                if s > 0.0:
-                    q -= n * s
-        return q
 
 
 class EllipsoidShape(ShapeStrategy):
@@ -66,7 +16,7 @@ class EllipsoidShape(ShapeStrategy):
     proxy_object_type = "MESH"
     proxy_data_type = "MESH"
     _MIRROR = MirrorDeformer()
-    _CLIP = _EllipsoidClipDeformer()
+    _CLIP = EllipsoidClipDeformer()
     _RESOLUTION = ResolutionDeformer()
 
     def __init__(
@@ -377,7 +327,7 @@ class EllipsoidShape(ShapeStrategy):
     def _apply_clip_planes(self, bm):
         if not bool(self.clip_enabled):
             return
-        for n, off, keep_pos in self._CLIP._plane_defs(self):
+        for n, off, keep_pos in self._CLIP.plane_defs(self):
             self._apply_single_clip_plane(bm, n, off, keep_pos)
 
     def _apply_single_clip_plane(self, bm, n, off, keep_pos):

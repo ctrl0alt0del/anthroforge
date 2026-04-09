@@ -1,6 +1,7 @@
 import bpy
 
 from ..deps.dirty_hints import dirty_hints_for
+from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..registry import SCPRegistry
 from ..utils import get_af_root
 from ..attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param
@@ -202,6 +203,17 @@ def _collect_changed_fiber_ids(sync, root, scene, depsgraph, vis_col, runtime):
     return changed_fiber_ids
 
 
+def apply_fiber_control_update(sync, root, scene, obj, depsgraph):
+    runtime = SCPRegistry(root)
+    runtime.build()
+    changed = set()
+    if obj.get("af_fiber_endpoint_handle"):
+        _update_endpoint_handle(sync, root, scene, runtime, obj, changed)
+    elif obj.get("af_fiber_touch_handle"):
+        _update_touch_handle(sync, root, scene, runtime, obj, changed)
+    return next(iter(changed), None)
+
+
 def on_depsgraph_update(sync, scene, depsgraph):
     if sync._syncing:
         return
@@ -213,12 +225,20 @@ def on_depsgraph_update(sync, scene, depsgraph):
     if vis_col is None:
         return
 
-    runtime = SCPRegistry(root)
-    runtime.build()
-
     sync._syncing = True
     try:
-        changed_fiber_ids = _collect_changed_fiber_ids(sync, root, scene, depsgraph, vis_col, runtime)
+        changed_fiber_ids = set()
+        for upd in depsgraph.updates:
+            obj = upd.id
+            if not _is_relevant_update_obj(sync, root, vis_col, obj):
+                continue
+            classified = classify_control_object(obj)
+            if not classified:
+                continue
+            if str(classified["control_type"]) not in ("FIBER_ENDPOINT", "FIBER_TOUCH"):
+                continue
+            if enqueue_control_intent(root, classified["control_type"], classified["payload"]):
+                changed_fiber_ids |= set(classified["dirty_hints"].get("FIBER", set()) or set())
     finally:
         sync._syncing = False
 

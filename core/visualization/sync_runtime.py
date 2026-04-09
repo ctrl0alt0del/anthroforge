@@ -1,6 +1,7 @@
 import bpy
 
 from ..deps.dirty_hints import dirty_hints_for
+from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..deps.gates import allow_writeback
 from ..deps.transform_intents import enqueue_scp_transform_intent
 from ..registry import SCPRegistry
@@ -108,13 +109,15 @@ def _is_relevant_proxy_update(root, vis_col, obj):
 
 
 def _handle_extension_updates(sync, root, scene, vis_col, obj, depsgraph, changed_ids):
-    for ext in sync._shape_sync_extensions:
-        consumed, did, sid = ext.handle_object_update(sync, root, scene, vis_col, obj, depsgraph)
-        if not consumed:
-            continue
-        if did and sid:
-            changed_ids.add(sid)
-        return consumed, bool(did)
+    classified = classify_control_object(obj)
+    if not classified:
+        return False, False
+    ctype = str(classified["control_type"])
+    if ctype not in ("SCP_CURVE_POINT", "SCP_PARALLELEPIPED_VERTEX", "SCP_ELLIPSOID_CLIP"):
+        return False, False
+    if enqueue_control_intent(root, classified["control_type"], classified["payload"]):
+        changed_ids |= set(classified["dirty_hints"].get("SCP", set()) or set())
+        return True, True
     return False, False
 
 

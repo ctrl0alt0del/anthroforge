@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from mathutils import Matrix, Vector
+from .deformers import normalize_deformer_sequence
 
 
 class ShapeStrategy(ABC):
@@ -78,19 +79,44 @@ class ShapeStrategy(ABC):
 
     def apply_point_deformers(self, local_point):
         p = local_point.copy()
-        for d in sorted(self.get_deformers(), key=lambda x: int(getattr(x, "priority", 100))):
+        for d in normalize_deformer_sequence(self.get_deformers()):
             p = d.forward(p, self)
         return p
 
     def invert_point_deformers(self, deformed_local_point):
         p = deformed_local_point.copy()
-        for d in sorted(self.get_deformers(), key=lambda x: int(getattr(x, "priority", 100)), reverse=True):
+        deformers = list(normalize_deformer_sequence(self.get_deformers()))
+        for d in reversed(deformers):
             p = d.inverse(p, self)
         return p
 
     # Optional hook for mirrored control-point propagation.
     # Return tuple(pair_index, pair_local_base_point) or None.
     def mirror_pair_update_from_handle(self, proxy_obj, handle_world_location, vert_index, scp_prop):
+        for d in normalize_deformer_sequence(self.get_deformers()):
+            req = d.request_handle_update(
+                shape=self,
+                proxy_obj=proxy_obj,
+                handle_world_location=handle_world_location,
+                vert_index=vert_index,
+                scp_prop=scp_prop,
+            )
+            if req is None:
+                continue
+            applied = self.apply_deformer_update_request(req)
+            if applied is not None:
+                return applied
+        return None
+
+    def apply_deformer_update_request(self, request):
+        rtype = str(getattr(request, "request_type", "") or "")
+        payload = dict(getattr(request, "payload", {}) or {})
+        if rtype == "MIRROR_PAIR_POINT":
+            pair_index = int(payload.get("pair_index", -1))
+            pair_local = payload.get("pair_local_base_point", None)
+            if pair_local is None:
+                return None
+            return pair_index, pair_local
         return None
 
     @abstractmethod

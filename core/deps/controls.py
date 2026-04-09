@@ -1,0 +1,106 @@
+from collections import defaultdict
+
+
+class ControlIntent:
+    def __init__(self, control_type, payload):
+        self.control_type = str(control_type or "")
+        self.payload = dict(payload or {})
+
+
+_CONTROL_INTENTS = defaultdict(list)
+
+
+def _root_key(root):
+    return str(getattr(root, "name", "") or "")
+
+
+def enqueue_control_intent(root, control_type, payload):
+    key = _root_key(root)
+    if not key:
+        return False
+    _CONTROL_INTENTS[key].append(ControlIntent(control_type=control_type, payload=payload))
+    return True
+
+
+def pop_control_intents(root):
+    key = _root_key(root)
+    if not key:
+        return []
+    return list(_CONTROL_INTENTS.pop(key, []))
+
+
+def _as_id(v):
+    return str(v or "").strip()
+
+
+def classify_control_object(obj):
+    if obj is None:
+        return None
+
+    root_name = _as_id(getattr(obj, "get", lambda *_: None)("af_root_name"))
+    if not root_name:
+        return None
+
+    if obj.get("af_curve_point_handle"):
+        scp_id = _as_id(obj.get("af_scp_id"))
+        idx = int(obj.get("af_curve_point_index", -1))
+        if scp_id and idx >= 0:
+            return {
+                "control_type": "SCP_CURVE_POINT",
+                "payload": {"root_name": root_name, "object_name": str(obj.name), "scp_id": scp_id, "point_index": idx},
+                "dirty_hints": {"SCP": {scp_id}},
+            }
+    if obj.get("af_parallelepiped_vert_handle"):
+        scp_id = _as_id(obj.get("af_scp_id"))
+        idx = int(obj.get("af_parallelepiped_vert_index", -1))
+        if scp_id and idx >= 0:
+            return {
+                "control_type": "SCP_PARALLELEPIPED_VERTEX",
+                "payload": {"root_name": root_name, "object_name": str(obj.name), "scp_id": scp_id, "vert_index": idx},
+                "dirty_hints": {"SCP": {scp_id}},
+            }
+    if obj.get("af_ellipsoid_clip_handle"):
+        scp_id = _as_id(obj.get("af_scp_id"))
+        idx = int(obj.get("af_ellipsoid_clip_index", -1))
+        if scp_id and idx in (1, 2):
+            return {
+                "control_type": "SCP_ELLIPSOID_CLIP",
+                "payload": {"root_name": root_name, "object_name": str(obj.name), "scp_id": scp_id, "clip_index": idx},
+                "dirty_hints": {"SCP": {scp_id}},
+            }
+    if obj.get("af_fiber_endpoint_handle"):
+        fid = _as_id(obj.get("af_fiber_id"))
+        endpoint = _as_id(obj.get("af_fiber_endpoint"))
+        if fid and endpoint in ("A", "B"):
+            return {
+                "control_type": "FIBER_ENDPOINT",
+                "payload": {"root_name": root_name, "object_name": str(obj.name), "fiber_id": fid, "endpoint": endpoint},
+                "dirty_hints": {"FIBER": {fid}},
+            }
+    if obj.get("af_fiber_touch_handle"):
+        fid = _as_id(obj.get("af_fiber_id"))
+        idx = int(obj.get("af_fiber_touch_index", -1))
+        if fid and idx >= 0:
+            return {
+                "control_type": "FIBER_TOUCH",
+                "payload": {"root_name": root_name, "object_name": str(obj.name), "fiber_id": fid, "touch_index": idx},
+                "dirty_hints": {"FIBER": {fid}},
+            }
+    if obj.get("af_muscle_inflation_ctrl"):
+        mid = _as_id(obj.get("af_muscle_id"))
+        if mid:
+            return {
+                "control_type": "MUSCLE_INFLATION",
+                "payload": {"root_name": root_name, "object_name": str(obj.name), "muscle_id": mid},
+                "dirty_hints": {"MUSCLE": {mid}},
+            }
+    if obj.get("af_blob_control_gizmo"):
+        bid = _as_id(obj.get("af_blob_id"))
+        if bid:
+            return {
+                "control_type": "BLOB_CONTROL",
+                "payload": {"root_name": root_name, "object_name": str(obj.name), "blob_id": bid},
+                "dirty_hints": {"BLOB": {bid}},
+            }
+    return None
+
