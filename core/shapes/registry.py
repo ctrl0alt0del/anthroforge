@@ -1,3 +1,6 @@
+from .state_codec import ensure_deformer_state_seeded
+
+
 class ShapeRegistry:
     _registry = {}
 
@@ -16,6 +19,11 @@ class ShapeRegistry:
     @classmethod
     def create_from_prop(cls, scp_prop):
         shape_cls = cls.get(scp_prop.shape_type)
+        if shape_cls:
+            try:
+                ensure_deformer_state_seeded(scp_prop)
+            except Exception:
+                pass
         return shape_cls.from_scp_prop(scp_prop) if shape_cls else None
 
     @classmethod

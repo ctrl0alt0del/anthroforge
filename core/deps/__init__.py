@@ -11,12 +11,10 @@ from .gates import (
     PHASE_PRE_INGEST,
     PHASE_PRE_CONSTRAINT,
     PHASE_PRE_SYNC,
-    PHASE_PRE_WRITEBACK,
     GateContext,
     GateDecision,
     register_gate,
     evaluate_gates,
-    allow_writeback,
 )
 
 __all__ = [
@@ -31,10 +29,8 @@ __all__ = [
     "PHASE_PRE_INGEST",
     "PHASE_PRE_CONSTRAINT",
     "PHASE_PRE_SYNC",
-    "PHASE_PRE_WRITEBACK",
     "GateContext",
     "GateDecision",
     "register_gate",
     "evaluate_gates",
-    "allow_writeback",
 ]

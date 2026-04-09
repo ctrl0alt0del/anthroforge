@@ -250,7 +250,9 @@ class MuscleSceneSync:
                 classified = classify_control_object(obj)
                 if not classified or str(classified["control_type"]) != "MUSCLE_INFLATION":
                     continue
-                if enqueue_control_intent(root, classified["control_type"], classified["payload"]):
+                payload = dict(classified["payload"])
+                payload["binding"] = classified.get("binding")
+                if enqueue_control_intent(root, classified["control_type"], payload):
                     changed_muscle_ids |= set(classified["dirty_hints"].get("MUSCLE", set()) or set())
 
         finally:

@@ -114,7 +114,7 @@ class CurveSCPSyncExtension:
                 self._sync_curve_handles(sync_manager, root, scene, vis_col, scp_prop, live_keys)
         self._cleanup_stale_handles(vis_col, root.name, live_keys)
 
-    def handle_object_update(self, sync_manager, root, scene, vis_col, obj, depsgraph):
+    def handle_object_update(self, sync_manager, root, scene, vis_col, obj, depsgraph, control_binding=None):
         if not obj.get("af_curve_point_handle"):
             return False, False, None
 
@@ -133,9 +133,12 @@ class CurveSCPSyncExtension:
         if point_index < 0 or point_index >= len(scp_prop.curve_points):
             return True, False, None
 
-        local = proxy.matrix_world.inverted() @ obj.location
+        local_deformed = proxy.matrix_world.inverted() @ obj.location
         shape = ShapeRegistry.create_from_prop(scp_prop)
         if shape is not None:
-            local = shape.invert_point_deformers(local)
+            space = str(getattr(control_binding, "space", "FINAL") or "FINAL")
+            local = shape.invert_point_from_space(local_deformed, space=space)
+        else:
+            local = local_deformed
         did = self._apply_curve_proportional_delta(scp_prop, point_index, local)
         return True, did, scp_id if did else None

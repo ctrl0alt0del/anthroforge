@@ -41,12 +41,13 @@ class CurveShape(ShapeStrategy):
 
     @classmethod
     def from_scp_prop(cls, scp_prop):
-        return cls(
+        shape = cls(
             length=scp_prop.curve_length,
             segments=scp_prop.curve_segments,
             thickness=scp_prop.curve_thickness,
             points=cls._points_from_prop(scp_prop),
         )
+        return cls.hydrate_from_scp_prop(shape, scp_prop)
 
     @classmethod
     def init_scp_prop_defaults(cls, scp_prop):

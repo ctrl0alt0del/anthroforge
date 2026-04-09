@@ -67,7 +67,7 @@ class ParallelepipedShape(ShapeStrategy):
 
     @classmethod
     def from_scp_prop(cls, scp_prop):
-        return cls(
+        shape = cls(
             size=tuple(scp_prop.parallelepiped_size),
             points=cls._points_from_prop(scp_prop),
             bend_enabled=bool(getattr(scp_prop, "parallelepiped_bend_enabled", False)),
@@ -76,6 +76,7 @@ class ParallelepipedShape(ShapeStrategy):
             bend_radius=float(getattr(scp_prop, "parallelepiped_bend_radius", 1.0)),
             resolution=int(getattr(scp_prop, "parallelepiped_resolution", 4)),
         )
+        return cls.hydrate_from_scp_prop(shape, scp_prop)
 
     @classmethod
     def init_scp_prop_defaults(cls, scp_prop):

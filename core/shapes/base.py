@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
 from mathutils import Matrix, Vector
 from .deformers import normalize_deformer_sequence
+from .pipeline import DeformerPipeline
+from .state import DeformerState, ShapeState
+from .state_codec import get_deformer_param_overrides
 
 
 class ShapeStrategy(ABC):
@@ -11,9 +14,23 @@ class ShapeStrategy(ABC):
     proxy_data_type = "MESH"
     supports_fiber_collision = True
 
+    def _ensure_deformer_state_runtime(self):
+        if not hasattr(self, "_deformer_param_overrides"):
+            self._deformer_param_overrides = {}
+        if not hasattr(self, "_shape_state_version"):
+            self._shape_state_version = 0
+
     @classmethod
     def from_scp_prop(cls, scp_prop):
         return cls()
+
+    @classmethod
+    def hydrate_from_scp_prop(cls, shape, scp_prop):
+        try:
+            shape._deformer_param_overrides = get_deformer_param_overrides(scp_prop)
+        except Exception:
+            shape._deformer_param_overrides = {}
+        return shape
 
     @classmethod
     def init_scp_prop_defaults(cls, scp_prop):
@@ -77,18 +94,68 @@ class ShapeStrategy(ABC):
     def get_deformers(self):
         return []
 
+    def _deformer_state_for(self, deformer):
+        self._ensure_deformer_state_runtime()
+        did = str(getattr(deformer, "deformer_id", deformer.__class__.__name__.lower()) or "")
+        priority = int(getattr(deformer, "priority", 100))
+        params = dict(deformer.extract_params(self) or {})
+        override = self._deformer_param_overrides.get(did, None)
+        if isinstance(override, dict):
+            params.update(dict(override))
+        return DeformerState(
+            deformer_id=did,
+            enabled=bool(params.pop("enabled", True)),
+            order=int(params.pop("order", priority)),
+            params=params,
+            version=int(self._shape_state_version),
+        )
+
+    def build_shape_state(self):
+        self._ensure_deformer_state_runtime()
+        deformers = [self._deformer_state_for(d) for d in normalize_deformer_sequence(self.get_deformers())]
+        return ShapeState(
+            shape_type=str(getattr(self, "type_id", "BASE")),
+            base_data={},
+            deformers=deformers,
+            version=int(self._shape_state_version),
+        )
+
+    def get_deformer_state(self, deformer_id):
+        did = str(deformer_id or "")
+        if not did:
+            return None
+        for ds in self.build_shape_state().deformers:
+            if str(getattr(ds, "deformer_id", "") or "") == did:
+                return ds
+        return None
+
+    def set_deformer_param(self, deformer_id, key, value):
+        self._ensure_deformer_state_runtime()
+        did = str(deformer_id or "")
+        if not did:
+            return False
+        bucket = self._deformer_param_overrides.setdefault(did, {})
+        if bucket.get(str(key)) == value:
+            return False
+        bucket[str(key)] = value
+        self._shape_state_version += 1
+        return True
+
     def apply_point_deformers(self, local_point):
-        p = local_point.copy()
-        for d in normalize_deformer_sequence(self.get_deformers()):
-            p = d.forward(p, self)
-        return p
+        pipeline = DeformerPipeline(self, self.build_shape_state())
+        return pipeline.forward_point(local_point.copy())
 
     def invert_point_deformers(self, deformed_local_point):
-        p = deformed_local_point.copy()
-        deformers = list(normalize_deformer_sequence(self.get_deformers()))
-        for d in reversed(deformers):
-            p = d.inverse(p, self)
-        return p
+        pipeline = DeformerPipeline(self, self.build_shape_state())
+        return pipeline.inverse_point(deformed_local_point.copy())
+
+    def sample_point_in_space(self, local_point, space="FINAL"):
+        pipeline = DeformerPipeline(self, self.build_shape_state())
+        return pipeline.sample_point_in_space(local_point.copy(), space=space)
+
+    def invert_point_from_space(self, point_in_space, space="FINAL"):
+        pipeline = DeformerPipeline(self, self.build_shape_state())
+        return pipeline.inverse_point_from_space(point_in_space.copy(), space=space)
 
     # Optional hook for mirrored control-point propagation.
     # Return tuple(pair_index, pair_local_base_point) or None.

@@ -1,6 +1,6 @@
 import bpy
 from mathutils import Vector
-from ...deps.gates import allow_writeback
+from ...shapes.state_codec import set_deformer_param_patch
 from ...shapes.registry import ShapeRegistry
 
 
@@ -165,23 +165,9 @@ class EllipsoidSCPSyncExtension:
                 root.af_scp_system.active_scp_index = i
                 return
 
-    def handle_object_update(self, sync_manager, root, scene, vis_col, obj, depsgraph):
+    def handle_object_update(self, sync_manager, root, scene, vis_col, obj, depsgraph, control_binding=None):
         if not obj.get("af_ellipsoid_clip_handle"):
             return False, False, None
-
-        if not allow_writeback(
-            root=root,
-            scene=scene,
-            source="depsgraph",
-            event_type="TRANSFORM",
-            entity_type="SCP",
-            entity_id=str(obj.get("af_scp_id") or ""),
-            payload={
-                "require_user_transform": "ANY_TRANSFORM",
-                "is_user_transform_active": lambda _req: bool(self._is_user_transform_active()),
-            },
-        ):
-            return True, False, None
 
         scp_id = obj.get("af_scp_id")
         clip_index = int(obj.get("af_ellipsoid_clip_index", -1))
@@ -203,6 +189,10 @@ class EllipsoidSCPSyncExtension:
         return True, True, scp_id
 
     def _write_clip_props(self, scp_prop, clip_index, n_local, off):
+        set_deformer_param_patch(scp_prop, "ellipsoid_clip", "enabled", True)
+        set_deformer_param_patch(scp_prop, "ellipsoid_clip", f"clip{clip_index}_enabled", True)
+        set_deformer_param_patch(scp_prop, "ellipsoid_clip", f"clip{clip_index}_normal", (n_local.x, n_local.y, n_local.z))
+        set_deformer_param_patch(scp_prop, "ellipsoid_clip", f"clip{clip_index}_offset", float(off))
         setattr(scp_prop, "ellipsoid_clip_enabled", True)
         setattr(scp_prop, f"ellipsoid_clip{clip_index}_enabled", True)
         setattr(scp_prop, f"ellipsoid_clip{clip_index}_normal", (n_local.x, n_local.y, n_local.z))

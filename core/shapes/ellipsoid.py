@@ -4,7 +4,7 @@ import bpy
 import bmesh
 from mathutils import Vector
 from .base import ShapeStrategy
-from .deformers import MirrorDeformer, ResolutionDeformer, ShapeDeformer
+from .deformers import MirrorDeformer, ResolutionDeformer
 from .deformer_impl import EllipsoidClipDeformer
 from .registry import ShapeRegistry
 
@@ -47,7 +47,7 @@ class EllipsoidShape(ShapeStrategy):
 
     @classmethod
     def from_scp_prop(cls, scp_prop):
-        return cls(
+        shape = cls(
             radii=tuple(scp_prop.ellipsoid_radii),
             resolution=scp_prop.ellipsoid_resolution,
             clip_enabled=bool(getattr(scp_prop, "ellipsoid_clip_enabled", False)),
@@ -60,6 +60,7 @@ class EllipsoidShape(ShapeStrategy):
             clip2_offset=float(getattr(scp_prop, "ellipsoid_clip2_offset", 0.0)),
             clip2_keep_side=str(getattr(scp_prop, "ellipsoid_clip2_keep_side", "POS")),
         )
+        return cls.hydrate_from_scp_prop(shape, scp_prop)
 
     @classmethod
     def init_scp_prop_defaults(cls, scp_prop):
@@ -208,13 +209,14 @@ class EllipsoidShape(ShapeStrategy):
         return [self._MIRROR, self._CLIP, self._RESOLUTION]
 
     def get_attach_params(self):
+        clip_state = self.get_deformer_state(self._CLIP.deformer_id)
         params = []
         for i in range(self.resolution):
             theta = (2 * math.pi * i) / self.resolution
             for j in range(1, self.resolution):
                 phi = (math.pi * j) / self.resolution
                 p = self._compute_base_local_point(theta, phi)
-                if self._CLIP.is_kept(p, self):
+                if self._CLIP.is_kept(p, self, deformer_state=clip_state):
                     params.append((theta, phi))
         if not params:
             params.append((0.0, math.pi * 0.5))
@@ -228,10 +230,11 @@ class EllipsoidShape(ShapeStrategy):
         return Vector((x, y, z))
 
     def compute_local_point(self, param):
+        clip_state = self.get_deformer_state(self._CLIP.deformer_id)
         theta, phi = param
         p = self._compute_base_local_point(theta, phi)
-        if not self._CLIP.is_kept(p, self):
-            p = self._CLIP.project_to_boundary(p, self)
+        if not self._CLIP.is_kept(p, self, deformer_state=clip_state):
+            p = self._CLIP.project_to_boundary(p, self, deformer_state=clip_state)
         return self.apply_point_deformers(p)
 
     def sample_attachment_frame_local(self, param):
@@ -250,8 +253,9 @@ class EllipsoidShape(ShapeStrategy):
             return 0.0, math.pi * 0.5
 
     def _attachment_base(self, theta, phi):
+        clip_state = self.get_deformer_state(self._CLIP.deformer_id)
         base = self._compute_base_local_point(theta, phi)
-        return base if self._CLIP.is_kept(base, self) else self._CLIP.project_to_boundary(base, self)
+        return base if self._CLIP.is_kept(base, self, deformer_state=clip_state) else self._CLIP.project_to_boundary(base, self, deformer_state=clip_state)
 
     def _stable_normal(self, base, origin):
         normal = self._surface_normal(base)
@@ -325,9 +329,12 @@ class EllipsoidShape(ShapeStrategy):
         obj.scale = (1.0, 1.0, 1.0)
 
     def _apply_clip_planes(self, bm):
-        if not bool(self.clip_enabled):
+        clip_state = self.get_deformer_state(self._CLIP.deformer_id)
+        if clip_state is None:
             return
-        for n, off, keep_pos in self._CLIP.plane_defs(self):
+        if not bool(getattr(clip_state, "enabled", True)):
+            return
+        for n, off, keep_pos in self._CLIP.plane_defs(self, deformer_state=clip_state):
             self._apply_single_clip_plane(bm, n, off, keep_pos)
 
     def _apply_single_clip_plane(self, bm, n, off, keep_pos):

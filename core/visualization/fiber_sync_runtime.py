@@ -237,7 +237,9 @@ def on_depsgraph_update(sync, scene, depsgraph):
                 continue
             if str(classified["control_type"]) not in ("FIBER_ENDPOINT", "FIBER_TOUCH"):
                 continue
-            if enqueue_control_intent(root, classified["control_type"], classified["payload"]):
+            payload = dict(classified["payload"])
+            payload["binding"] = classified.get("binding")
+            if enqueue_control_intent(root, classified["control_type"], payload):
                 changed_fiber_ids |= set(classified["dirty_hints"].get("FIBER", set()) or set())
     finally:
         sync._syncing = False

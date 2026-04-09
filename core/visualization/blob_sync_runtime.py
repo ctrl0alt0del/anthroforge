@@ -118,7 +118,9 @@ def _mark_changed_by_ctrl(sync, root, obj, blobs_by_id, changed_blob_ids):
     classified = classify_control_object(obj)
     if not classified or str(classified["control_type"]) != "BLOB_CONTROL":
         return
-    if enqueue_control_intent(root, classified["control_type"], classified["payload"]):
+    payload = dict(classified["payload"])
+    payload["binding"] = classified.get("binding")
+    if enqueue_control_intent(root, classified["control_type"], payload):
         changed_blob_ids |= set(classified["dirty_hints"].get("BLOB", set()) or set())
 
 

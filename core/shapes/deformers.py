@@ -20,6 +20,15 @@ class ShapeDeformer(ABC):
     def inverse(self, p, shape):
         return self.inverse_point(p, shape)
 
+    def forward_state(self, p, shape, deformer_state):
+        return self.forward(p, shape)
+
+    def inverse_state(self, p, shape, deformer_state):
+        return self.inverse(p, shape)
+
+    def extract_params(self, shape):
+        return {}
+
     def forward_point(self, p, _shape):
         return p
 
@@ -49,6 +58,15 @@ class LegacyShapeDeformerAdapter(ShapeDeformer):
 
     def inverse_point(self, p, shape):
         return self._wrapped.inverse(p, shape)
+
+    def extract_params(self, shape):
+        fn = getattr(self._wrapped, "extract_params", None)
+        if callable(fn):
+            try:
+                return dict(fn(shape) or {})
+            except Exception:
+                return {}
+        return {}
 
 
 def _as_vector3(v):

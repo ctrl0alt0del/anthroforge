@@ -1,6 +1,5 @@
 import bpy
 from mathutils import Vector
-from ...deps.gates import allow_writeback
 from ...shapes.registry import ShapeRegistry
 
 
@@ -74,23 +73,9 @@ class ParallelepipedSCPSyncExtension:
                 self._sync_vertex_handles(sync_manager, root, scene, vis_col, scp_prop, live_keys)
         self._cleanup_stale_vertex_handles(vis_col, root.name, live_keys)
 
-    def handle_object_update(self, sync_manager, root, scene, vis_col, obj, depsgraph):
+    def handle_object_update(self, sync_manager, root, scene, vis_col, obj, depsgraph, control_binding=None):
         if not obj.get("af_parallelepiped_vert_handle"):
             return False, False, None
-
-        if not allow_writeback(
-            root=root,
-            scene=scene,
-            source="depsgraph",
-            event_type="TRANSFORM",
-            entity_type="SCP",
-            entity_id=str(obj.get("af_scp_id") or ""),
-            payload={
-                "require_user_transform": "TRANSLATE",
-                "is_user_transform_active": lambda _req: bool(sync_manager._is_user_translate_active()),
-            },
-        ):
-            return True, False, None
         scp_id = obj.get("af_scp_id")
         vert_index = int(obj.get("af_parallelepiped_vert_index", -1))
         scp_prop = sync_manager._get_scp_prop_by_id(root, scp_id)
@@ -100,7 +85,8 @@ class ParallelepipedSCPSyncExtension:
         self._activate_scp(root, scp_id)
         if not self._valid_vert_index(scp_prop, vert_index):
             return True, False, None
-        local = self._target_local_point(scp_prop, proxy, obj.location)
+        space = str(getattr(control_binding, "space", "FINAL") or "FINAL")
+        local = self._target_local_point(scp_prop, proxy, obj.location, space=space)
         old = self._point_vec(scp_prop.parallelepiped_points[vert_index])
         if (local - old).length_squared <= 1e-10:
             return True, False, None
@@ -120,12 +106,12 @@ class ParallelepipedSCPSyncExtension:
     def _point_vec(self, p):
         return Vector((p.co[0], p.co[1], p.co[2]))
 
-    def _target_local_point(self, scp_prop, proxy, world_location):
+    def _target_local_point(self, scp_prop, proxy, world_location, space="FINAL"):
         local_deformed = proxy.matrix_world.inverted() @ world_location
         shape = ShapeRegistry.create_from_prop(scp_prop)
         if shape is None:
             return local_deformed
-        return shape.invert_point_deformers(local_deformed)
+        return shape.invert_point_from_space(local_deformed, space=space)
 
     def _apply_pair_update_if_needed(self, scp_prop, proxy, world_location, vert_index):
         shape = ShapeRegistry.create_from_prop(scp_prop)

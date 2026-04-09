@@ -2,7 +2,6 @@ import bpy
 
 from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
-from ..deps.gates import allow_writeback
 from ..deps.transform_intents import enqueue_scp_transform_intent
 from ..registry import SCPRegistry
 from ..utils import get_af_root
@@ -115,7 +114,9 @@ def _handle_extension_updates(sync, root, scene, vis_col, obj, depsgraph, change
     ctype = str(classified["control_type"])
     if ctype not in ("SCP_CURVE_POINT", "SCP_PARALLELEPIPED_VERTEX", "SCP_ELLIPSOID_CLIP"):
         return False, False
-    if enqueue_control_intent(root, classified["control_type"], classified["payload"]):
+    payload = dict(classified["payload"])
+    payload["binding"] = classified.get("binding")
+    if enqueue_control_intent(root, classified["control_type"], payload):
         changed_ids |= set(classified["dirty_hints"].get("SCP", set()) or set())
         return True, True
     return False, False
@@ -127,19 +128,7 @@ def _handle_proxy_transform_update(sync, root, scene, obj, depsgraph, changed_id
     scp_id = str(obj.get("af_scp_id") or "")
     if not scp_id:
         return False
-    if not allow_writeback(
-        root=root,
-        scene=scene,
-        source="depsgraph",
-        event_type="TRANSFORM",
-        entity_type="SCP",
-        entity_id=scp_id,
-        payload={
-            "check_synced_matrix": True,
-            "obj": obj,
-            "is_synced_matrix_fn": lambda o: bool(sync._is_synced_matrix(o)),
-        },
-    ):
+    if sync._is_synced_matrix(obj):
         return False
     if not enqueue_scp_transform_intent(root, scp_id, obj.matrix_world.copy()):
         return False

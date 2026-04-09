@@ -24,39 +24,50 @@ class ParallelepipedBendDeformer(ShapeDeformer):
             return Vector((v, w, u))
         return Vector((u, v, w))
 
-    def _bend_basis(self, p, shape):
-        axis = shape.bend_axis
+    def _bend_basis(self, p, shape, axis):
         u_center, span, v_center = shape.bend_frame(axis)
         u, v, w = self._axis_components(axis, p)
         return axis, u_center, span, v_center, u, v, w
 
-    def forward_point(self, p, shape):
-        if not shape.bend_enabled:
+    def extract_params(self, shape):
+        return {
+            "enabled": bool(getattr(shape, "bend_enabled", False)),
+            "axis": str(getattr(shape, "bend_axis", "X")),
+            "angle_deg": float(getattr(shape, "bend_angle_deg", 0.0)),
+            "radius": float(getattr(shape, "bend_radius", 1.0)),
+        }
+
+    def forward_state(self, p, shape, deformer_state):
+        params = dict(getattr(deformer_state, "params", {}) or {})
+        if not bool(getattr(deformer_state, "enabled", True)):
             return p
 
-        angle_rad = radians(shape.bend_angle_deg)
+        axis = str(params.get("axis", getattr(shape, "bend_axis", "X")))
+        angle_rad = radians(float(params.get("angle_deg", getattr(shape, "bend_angle_deg", 0.0))))
         if abs(angle_rad) <= 1e-9:
             return p
 
-        axis, u_center, span, v_center, u, v, w = self._bend_basis(p, shape)
+        axis, u_center, span, v_center, u, v, w = self._bend_basis(p, shape, axis)
         theta = ((u - u_center) / span) * angle_rad
-        r0 = max(1e-6, shape.bend_radius)
+        r0 = max(1e-6, float(params.get("radius", getattr(shape, "bend_radius", 1.0))))
         v_local = v - v_center
         r = max(1e-6, r0 + v_local)
         new_u = u_center + (sin(theta) * r)
         new_v = v_center + ((cos(theta) * r) - r0)
         return self._axis_vector(axis, new_u, new_v, w)
 
-    def inverse_point(self, p, shape):
-        if not shape.bend_enabled:
+    def inverse_state(self, p, shape, deformer_state):
+        params = dict(getattr(deformer_state, "params", {}) or {})
+        if not bool(getattr(deformer_state, "enabled", True)):
             return p.copy()
 
-        angle_rad = radians(shape.bend_angle_deg)
+        axis = str(params.get("axis", getattr(shape, "bend_axis", "X")))
+        angle_rad = radians(float(params.get("angle_deg", getattr(shape, "bend_angle_deg", 0.0))))
         if abs(angle_rad) <= 1e-9:
             return p.copy()
 
-        axis, u_center, span, v_center, new_u, new_v, w = self._bend_basis(p, shape)
-        r0 = max(1e-6, shape.bend_radius)
+        axis, u_center, span, v_center, new_u, new_v, w = self._bend_basis(p, shape, axis)
+        r0 = max(1e-6, float(params.get("radius", getattr(shape, "bend_radius", 1.0))))
         su = new_u - u_center
         cv = (new_v - v_center) + r0
         r = max(1e-6, sqrt((su * su) + (cv * cv)))
@@ -105,6 +116,19 @@ class EllipsoidClipDeformer(ShapeDeformer):
     deformer_id = "ellipsoid_clip"
     priority = 20
 
+    def extract_params(self, shape):
+        return {
+            "enabled": bool(getattr(shape, "clip_enabled", False)),
+            "clip1_enabled": bool(getattr(shape, "clip1_enabled", False)),
+            "clip1_normal": tuple(getattr(shape, "clip1_normal", (1.0, 0.0, 0.0))),
+            "clip1_offset": float(getattr(shape, "clip1_offset", 0.0)),
+            "clip1_keep_side": str(getattr(shape, "clip1_keep_side", "POS")),
+            "clip2_enabled": bool(getattr(shape, "clip2_enabled", False)),
+            "clip2_normal": tuple(getattr(shape, "clip2_normal", (-1.0, 0.0, 0.0))),
+            "clip2_offset": float(getattr(shape, "clip2_offset", 0.0)),
+            "clip2_keep_side": str(getattr(shape, "clip2_keep_side", "POS")),
+        }
+
     def forward_point(self, p, _shape):
         return p
 
@@ -112,25 +136,34 @@ class EllipsoidClipDeformer(ShapeDeformer):
         return p
 
     @staticmethod
-    def plane_defs(shape):
-        if not bool(getattr(shape, "clip_enabled", False)):
+    def _bool_from_params(params, key, fallback):
+        return bool(params.get(key, fallback))
+
+    @staticmethod
+    def _value(params, key, fallback):
+        return params.get(key, fallback)
+
+    def plane_defs(self, shape, deformer_state=None):
+        params = dict(getattr(deformer_state, "params", {}) or {})
+        enabled = bool(getattr(deformer_state, "enabled", True)) and self._bool_from_params(params, "enabled", getattr(shape, "clip_enabled", False))
+        if not enabled:
             return []
         out = []
         for i in (1, 2):
-            if not bool(getattr(shape, f"clip{i}_enabled", False)):
+            if not self._bool_from_params(params, f"clip{i}_enabled", getattr(shape, f"clip{i}_enabled", False)):
                 continue
-            n = Vector(getattr(shape, f"clip{i}_normal", (1.0, 0.0, 0.0)))
+            n = Vector(self._value(params, f"clip{i}_normal", getattr(shape, f"clip{i}_normal", (1.0, 0.0, 0.0))))
             if n.length <= 1e-9:
                 continue
             n.normalize()
-            off = float(getattr(shape, f"clip{i}_offset", 0.0))
-            keep_side = str(getattr(shape, f"clip{i}_keep_side", "POS"))
+            off = float(self._value(params, f"clip{i}_offset", getattr(shape, f"clip{i}_offset", 0.0)))
+            keep_side = str(self._value(params, f"clip{i}_keep_side", getattr(shape, f"clip{i}_keep_side", "POS")))
             keep_pos = (keep_side != "NEG")
             out.append((n, off, keep_pos))
         return out
 
-    def is_kept(self, p, shape):
-        for n, off, keep_pos in self.plane_defs(shape):
+    def is_kept(self, p, shape, deformer_state=None):
+        for n, off, keep_pos in self.plane_defs(shape, deformer_state=deformer_state):
             s = n.dot(p) - off
             if keep_pos:
                 if s < 0.0:
@@ -140,9 +173,9 @@ class EllipsoidClipDeformer(ShapeDeformer):
                     return False
         return True
 
-    def project_to_boundary(self, p, shape):
+    def project_to_boundary(self, p, shape, deformer_state=None):
         q = p.copy()
-        for n, off, keep_pos in self.plane_defs(shape):
+        for n, off, keep_pos in self.plane_defs(shape, deformer_state=deformer_state):
             s = n.dot(q) - off
             if keep_pos:
                 if s < 0.0:
@@ -151,4 +184,3 @@ class EllipsoidClipDeformer(ShapeDeformer):
                 if s > 0.0:
                     q -= n * s
         return q
-

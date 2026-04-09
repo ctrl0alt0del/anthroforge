@@ -24,10 +24,11 @@ class MeshAssetShape(ShapeStrategy):
 
     @classmethod
     def from_scp_prop(cls, scp_prop):
-        return cls(
+        shape = cls(
             asset_id=getattr(scp_prop, "mesh_asset_id", ""),
             resolution_hint=0,
         )
+        return cls.hydrate_from_scp_prop(shape, scp_prop)
 
     @classmethod
     def init_scp_prop_defaults(cls, scp_prop):

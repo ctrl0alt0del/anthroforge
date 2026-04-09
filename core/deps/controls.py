@@ -1,4 +1,5 @@
 from collections import defaultdict
+from ..shapes.state import ControlBinding
 
 
 class ControlIntent:
@@ -49,6 +50,7 @@ def classify_control_object(obj):
                 "control_type": "SCP_CURVE_POINT",
                 "payload": {"root_name": root_name, "object_name": str(obj.name), "scp_id": scp_id, "point_index": idx},
                 "dirty_hints": {"SCP": {scp_id}},
+                "binding": ControlBinding(kind="GEOMETRY_SAMPLE", space="FINAL", target_path=f"SCP/{scp_id}/curve_points/{idx}"),
             }
     if obj.get("af_parallelepiped_vert_handle"):
         scp_id = _as_id(obj.get("af_scp_id"))
@@ -58,6 +60,7 @@ def classify_control_object(obj):
                 "control_type": "SCP_PARALLELEPIPED_VERTEX",
                 "payload": {"root_name": root_name, "object_name": str(obj.name), "scp_id": scp_id, "vert_index": idx},
                 "dirty_hints": {"SCP": {scp_id}},
+                "binding": ControlBinding(kind="GEOMETRY_SAMPLE", space="FINAL", target_path=f"SCP/{scp_id}/parallelepiped_points/{idx}"),
             }
     if obj.get("af_ellipsoid_clip_handle"):
         scp_id = _as_id(obj.get("af_scp_id"))
@@ -67,6 +70,7 @@ def classify_control_object(obj):
                 "control_type": "SCP_ELLIPSOID_CLIP",
                 "payload": {"root_name": root_name, "object_name": str(obj.name), "scp_id": scp_id, "clip_index": idx},
                 "dirty_hints": {"SCP": {scp_id}},
+                "binding": ControlBinding(kind="FRAME_SAMPLE", space="BASE", target_path=f"SCP/{scp_id}/ellipsoid_clip{idx}"),
             }
     if obj.get("af_fiber_endpoint_handle"):
         fid = _as_id(obj.get("af_fiber_id"))
@@ -76,6 +80,7 @@ def classify_control_object(obj):
                 "control_type": "FIBER_ENDPOINT",
                 "payload": {"root_name": root_name, "object_name": str(obj.name), "fiber_id": fid, "endpoint": endpoint},
                 "dirty_hints": {"FIBER": {fid}},
+                "binding": ControlBinding(kind="GEOMETRY_SAMPLE", space="FINAL", target_path=f"FIBER/{fid}/endpoint/{endpoint}"),
             }
     if obj.get("af_fiber_touch_handle"):
         fid = _as_id(obj.get("af_fiber_id"))
@@ -85,6 +90,7 @@ def classify_control_object(obj):
                 "control_type": "FIBER_TOUCH",
                 "payload": {"root_name": root_name, "object_name": str(obj.name), "fiber_id": fid, "touch_index": idx},
                 "dirty_hints": {"FIBER": {fid}},
+                "binding": ControlBinding(kind="GEOMETRY_SAMPLE", space="FINAL", target_path=f"FIBER/{fid}/touch/{idx}"),
             }
     if obj.get("af_muscle_inflation_ctrl"):
         mid = _as_id(obj.get("af_muscle_id"))
@@ -93,6 +99,7 @@ def classify_control_object(obj):
                 "control_type": "MUSCLE_INFLATION",
                 "payload": {"root_name": root_name, "object_name": str(obj.name), "muscle_id": mid},
                 "dirty_hints": {"MUSCLE": {mid}},
+                "binding": ControlBinding(kind="GEOMETRY_SAMPLE", space="FINAL", target_path=f"MUSCLE/{mid}/inflation_ctrl"),
             }
     if obj.get("af_blob_control_gizmo"):
         bid = _as_id(obj.get("af_blob_id"))
@@ -101,6 +108,6 @@ def classify_control_object(obj):
                 "control_type": "BLOB_CONTROL",
                 "payload": {"root_name": root_name, "object_name": str(obj.name), "blob_id": bid},
                 "dirty_hints": {"BLOB": {bid}},
+                "binding": ControlBinding(kind="GEOMETRY_SAMPLE", space="FINAL", target_path=f"BLOB/{bid}/control_point"),
             }
     return None
-

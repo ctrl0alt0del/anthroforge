@@ -27,9 +27,12 @@ def _apply_scp_control(root, scene, intent):
     if vis_col is None:
         return {}
     depsgraph = bpy.context.evaluated_depsgraph_get()
+    control_binding = intent.payload.get("binding")
     changed_ids = set()
     for ext in sync._shape_sync_extensions:
-        consumed, did, sid = ext.handle_object_update(sync, root, scene, vis_col, obj, depsgraph)
+        consumed, did, sid = ext.handle_object_update(
+            sync, root, scene, vis_col, obj, depsgraph, control_binding=control_binding
+        )
         if not consumed:
             continue
         if did and sid:
@@ -77,4 +80,3 @@ def apply_control_intent(root, scene, intent):
     if ctype == "BLOB_CONTROL":
         return _apply_blob_control(root, scene, intent)
     return {}
-
