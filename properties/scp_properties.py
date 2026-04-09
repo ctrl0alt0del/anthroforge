@@ -1,7 +1,7 @@
 import bpy
 from mathutils import Euler, Quaternion
 from ..core.utils import get_af_root
-from ..core.deps.dirty_hints import dirty_hints_for
+from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 
 
 def _sync_scene(context, scp_id=None):
@@ -14,8 +14,8 @@ def _sync_scene(context, scp_id=None):
         from ..core.visualization.sync_runner import sync_from_dirty_hints
         sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("SCP", {scp_id}))
     else:
-        from ..core.visualization.sync_runner import sync_all
-        sync_all(root=root, scene=scene)
+        from ..core.visualization.sync_runner import sync_from_dirty_hints
+        sync_from_dirty_hints(root=root, scene=scene, dirty_hints=empty_dirty_hints())
 
 
 def _on_scp_prop_update(self, context):

@@ -73,8 +73,7 @@ def sync_root_to_scene(sync, root=None, scene=None, target_scp_ids=None):
         for ext in sync._shape_sync_extensions:
             ext.sync_post(sync, root, scene, vis_col)
 
-        if target_scp_ids is None:
-            _cleanup_stale_root_proxies(sync, vis_col, root.name, all_live_ids)
+        _cleanup_stale_root_proxies(sync, vis_col, root.name, all_live_ids)
     finally:
         sync._syncing = False
 
@@ -185,7 +184,7 @@ def _handle_active_switch(sync, root, scene):
         changed_ids.add(active_scp_id)
     sync._last_active_scp_id = active_scp_id
     # Route active selection refresh through dependency runtime.
-    from .sync_runner import sync_all, sync_from_dirty_hints
+    from .sync_runner import sync_from_dirty_hints
 
     if changed_ids:
         sync_from_dirty_hints(
@@ -195,8 +194,6 @@ def _handle_active_switch(sync, root, scene):
             source="depsgraph",
             event_type="SELECTION",
         )
-    else:
-        sync_all(root=root, scene=scene, bake=False, source="depsgraph", event_type="SELECTION")
 
 
 def _is_relevant_proxy_update(root, vis_col, obj):

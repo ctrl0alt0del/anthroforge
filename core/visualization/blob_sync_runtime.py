@@ -97,8 +97,7 @@ def sync_root_to_scene(sync, root=None, scene=None, target_blob_ids=None):
             result = _sync_blob_geometry(sync, scene, root, bp, obj, ctrl)
             _update_blob_meta(sync, root, vcp, bp, obj, result)
 
-        if target_blob_ids is None:
-            _cleanup_stale_blob_objects(sync, vis_col, root.name, all_blob_ids)
+        _cleanup_stale_blob_objects(sync, vis_col, root.name, all_blob_ids)
     finally:
         sync._syncing = False
 

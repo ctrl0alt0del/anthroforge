@@ -1,5 +1,6 @@
 import bpy
-from ..core.visualization.sync_runner import sync_all
+from ..core.deps.dirty_hints import empty_dirty_hints
+from ..core.visualization.sync_runner import sync_from_dirty_hints
 class AF_OT_CreateRoot(bpy.types.Operator):
     bl_idname = "af.create_root"
     bl_label = "Create AnthroForge Root"
@@ -22,5 +23,5 @@ class AF_OT_CreateRoot(bpy.types.Operator):
       root.af_scp_system  # just ensure pointer exists
 
       self.report({'INFO'}, "AnthroForge Root created.")
-      sync_all(root=root, scene=context.scene)
+      sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=empty_dirty_hints())
       return {'FINISHED'}

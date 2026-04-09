@@ -187,7 +187,7 @@ class AFMirrorSync:
                     unresolved = True
 
         has_any = any(bool(v) for v in dirty.values())
-        return dirty if has_any and not unresolved else None
+        return dirty, unresolved or not has_any
 
     def on_depsgraph_update(self, scene, depsgraph):
         if self._syncing:
@@ -199,20 +199,17 @@ class AFMirrorSync:
 
         if self._has_relevant_updates(root, depsgraph):
             # Use dependency runtime as the single scheduler for all update paths.
-            from .sync_runner import sync_all, sync_from_dirty_hints
+            from .sync_runner import sync_from_dirty_hints
 
-            dirty = self._collect_dirty_hints(root, depsgraph)
-            if dirty is None:
-                sync_all(root=root, scene=scene, bake=False, source="depsgraph", event_type="TRANSFORM")
-            else:
-                sync_from_dirty_hints(
-                    root=root,
-                    scene=scene,
-                    dirty_hints=dirty,
-                    bake=False,
-                    source="depsgraph",
-                    event_type="TRANSFORM",
-                )
+            dirty, use_full = self._collect_dirty_hints(root, depsgraph)
+            sync_from_dirty_hints(
+                root=root,
+                scene=scene,
+                dirty_hints=empty_dirty_hints() if use_full else dirty,
+                bake=False,
+                source="depsgraph",
+                event_type="TRANSFORM",
+            )
 
 
 _MIRROR_SYNC = None

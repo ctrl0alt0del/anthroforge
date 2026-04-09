@@ -1,7 +1,8 @@
 import bpy
 
 from ..core.utils import get_af_root
-from ..core.visualization.sync_runner import sync_all
+from ..core.deps.dirty_hints import dirty_hints_for
+from ..core.visualization.sync_runner import sync_from_dirty_hints
 
 
 class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
@@ -56,7 +57,7 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
             return {"CANCELLED"}
         scps.remove(idx)
         self._set_active_scp_after_remove(root, scps, idx)
-        sync_all(root=root, scene=context.scene)
+        sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=dirty_hints_for("SCP", {scp_id}))
         self.report({"INFO"}, f"Deleted SCP '{scp_id}'")
         return {"FINISHED"}
 
@@ -83,7 +84,7 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
             root.af_vcp_system.active_vcp_type = "NONE"
             root.af_vcp_system.active_vcp_id = ""
 
-        sync_all(root=root, scene=context.scene)
+        sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=dirty_hints_for("FIBER", {fiber_id}))
         self.report({"INFO"}, f"Deleted Fiber '{fiber_id}'")
         return {"FINISHED"}
 
@@ -104,7 +105,7 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
             root.af_vcp_system.active_vcp_type = "NONE"
             root.af_vcp_system.active_vcp_id = ""
 
-        sync_all(root=root, scene=context.scene)
+        sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=dirty_hints_for("BLOB", {blob_id}))
         self.report({"INFO"}, f"Deleted Blob '{blob_id}'")
         return {"FINISHED"}
 

@@ -120,8 +120,7 @@ def sync_root_to_scene(sync, root=None, scene=None, bake=False, target_fiber_ids
             live_ids.add(fiber.id)
             _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake)
 
-        if target_fiber_ids is None:
-            _cleanup_stale_fiber_proxies(vis_col, root.name, live_ids)
+        _cleanup_stale_fiber_proxies(vis_col, root.name, {f.id for f in root.af_vcp_system.fibers})
 
         sync._sync_handles(root, scene, vis_col, runtime.registry)
         sync._apply_selection_highlight(root, scene)

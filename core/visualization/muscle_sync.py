@@ -190,8 +190,7 @@ class MuscleSceneSync:
                     continue
                 self._sync_single_muscle(vis_col, root, scene, vcp, muscle)
 
-            if target_muscle_ids is None:
-                self._cleanup_removed_muscles(vis_col, root.name, all_muscle_ids)
+            self._cleanup_removed_muscles(vis_col, root.name, all_muscle_ids)
 
         finally:
             self._syncing = False

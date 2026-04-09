@@ -1,6 +1,8 @@
 import bpy
 
 from ..core.utils import get_af_root
+from ..core.deps.dirty_hints import dirty_hints_for
+from ..core.visualization.sync_runner import sync_from_dirty_hints
 
 
 class AF_OT_AddSCPConstraint(bpy.types.Operator):
@@ -63,6 +65,13 @@ class AF_OT_AddSCPConstraint(bpy.types.Operator):
         c = scp.constraints.add()
         self._init_constraint_defaults(c)
         scp.active_constraint_index = len(scp.constraints) - 1
+        sync_from_dirty_hints(
+            root=root,
+            scene=context.scene,
+            dirty_hints=dirty_hints_for("SCP", {scp.id}),
+            source="operator",
+            event_type="UPDATE",
+        )
         return {"FINISHED"}
 
 
@@ -105,4 +114,11 @@ class AF_OT_RemoveSCPConstraint(bpy.types.Operator):
 
         scp.constraints.remove(i)
         scp.active_constraint_index = max(0, min(scp.active_constraint_index, len(scp.constraints) - 1))
+        sync_from_dirty_hints(
+            root=root,
+            scene=context.scene,
+            dirty_hints=dirty_hints_for("SCP", {scp.id}),
+            source="operator",
+            event_type="UPDATE",
+        )
         return {"FINISHED"}
