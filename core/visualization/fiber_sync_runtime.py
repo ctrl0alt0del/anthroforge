@@ -46,11 +46,35 @@ def _cleanup_stale_handles(vis_col, root_name, live_endpoint_keys, live_touch_ke
                 bpy.data.objects.remove(obj, do_unlink=True)
 
 
+def _active_fiber_id(root):
+    try:
+        ctx = bpy.context
+        active = ctx.view_layer.objects.active if ctx and ctx.view_layer else None
+    except Exception:
+        active = None
+
+    if active is not None and active.get("af_root_name") == root.name:
+        if active.get("af_fiber_proxy") and active.get("af_fiber_id"):
+            return str(active.get("af_fiber_id"))
+        if active.get("af_fiber_endpoint_handle") and active.get("af_fiber_id"):
+            return str(active.get("af_fiber_id"))
+        if active.get("af_fiber_touch_handle") and active.get("af_fiber_id"):
+            return str(active.get("af_fiber_id"))
+
+    vcp = root.af_vcp_system
+    if str(vcp.active_vcp_type or "") == "FIBER" and str(vcp.active_vcp_id or ""):
+        return str(vcp.active_vcp_id)
+    return ""
+
+
 def sync_handles(sync, root, scene, vis_col, runtime_registry):
     live_endpoint_keys = set()
     live_touch_keys = set()
+    active_fiber_id = _active_fiber_id(root)
 
     for fiber in root.af_vcp_system.fibers:
+        if not active_fiber_id or fiber.id != active_fiber_id:
+            continue
         for endpoint, pid, raw in _iter_endpoints(fiber):
             live_endpoint_keys.add((fiber.id, endpoint))
             _sync_endpoint_handle(sync, vis_col, root, scene, runtime_registry, fiber, endpoint, pid, raw)

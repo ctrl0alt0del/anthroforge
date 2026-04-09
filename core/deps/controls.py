@@ -2,6 +2,17 @@ from collections import defaultdict
 from ..shapes.state import ControlBinding
 
 
+CONTROL_FLAG_KEYS = (
+    "af_curve_point_handle",
+    "af_parallelepiped_vert_handle",
+    "af_ellipsoid_clip_handle",
+    "af_fiber_endpoint_handle",
+    "af_fiber_touch_handle",
+    "af_muscle_inflation_ctrl",
+    "af_blob_control_gizmo",
+)
+
+
 class ControlIntent:
     def __init__(self, control_type, payload):
         self.control_type = str(control_type or "")
@@ -32,6 +43,18 @@ def pop_control_intents(root):
 
 def _as_id(v):
     return str(v or "").strip()
+
+
+def is_control_object(obj):
+    if obj is None:
+        return False
+    for k in CONTROL_FLAG_KEYS:
+        try:
+            if obj.get(k):
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def classify_control_object(obj):

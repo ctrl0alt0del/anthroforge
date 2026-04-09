@@ -42,9 +42,28 @@ def _ensure_blob_ctrl(sync, vis_col, root, bp, obj):
     return ctrl
 
 
-def _sync_blob_geometry(sync, scene, root, bp, obj, ctrl):
+def _active_blob_id(root):
+    try:
+        ctx = bpy.context
+        active = ctx.view_layer.objects.active if ctx and ctx.view_layer else None
+    except Exception:
+        active = None
+
+    if active is not None and active.get("af_root_name") == root.name:
+        if active.get("af_blob_proxy") and active.get("af_blob_id"):
+            return str(active.get("af_blob_id"))
+        if active.get("af_blob_control_gizmo") and active.get("af_blob_id"):
+            return str(active.get("af_blob_id"))
+
+    vcp = root.af_vcp_system
+    if str(vcp.active_vcp_type or "") == "BLOB" and str(vcp.active_vcp_id or ""):
+        return str(vcp.active_vcp_id)
+    return ""
+
+
+def _sync_blob_geometry(sync, scene, root, bp, obj, control_world):
     runtime = sync._runtime_from_proxy_transform(bp, obj)
-    runtime.control_point_world = ctrl.location.copy()
+    runtime.control_point_world = control_world.copy()
     target_obj = target_object_for_blob(scene, root, bp)
     unit_local, faces = sync._unit_local_mesh(runtime)
     rest_world = [obj.matrix_world @ v for v in unit_local]
@@ -86,6 +105,7 @@ def sync_root_to_scene(sync, root=None, scene=None, target_blob_ids=None):
     try:
         vis_col = sync._get_vis_collection(scene)
         vcp = root.af_vcp_system
+        active_blob_id = _active_blob_id(root)
 
         all_blob_ids, blob_ids_to_sync = _blob_ids_to_sync(vcp, target_blob_ids)
 
@@ -94,11 +114,21 @@ def sync_root_to_scene(sync, root=None, scene=None, target_blob_ids=None):
                 continue
 
             obj = _ensure_blob_proxy(sync, vis_col, root, bp)
-            ctrl = _ensure_blob_ctrl(sync, vis_col, root, bp, obj)
-            result = _sync_blob_geometry(sync, scene, root, bp, obj, ctrl)
+            if active_blob_id and bp.id == active_blob_id:
+                ctrl = _ensure_blob_ctrl(sync, vis_col, root, bp, obj)
+                control_world = ctrl.location.copy()
+            else:
+                control_world = Vector((bp.control_point_world[0], bp.control_point_world[1], bp.control_point_world[2]))
+            result = _sync_blob_geometry(sync, scene, root, bp, obj, control_world)
             _update_blob_meta(sync, root, vcp, bp, obj, result)
 
         _cleanup_stale_blob_objects(sync, vis_col, root.name, all_blob_ids)
+        for o in list(vis_col.objects):
+            if not o.get("af_blob_control_gizmo") or o.get("af_root_name") != root.name:
+                continue
+            if active_blob_id and o.get("af_blob_id") == active_blob_id:
+                continue
+            sync._remove_ctrl(o)
     finally:
         sync._syncing = False
 

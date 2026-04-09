@@ -147,9 +147,18 @@ class MuscleSceneSync:
             self._clear_muscle_meshes(vcp, muscle.id, base_obj, infl_obj)
             return
         base_points = prepare_surface_rows(ordered_points, int(ordered_fibers[0].node_count), densify_v=True)
-        self._apply_muscle_surface(vis_col, root, vcp, muscle, base_obj, infl_obj, base_points)
+        self._apply_muscle_surface(
+            vis_col,
+            root,
+            vcp,
+            muscle,
+            base_obj,
+            infl_obj,
+            base_points,
+            ensure_control=(self._active_muscle_id(root) == muscle.id),
+        )
 
-    def _apply_muscle_surface(self, vis_col, root, vcp, muscle, base_obj, infl_obj, base_points):
+    def _apply_muscle_surface(self, vis_col, root, vcp, muscle, base_obj, infl_obj, base_points, ensure_control):
         base_verts, faces_raw = self._build_surface(base_points, muscle.closed_v)
         if base_verts is None:
             self._clear_muscle_meshes(vcp, muscle.id, base_obj, infl_obj)
@@ -157,11 +166,40 @@ class MuscleSceneSync:
         flip = bool(getattr(muscle, "flip_normals", False))
         faces_final = [(f[0], f[3], f[2], f[1]) for f in faces_raw] if flip else faces_raw
         self._update_mesh(base_obj, base_verts, faces_final)
-        self._ensure_inflation_ctrl(vis_col, root, muscle, base_obj, base_points)
+        if ensure_control:
+            self._ensure_inflation_ctrl(vis_col, root, muscle, base_obj, base_points)
         infl_points = apply_inflation_from_ctrl(base_points, muscle)
         infl_verts, _faces_raw = self._build_surface(infl_points, muscle.closed_v)
         self._update_mesh(infl_obj, list(base_verts) if infl_verts is None else infl_verts, faces_final)
         self._set_muscle_active_materials(vcp, muscle.id, base_obj, infl_obj)
+
+    def _active_muscle_id(self, root):
+        try:
+            ctx = bpy.context
+            active = ctx.view_layer.objects.active if ctx and ctx.view_layer else None
+        except Exception:
+            active = None
+
+        if active is not None and active.get("af_root_name") == root.name:
+            if active.get("af_muscle_proxy") and active.get("af_muscle_id"):
+                return str(active.get("af_muscle_id"))
+            if active.get("af_muscle_inflation_ctrl") and active.get("af_muscle_id"):
+                return str(active.get("af_muscle_id"))
+
+        vcp = root.af_vcp_system
+        if str(vcp.active_vcp_type or "") == "MUSCLE" and str(vcp.active_vcp_id or ""):
+            return str(vcp.active_vcp_id)
+        return ""
+
+    def _cleanup_inactive_muscle_controls(self, vis_col, root_name, active_muscle_id):
+        for obj in list(vis_col.objects):
+            if not obj.get("af_muscle_inflation_ctrl"):
+                continue
+            if obj.get("af_root_name") != root_name:
+                continue
+            if active_muscle_id and obj.get("af_muscle_id") == active_muscle_id:
+                continue
+            self._remove_ctrl_obj(obj)
 
     def _cleanup_removed_muscles(self, vis_col, root_name, all_muscle_ids):
         for obj in list(vis_col.objects):
@@ -185,6 +223,7 @@ class MuscleSceneSync:
             vis_col = self._get_vis_collection(scene)
             vcp = root.af_vcp_system
             all_muscle_ids, muscle_ids_to_sync = self._muscle_ids_to_sync(vcp, target_muscle_ids)
+            active_muscle_id = self._active_muscle_id(root)
 
             for muscle in vcp.muscles:
                 if muscle.id not in muscle_ids_to_sync:
@@ -192,6 +231,7 @@ class MuscleSceneSync:
                 self._sync_single_muscle(vis_col, root, scene, vcp, muscle)
 
             self._cleanup_removed_muscles(vis_col, root.name, all_muscle_ids)
+            self._cleanup_inactive_muscle_controls(vis_col, root.name, active_muscle_id)
 
         finally:
             self._syncing = False

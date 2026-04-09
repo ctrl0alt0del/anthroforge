@@ -73,6 +73,10 @@ from .core.visualization.fiber_sync import register_fiber_sync, unregister_fiber
 from .core.visualization.muscle_sync import register_muscle_sync, unregister_muscle_sync
 from .core.visualization.blob_sync import register_blob_sync, unregister_blob_sync
 from .core.visualization.mirror_sync import register_mirror_sync, unregister_mirror_sync
+from .core.visualization.transient_controls import (
+    register_transient_control_runtime,
+    unregister_transient_control_runtime,
+)
 from .ui.scene_props import register_scene_props, unregister_scene_props
 
 addon_keymaps = []
@@ -142,6 +146,7 @@ def register():
     register_muscle_sync()
     register_blob_sync()
     register_mirror_sync()
+    register_transient_control_runtime()
 
     wm = bpy.context.window_manager
     kc = wm.keyconfigs.addon
@@ -153,6 +158,7 @@ def register():
 
 def unregister():
     unregister_mirror_sync()
+    unregister_transient_control_runtime()
     unregister_blob_sync()
     unregister_muscle_sync()
     unregister_fiber_sync()
