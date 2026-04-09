@@ -173,6 +173,8 @@ def _collect_runtime_items(root, changed_source_ids):
                 continue
             src_obj = getattr(c, "source_obj", None)
             src_id = str(src_obj.get("af_scp_id")) if (src_obj and src_obj.get("af_scp_id")) else str(getattr(c, "source_scp_id", "") or "")
+            if not src_id or src_id == str(dest.id):
+                continue
             if src_id and src_id in changed_source_ids:
                 items.append((int(c.priority), str(dest.id), dest, c, src_id))
     return items

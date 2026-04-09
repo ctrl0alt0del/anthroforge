@@ -7,6 +7,7 @@ from .drivers import (
 )
 from .builtin_drivers import (
     RuntimeGraphDriver,
+    SCPTransformIntentDriver,
     SCPConstraintDriver,
     SCPSyncDriver,
     FiberSyncDriver,
@@ -56,6 +57,21 @@ def _dirty_start_nodes(dirty):
         for eid in dirty[et]:
             starts.add((et, eid))
     return starts
+
+
+def _source_start_nodes(starts, gate_meta):
+    payload = dict((gate_meta or {}).get("payload", {}) or {})
+    by_type_raw = dict(payload.get("non_source_ids_by_type", {}) or {})
+    by_type = {str(k): {str(x) for x in set(v or set())} for k, v in by_type_raw.items()}
+    if not by_type:
+        return set(starts)
+
+    out = set()
+    for et, eid in set(starts or set()):
+        if str(eid) in by_type.get(str(et), set()):
+            continue
+        out.add((et, eid))
+    return out
 
 
 def _impact_sets(impacted):
@@ -223,9 +239,10 @@ def _build_runtime_context(root, scene, dirty_hints, gate_meta=None):
     return graph, entity_sets, adjacency, scc_idx, scc_sizes, dirty, is_full
 
 
-def _compute_impacted_sets(graph, dirty):
+def _compute_impacted_sets(graph, dirty, gate_meta=None):
     starts = _dirty_start_nodes(dirty)
-    impacted = graph.downstream_entities(starts) if starts else set()
+    source_starts = _source_start_nodes(starts, gate_meta)
+    impacted = graph.downstream_entities(source_starts) if source_starts else set()
     impacted |= starts
     return _impact_sets(impacted)
 
@@ -235,7 +252,7 @@ def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=
         root, scene, dirty_hints, gate_meta=gate_meta
     )
 
-    impacted_sets = _compute_impacted_sets(graph, dirty)
+    impacted_sets = _compute_impacted_sets(graph, dirty, gate_meta=gate_meta)
 
     constraint_impacts = _apply_constraint_drivers(
         root=root,
@@ -265,6 +282,7 @@ def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=
 
 # Register built-in drivers.
 register_dependency_driver(RuntimeGraphDriver(), replace=True)
+register_dependency_driver(SCPTransformIntentDriver(), replace=True)
 register_dependency_driver(SCPConstraintDriver(), replace=True)
 register_dependency_driver(SCPSyncDriver(), replace=True)
 register_dependency_driver(FiberSyncDriver(), replace=True)

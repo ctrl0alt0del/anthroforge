@@ -1,15 +1,13 @@
 from .adapters import build_runtime_graph
 from .drivers import DependencyDriver
 from ..constraints.scp_constraints import evaluate_scp_constraints_runtime, apply_scp_input_write
+from .transform_intents import pop_scp_transform_intents
+from .scp_transform_intent_apply import apply_scp_transform_intent
 from ..visualization.sync import register_sync
 from ..visualization.fiber_sync import register_fiber_sync
 from ..visualization.muscle_sync import register_muscle_sync
 from ..visualization.blob_sync import register_blob_sync
 from ..visualization.mirror_sync import register_mirror_sync
-
-
-def _has_self_loop(adjacency, node):
-    return node in adjacency.get(node, set())
 
 
 class RuntimeGraphDriver(DependencyDriver):
@@ -71,7 +69,7 @@ class SCPConstraintDriver(DependencyDriver):
             if ctx.scc_idx[src_node] != ctx.scc_idx[dst_node]:
                 return False
             size = ctx.scc_sizes.get(ctx.scc_idx[src_node], 1)
-            return size > 1 or _has_self_loop(ctx.adjacency, src_node)
+            return size > 1
 
         changed_dest_scps = evaluate_scp_constraints_runtime(
             root=ctx.root,
@@ -82,6 +80,22 @@ class SCPConstraintDriver(DependencyDriver):
         self._delayed_writes.clear()
         self._delayed_writes.update(new_delayed)
         return {"SCP": set(changed_dest_scps)}
+
+
+class SCPTransformIntentDriver(DependencyDriver):
+    name = "scp_transform_intent_driver"
+
+    def entity_types(self):
+        return ("SCP",)
+
+    def apply_constraints(self, ctx):
+        changed = set()
+        for scp_id, matrix_world in pop_scp_transform_intents(ctx.root):
+            if apply_scp_transform_intent(ctx.root, scp_id, matrix_world):
+                changed.add(scp_id)
+        if not changed:
+            return {}
+        return {"SCP": changed}
 
 
 class SCPSyncDriver(DependencyDriver):

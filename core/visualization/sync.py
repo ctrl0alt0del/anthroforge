@@ -3,7 +3,6 @@ import bpy
 from ..attachment_codec import parse_scp_attach_param
 from .sync_runtime import (
     sync_root_to_scene as _sync_root_to_scene_runtime,
-    write_proxy_transform_to_data as _write_proxy_transform_to_data_runtime,
     on_depsgraph_update as _on_depsgraph_update_runtime,
 )
 from .scp_sync_helpers import (
@@ -211,9 +210,6 @@ class SCPSceneSync:
 
     def _nearest_mesh_point_local(self, obj, target_world, depsgraph):
         return nearest_mesh_point_local(obj, target_world, depsgraph)
-
-    def _write_proxy_transform_to_data(self, root, proxy_obj, scene, depsgraph):
-        return _write_proxy_transform_to_data_runtime(self, root, proxy_obj, scene, depsgraph)
 
     def on_depsgraph_update(self, scene, depsgraph):
         return _on_depsgraph_update_runtime(self, scene, depsgraph)

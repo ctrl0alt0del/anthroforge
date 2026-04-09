@@ -20,6 +20,12 @@ def _src_id_from_constraint(c):
     return str(getattr(c, "source_scp_id", "") or "")
 
 
+def _add_dependency_edge(graph, src_entity, dst_entity):
+    if src_entity == dst_entity:
+        return
+    graph.add_entity_edge(src_entity, dst_entity)
+
+
 def _add_scp_entities(root, graph, entity_sets):
     for scp in root.af_scp_system.scps:
         sid = scp.id
@@ -36,17 +42,17 @@ def _add_scp_entities(root, graph, entity_sets):
         if scp.parent_id:
             parent_probe = graph.add_port(PortRef("SCP", scp.parent_id, "probe", PHASE_PROBES, MUT_PROBE))
             graph.add_edge(Edge(parent_probe, p_att, EDGE_ATTACHMENT))
-            graph.add_entity_edge(("SCP", scp.parent_id), ("SCP", sid))
+            _add_dependency_edge(graph, ("SCP", scp.parent_id), ("SCP", sid))
 
         for c in scp.constraints:
             if not bool(getattr(c, "enabled", True)):
                 continue
             src_id = _src_id_from_constraint(c)
-            if not src_id:
+            if not src_id or src_id == sid:
                 continue
             src_probe = graph.add_port(PortRef("SCP", src_id, "probe", PHASE_PROBES, MUT_PROBE))
             graph.add_edge(Edge(src_probe, p_in, EDGE_CONSTRAINT_READ))
-            graph.add_entity_edge(("SCP", src_id), ("SCP", sid))
+            _add_dependency_edge(graph, ("SCP", src_id), ("SCP", sid))
 
 
 def _add_fiber_entities(root, graph, entity_sets):
@@ -66,7 +72,7 @@ def _add_fiber_entities(root, graph, entity_sets):
         for sid in parents:
             sp = graph.add_port(PortRef("SCP", sid, "probe", PHASE_PROBES, MUT_PROBE))
             graph.add_edge(Edge(sp, fp_local, EDGE_ATTACHMENT))
-            graph.add_entity_edge(("SCP", sid), ("FIBER", fid))
+            _add_dependency_edge(graph, ("SCP", sid), ("FIBER", fid))
 
 
 def _add_muscle_entities(root, graph, entity_sets):
@@ -84,7 +90,7 @@ def _add_muscle_entities(root, graph, entity_sets):
                 continue
             fp = graph.add_port(PortRef("FIBER", ref.fiber_id, "probe", PHASE_PROBES, MUT_PROBE))
             graph.add_edge(Edge(fp, mp_local, EDGE_EVAL))
-            graph.add_entity_edge(("FIBER", ref.fiber_id), ("MUSCLE", mid))
+            _add_dependency_edge(graph, ("FIBER", ref.fiber_id), ("MUSCLE", mid))
 
 
 def _add_blob_entities(root, graph, entity_sets):
@@ -98,11 +104,11 @@ def _add_blob_entities(root, graph, entity_sets):
         if b.attach_target_type == "SCP" and b.attach_target_id:
             sp = graph.add_port(PortRef("SCP", b.attach_target_id, "probe", PHASE_PROBES, MUT_PROBE))
             graph.add_edge(Edge(sp, bp_local, EDGE_ATTACHMENT))
-            graph.add_entity_edge(("SCP", b.attach_target_id), ("BLOB", bid))
+            _add_dependency_edge(graph, ("SCP", b.attach_target_id), ("BLOB", bid))
         elif b.attach_target_type == "MUSCLE" and b.attach_target_id:
             mp = graph.add_port(PortRef("MUSCLE", b.attach_target_id, "probe", PHASE_PROBES, MUT_PROBE))
             graph.add_edge(Edge(mp, bp_local, EDGE_ATTACHMENT))
-            graph.add_entity_edge(("MUSCLE", b.attach_target_id), ("BLOB", bid))
+            _add_dependency_edge(graph, ("MUSCLE", b.attach_target_id), ("BLOB", bid))
 
 
 def build_runtime_graph(root, graph):

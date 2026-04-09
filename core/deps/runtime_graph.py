@@ -17,11 +17,10 @@ class RuntimeGraph:
         if not isinstance(edge, Edge):
             return
         self.edges.append(edge)
-        s = (edge.src.entity_type, edge.src.entity_id)
-        d = (edge.dst.entity_type, edge.dst.entity_id)
-        self._entity_edges[s].add(d)
 
     def add_entity_edge(self, src_entity, dst_entity):
+        if src_entity == dst_entity:
+            return
         self._entity_edges[src_entity].add(dst_entity)
 
     def downstream_entities(self, start_entities):
