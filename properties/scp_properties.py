@@ -3,6 +3,16 @@ from mathutils import Euler, Quaternion
 from ..core.utils import get_af_root
 from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 from ..core.shapes.state_codec import set_deformer_param_patch
+from ..core.attachment_codec import (
+    parse_scp_attach_descriptor,
+    encode_surface_frame,
+    encode_scp_mesh_anchor,
+)
+from ..core.effects import (
+    ASPECT_POSITION,
+    ASPECT_ROTATION,
+    normalize_behavior,
+)
 
 
 def _sync_deformer_state_from_scp_prop(scp_prop):
@@ -26,6 +36,39 @@ def _sync_deformer_state_from_scp_prop(scp_prop):
         set_deformer_param_patch(scp_prop, "ellipsoid_clip", "clip2_keep_side", str(getattr(scp_prop, "ellipsoid_clip2_keep_side", "POS")))
 
 
+def _sync_attach_behavior_from_scp_prop(scp_prop):
+    if scp_prop is None or not bool(getattr(scp_prop, "parent_id", "")):
+        return
+    mode, payload, behavior = parse_scp_attach_descriptor(getattr(scp_prop, "attach_param", ""))
+    behavior_n = normalize_behavior(mode, behavior)
+    follow_rot = bool(getattr(scp_prop, "attach_follow_parent_rotation", True))
+    aspects = [ASPECT_POSITION, ASPECT_ROTATION] if follow_rot else [ASPECT_POSITION]
+    behavior_n["aspects"] = aspects
+
+    if mode == "mesh_anchor":
+        parent_local_point, child_local_point = payload
+        scp_prop.attach_param = encode_scp_mesh_anchor(parent_local_point, child_local_point, behavior=behavior_n)
+    else:
+        scp_prop.attach_param = encode_surface_frame(
+            parent_param=payload.get("parent_param", 0.0),
+            child_origin_local=payload.get("child_origin_local"),
+            child_tangent_local=payload.get("child_tangent_local"),
+            child_normal_local=payload.get("child_normal_local"),
+            behavior=behavior_n,
+        )
+
+
+def _sync_attach_property_from_param(scp_prop):
+    if scp_prop is None:
+        return
+    mode, _payload, behavior = parse_scp_attach_descriptor(getattr(scp_prop, "attach_param", ""))
+    behavior_n = normalize_behavior(mode, behavior)
+    follow = ASPECT_ROTATION in set(behavior_n.get("aspects", []))
+    if bool(getattr(scp_prop, "attach_follow_parent_rotation", True)) == bool(follow):
+        return
+    scp_prop["attach_follow_parent_rotation"] = bool(follow)
+
+
 def _sync_scene(context, scp_id=None):
     scene = context.scene if context else None
     root = get_af_root(scene)
@@ -41,7 +84,13 @@ def _sync_scene(context, scp_id=None):
 
 
 def _on_scp_prop_update(self, context):
+    _sync_attach_property_from_param(self)
     _sync_deformer_state_from_scp_prop(self)
+    _sync_scene(context, getattr(self, "id", ""))
+
+
+def _on_attach_behavior_update(self, context):
+    _sync_attach_behavior_from_scp_prop(self)
     _sync_scene(context, getattr(self, "id", ""))
 
 
@@ -526,6 +575,11 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
 
     parent_id: bpy.props.StringProperty(name="Parent ID")
     attach_param: bpy.props.StringProperty(name="Attach Param JSON")
+    attach_follow_parent_rotation: bpy.props.BoolProperty(
+        name="Look Rotation On Parent Surface",
+        default=True,
+        update=_on_attach_behavior_update,
+    )
 
     mirror_enabled: bpy.props.BoolProperty(
         name="Mirror Enabled", default=False, update=_on_scp_prop_update

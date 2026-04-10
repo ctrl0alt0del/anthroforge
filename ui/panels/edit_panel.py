@@ -35,6 +35,10 @@ class AF_PT_EditPanel(bpy.types.Panel):
         layout.prop(scp, "local_origin")
         layout.prop(scp, "local_rotation_euler")
         layout.prop(scp, "local_scale")
+        if bool(getattr(scp, "parent_id", "")):
+            layout.separator()
+            layout.label(text="Attachment Behavior")
+            layout.prop(scp, "attach_follow_parent_rotation")
 
     def _draw_mirror(self, layout, scp):
         layout.separator()

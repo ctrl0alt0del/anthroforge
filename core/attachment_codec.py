@@ -1,6 +1,13 @@
 import json
 from mathutils import Vector
 
+from .effects import (
+    ASPECT_POSITION,
+    ASPECT_ROTATION,
+    default_behavior_for_mode,
+    normalize_behavior,
+)
+
 
 def _vec3(value, fallback):
     if isinstance(value, (list, tuple)) and len(value) == 3:
@@ -36,10 +43,21 @@ def _mesh_anchor_from_data(data):
     return None
 
 
-def parse_scp_attach_param(raw):
+def _parse_behavior(mode, data):
+    if not isinstance(data, dict):
+        return default_behavior_for_mode(mode)
+    raw = data.get("behavior", None)
+    if not isinstance(raw, dict):
+        return default_behavior_for_mode(mode)
+    return normalize_behavior(mode, raw)
+
+
+def parse_scp_attach_descriptor(raw):
     raw = (raw or "").strip()
     if not raw:
-        return "surface_frame_v1", _default_surface_frame_payload()
+        mode = "surface_frame_v1"
+        payload = _default_surface_frame_payload()
+        return mode, payload, default_behavior_for_mode(mode)
 
     try:
         data = json.loads(raw)
@@ -47,15 +65,26 @@ def parse_scp_attach_param(raw):
         data = {}
 
     if isinstance(data, dict) and data.get("mode") == "surface_frame_v1":
-        return _surface_frame_from_data(data)
+        mode, payload = _surface_frame_from_data(data)
+        return mode, payload, _parse_behavior(mode, data)
     if isinstance(data, dict) and data.get("mode") == "mesh_anchor":
         parsed = _mesh_anchor_from_data(data)
         if parsed is not None:
-            return parsed
-    return "surface_frame_v1", _default_surface_frame_payload()
+            mode, payload = parsed
+            return mode, payload, _parse_behavior(mode, data)
+
+    mode = "surface_frame_v1"
+    payload = _default_surface_frame_payload()
+    return mode, payload, default_behavior_for_mode(mode)
 
 
-def encode_surface_frame(parent_param, child_origin_local, child_tangent_local, child_normal_local):
+def parse_scp_attach_param(raw):
+    mode, payload, _behavior = parse_scp_attach_descriptor(raw)
+    return mode, payload
+
+
+def encode_surface_frame(parent_param, child_origin_local, child_tangent_local, child_normal_local, behavior=None):
+    behavior_n = normalize_behavior("surface_frame_v1", behavior or default_behavior_for_mode("surface_frame_v1"))
     return json.dumps(
         {
             "mode": "surface_frame_v1",
@@ -63,11 +92,16 @@ def encode_surface_frame(parent_param, child_origin_local, child_tangent_local, 
             "child_origin_local": [float(child_origin_local.x), float(child_origin_local.y), float(child_origin_local.z)],
             "child_tangent_local": [float(child_tangent_local.x), float(child_tangent_local.y), float(child_tangent_local.z)],
             "child_normal_local": [float(child_normal_local.x), float(child_normal_local.y), float(child_normal_local.z)],
+            "behavior": {
+                "id": str(behavior_n.get("id", "surface_follow")),
+                "aspects": [str(v) for v in behavior_n.get("aspects", [ASPECT_POSITION, ASPECT_ROTATION])],
+            },
         }
     )
 
 
-def encode_scp_mesh_anchor(parent_local_point, child_local_point):
+def encode_scp_mesh_anchor(parent_local_point, child_local_point, behavior=None):
+    behavior_n = normalize_behavior("mesh_anchor", behavior or default_behavior_for_mode("mesh_anchor"))
     return json.dumps(
         {
             "mode": "mesh_anchor",
@@ -81,6 +115,10 @@ def encode_scp_mesh_anchor(parent_local_point, child_local_point):
                 float(child_local_point.y),
                 float(child_local_point.z),
             ],
+            "behavior": {
+                "id": str(behavior_n.get("id", "mesh_anchor")),
+                "aspects": [str(v) for v in behavior_n.get("aspects", [ASPECT_POSITION])],
+            },
         }
     )
 

@@ -1,6 +1,7 @@
 import bpy
 
-from ..attachment_codec import parse_scp_attach_param
+from ..attachment_codec import parse_scp_attach_descriptor
+from ..deps.transform_behaviors import compose_attachment_world_matrix
 from .sync_runtime import (
     sync_root_to_scene as _sync_root_to_scene_runtime,
     on_depsgraph_update as _on_depsgraph_update_runtime,
@@ -187,21 +188,22 @@ class SCPSceneSync:
         if scp_prop is None:
             return scp.get_world_matrix(runtime_registry)
 
-        mode, payload = parse_scp_attach_param(scp_prop.attach_param)
-        if mode == "surface_frame_v1":
-            parent_proxy = self._find_proxy_in_scene(scene, root.name, scp.attachment.parent_id)
-            parent_scp = runtime_registry.get(scp.attachment.parent_id)
-            if parent_proxy and parent_scp:
-                return self._world_matrix_from_surface_frame(
-                    scp, parent_scp, parent_proxy, payload
+        mode, payload, behavior = parse_scp_attach_descriptor(scp_prop.attach_param)
+        parent_proxy = self._find_proxy_in_scene(scene, root.name, scp.attachment.parent_id)
+        parent_scp = runtime_registry.get(scp.attachment.parent_id)
+        if parent_proxy and parent_scp:
+            parent_world = parent_proxy.matrix_world.copy()
+            try:
+                return compose_attachment_world_matrix(
+                    child_scp=scp,
+                    parent_scp=parent_scp,
+                    parent_world=parent_world,
+                    mode=mode,
+                    payload=payload,
+                    behavior=behavior,
                 )
-        if mode == "mesh_anchor":
-            parent_proxy = self._find_proxy_in_scene(scene, root.name, scp.attachment.parent_id)
-            if parent_proxy:
-                parent_local_point, child_local_point = payload
-                return self._world_matrix_from_mesh_anchor(
-                    scp, parent_proxy, parent_local_point, child_local_point
-                )
+            except Exception:
+                pass
 
         return scp.get_world_matrix(runtime_registry)
 
