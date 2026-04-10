@@ -1,4 +1,9 @@
 from .mirror_rules import mirror_world_matrix
+from .mirror_model import (
+    target_rule_for_scp,
+    target_rule_for_fiber,
+    target_rule_for_muscle,
+)
 
 
 def _remove_if_present(sync, obj):
@@ -32,8 +37,8 @@ def _cleanup_mirror_objects(sync, collection, root_name, predicate, key_fn, desi
             sync._remove_obj(obj)
 
 
-def _scp_intersects_rule_plane(sync, src, rule, explicit):
-    axis, origin = explicit if explicit is not None else rule
+def _scp_intersects_rule_plane(sync, src, rule):
+    axis, origin = rule
     return sync._intersects_mirror_plane(src, axis=axis, origin=origin)
 
 
@@ -65,15 +70,14 @@ def _tag_muscle_mirror(sync, mir, root_name, muscle_id, surf):
     sync._ensure_mirror_material(mir, alpha_mult=0.60)
 
 
-def _sync_one_scp_mirror(sync, root, scp_col, scp_id, scp_prop, scp_map):
-    rule = sync._effective_rule_for_scp(scp_id, scp_map)
+def _sync_one_scp_mirror(sync, root, scp_col, scp_id, scp_prop, roles, source_rules):
+    rule = target_rule_for_scp(scp_id, roles, source_rules)
     src = sync._find_source_scp_obj(scp_col, root.name, scp_id)
     mir = sync._find_mirror_scp_obj(scp_col, root.name, scp_id)
     if rule is None or src is None:
         _remove_if_present(sync, mir)
         return False
-    explicit = sync._explicit_mirror_rule_for_scp(scp_prop)
-    if _scp_intersects_rule_plane(sync, src, rule, explicit):
+    if _scp_intersects_rule_plane(sync, src, rule):
         _remove_if_present(sync, mir)
         return False
     mir = _ensure_mirror(sync, scp_col, src, mir)
@@ -84,8 +88,8 @@ def _sync_one_scp_mirror(sync, root, scp_col, scp_id, scp_prop, scp_map):
     return True
 
 
-def _sync_one_fiber_mirror(sync, root, vcp_col, fiber, scp_map):
-    rule = sync._effective_rule_for_fiber(fiber, scp_map)
+def _sync_one_fiber_mirror(sync, root, vcp_col, fiber, roles, source_rules):
+    rule = target_rule_for_fiber(fiber, roles, source_rules)
     src = sync._find_source_fiber_obj(vcp_col, root.name, fiber.id)
     mir = sync._find_mirror_fiber_obj(vcp_col, root.name, fiber.id)
     if rule is None or src is None:
@@ -113,13 +117,13 @@ def _sync_one_muscle_mirror(sync, root, vcp_col, muscle, surf, rule):
     return True
 
 
-def sync_scp_mirrors(sync, root, scene, scp_col, scp_map):
+def sync_scp_mirrors(sync, root, scene, scp_col, scp_map, roles, source_rules):
     if scp_col is None:
         return
 
     desired_ids = set()
     for scp_id, scp_prop in scp_map.items():
-        if _sync_one_scp_mirror(sync, root, scp_col, scp_id, scp_prop, scp_map):
+        if _sync_one_scp_mirror(sync, root, scp_col, scp_id, scp_prop, roles, source_rules):
             desired_ids.add(scp_id)
     _cleanup_mirror_objects(
         sync,
@@ -131,13 +135,13 @@ def sync_scp_mirrors(sync, root, scene, scp_col, scp_map):
     )
 
 
-def sync_fiber_mirrors(sync, root, vcp_col, scp_map, fibers_by_id):
+def sync_fiber_mirrors(sync, root, vcp_col, scp_map, fibers_by_id, roles, source_rules):
     if vcp_col is None:
         return
 
     desired_ids = set()
     for fiber in root.af_vcp_system.fibers:
-        if _sync_one_fiber_mirror(sync, root, vcp_col, fiber, scp_map):
+        if _sync_one_fiber_mirror(sync, root, vcp_col, fiber, roles, source_rules):
             desired_ids.add(fiber.id)
     _cleanup_mirror_objects(
         sync,
@@ -149,13 +153,13 @@ def sync_fiber_mirrors(sync, root, vcp_col, scp_map, fibers_by_id):
     )
 
 
-def sync_muscle_mirrors(sync, root, vcp_col, scp_map, fibers_by_id):
+def sync_muscle_mirrors(sync, root, vcp_col, scp_map, fibers_by_id, roles, source_rules):
     if vcp_col is None:
         return
 
     desired_keys = set()
     for muscle in root.af_vcp_system.muscles:
-        rule = sync._effective_rule_for_muscle(muscle, fibers_by_id, scp_map)
+        rule = target_rule_for_muscle(muscle, fibers_by_id, roles, source_rules)
         for surf in ("BASE", "INFL"):
             if _sync_one_muscle_mirror(sync, root, vcp_col, muscle, surf, rule):
                 desired_keys.add((muscle.id, surf))

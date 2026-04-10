@@ -19,6 +19,10 @@ class ShapeStrategy(ABC):
             self._deformer_param_overrides = {}
         if not hasattr(self, "_shape_state_version"):
             self._shape_state_version = 0
+        if not hasattr(self, "_mirror_source_enabled"):
+            self._mirror_source_enabled = False
+        if not hasattr(self, "_mirror_axis"):
+            self._mirror_axis = "X"
 
     @classmethod
     def from_scp_prop(cls, scp_prop):
@@ -30,6 +34,8 @@ class ShapeStrategy(ABC):
             shape._deformer_param_overrides = get_deformer_param_overrides(scp_prop)
         except Exception:
             shape._deformer_param_overrides = {}
+        shape._mirror_source_enabled = bool(getattr(scp_prop, "mirror_enabled", False))
+        shape._mirror_axis = str(getattr(scp_prop, "mirror_axis", "X") or "X")
         return shape
 
     @classmethod
@@ -94,6 +100,15 @@ class ShapeStrategy(ABC):
     def get_deformers(self):
         return []
 
+    # Representative base-space points used to build stage runtime context.
+    # Should reflect geometry/control domain for stack-dependent deformers.
+    def deformer_domain_points(self):
+        return []
+
+    # Non-geometry stack behaviors used by controls/runtime metadata.
+    def get_control_behaviors(self):
+        return []
+
     def _deformer_state_for(self, deformer):
         self._ensure_deformer_state_runtime()
         did = str(getattr(deformer, "deformer_id", deformer.__class__.__name__.lower()) or "")
@@ -115,7 +130,10 @@ class ShapeStrategy(ABC):
         deformers = [self._deformer_state_for(d) for d in normalize_deformer_sequence(self.get_deformers())]
         return ShapeState(
             shape_type=str(getattr(self, "type_id", "BASE")),
-            base_data={},
+            base_data={
+                "mirror_source_enabled": bool(getattr(self, "_mirror_source_enabled", False)),
+                "mirror_axis": str(getattr(self, "_mirror_axis", "X") or "X"),
+            },
             deformers=deformers,
             version=int(self._shape_state_version),
         )
@@ -128,6 +146,14 @@ class ShapeStrategy(ABC):
             if str(getattr(ds, "deformer_id", "") or "") == did:
                 return ds
         return None
+
+    def is_mirror_source(self):
+        self._ensure_deformer_state_runtime()
+        return bool(getattr(self, "_mirror_source_enabled", False))
+
+    def mirror_axis(self):
+        self._ensure_deformer_state_runtime()
+        return str(getattr(self, "_mirror_axis", "X") or "X")
 
     def set_deformer_param(self, deformer_id, key, value):
         self._ensure_deformer_state_runtime()
@@ -157,10 +183,14 @@ class ShapeStrategy(ABC):
         pipeline = DeformerPipeline(self, self.build_shape_state())
         return pipeline.inverse_point_from_space(point_in_space.copy(), space=space)
 
+    def apply_geometry_deformers(self, verts, faces):
+        pipeline = DeformerPipeline(self, self.build_shape_state())
+        return pipeline.forward_geometry(verts, faces)
+
     # Optional hook for mirrored control-point propagation.
     # Return tuple(pair_index, pair_local_base_point) or None.
     def mirror_pair_update_from_handle(self, proxy_obj, handle_world_location, vert_index, scp_prop):
-        for d in normalize_deformer_sequence(self.get_deformers()):
+        for d in normalize_deformer_sequence(self.get_control_behaviors()):
             req = d.request_handle_update(
                 shape=self,
                 proxy_obj=proxy_obj,

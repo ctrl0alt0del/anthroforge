@@ -3,7 +3,8 @@ from mathutils import Vector
 
 from .base import ShapeStrategy
 from .deformer_impl import ParallelepipedBendDeformer, ParallelepipedMirrorPairDeformer
-from .deformers import ResolutionDeformer
+from .deformers import ShapeSizeDeformer, ResolutionDeformer
+from .state_codec import get_deformer_param_overrides
 from .registry import ShapeRegistry
 
 
@@ -16,6 +17,7 @@ class ParallelepipedShape(ShapeStrategy):
     supports_fiber_collision = True
 
     _MIRROR_PAIR = ParallelepipedMirrorPairDeformer()
+    _SIZE = ShapeSizeDeformer()
     _BEND = ParallelepipedBendDeformer()
     _RES = ResolutionDeformer()
     _SURFACE_FACES = ("X_MIN", "X_MAX", "Y_MIN", "Y_MAX", "Z_MIN", "Z_MAX")
@@ -39,8 +41,15 @@ class ParallelepipedShape(ShapeStrategy):
         self.resolution = max(1, int(resolution))
 
     def get_deformers(self):
-        # Priority: mirror pair request -> bend -> resolution
-        return [self._MIRROR_PAIR, self._BEND, self._RES]
+        # Explicit stack order:
+        # Shape Size -> Resolution -> Dynamic Deformers -> Control
+        return [self._SIZE, self._RES, self._BEND]
+
+    def get_control_behaviors(self):
+        return [self._MIRROR_PAIR]
+
+    def deformer_domain_points(self):
+        return [p.copy() for p in list(self.points or [])]
 
     @staticmethod
     def _default_points(size):
@@ -67,13 +76,15 @@ class ParallelepipedShape(ShapeStrategy):
 
     @classmethod
     def from_scp_prop(cls, scp_prop):
+        overrides = get_deformer_param_overrides(scp_prop)
+        bend = dict(overrides.get("parallelepiped_bend", {}) or {})
         shape = cls(
             size=tuple(scp_prop.parallelepiped_size),
             points=cls._points_from_prop(scp_prop),
-            bend_enabled=bool(getattr(scp_prop, "parallelepiped_bend_enabled", False)),
-            bend_axis=getattr(scp_prop, "parallelepiped_bend_axis", "X"),
-            bend_angle_deg=float(getattr(scp_prop, "parallelepiped_bend_angle_deg", 0.0)),
-            bend_radius=float(getattr(scp_prop, "parallelepiped_bend_radius", 1.0)),
+            bend_enabled=bool(bend.get("enabled", False)),
+            bend_axis=str(bend.get("axis", "X")),
+            bend_angle_deg=float(bend.get("angle_deg", 0.0)),
+            bend_radius=float(bend.get("radius", 1.0)),
             resolution=int(getattr(scp_prop, "parallelepiped_resolution", 4)),
         )
         return cls.hydrate_from_scp_prop(shape, scp_prop)
@@ -141,21 +152,11 @@ class ParallelepipedShape(ShapeStrategy):
     @classmethod
     def draw_creation_ui(cls, layout, scene):
         layout.prop(scene, "af_new_parallelepiped_size")
-        layout.prop(scene, "af_new_parallelepiped_bend_enabled")
-        bcol = layout.column()
-        bcol.enabled = bool(scene.af_new_parallelepiped_bend_enabled)
-        bcol.prop(scene, "af_new_parallelepiped_bend_axis")
-        bcol.prop(scene, "af_new_parallelepiped_bend_angle_deg")
-        bcol.prop(scene, "af_new_parallelepiped_bend_radius")
         layout.prop(scene, "af_new_parallelepiped_resolution")
 
     @classmethod
     def apply_creation_to_scp(cls, scene, scp_prop):
         scp_prop.parallelepiped_size = scene.af_new_parallelepiped_size
-        scp_prop.parallelepiped_bend_enabled = bool(scene.af_new_parallelepiped_bend_enabled)
-        scp_prop.parallelepiped_bend_axis = scene.af_new_parallelepiped_bend_axis
-        scp_prop.parallelepiped_bend_angle_deg = float(scene.af_new_parallelepiped_bend_angle_deg)
-        scp_prop.parallelepiped_bend_radius = float(scene.af_new_parallelepiped_bend_radius)
         scp_prop.parallelepiped_resolution = int(scene.af_new_parallelepiped_resolution)
         while len(scp_prop.parallelepiped_points) > 0:
             scp_prop.parallelepiped_points.remove(len(scp_prop.parallelepiped_points) - 1)
@@ -168,12 +169,6 @@ class ParallelepipedShape(ShapeStrategy):
         col = layout.column()
         col.enabled = not readonly
         col.prop(scp_prop, "parallelepiped_size")
-        col.prop(scp_prop, "parallelepiped_bend_enabled")
-        bcol = col.column()
-        bcol.enabled = bool(scp_prop.parallelepiped_bend_enabled)
-        bcol.prop(scp_prop, "parallelepiped_bend_axis")
-        bcol.prop(scp_prop, "parallelepiped_bend_angle_deg")
-        bcol.prop(scp_prop, "parallelepiped_bend_radius")
         col.prop(scp_prop, "parallelepiped_resolution")
 
         box = col.box()
@@ -323,6 +318,14 @@ class ParallelepipedShape(ShapeStrategy):
     def world_handle_to_base_point(self, proxy_obj, world_location):
         local_deformed = proxy_obj.matrix_world.inverted() @ world_location
         return self.invert_point_deformers(local_deformed)
+
+    def mirror_source_plane_coord_local(self, axis):
+        if not self.points:
+            return 0.0
+        a = str(axis or "X").upper()
+        idx = 0 if a == "X" else (1 if a == "Y" else 2)
+        vals = [float(p[idx]) for p in self.points]
+        return 0.5 * (min(vals) + max(vals))
 
     def _trilinear_point(self, u, v, w):
         p = self.points

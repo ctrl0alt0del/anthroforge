@@ -1,4 +1,5 @@
 from math import atan2, cos, radians, sin, sqrt
+import bmesh
 from mathutils import Vector
 
 from .deformers import ShapeDeformer, DeformerUpdateRequest
@@ -24,10 +25,20 @@ class ParallelepipedBendDeformer(ShapeDeformer):
             return Vector((v, w, u))
         return Vector((u, v, w))
 
-    def _bend_basis(self, p, shape, axis):
-        u_center, span, v_center = shape.bend_frame(axis)
+    def _bend_basis(self, p, shape, axis, deformer_state):
+        u_center, span, v_center = self._runtime_bend_frame(shape, axis, deformer_state)
         u, v, w = self._axis_components(axis, p)
         return axis, u_center, span, v_center, u, v, w
+
+    def _runtime_bend_frame(self, shape, axis, deformer_state):
+        params = getattr(deformer_state, "params", {}) or {}
+        k = str(axis or "X").upper()
+        u_key = f"__frame_u_center_{k}"
+        s_key = f"__frame_span_{k}"
+        v_key = f"__frame_v_center_{k}"
+        if u_key in params and s_key in params and v_key in params:
+            return float(params[u_key]), max(1e-8, float(params[s_key])), float(params[v_key])
+        return shape.bend_frame(axis)
 
     def extract_params(self, shape):
         return {
@@ -36,6 +47,29 @@ class ParallelepipedBendDeformer(ShapeDeformer):
             "angle_deg": float(getattr(shape, "bend_angle_deg", 0.0)),
             "radius": float(getattr(shape, "bend_radius", 1.0)),
         }
+
+    def prepare_state_from_domain(self, shape, deformer_state, domain_points):
+        pts = list(domain_points or [])
+        if not pts:
+            return
+        axis = str((deformer_state.params or {}).get("axis", getattr(shape, "bend_axis", "X")))
+        us = []
+        vs = []
+        for p in pts:
+            u, v, _w = self._axis_components(axis, p)
+            us.append(float(u))
+            vs.append(float(v))
+        if not us:
+            return
+        u_min = min(us)
+        u_max = max(us)
+        span = max(1e-8, (u_max - u_min))
+        u_center = 0.5 * (u_min + u_max)
+        v_center = 0.5 * (min(vs) + max(vs)) if vs else 0.0
+        k = str(axis or "X").upper()
+        deformer_state.params[f"__frame_u_center_{k}"] = float(u_center)
+        deformer_state.params[f"__frame_span_{k}"] = float(span)
+        deformer_state.params[f"__frame_v_center_{k}"] = float(v_center)
 
     def forward_state(self, p, shape, deformer_state):
         params = dict(getattr(deformer_state, "params", {}) or {})
@@ -47,7 +81,7 @@ class ParallelepipedBendDeformer(ShapeDeformer):
         if abs(angle_rad) <= 1e-9:
             return p
 
-        axis, u_center, span, v_center, u, v, w = self._bend_basis(p, shape, axis)
+        axis, u_center, span, v_center, u, v, w = self._bend_basis(p, shape, axis, deformer_state)
         theta = ((u - u_center) / span) * angle_rad
         r0 = max(1e-6, float(params.get("radius", getattr(shape, "bend_radius", 1.0))))
         v_local = v - v_center
@@ -66,7 +100,7 @@ class ParallelepipedBendDeformer(ShapeDeformer):
         if abs(angle_rad) <= 1e-9:
             return p.copy()
 
-        axis, u_center, span, v_center, new_u, new_v, w = self._bend_basis(p, shape, axis)
+        axis, u_center, span, v_center, new_u, new_v, w = self._bend_basis(p, shape, axis, deformer_state)
         r0 = max(1e-6, float(params.get("radius", getattr(shape, "bend_radius", 1.0))))
         su = new_u - u_center
         cv = (new_v - v_center) + r0
@@ -88,24 +122,28 @@ class ParallelepipedMirrorPairDeformer(ShapeDeformer):
     }
 
     def request_handle_update(self, *, shape, proxy_obj, handle_world_location, vert_index, scp_prop):
-        if not bool(getattr(scp_prop, "mirror_enabled", False)):
+        if not bool(getattr(shape, "is_mirror_source", lambda: False)()):
             return None
 
-        axis = str(getattr(scp_prop, "mirror_axis", "X"))
-        origin = tuple(getattr(scp_prop, "mirror_origin", (0.0, 0.0, 0.0)))
+        axis = str(getattr(shape, "mirror_axis", lambda: "X")())
         pair_index = self._PAIR_MAP.get(axis, self._PAIR_MAP["X"]).get(int(vert_index), -1)
         if pair_index < 0:
             return None
 
-        q = handle_world_location.copy()
+        src_local_base = shape.world_handle_to_base_point(proxy_obj, handle_world_location)
+        mirrored_local_base = src_local_base.copy()
+        plane = 0.0
+        if hasattr(shape, "mirror_source_plane_coord_local"):
+            try:
+                plane = float(shape.mirror_source_plane_coord_local(axis))
+            except Exception:
+                plane = 0.0
         if axis == "Y":
-            q.y = (2.0 * float(origin[1])) - q.y
+            mirrored_local_base.y = (2.0 * plane) - mirrored_local_base.y
         elif axis == "Z":
-            q.z = (2.0 * float(origin[2])) - q.z
+            mirrored_local_base.z = (2.0 * plane) - mirrored_local_base.z
         else:
-            q.x = (2.0 * float(origin[0])) - q.x
-
-        mirrored_local_base = shape.world_handle_to_base_point(proxy_obj, q)
+            mirrored_local_base.x = (2.0 * plane) - mirrored_local_base.x
         return DeformerUpdateRequest(
             request_type="MIRROR_PAIR_POINT",
             payload={"pair_index": int(pair_index), "pair_local_base_point": mirrored_local_base},
@@ -184,3 +222,59 @@ class EllipsoidClipDeformer(ShapeDeformer):
                 if s > 0.0:
                     q -= n * s
         return q
+
+    def forward_state(self, p, shape, deformer_state):
+        if not self.is_kept(p, shape, deformer_state=deformer_state):
+            return self.project_to_boundary(p, shape, deformer_state=deformer_state)
+        return p
+
+    def apply_geometry_state(self, verts, faces, shape, deformer_state):
+        out_verts = [v.copy() for v in list(verts or [])]
+        out_faces = list(faces or [])
+        planes = self.plane_defs(shape, deformer_state=deformer_state)
+        if not planes:
+            return out_verts, out_faces
+        bm = bmesh.new()
+        try:
+            vmap = []
+            for v in out_verts:
+                vmap.append(bm.verts.new(v.copy()))
+            bm.verts.ensure_lookup_table()
+            for f in out_faces:
+                try:
+                    bm.faces.new([vmap[int(i)] for i in f])
+                except Exception:
+                    continue
+            bm.faces.ensure_lookup_table()
+
+            for n, off, keep_pos in planes:
+                geom = list(bm.verts) + list(bm.edges) + list(bm.faces)
+                bmesh.ops.bisect_plane(
+                    bm,
+                    geom=geom,
+                    plane_co=n * off,
+                    plane_no=n,
+                    clear_inner=bool(keep_pos),
+                    clear_outer=not bool(keep_pos),
+                    dist=1e-6,
+                )
+                boundary = [e for e in bm.edges if e.is_boundary]
+                if boundary:
+                    try:
+                        bmesh.ops.holes_fill(bm, edges=boundary, sides=0)
+                    except Exception:
+                        pass
+
+            bm.verts.ensure_lookup_table()
+            bm.faces.ensure_lookup_table()
+            idx_by_vert = {}
+            out_verts = []
+            for i, v in enumerate(bm.verts):
+                idx_by_vert[v] = i
+                out_verts.append(v.co.copy())
+            out_faces = []
+            for f in bm.faces:
+                out_faces.append(tuple(idx_by_vert[v] for v in f.verts))
+            return out_verts, out_faces
+        finally:
+            bm.free()

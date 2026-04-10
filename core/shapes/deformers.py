@@ -29,6 +29,20 @@ class ShapeDeformer(ABC):
     def extract_params(self, shape):
         return {}
 
+    # Optional per-stage context hook.
+    # Called by pipeline with domain points coming from previous stages.
+    def prepare_state_from_domain(self, shape, deformer_state, domain_points):
+        return None
+
+    # Optional geometry-level stage.
+    # Input/output format: (verts, faces) where verts is list[Vector], faces is list[tuple[int,...]].
+    # Default behavior applies point forward transform to each vertex and preserves topology.
+    def apply_geometry_state(self, verts, faces, shape, deformer_state):
+        out_verts = []
+        for v in list(verts or []):
+            out_verts.append(self.forward_state(v.copy(), shape, deformer_state))
+        return out_verts, list(faces or [])
+
     def forward_point(self, p, _shape):
         return p
 
@@ -98,7 +112,8 @@ def normalize_deformer_sequence(deformers):
             inst = LegacyShapeDeformerAdapter(inst)
         _validate_deformer_instance(inst)
         normalized.append(inst)
-    return tuple(sorted(normalized, key=lambda x: (int(getattr(x, "priority", 100)), str(getattr(x, "deformer_id", "")))))
+    # Stack is explicit: preserve caller order.
+    return tuple(normalized)
 
 
 class MirrorDeformer(ShapeDeformer):
@@ -108,7 +123,15 @@ class MirrorDeformer(ShapeDeformer):
     priority = 10
 
 
+class ShapeSizeDeformer(ShapeDeformer):
+    deformer_id = "shape_size"
+    # Explicit stage marker for the stack contract:
+    # Shape Size -> Resolution -> Deformer(s) -> Control.
+    priority = 15
+
+
 class ResolutionDeformer(ShapeDeformer):
     deformer_id = "resolution"
     # Resolution affects mesh tessellation, not single point coordinates.
+    # Priority is not used for ordering; stack order is explicit.
     priority = 30

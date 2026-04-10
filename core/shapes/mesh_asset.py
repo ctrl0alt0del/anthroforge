@@ -2,7 +2,7 @@ import bpy
 from mathutils import Vector
 
 from .base import ShapeStrategy
-from .deformers import MirrorDeformer, ResolutionDeformer
+from .deformers import ShapeSizeDeformer, ResolutionDeformer
 from .registry import ShapeRegistry
 from ..assets.scp_mesh_library import load_asset_mesh, enum_items, list_assets
 
@@ -14,7 +14,7 @@ class MeshAssetShape(ShapeStrategy):
     proxy_object_type = "MESH"
     proxy_data_type = "MESH"
     supports_fiber_collision = True
-    _MIRROR = MirrorDeformer()
+    _SIZE = ShapeSizeDeformer()
     _RESOLUTION = ResolutionDeformer()
 
     def __init__(self, asset_id="", resolution_hint=0):
@@ -87,7 +87,7 @@ class MeshAssetShape(ShapeStrategy):
         row.prop(scp_prop, "mesh_asset_id", text="Asset")
 
     def get_deformers(self):
-        return [self._MIRROR, self._RESOLUTION]
+        return [self._SIZE, self._RESOLUTION]
 
     def _refresh_vertex_cache_from_obj(self, obj):
         self._cached_verts = []

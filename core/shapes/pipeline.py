@@ -12,6 +12,7 @@ class DeformerPipeline:
         self.shape = shape
         self.shape_state = shape_state
         self._steps = self._build_steps()
+        self._prepare_step_runtime_context()
 
     def _build_steps(self):
         state_by_id = {}
@@ -27,9 +28,16 @@ class DeformerPipeline:
             if not bool(getattr(ds, "enabled", True)):
                 continue
             out.append(DeformerRuntimeStep(deformer=d, deformer_state=ds))
-
-        out.sort(key=lambda s: (int(getattr(s.deformer_state, "order", 100)), str(getattr(s.deformer_state, "deformer_id", ""))))
         return out
+
+    def _prepare_step_runtime_context(self):
+        raw_domain = list(getattr(self.shape, "deformer_domain_points", lambda: [])() or [])
+        domain = [p.copy() for p in raw_domain]
+        if not domain:
+            return
+        for step in self._steps:
+            step.deformer.prepare_state_from_domain(self.shape, step.deformer_state, domain)
+            domain = [step.deformer.forward_state(p.copy(), self.shape, step.deformer_state) for p in domain]
 
     def forward_point(self, local_point):
         spaces = self.evaluate_spaces(local_point)
@@ -78,3 +86,15 @@ class DeformerPipeline:
             return p
 
         return self.inverse_point_from_space(point_in_space, "FINAL")
+
+    def forward_geometry(self, verts, faces):
+        out_verts = [v.copy() for v in list(verts or [])]
+        out_faces = list(faces or [])
+        for step in self._steps:
+            out_verts, out_faces = step.deformer.apply_geometry_state(
+                out_verts,
+                out_faces,
+                self.shape,
+                step.deformer_state,
+            )
+        return out_verts, out_faces

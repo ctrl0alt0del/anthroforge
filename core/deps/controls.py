@@ -93,7 +93,7 @@ def classify_control_object(obj):
                 "control_type": "SCP_ELLIPSOID_CLIP",
                 "payload": {"root_name": root_name, "object_name": str(obj.name), "scp_id": scp_id, "clip_index": idx},
                 "dirty_hints": {"SCP": {scp_id}},
-                "binding": ControlBinding(kind="FRAME_SAMPLE", space="BASE", target_path=f"SCP/{scp_id}/ellipsoid_clip{idx}"),
+                "binding": ControlBinding(kind="FRAME_SAMPLE", space="FINAL", target_path=f"SCP/{scp_id}/ellipsoid_clip{idx}"),
             }
     if obj.get("af_fiber_endpoint_handle"):
         fid = _as_id(obj.get("af_fiber_id"))

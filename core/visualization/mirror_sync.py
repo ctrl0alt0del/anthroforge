@@ -1,15 +1,10 @@
 import bpy
 
 from ..utils import get_af_root
+from ..registry import SCPRegistry
 from ..deps.dirty_hints import empty_dirty_hints
-from .mirror_rules import (
-    explicit_mirror_rule_for_scp,
-    effective_rule_for_scp,
-    effective_rule_for_fiber,
-    effective_rule_for_muscle,
-    axis_index,
-    intersects_mirror_plane,
-)
+from .mirror_rules import intersects_mirror_plane
+from .mirror_model import build_scp_mirror_roles, source_rules_by_scp_id
 from .mirror_objects import (
     get_collection,
     scp_prop_map,
@@ -43,21 +38,6 @@ class AFMirrorSync:
 
     def _fiber_prop_map(self, root):
         return fiber_prop_map(root)
-
-    def _explicit_mirror_rule_for_scp(self, scp_prop):
-        return explicit_mirror_rule_for_scp(scp_prop)
-
-    def _effective_rule_for_scp(self, scp_id, scp_map):
-        return effective_rule_for_scp(scp_id, scp_map)
-
-    def _effective_rule_for_fiber(self, fiber_prop, scp_map):
-        return effective_rule_for_fiber(fiber_prop, scp_map)
-
-    def _effective_rule_for_muscle(self, muscle_prop, fibers_by_id, scp_map):
-        return effective_rule_for_muscle(muscle_prop, fibers_by_id, scp_map)
-
-    def _axis_index(self, axis):
-        return axis_index(axis)
 
     def _intersects_mirror_plane(self, obj, axis="X", origin=(0.0, 0.0, 0.0), eps=1e-6):
         return intersects_mirror_plane(obj, axis=axis, origin=origin, eps=eps)
@@ -95,14 +75,14 @@ class AFMirrorSync:
     def _ensure_mirror_material(self, obj, alpha_mult=0.35):
         return ensure_mirror_material(obj, alpha_mult=alpha_mult)
 
-    def _sync_scp_mirrors(self, root, scene, scp_col, scp_map):
-        return sync_scp_mirrors(self, root, scene, scp_col, scp_map)
+    def _sync_scp_mirrors(self, root, scene, scp_col, scp_map, roles, source_rules):
+        return sync_scp_mirrors(self, root, scene, scp_col, scp_map, roles, source_rules)
 
-    def _sync_fiber_mirrors(self, root, vcp_col, scp_map, fibers_by_id):
-        return sync_fiber_mirrors(self, root, vcp_col, scp_map, fibers_by_id)
+    def _sync_fiber_mirrors(self, root, vcp_col, scp_map, fibers_by_id, roles, source_rules):
+        return sync_fiber_mirrors(self, root, vcp_col, scp_map, fibers_by_id, roles, source_rules)
 
-    def _sync_muscle_mirrors(self, root, vcp_col, scp_map, fibers_by_id):
-        return sync_muscle_mirrors(self, root, vcp_col, scp_map, fibers_by_id)
+    def _sync_muscle_mirrors(self, root, vcp_col, scp_map, fibers_by_id, roles, source_rules):
+        return sync_muscle_mirrors(self, root, vcp_col, scp_map, fibers_by_id, roles, source_rules)
 
     def sync_root_to_scene(self, root=None, scene=None):
         if self._syncing:
@@ -120,10 +100,15 @@ class AFMirrorSync:
 
             scp_map = self._scp_prop_map(root)
             fibers_by_id = self._fiber_prop_map(root)
+            runtime = SCPRegistry(root)
+            runtime.build()
+            shape_by_id = {sid: scp.shape for sid, scp in runtime.registry.items()}
+            roles = build_scp_mirror_roles(scp_map, shape_by_id=shape_by_id)
+            source_rules = source_rules_by_scp_id(self, scp_col, root.name, scp_map, roles, shape_by_id=shape_by_id)
 
-            self._sync_scp_mirrors(root, scene, scp_col, scp_map)
-            self._sync_fiber_mirrors(root, vcp_col, scp_map, fibers_by_id)
-            self._sync_muscle_mirrors(root, vcp_col, scp_map, fibers_by_id)
+            self._sync_scp_mirrors(root, scene, scp_col, scp_map, roles, source_rules)
+            self._sync_fiber_mirrors(root, vcp_col, scp_map, fibers_by_id, roles, source_rules)
+            self._sync_muscle_mirrors(root, vcp_col, scp_map, fibers_by_id, roles, source_rules)
         finally:
             self._syncing = False
 
@@ -219,11 +204,10 @@ def register_mirror_sync():
     global _MIRROR_SYNC
     if _MIRROR_SYNC is None:
         _MIRROR_SYNC = AFMirrorSync()
-
     h = _MIRROR_SYNC.on_depsgraph_update
-    if h not in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.append(h)
-
+    if h in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(h)
+    # Mirror is scheduled by dependency runtime post_sync driver.
     return _MIRROR_SYNC
 
 
@@ -231,9 +215,7 @@ def unregister_mirror_sync():
     global _MIRROR_SYNC
     if _MIRROR_SYNC is None:
         return
-
     h = _MIRROR_SYNC.on_depsgraph_update
     if h in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(h)
-
     _MIRROR_SYNC = None

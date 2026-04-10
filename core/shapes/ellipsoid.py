@@ -4,8 +4,9 @@ import bpy
 import bmesh
 from mathutils import Vector
 from .base import ShapeStrategy
-from .deformers import MirrorDeformer, ResolutionDeformer
+from .deformers import ShapeSizeDeformer, ResolutionDeformer
 from .deformer_impl import EllipsoidClipDeformer
+from .state_codec import get_deformer_param_overrides
 from .registry import ShapeRegistry
 
 
@@ -15,7 +16,7 @@ class EllipsoidShape(ShapeStrategy):
 
     proxy_object_type = "MESH"
     proxy_data_type = "MESH"
-    _MIRROR = MirrorDeformer()
+    _SIZE = ShapeSizeDeformer()
     _CLIP = EllipsoidClipDeformer()
     _RESOLUTION = ResolutionDeformer()
 
@@ -47,18 +48,20 @@ class EllipsoidShape(ShapeStrategy):
 
     @classmethod
     def from_scp_prop(cls, scp_prop):
+        overrides = get_deformer_param_overrides(scp_prop)
+        clip = dict(overrides.get("ellipsoid_clip", {}) or {})
         shape = cls(
             radii=tuple(scp_prop.ellipsoid_radii),
             resolution=scp_prop.ellipsoid_resolution,
-            clip_enabled=bool(getattr(scp_prop, "ellipsoid_clip_enabled", False)),
-            clip1_enabled=bool(getattr(scp_prop, "ellipsoid_clip1_enabled", False)),
-            clip1_normal=tuple(getattr(scp_prop, "ellipsoid_clip1_normal", (1.0, 0.0, 0.0))),
-            clip1_offset=float(getattr(scp_prop, "ellipsoid_clip1_offset", 0.0)),
-            clip1_keep_side=str(getattr(scp_prop, "ellipsoid_clip1_keep_side", "POS")),
-            clip2_enabled=bool(getattr(scp_prop, "ellipsoid_clip2_enabled", False)),
-            clip2_normal=tuple(getattr(scp_prop, "ellipsoid_clip2_normal", (-1.0, 0.0, 0.0))),
-            clip2_offset=float(getattr(scp_prop, "ellipsoid_clip2_offset", 0.0)),
-            clip2_keep_side=str(getattr(scp_prop, "ellipsoid_clip2_keep_side", "POS")),
+            clip_enabled=bool(clip.get("enabled", False)),
+            clip1_enabled=bool(clip.get("clip1_enabled", False)),
+            clip1_normal=tuple(clip.get("clip1_normal", (1.0, 0.0, 0.0))),
+            clip1_offset=float(clip.get("clip1_offset", 0.0)),
+            clip1_keep_side=str(clip.get("clip1_keep_side", "POS")),
+            clip2_enabled=bool(clip.get("clip2_enabled", False)),
+            clip2_normal=tuple(clip.get("clip2_normal", (-1.0, 0.0, 0.0))),
+            clip2_offset=float(clip.get("clip2_offset", 0.0)),
+            clip2_keep_side=str(clip.get("clip2_keep_side", "POS")),
         )
         return cls.hydrate_from_scp_prop(shape, scp_prop)
 
@@ -153,35 +156,11 @@ class EllipsoidShape(ShapeStrategy):
     def draw_creation_ui(cls, layout, scene):
         layout.prop(scene, "af_new_ellipsoid_radii")
         layout.prop(scene, "af_new_ellipsoid_resolution")
-        layout.prop(scene, "af_new_ellipsoid_clip_enabled")
-        ccol = layout.column()
-        ccol.enabled = bool(scene.af_new_ellipsoid_clip_enabled)
-        ccol.prop(scene, "af_new_ellipsoid_clip1_enabled")
-        p1 = ccol.column()
-        p1.enabled = bool(scene.af_new_ellipsoid_clip1_enabled)
-        p1.prop(scene, "af_new_ellipsoid_clip1_normal")
-        p1.prop(scene, "af_new_ellipsoid_clip1_offset")
-        p1.prop(scene, "af_new_ellipsoid_clip1_keep_side")
-        ccol.prop(scene, "af_new_ellipsoid_clip2_enabled")
-        p2 = ccol.column()
-        p2.enabled = bool(scene.af_new_ellipsoid_clip2_enabled)
-        p2.prop(scene, "af_new_ellipsoid_clip2_normal")
-        p2.prop(scene, "af_new_ellipsoid_clip2_offset")
-        p2.prop(scene, "af_new_ellipsoid_clip2_keep_side")
 
     @classmethod
     def apply_creation_to_scp(cls, scene, scp_prop):
         scp_prop.ellipsoid_radii = scene.af_new_ellipsoid_radii
         scp_prop.ellipsoid_resolution = scene.af_new_ellipsoid_resolution
-        scp_prop.ellipsoid_clip_enabled = bool(scene.af_new_ellipsoid_clip_enabled)
-        scp_prop.ellipsoid_clip1_enabled = bool(scene.af_new_ellipsoid_clip1_enabled)
-        scp_prop.ellipsoid_clip1_normal = tuple(scene.af_new_ellipsoid_clip1_normal)
-        scp_prop.ellipsoid_clip1_offset = float(scene.af_new_ellipsoid_clip1_offset)
-        scp_prop.ellipsoid_clip1_keep_side = str(scene.af_new_ellipsoid_clip1_keep_side)
-        scp_prop.ellipsoid_clip2_enabled = bool(scene.af_new_ellipsoid_clip2_enabled)
-        scp_prop.ellipsoid_clip2_normal = tuple(scene.af_new_ellipsoid_clip2_normal)
-        scp_prop.ellipsoid_clip2_offset = float(scene.af_new_ellipsoid_clip2_offset)
-        scp_prop.ellipsoid_clip2_keep_side = str(scene.af_new_ellipsoid_clip2_keep_side)
 
     @classmethod
     def draw_scp_ui(cls, layout, scp_prop, readonly=False):
@@ -189,24 +168,11 @@ class EllipsoidShape(ShapeStrategy):
         col.enabled = not readonly
         col.prop(scp_prop, "ellipsoid_radii")
         col.prop(scp_prop, "ellipsoid_resolution")
-        col.prop(scp_prop, "ellipsoid_clip_enabled")
-        ccol = col.column()
-        ccol.enabled = bool(scp_prop.ellipsoid_clip_enabled)
-        ccol.prop(scp_prop, "ellipsoid_clip1_enabled")
-        p1 = ccol.column()
-        p1.enabled = bool(scp_prop.ellipsoid_clip1_enabled)
-        p1.prop(scp_prop, "ellipsoid_clip1_normal")
-        p1.prop(scp_prop, "ellipsoid_clip1_offset")
-        p1.prop(scp_prop, "ellipsoid_clip1_keep_side")
-        ccol.prop(scp_prop, "ellipsoid_clip2_enabled")
-        p2 = ccol.column()
-        p2.enabled = bool(scp_prop.ellipsoid_clip2_enabled)
-        p2.prop(scp_prop, "ellipsoid_clip2_normal")
-        p2.prop(scp_prop, "ellipsoid_clip2_offset")
-        p2.prop(scp_prop, "ellipsoid_clip2_keep_side")
 
     def get_deformers(self):
-        return [self._MIRROR, self._CLIP, self._RESOLUTION]
+        # Explicit stack order:
+        # Shape Size -> Resolution -> Dynamic Deformers -> Control
+        return [self._SIZE, self._RESOLUTION, self._CLIP]
 
     def get_attach_params(self):
         clip_state = self.get_deformer_state(self._CLIP.deformer_id)
@@ -230,11 +196,8 @@ class EllipsoidShape(ShapeStrategy):
         return Vector((x, y, z))
 
     def compute_local_point(self, param):
-        clip_state = self.get_deformer_state(self._CLIP.deformer_id)
         theta, phi = param
         p = self._compute_base_local_point(theta, phi)
-        if not self._CLIP.is_kept(p, self, deformer_state=clip_state):
-            p = self._CLIP.project_to_boundary(p, self, deformer_state=clip_state)
         return self.apply_point_deformers(p)
 
     def sample_attachment_frame_local(self, param):
@@ -253,9 +216,7 @@ class EllipsoidShape(ShapeStrategy):
             return 0.0, math.pi * 0.5
 
     def _attachment_base(self, theta, phi):
-        clip_state = self.get_deformer_state(self._CLIP.deformer_id)
-        base = self._compute_base_local_point(theta, phi)
-        return base if self._CLIP.is_kept(base, self, deformer_state=clip_state) else self._CLIP.project_to_boundary(base, self, deformer_state=clip_state)
+        return self._compute_base_local_point(theta, phi)
 
     def _stable_normal(self, base, origin):
         normal = self._surface_normal(base)
@@ -304,58 +265,35 @@ class EllipsoidShape(ShapeStrategy):
         if obj.data is None:
             obj.data = bpy.data.meshes.new(f"{obj.name}_mesh")
         mesh = obj.data
-        bm = self._build_ellipsoid_bmesh()
-        self._apply_clip_planes(bm)
-        bm.to_mesh(mesh)
-        bm.free()
+        verts, faces = self._base_mesh_data()
+        verts, faces = self.apply_geometry_deformers(verts, faces)
+        mesh.clear_geometry()
+        mesh.from_pydata([(v.x, v.y, v.z) for v in verts], [], faces)
         self._finalize_proxy_object(obj, mesh)
 
-    def _build_ellipsoid_bmesh(self):
+    def _base_mesh_data(self):
         rx, ry, rz = self.radii
         bm = bmesh.new()
-        bmesh.ops.create_uvsphere(
-            bm,
-            u_segments=max(8, int(self.resolution) * 2),
-            v_segments=max(4, int(self.resolution)),
-            radius=1.0,
-        )
-        bmesh.ops.scale(bm, vec=(rx, ry, rz), verts=bm.verts)
-        return bm
+        try:
+            bmesh.ops.create_uvsphere(
+                bm,
+                u_segments=max(8, int(self.resolution) * 2),
+                v_segments=max(4, int(self.resolution)),
+                radius=1.0,
+            )
+            bmesh.ops.scale(bm, vec=(rx, ry, rz), verts=bm.verts)
+            bm.verts.ensure_lookup_table()
+            bm.faces.ensure_lookup_table()
+            verts = [v.co.copy() for v in bm.verts]
+            faces = [tuple(v.index for v in f.verts) for f in bm.faces]
+            return verts, faces
+        finally:
+            bm.free()
 
     def _finalize_proxy_object(self, obj, mesh):
         mesh.update()
         obj.display_type = "SOLID"
         obj.hide_render = False
         obj.scale = (1.0, 1.0, 1.0)
-
-    def _apply_clip_planes(self, bm):
-        clip_state = self.get_deformer_state(self._CLIP.deformer_id)
-        if clip_state is None:
-            return
-        if not bool(getattr(clip_state, "enabled", True)):
-            return
-        for n, off, keep_pos in self._CLIP.plane_defs(self, deformer_state=clip_state):
-            self._apply_single_clip_plane(bm, n, off, keep_pos)
-
-    def _apply_single_clip_plane(self, bm, n, off, keep_pos):
-        plane_co = n * off
-        geom = list(bm.verts) + list(bm.edges) + list(bm.faces)
-        bmesh.ops.bisect_plane(
-            bm,
-            geom=geom,
-            plane_co=plane_co,
-            plane_no=n,
-            clear_inner=bool(keep_pos),
-            clear_outer=not bool(keep_pos),
-            dist=1e-6,
-        )
-        boundary = [e for e in bm.edges if e.is_boundary]
-        if not boundary:
-            return
-        try:
-            bmesh.ops.holes_fill(bm, edges=boundary, sides=0)
-        except Exception:
-            pass
-
 
 ShapeRegistry.register(EllipsoidShape)

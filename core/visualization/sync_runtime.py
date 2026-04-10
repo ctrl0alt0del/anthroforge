@@ -87,6 +87,16 @@ def _shape_deformer_payload(scp, scp_prop):
 
     if scp_prop is not None:
         payload["deformer_state_json"] = str(getattr(scp_prop, "af_deformer_state_json", "") or "")
+    if shape is not None:
+        try:
+            payload["mirror_enabled"] = bool(shape.is_mirror_source())
+            payload["mirror_axis"] = str(shape.mirror_axis())
+        except Exception:
+            payload["mirror_enabled"] = False
+            payload["mirror_axis"] = "X"
+    elif scp_prop is not None:
+        payload["mirror_enabled"] = bool(getattr(scp_prop, "mirror_enabled", False))
+        payload["mirror_axis"] = str(getattr(scp_prop, "mirror_axis", "X"))
 
     if st == "CURVE":
         payload.update(
@@ -197,10 +207,70 @@ def _sync_single_proxy(sync, vis_col, root, scene, runtime, scp):
         scp.shape.ensure_proxy_object(obj)
 
     obj.matrix_world = sync._compute_visual_world_matrix(scp, runtime.registry, root, scene)
+    _sync_source_mirror_modifier(obj, getattr(scp, "shape", None), sync._get_scp_prop_by_id(root, scp.id))
     obj["af_fp_transform"] = fp_transform
     obj["af_fp_topology"] = fp_topology
     obj["af_fp_deformer"] = fp_deformer
     sync._mark_synced_matrix(obj)
+
+
+def _sync_source_mirror_modifier(obj, shape, scp_prop):
+    if obj is None or not hasattr(obj, "modifiers"):
+        return
+
+    mod_name = "AF_MIRROR_SOURCE"
+    enabled = False
+    axis = "X"
+    if shape is not None:
+        try:
+            enabled = bool(shape.is_mirror_source())
+            axis = str(shape.mirror_axis() or "X")
+        except Exception:
+            enabled = False
+            axis = "X"
+    elif scp_prop is not None:
+        enabled = bool(getattr(scp_prop, "mirror_enabled", False))
+        axis = str(getattr(scp_prop, "mirror_axis", "X") or "X")
+    existing = obj.modifiers.get(mod_name)
+
+    if not enabled:
+        if existing is not None:
+            try:
+                obj.modifiers.remove(existing)
+            except Exception:
+                pass
+        return
+
+    mod = existing
+    if mod is None:
+        try:
+            mod = obj.modifiers.new(name=mod_name, type="MIRROR")
+        except Exception:
+            return
+    elif str(getattr(mod, "type", "")) != "MIRROR":
+        try:
+            obj.modifiers.remove(mod)
+            mod = obj.modifiers.new(name=mod_name, type="MIRROR")
+        except Exception:
+            return
+
+    axis = str(axis or "X").upper()
+    use_x = axis == "X"
+    use_y = axis == "Y"
+    use_z = axis == "Z"
+    axis_vec = (use_x, use_y, use_z)
+    if hasattr(mod, "use_axis"):
+        mod.use_axis = axis_vec
+    if hasattr(mod, "use_bisect_axis"):
+        mod.use_bisect_axis = axis_vec
+    if hasattr(mod, "use_bisect_flip_axis"):
+        mod.use_bisect_flip_axis = (False, False, False)
+    if hasattr(mod, "use_clip"):
+        mod.use_clip = True
+    if hasattr(mod, "use_mirror_merge"):
+        mod.use_mirror_merge = True
+    if hasattr(mod, "merge_threshold"):
+        mod.merge_threshold = 1e-4
 
 
 def _cleanup_stale_root_proxies(sync, vis_col, root_name, live_ids):

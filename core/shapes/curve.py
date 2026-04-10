@@ -1,7 +1,7 @@
 from mathutils import Vector
 import bpy
 from .base import ShapeStrategy
-from .deformers import MirrorDeformer, ResolutionDeformer
+from .deformers import ShapeSizeDeformer, ResolutionDeformer
 from .registry import ShapeRegistry
 
 
@@ -12,7 +12,7 @@ class CurveShape(ShapeStrategy):
     proxy_object_type = "CURVE"
     proxy_data_type = "CURVE"
     supports_fiber_collision = False
-    _MIRROR = MirrorDeformer()
+    _SIZE = ShapeSizeDeformer()
     _RESOLUTION = ResolutionDeformer()
 
     def __init__(self, length=1.0, segments=5, thickness=0.02, points=None):
@@ -68,7 +68,7 @@ class CurveShape(ShapeStrategy):
         return [i / self.segments for i in range(self.segments + 1)]
 
     def get_deformers(self):
-        return [self._MIRROR, self._RESOLUTION]
+        return [self._SIZE, self._RESOLUTION]
 
     def compute_local_point(self, t):
         if not self.points:
