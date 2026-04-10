@@ -13,6 +13,7 @@ from ..core.effects import (
     ASPECT_ROTATION,
     normalize_behavior,
 )
+from ..core.visualization.control_runtime import notify_selection_changed
 
 
 def _sync_deformer_state_from_scp_prop(scp_prop):
@@ -421,6 +422,7 @@ def _on_active_scp_index_update(self, context):
     if proxy is None:
         return
     _select_only_proxy(scene, context, proxy)
+    notify_selection_changed(scene)
 
 
 def _find_scene_scp_proxy(scene, root_name, scp_id):

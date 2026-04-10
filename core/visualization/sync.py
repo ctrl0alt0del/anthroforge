@@ -29,32 +29,12 @@ class SCPSceneSync:
     def __init__(self, collection_name="AF_VIS"):
         self.collection_name = collection_name
         self._syncing = False
-        self._last_active_scp_id = ""
         self._shape_sync_extensions = [
             CurveSCPSyncExtension(),
             EllipsoidSCPSyncExtension(),
             MeshAssetSCPSyncExtension(),
             ParallelepipedSCPSyncExtension(),
         ]
-
-    def _active_scp_id_from_context(self, root):
-        if bpy.context is None or bpy.context.view_layer is None:
-            return ""
-        active_obj = bpy.context.view_layer.objects.active
-        if active_obj is None:
-            return ""
-        if active_obj.get("af_root_name") != root.name:
-            return ""
-
-        if active_obj.get("af_scp_id"):
-            if (
-                active_obj.get("af_proxy")
-                or active_obj.get("af_curve_point_handle")
-                or active_obj.get("af_parallelepiped_vert_handle")
-                or active_obj.get("af_ellipsoid_clip_handle")
-            ):
-                return str(active_obj.get("af_scp_id"))
-        return ""
 
     def _get_vis_collection(self, scene):
         col = scene.collection.children.get(self.collection_name)

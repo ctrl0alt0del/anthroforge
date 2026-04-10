@@ -76,29 +76,6 @@ def sync_root_to_scene(sync, root=None, scene=None, target_scp_ids=None):
         sync._syncing = False
 
 
-def _handle_active_switch(sync, root, scene):
-    active_scp_id = sync._active_scp_id_from_context(root)
-    if active_scp_id == sync._last_active_scp_id:
-        return
-    changed_ids = set()
-    if sync._last_active_scp_id:
-        changed_ids.add(sync._last_active_scp_id)
-    if active_scp_id:
-        changed_ids.add(active_scp_id)
-    sync._last_active_scp_id = active_scp_id
-    # Route active selection refresh through dependency runtime.
-    from .sync_runner import sync_from_dirty_hints
-
-    if changed_ids:
-        sync_from_dirty_hints(
-            root=root,
-            scene=scene,
-            dirty_hints=dirty_hints_for("SCP", changed_ids),
-            source="depsgraph",
-            event_type="SELECTION",
-        )
-
-
 def _is_relevant_proxy_update(root, vis_col, obj):
     if not isinstance(obj, bpy.types.Object):
         return False
@@ -162,8 +139,6 @@ def on_depsgraph_update(sync, scene, depsgraph):
     root = get_af_root(scene)
     if root is None:
         return
-
-    _handle_active_switch(sync, root, scene)
 
     vis_col = bpy.data.collections.get(sync.collection_name)
     if vis_col is None:

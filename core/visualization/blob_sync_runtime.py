@@ -5,6 +5,7 @@ from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..utils import get_af_root
 from .blob_sync_helpers import target_object_for_blob
+from .control_runtime import active_entity_id
 
 
 def _resolve_root_scene(root, scene):
@@ -43,22 +44,7 @@ def _ensure_blob_ctrl(sync, vis_col, root, bp, obj):
 
 
 def _active_blob_id(root):
-    try:
-        ctx = bpy.context
-        active = ctx.view_layer.objects.active if ctx and ctx.view_layer else None
-    except Exception:
-        active = None
-
-    if active is not None and active.get("af_root_name") == root.name:
-        if active.get("af_blob_proxy") and active.get("af_blob_id"):
-            return str(active.get("af_blob_id"))
-        if active.get("af_blob_control_gizmo") and active.get("af_blob_id"):
-            return str(active.get("af_blob_id"))
-
-    vcp = root.af_vcp_system
-    if str(vcp.active_vcp_type or "") == "BLOB" and str(vcp.active_vcp_id or ""):
-        return str(vcp.active_vcp_id)
-    return ""
+    return active_entity_id(root, "BLOB")
 
 
 def _sync_blob_geometry(sync, scene, root, bp, obj, control_world):

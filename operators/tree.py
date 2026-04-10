@@ -3,6 +3,7 @@ from ..core.utils import get_af_root
 from ..ui.tree_state import toggle_collapsed, toggle_vcp_collapsed
 from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.visualization.sync_runner import sync_from_dirty_hints
+from ..core.visualization.control_runtime import notify_selection_changed
 
 
 class AF_OT_ToggleSCPCollapse(bpy.types.Operator):
@@ -67,6 +68,7 @@ class AF_OT_SelectSCPInTree(bpy.types.Operator):
             return {"CANCELLED"}
         self._select_only(context, target_obj)
         self._set_active_scp_index(context.scene, root, target_index)
+        notify_selection_changed(context.scene)
         return {"FINISHED"}
 
 
@@ -134,6 +136,7 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
         v = root.af_vcp_system
         v.active_vcp_id = self.node_id
         v.active_vcp_type = self.node_type
+        notify_selection_changed(context.scene)
         sync_from_dirty_hints(
             root=root,
             scene=context.scene,

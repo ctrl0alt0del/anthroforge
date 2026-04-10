@@ -2,6 +2,7 @@ import bpy
 from mathutils import Vector
 from ...shapes.state_codec import set_deformer_param_patch
 from ...shapes.registry import ShapeRegistry
+from ..control_runtime import active_entity_id
 
 
 class EllipsoidSCPSyncExtension:
@@ -95,16 +96,7 @@ class EllipsoidSCPSyncExtension:
             return False
 
     def _active_scp_id(self, root):
-        active_obj = bpy.context.view_layer.objects.active if bpy.context and bpy.context.view_layer else None
-        if active_obj and active_obj.get("af_root_name") == root.name:
-            if active_obj.get("af_ellipsoid_clip_handle") and active_obj.get("af_scp_id"):
-                return active_obj.get("af_scp_id")
-            if active_obj.get("af_proxy") and active_obj.get("af_scp_id"):
-                return active_obj.get("af_scp_id")
-        idx = root.af_scp_system.active_scp_index
-        if 0 <= idx < len(root.af_scp_system.scps):
-            return root.af_scp_system.scps[idx].id
-        return ""
+        return active_entity_id(root, "SCP")
 
     def _is_editing_handle(self, handle):
         active_obj = bpy.context.view_layer.objects.active if bpy.context and bpy.context.view_layer else None

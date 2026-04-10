@@ -1,6 +1,7 @@
 import bpy
 from mathutils import Vector
 from ...shapes.registry import ShapeRegistry
+from ..control_runtime import active_entity_id
 
 
 class ParallelepipedSCPSyncExtension:
@@ -30,16 +31,7 @@ class ParallelepipedSCPSyncExtension:
         return obj
 
     def _active_scp_id(self, root):
-        active_obj = bpy.context.view_layer.objects.active if bpy.context and bpy.context.view_layer else None
-        if active_obj and active_obj.get("af_root_name") == root.name:
-            if active_obj.get("af_parallelepiped_vert_handle") and active_obj.get("af_scp_id"):
-                return active_obj.get("af_scp_id")
-            if active_obj.get("af_proxy") and active_obj.get("af_scp_id"):
-                return active_obj.get("af_scp_id")
-        idx = root.af_scp_system.active_scp_index
-        if 0 <= idx < len(root.af_scp_system.scps):
-            return root.af_scp_system.scps[idx].id
-        return ""
+        return active_entity_id(root, "SCP")
 
     def _sync_vertex_handles(self, sync_manager, root, scene, vis_col, scp_prop, live_keys):
         proxy = sync_manager._find_proxy_in_scene(scene, root.name, scp_prop.id)

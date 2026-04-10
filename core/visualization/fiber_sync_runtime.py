@@ -5,6 +5,7 @@ from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..registry import SCPRegistry
 from ..utils import get_af_root
 from ..attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param
+from .control_runtime import active_entity_id
 
 
 def _iter_endpoints(fiber):
@@ -47,24 +48,7 @@ def _cleanup_stale_handles(vis_col, root_name, live_endpoint_keys, live_touch_ke
 
 
 def _active_fiber_id(root):
-    try:
-        ctx = bpy.context
-        active = ctx.view_layer.objects.active if ctx and ctx.view_layer else None
-    except Exception:
-        active = None
-
-    if active is not None and active.get("af_root_name") == root.name:
-        if active.get("af_fiber_proxy") and active.get("af_fiber_id"):
-            return str(active.get("af_fiber_id"))
-        if active.get("af_fiber_endpoint_handle") and active.get("af_fiber_id"):
-            return str(active.get("af_fiber_id"))
-        if active.get("af_fiber_touch_handle") and active.get("af_fiber_id"):
-            return str(active.get("af_fiber_id"))
-
-    vcp = root.af_vcp_system
-    if str(vcp.active_vcp_type or "") == "FIBER" and str(vcp.active_vcp_id or ""):
-        return str(vcp.active_vcp_id)
-    return ""
+    return active_entity_id(root, "FIBER")
 
 
 def sync_handles(sync, root, scene, vis_col, runtime_registry):

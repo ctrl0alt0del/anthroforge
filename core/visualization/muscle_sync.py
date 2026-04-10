@@ -23,6 +23,7 @@ from .muscle_sync_helpers import (
 )
 from .muscle_inflation import apply_inflation_from_ctrl
 from .muscle_sync_runtime import collect_fiber_points, ensure_inflation_ctrl
+from .control_runtime import active_entity_id
 
 
 class MuscleSceneSync:
@@ -174,22 +175,7 @@ class MuscleSceneSync:
         self._set_muscle_active_materials(vcp, muscle.id, base_obj, infl_obj)
 
     def _active_muscle_id(self, root):
-        try:
-            ctx = bpy.context
-            active = ctx.view_layer.objects.active if ctx and ctx.view_layer else None
-        except Exception:
-            active = None
-
-        if active is not None and active.get("af_root_name") == root.name:
-            if active.get("af_muscle_proxy") and active.get("af_muscle_id"):
-                return str(active.get("af_muscle_id"))
-            if active.get("af_muscle_inflation_ctrl") and active.get("af_muscle_id"):
-                return str(active.get("af_muscle_id"))
-
-        vcp = root.af_vcp_system
-        if str(vcp.active_vcp_type or "") == "MUSCLE" and str(vcp.active_vcp_id or ""):
-            return str(vcp.active_vcp_id)
-        return ""
+        return active_entity_id(root, "MUSCLE")
 
     def _cleanup_inactive_muscle_controls(self, vis_col, root_name, active_muscle_id):
         for obj in list(vis_col.objects):
