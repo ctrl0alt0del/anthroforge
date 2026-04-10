@@ -19,6 +19,18 @@ def _props_by_id(root):
     return {scp.id: scp for scp in root.af_scp_system.scps}
 
 
+def build_scp_transform_apply_context(root):
+    if root is None:
+        return {"runtime_registry": {}, "props": {}, "cache": {}}
+    runtime = SCPRegistry(root)
+    runtime.build()
+    return {
+        "runtime_registry": runtime.registry,
+        "props": _props_by_id(root),
+        "cache": {},
+    }
+
+
 def _local_matrix_from_prop(scp_prop):
     loc = Vector(scp_prop.local_origin)
     rot = scp_prop.local_rotation
@@ -94,12 +106,15 @@ def _set_root_from_world(scp_prop, matrix_world):
     return changed
 
 
-def _set_parented_from_world(root, scp_prop, matrix_world):
-    runtime = SCPRegistry(root)
-    runtime.build()
-    runtime_registry = runtime.registry
-    props = _props_by_id(root)
-    cache = {}
+def _set_parented_from_world(root, scp_prop, matrix_world, runtime_registry=None, props=None, cache=None):
+    runtime_registry = runtime_registry if runtime_registry is not None else {}
+    props = props if props is not None else _props_by_id(root)
+    cache = cache if cache is not None else {}
+
+    if not runtime_registry:
+        runtime = SCPRegistry(root)
+        runtime.build()
+        runtime_registry = runtime.registry
 
     child = runtime_registry.get(scp_prop.id)
     parent = runtime_registry.get(scp_prop.parent_id)
@@ -129,7 +144,7 @@ def _set_parented_from_world(root, scp_prop, matrix_world):
     return changed
 
 
-def apply_scp_transform_intent(root, scp_id, matrix_world):
+def apply_scp_transform_intent(root, scp_id, matrix_world, context=None):
     if root is None or not scp_id or matrix_world is None:
         return False
     scp_prop = _get_scp_prop(root, scp_id)
@@ -137,4 +152,12 @@ def apply_scp_transform_intent(root, scp_id, matrix_world):
         return False
     if not scp_prop.parent_id:
         return _set_root_from_world(scp_prop, matrix_world)
-    return _set_parented_from_world(root, scp_prop, matrix_world)
+    ctx = dict(context or {})
+    return _set_parented_from_world(
+        root,
+        scp_prop,
+        matrix_world,
+        runtime_registry=ctx.get("runtime_registry"),
+        props=ctx.get("props"),
+        cache=ctx.get("cache"),
+    )

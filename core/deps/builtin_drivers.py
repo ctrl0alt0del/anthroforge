@@ -4,7 +4,10 @@ from .controls import pop_control_intents
 from .control_behaviors import apply_control_intent
 from ..constraints.scp_constraints import evaluate_scp_constraints_runtime, apply_scp_input_write
 from .transform_intents import pop_scp_transform_intents
-from .scp_transform_intent_apply import apply_scp_transform_intent
+from .scp_transform_intent_apply import (
+    apply_scp_transform_intent,
+    build_scp_transform_apply_context,
+)
 from ..visualization.sync import register_sync
 from ..visualization.fiber_sync import register_fiber_sync
 from ..visualization.muscle_sync import register_muscle_sync
@@ -92,8 +95,13 @@ class SCPTransformIntentDriver(DependencyDriver):
 
     def apply_constraints(self, ctx):
         changed = set()
-        for scp_id, matrix_world in pop_scp_transform_intents(ctx.root):
-            if apply_scp_transform_intent(ctx.root, scp_id, matrix_world):
+        intents = pop_scp_transform_intents(ctx.root)
+        if not intents:
+            return {}
+
+        apply_ctx = build_scp_transform_apply_context(ctx.root)
+        for scp_id, matrix_world in intents:
+            if apply_scp_transform_intent(ctx.root, scp_id, matrix_world, context=apply_ctx):
                 changed.add(scp_id)
         if not changed:
             return {}

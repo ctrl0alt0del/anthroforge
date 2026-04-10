@@ -1,3 +1,6 @@
+import os
+import time
+
 from .runtime_graph import RuntimeGraph, tarjan_scc
 from .drivers import (
     DependencyRuntimeContext,
@@ -23,6 +26,59 @@ from .gates import (
     PHASE_PRE_CONSTRAINT,
     PHASE_PRE_SYNC,
 )
+
+
+_TRACE_ENV = "AF_DEPS_TRACE"
+_TRACE_MIN_MS_ENV = "AF_DEPS_TRACE_MIN_MS"
+
+
+def set_runtime_trace(enabled=True, min_ms=0.0):
+    """
+    Enable/disable dependency runtime tracing through environment variables.
+    Useful from Blender console during profiling sessions.
+    """
+    os.environ[_TRACE_ENV] = "1" if bool(enabled) else "0"
+    os.environ[_TRACE_MIN_MS_ENV] = str(max(0.0, float(min_ms)))
+
+
+def _trace_enabled(root=None, scene=None):
+    raw = str(os.environ.get(_TRACE_ENV, "") or "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    try:
+        if scene is not None and bool(scene.get("af_debug_deps_runtime", False)):
+            return True
+    except Exception:
+        pass
+    try:
+        if root is not None and bool(root.get("af_debug_deps_runtime", False)):
+            return True
+    except Exception:
+        pass
+    return True
+
+
+def _trace_min_ms():
+    try:
+        return max(0.0, float(os.environ.get(_TRACE_MIN_MS_ENV, "0") or 0.0))
+    except Exception:
+        return 0.0
+
+
+def _sizes_map(by_type):
+    out = {}
+    for et, vals in dict(by_type or {}).items():
+        n = len(set(vals or set()))
+        if n > 0:
+            out[str(et)] = n
+    return out
+
+
+def _trace_line(text):
+    print(f"[AnthroForge][deps] {text}")
+
 
 def _normalize_dirty_hints(entity_sets, dirty_hints):
     all_ids = {et: set(ids) for et, ids in entity_sets.items()}
@@ -89,7 +145,9 @@ def _merge_impacts(base, extra):
         base[et] |= set(extra.get(et, set()) or set())
 
 
-def _apply_constraint_drivers(root, scene, dirty, is_full, entity_sets, adjacency, scc_idx, scc_sizes, bake, gate_meta):
+def _apply_constraint_drivers(
+    root, scene, dirty, is_full, entity_sets, adjacency, scc_idx, scc_sizes, bake, gate_meta, profile=None
+):
     gate_meta = gate_meta or {}
     extra_impacts = {et: set() for et in get_registered_entity_types()}
 
@@ -137,13 +195,18 @@ def _apply_constraint_drivers(root, scene, dirty, is_full, entity_sets, adjacenc
             gate_meta=dict(gate_meta or {}),
             bake=bool(bake),
         )
+        t0 = time.perf_counter()
         out = d.apply_constraints(ctx) or {}
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+        if profile is not None:
+            bucket = profile.setdefault("constraints", {})
+            bucket[d.name] = bucket.get(d.name, 0.0) + dt_ms
         _merge_impacts(extra_impacts, out)
 
     return extra_impacts
 
 
-def _run_sync_drivers(root, scene, is_full, impacted, bake, gate_meta):
+def _run_sync_drivers(root, scene, is_full, impacted, bake, gate_meta, profile=None):
     gate_meta = gate_meta or {}
     for d in get_dependency_drivers():
         etypes = tuple(d.entity_types() or tuple())
@@ -186,10 +249,20 @@ def _run_sync_drivers(root, scene, is_full, impacted, bake, gate_meta):
 
         any_ids = any(bool(v) for v in d_impacted.values())
         if d_is_full or any_ids:
+            t0 = time.perf_counter()
             d.sync(root=root, scene=scene, is_full=d_is_full, impacted=d_impacted, bake=bake)
+            dt_ms = (time.perf_counter() - t0) * 1000.0
+            if profile is not None:
+                bucket = profile.setdefault("sync", {})
+                bucket[d.name] = bucket.get(d.name, 0.0) + dt_ms
 
     for d in get_dependency_drivers():
+        t0 = time.perf_counter()
         d.post_sync(root=root, scene=scene, is_full=is_full, impacted=impacted, bake=bake)
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+        if profile is not None:
+            bucket = profile.setdefault("post_sync", {})
+            bucket[d.name] = bucket.get(d.name, 0.0) + dt_ms
 
 
 def _build_runtime_context(root, scene, dirty_hints, gate_meta=None):
@@ -249,12 +322,22 @@ def _compute_impacted_sets(graph, dirty, gate_meta=None):
 
 
 def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=None):
+    trace_on = _trace_enabled(root=root, scene=scene)
+    trace_min_ms = _trace_min_ms()
+    profile = {"constraints": {}, "sync": {}, "post_sync": {}} if trace_on else None
+    t_total = time.perf_counter()
+
+    t0 = time.perf_counter()
     graph, entity_sets, adjacency, scc_idx, scc_sizes, dirty, is_full = _build_runtime_context(
         root, scene, dirty_hints, gate_meta=gate_meta
     )
+    dt_build_ms = (time.perf_counter() - t0) * 1000.0
 
+    t0 = time.perf_counter()
     impacted_sets = _compute_impacted_sets(graph, dirty, gate_meta=gate_meta)
+    dt_impacted_ms = (time.perf_counter() - t0) * 1000.0
 
+    t0 = time.perf_counter()
     constraint_impacts = _apply_constraint_drivers(
         root=root,
         scene=scene,
@@ -266,8 +349,11 @@ def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=
         scc_sizes=scc_sizes,
         bake=bake,
         gate_meta=gate_meta,
+        profile=profile,
     )
+    dt_constraints_ms = (time.perf_counter() - t0) * 1000.0
 
+    t0 = time.perf_counter()
     if constraint_impacts:
         starts = set()
         for et, ids in constraint_impacts.items():
@@ -277,8 +363,52 @@ def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=
             impacted2 = graph.downstream_entities(starts)
             impacted2 |= starts
             _merge_impacts(impacted_sets, _impact_sets(impacted2))
+    dt_constraints_expand_ms = (time.perf_counter() - t0) * 1000.0
 
-    _run_sync_drivers(root=root, scene=scene, is_full=is_full, impacted=impacted_sets, bake=bake, gate_meta=gate_meta)
+    t0 = time.perf_counter()
+    _run_sync_drivers(
+        root=root,
+        scene=scene,
+        is_full=is_full,
+        impacted=impacted_sets,
+        bake=bake,
+        gate_meta=gate_meta,
+        profile=profile,
+    )
+    dt_sync_ms = (time.perf_counter() - t0) * 1000.0
+
+    dt_total_ms = (time.perf_counter() - t_total) * 1000.0
+    if trace_on and dt_total_ms >= trace_min_ms:
+        meta = dict(gate_meta or {})
+        source = str(meta.get("source", "unknown"))
+        event_type = str(meta.get("event_type", "UPDATE"))
+        _trace_line(
+            "runtime total={:.2f}ms source={} event={} full={} dirty={} impacted={} c_impacts={}".format(
+                dt_total_ms,
+                source,
+                event_type,
+                bool(is_full),
+                _sizes_map(dirty),
+                _sizes_map(impacted_sets),
+                _sizes_map(constraint_impacts),
+            )
+        )
+        _trace_line(
+            "phases build={:.2f}ms impacted={:.2f}ms constraints={:.2f}ms c_expand={:.2f}ms sync={:.2f}ms".format(
+                dt_build_ms,
+                dt_impacted_ms,
+                dt_constraints_ms,
+                dt_constraints_expand_ms,
+                dt_sync_ms,
+            )
+        )
+        if profile is not None:
+            if profile.get("constraints"):
+                _trace_line(f"drivers.constraints {profile['constraints']}")
+            if profile.get("sync"):
+                _trace_line(f"drivers.sync {profile['sync']}")
+            if profile.get("post_sync"):
+                _trace_line(f"drivers.post_sync {profile['post_sync']}")
 
 
 # Register built-in drivers.

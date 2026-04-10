@@ -1,10 +1,151 @@
 import bpy
+import json
 
 from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..deps.transform_intents import enqueue_scp_transform_intent
 from ..registry import SCPRegistry
 from ..utils import get_af_root
+
+
+def _stable_text(data):
+    try:
+        return json.dumps(data, sort_keys=True, separators=(",", ":"))
+    except Exception:
+        return repr(data)
+
+
+def _vec3_tuple(v):
+    try:
+        return (float(v[0]), float(v[1]), float(v[2]))
+    except Exception:
+        return ()
+
+
+def _vec4_tuple(v):
+    try:
+        return (float(v[0]), float(v[1]), float(v[2]), float(v[3]))
+    except Exception:
+        return ()
+
+
+def _curve_points_sig(scp_prop):
+    out = []
+    for p in getattr(scp_prop, "curve_points", []):
+        out.append(_vec3_tuple(getattr(p, "co", (0.0, 0.0, 0.0))))
+    return out
+
+
+def _parallelepiped_points_sig(scp_prop):
+    out = []
+    for p in getattr(scp_prop, "parallelepiped_points", []):
+        out.append(_vec3_tuple(getattr(p, "co", (0.0, 0.0, 0.0))))
+    return out
+
+
+def _shape_topology_payload(scp, scp_prop):
+    shape = getattr(scp, "shape", None)
+    st = str(getattr(shape, "type_id", "") or getattr(scp_prop, "shape_type", ""))
+    payload = {"shape_type": st}
+
+    if st == "CURVE":
+        payload.update(
+            {
+                "segments": int(getattr(scp_prop, "curve_segments", getattr(shape, "segments", 0))),
+                "point_count": len(getattr(scp_prop, "curve_points", getattr(shape, "points", []))),
+            }
+        )
+    elif st == "PARALLELEPIPED":
+        payload.update(
+            {
+                "resolution": int(getattr(scp_prop, "parallelepiped_resolution", getattr(shape, "resolution", 0))),
+                "point_count": len(getattr(scp_prop, "parallelepiped_points", getattr(shape, "points", []))),
+            }
+        )
+    elif st == "ELLIPSOID":
+        payload.update(
+            {
+                "resolution": int(getattr(scp_prop, "ellipsoid_resolution", getattr(shape, "resolution", 0))),
+                "clip_enabled": bool(getattr(scp_prop, "ellipsoid_clip_enabled", getattr(shape, "clip_enabled", False))),
+                "clip1_enabled": bool(getattr(scp_prop, "ellipsoid_clip1_enabled", getattr(shape, "clip1_enabled", False))),
+                "clip2_enabled": bool(getattr(scp_prop, "ellipsoid_clip2_enabled", getattr(shape, "clip2_enabled", False))),
+            }
+        )
+    elif st == "MESH_ASSET":
+        payload.update(
+            {
+                "asset_id": str(getattr(scp_prop, "mesh_asset_id", getattr(shape, "asset_id", "")) or ""),
+            }
+        )
+    return payload
+
+
+def _shape_deformer_payload(scp, scp_prop):
+    shape = getattr(scp, "shape", None)
+    st = str(getattr(shape, "type_id", "") or getattr(scp_prop, "shape_type", ""))
+    payload = {"shape_type": st}
+
+    if scp_prop is not None:
+        payload["deformer_state_json"] = str(getattr(scp_prop, "af_deformer_state_json", "") or "")
+
+    if st == "CURVE":
+        payload.update(
+            {
+                "length": float(getattr(scp_prop, "curve_length", getattr(shape, "length", 0.0))),
+                "thickness": float(getattr(scp_prop, "curve_thickness", getattr(shape, "thickness", 0.0))),
+                "points": _curve_points_sig(scp_prop) if scp_prop is not None else [],
+            }
+        )
+    elif st == "PARALLELEPIPED":
+        payload.update(
+            {
+                "size": _vec3_tuple(getattr(scp_prop, "parallelepiped_size", getattr(shape, "size", ()))),
+                "bend_enabled": bool(getattr(scp_prop, "parallelepiped_bend_enabled", getattr(shape, "bend_enabled", False))),
+                "bend_axis": str(getattr(scp_prop, "parallelepiped_bend_axis", getattr(shape, "bend_axis", "X"))),
+                "bend_angle_deg": float(getattr(scp_prop, "parallelepiped_bend_angle_deg", getattr(shape, "bend_angle_deg", 0.0))),
+                "bend_radius": float(getattr(scp_prop, "parallelepiped_bend_radius", getattr(shape, "bend_radius", 1.0))),
+                "points": _parallelepiped_points_sig(scp_prop) if scp_prop is not None else [],
+            }
+        )
+    elif st == "ELLIPSOID":
+        payload.update(
+            {
+                "radii": _vec3_tuple(getattr(scp_prop, "ellipsoid_radii", getattr(shape, "radii", ()))),
+                "clip1_normal": _vec3_tuple(getattr(scp_prop, "ellipsoid_clip1_normal", getattr(shape, "clip1_normal", ()))),
+                "clip1_offset": float(getattr(scp_prop, "ellipsoid_clip1_offset", getattr(shape, "clip1_offset", 0.0))),
+                "clip1_keep_side": str(getattr(scp_prop, "ellipsoid_clip1_keep_side", getattr(shape, "clip1_keep_side", "POS"))),
+                "clip2_normal": _vec3_tuple(getattr(scp_prop, "ellipsoid_clip2_normal", getattr(shape, "clip2_normal", ()))),
+                "clip2_offset": float(getattr(scp_prop, "ellipsoid_clip2_offset", getattr(shape, "clip2_offset", 0.0))),
+                "clip2_keep_side": str(getattr(scp_prop, "ellipsoid_clip2_keep_side", getattr(shape, "clip2_keep_side", "POS"))),
+            }
+        )
+    return payload
+
+
+def _transform_payload(scp, scp_prop):
+    if scp_prop is not None:
+        return {
+            "local_origin": _vec3_tuple(getattr(scp_prop, "local_origin", ())),
+            "local_rotation": _vec4_tuple(getattr(scp_prop, "local_rotation", ())),
+            "local_scale": _vec3_tuple(getattr(scp_prop, "local_scale", ())),
+            "parent_id": str(getattr(scp_prop, "parent_id", "") or ""),
+            "attach_param": str(getattr(scp_prop, "attach_param", "") or ""),
+            "attach_follow_parent_rotation": bool(getattr(scp_prop, "attach_follow_parent_rotation", True)),
+        }
+    att = getattr(scp, "attachment", None)
+    return {
+        "local_origin": _vec3_tuple(getattr(scp, "local_origin", ())),
+        "local_scale": _vec3_tuple(getattr(scp, "local_scale", ())),
+        "parent_id": str(getattr(att, "parent_id", "") or ""),
+    }
+
+
+def _scp_fingerprints(sync, root, scp):
+    scp_prop = sync._get_scp_prop_by_id(root, scp.id)
+    fp_transform = _stable_text(_transform_payload(scp, scp_prop))
+    fp_topology = _stable_text(_shape_topology_payload(scp, scp_prop))
+    fp_deformer = _stable_text(_shape_deformer_payload(scp, scp_prop))
+    return fp_transform, fp_topology, fp_deformer
 
 
 def _resolve_sync_inputs(root, scene):
@@ -24,18 +165,41 @@ def _ids_to_sync(runtime_registry, target_scp_ids):
 
 def _sync_single_proxy(sync, vis_col, root, scene, runtime, scp):
     obj = sync._find_proxy(vis_col, root.name, scp.id)
+    created = False
+    shape_swapped = False
     if obj is None:
         obj = sync._create_proxy(vis_col, root, scp)
+        created = True
     elif not sync._object_matches_shape(obj, scp):
         sync._replace_proxy_data(obj, scp)
+        shape_swapped = True
     obj["af_proxy"] = True
     obj["af_root_name"] = root.name
     obj["af_scp_id"] = scp.id
     if obj.parent != root:
         obj.parent = root
         obj.matrix_parent_inverse = root.matrix_world.inverted()
-    scp.shape.ensure_proxy_object(obj)
+
+    fp_transform, fp_topology, fp_deformer = _scp_fingerprints(sync, root, scp)
+    old_transform = str(obj.get("af_fp_transform", "") or "")
+    old_topology = str(obj.get("af_fp_topology", "") or "")
+    old_deformer = str(obj.get("af_fp_deformer", "") or "")
+
+    topology_changed = old_topology != fp_topology
+    deformer_changed = old_deformer != fp_deformer
+    force_geometry = bool(created or shape_swapped)
+    shape_type = str(getattr(getattr(scp, "shape", None), "type_id", "") or "")
+
+    # Safety: Parallelepiped deformation (bend angle/radius) drives both proxy
+    # geometry and downstream attachment frames. Keep this path eager/correct.
+    always_rebuild = (shape_type == "PARALLELEPIPED")
+    if always_rebuild or force_geometry or topology_changed or deformer_changed:
+        scp.shape.ensure_proxy_object(obj)
+
     obj.matrix_world = sync._compute_visual_world_matrix(scp, runtime.registry, root, scene)
+    obj["af_fp_transform"] = fp_transform
+    obj["af_fp_topology"] = fp_topology
+    obj["af_fp_deformer"] = fp_deformer
     sync._mark_synced_matrix(obj)
 
 

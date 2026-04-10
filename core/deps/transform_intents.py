@@ -24,12 +24,19 @@ def pop_scp_transform_intents(root):
     if not key:
         return []
     raw = _SCP_TRANSFORM_INTENTS.pop(key, [])
-    out = []
+    # Keep only the latest intent per SCP id to avoid replaying stale transforms.
+    latest_by_id = {}
     for scp_id, rows in raw:
+        sid = str(scp_id)
+        if sid in latest_by_id:
+            latest_by_id.pop(sid, None)
+        latest_by_id[sid] = rows
+
+    out = []
+    for scp_id, rows in latest_by_id.items():
         try:
             mw = Matrix(rows)
         except Exception:
             continue
         out.append((str(scp_id), mw))
     return out
-
