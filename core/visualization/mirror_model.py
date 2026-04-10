@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from mathutils import Vector
 
 
 @dataclass(frozen=True)
@@ -6,6 +7,7 @@ class MirrorRole:
     is_source: bool
     is_target: bool
     source_id: str
+    propagate_source_id: str
 
 
 def _is_source_scp(scp_prop):
@@ -43,31 +45,37 @@ def build_scp_mirror_roles(scp_map, shape_by_id=None):
     def resolve(scp_id, trail):
         sid = str(scp_id or "")
         if not sid:
-            return MirrorRole(False, False, "")
+            return MirrorRole(False, False, "", "")
         cached = roles.get(sid)
         if cached is not None:
             return cached
         if sid in trail:
-            out = MirrorRole(False, False, "")
+            out = MirrorRole(False, False, "", "")
             roles[sid] = out
             return out
 
         scp = scp_map.get(sid)
         if scp is None:
-            out = MirrorRole(False, False, "")
+            out = MirrorRole(False, False, "", "")
             roles[sid] = out
             return out
 
         source_self = _is_source_id(sid, scp_map, shape_by_id)
         pid = _parent_id(scp)
-        parent_role = resolve(pid, trail | {sid}) if pid else MirrorRole(False, False, "")
+        parent_role = resolve(pid, trail | {sid}) if pid else MirrorRole(False, False, "", "")
+        parent_source = str(getattr(parent_role, "propagate_source_id", "") or "")
 
         if source_self:
-            inherited_target = bool(parent_role.source_id)
-            out = MirrorRole(True, inherited_target, str(parent_role.source_id or ""))
+            target_source = parent_source
+            out = MirrorRole(
+                True,
+                bool(target_source),
+                str(target_source or ""),
+                sid,
+            )
         else:
-            src = str(parent_role.source_id or "")
-            out = MirrorRole(False, bool(src), src)
+            src = parent_source
+            out = MirrorRole(False, bool(src), str(src or ""), str(src or ""))
 
         roles[sid] = out
         return out
@@ -125,7 +133,7 @@ def source_rule_for_scp(sync, scp_col, root_name, source_scp_id, scp_map, shape_
         origin = [float(loc.x), float(loc.y), float(loc.z)]
         return axis, tuple(origin)
 
-    world_corners = [src.matrix_world @ c for c in corners]
+    world_corners = [src.matrix_world @ Vector(c) for c in corners]
     coords = [float(v[ax]) for v in world_corners]
     mid = 0.5 * (min(coords) + max(coords))
     loc = src.matrix_world.translation
