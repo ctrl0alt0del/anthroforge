@@ -2,6 +2,7 @@ import bpy
 
 from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
+from ..deps.conflict_resolver import resolve_conflict
 from ..registry import SCPRegistry
 from ..utils import get_af_root
 from ..attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param
@@ -163,9 +164,23 @@ def _update_endpoint_handle(sync, root, scene, runtime, obj, changed_ids):
     if raw is None:
         return False
     slot = "a_attach_param" if endpoint == "A" else "b_attach_param"
-    if getattr(fiber, slot) == raw:
+    current = str(getattr(fiber, slot) or "")
+    incoming = str(raw or "")
+    resolved = str(
+        resolve_conflict(
+            entity_type="FIBER",
+            entity_id=str(fiber.id or ""),
+            aspect=f"attachment.{str(endpoint).lower()}.param",
+            source="blender_control",
+            current=current,
+            incoming=incoming,
+            payload={"endpoint": str(endpoint or "")},
+        )
+        or ""
+    )
+    if current == resolved:
         return False
-    setattr(fiber, slot, raw)
+    setattr(fiber, slot, resolved)
     sync._set_fiber_prefer_bake(fiber, False)
     changed_ids.add(fiber.id)
     return True
@@ -182,9 +197,25 @@ def _update_touch_handle(sync, root, scene, runtime, obj, changed_ids):
     if parent_scp is None or parent_proxy is None:
         return False
     raw = _compute_attach_raw(sync, parent_scp, parent_proxy, obj.location.copy())
-    if raw is None or tp.attach_param == raw:
+    if raw is None:
         return False
-    tp.attach_param = raw
+    current = str(tp.attach_param or "")
+    incoming = str(raw or "")
+    resolved = str(
+        resolve_conflict(
+            entity_type="FIBER",
+            entity_id=str(fiber.id or ""),
+            aspect=f"attachment.touch[{int(touch_index)}].param",
+            source="blender_control",
+            current=current,
+            incoming=incoming,
+            payload={"touch_index": int(touch_index)},
+        )
+        or ""
+    )
+    if current == resolved:
+        return False
+    tp.attach_param = resolved
     sync._set_fiber_prefer_bake(fiber, False)
     changed_ids.add(fiber.id)
     return True

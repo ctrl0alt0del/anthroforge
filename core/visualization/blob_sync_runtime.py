@@ -3,6 +3,7 @@ from mathutils import Vector
 
 from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
+from ..deps.conflict_resolver import resolve_conflict
 from ..utils import get_af_root
 from .blob_sync_helpers import target_object_for_blob
 from .control_runtime import active_entity_id
@@ -148,7 +149,21 @@ def apply_blob_control_update(sync, root, scene, obj):
     b = blobs_by_id.get(bid)
     if b is None:
         return None
-    new_loc = obj.location.copy()
+    incoming = obj.location.copy()
+    current = tuple(b.control_point_world)
+    resolved = resolve_conflict(
+        entity_type="BLOB",
+        entity_id=str(bid or ""),
+        aspect="control_point.world",
+        source="blender_control",
+        current=current,
+        incoming=(incoming.x, incoming.y, incoming.z),
+        payload={"control": "blob"},
+    )
+    try:
+        new_loc = Vector((float(resolved[0]), float(resolved[1]), float(resolved[2])))
+    except Exception:
+        new_loc = incoming
     if not sync._vec_changed(b.control_point_world, new_loc):
         return None
     b.control_point_world = (new_loc.x, new_loc.y, new_loc.z)

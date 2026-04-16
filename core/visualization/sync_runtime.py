@@ -3,7 +3,8 @@ import json
 
 from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
-from ..deps.transform_intents import enqueue_scp_transform_intent
+from ..deps.modifiers import scp_modifier_state, modifier_state_fingerprint, geometry_fingerprint
+from ..deps.modifier_intents import enqueue_scp_modifier_intent
 from ..registry import SCPRegistry
 from ..utils import get_af_root
 
@@ -66,9 +67,6 @@ def _shape_topology_payload(scp, scp_prop):
         payload.update(
             {
                 "resolution": int(getattr(scp_prop, "ellipsoid_resolution", getattr(shape, "resolution", 0))),
-                "clip_enabled": bool(getattr(scp_prop, "ellipsoid_clip_enabled", getattr(shape, "clip_enabled", False))),
-                "clip1_enabled": bool(getattr(scp_prop, "ellipsoid_clip1_enabled", getattr(shape, "clip1_enabled", False))),
-                "clip2_enabled": bool(getattr(scp_prop, "ellipsoid_clip2_enabled", getattr(shape, "clip2_enabled", False))),
             }
         )
     elif st == "MESH_ASSET":
@@ -110,10 +108,6 @@ def _shape_deformer_payload(scp, scp_prop):
         payload.update(
             {
                 "size": _vec3_tuple(getattr(scp_prop, "parallelepiped_size", getattr(shape, "size", ()))),
-                "bend_enabled": bool(getattr(scp_prop, "parallelepiped_bend_enabled", getattr(shape, "bend_enabled", False))),
-                "bend_axis": str(getattr(scp_prop, "parallelepiped_bend_axis", getattr(shape, "bend_axis", "X"))),
-                "bend_angle_deg": float(getattr(scp_prop, "parallelepiped_bend_angle_deg", getattr(shape, "bend_angle_deg", 0.0))),
-                "bend_radius": float(getattr(scp_prop, "parallelepiped_bend_radius", getattr(shape, "bend_radius", 1.0))),
                 "points": _parallelepiped_points_sig(scp_prop) if scp_prop is not None else [],
             }
         )
@@ -121,12 +115,6 @@ def _shape_deformer_payload(scp, scp_prop):
         payload.update(
             {
                 "radii": _vec3_tuple(getattr(scp_prop, "ellipsoid_radii", getattr(shape, "radii", ()))),
-                "clip1_normal": _vec3_tuple(getattr(scp_prop, "ellipsoid_clip1_normal", getattr(shape, "clip1_normal", ()))),
-                "clip1_offset": float(getattr(scp_prop, "ellipsoid_clip1_offset", getattr(shape, "clip1_offset", 0.0))),
-                "clip1_keep_side": str(getattr(scp_prop, "ellipsoid_clip1_keep_side", getattr(shape, "clip1_keep_side", "POS"))),
-                "clip2_normal": _vec3_tuple(getattr(scp_prop, "ellipsoid_clip2_normal", getattr(shape, "clip2_normal", ()))),
-                "clip2_offset": float(getattr(scp_prop, "ellipsoid_clip2_offset", getattr(shape, "clip2_offset", 0.0))),
-                "clip2_keep_side": str(getattr(scp_prop, "ellipsoid_clip2_keep_side", getattr(shape, "clip2_keep_side", "POS"))),
             }
         )
     return payload
@@ -200,77 +188,15 @@ def _sync_single_proxy(sync, vis_col, root, scene, runtime, scp):
     force_geometry = bool(created or shape_swapped)
     shape_type = str(getattr(getattr(scp, "shape", None), "type_id", "") or "")
 
-    # Safety: Parallelepiped deformation (bend angle/radius) drives both proxy
-    # geometry and downstream attachment frames. Keep this path eager/correct.
-    always_rebuild = (shape_type == "PARALLELEPIPED")
+    always_rebuild = False
     if always_rebuild or force_geometry or topology_changed or deformer_changed:
         scp.shape.ensure_proxy_object(obj)
 
     obj.matrix_world = sync._compute_visual_world_matrix(scp, runtime.registry, root, scene)
-    _sync_source_mirror_modifier(obj, getattr(scp, "shape", None), sync._get_scp_prop_by_id(root, scp.id))
     obj["af_fp_transform"] = fp_transform
     obj["af_fp_topology"] = fp_topology
     obj["af_fp_deformer"] = fp_deformer
     sync._mark_synced_matrix(obj)
-
-
-def _sync_source_mirror_modifier(obj, shape, scp_prop):
-    if obj is None or not hasattr(obj, "modifiers"):
-        return
-
-    mod_name = "AF_MIRROR_SOURCE"
-    enabled = False
-    axis = "X"
-    if shape is not None:
-        try:
-            enabled = bool(shape.is_mirror_source())
-            axis = str(shape.mirror_axis() or "X")
-        except Exception:
-            enabled = False
-            axis = "X"
-    elif scp_prop is not None:
-        enabled = bool(getattr(scp_prop, "mirror_enabled", False))
-        axis = str(getattr(scp_prop, "mirror_axis", "X") or "X")
-    existing = obj.modifiers.get(mod_name)
-
-    if not enabled:
-        if existing is not None:
-            try:
-                obj.modifiers.remove(existing)
-            except Exception:
-                pass
-        return
-
-    mod = existing
-    if mod is None:
-        try:
-            mod = obj.modifiers.new(name=mod_name, type="MIRROR")
-        except Exception:
-            return
-    elif str(getattr(mod, "type", "")) != "MIRROR":
-        try:
-            obj.modifiers.remove(mod)
-            mod = obj.modifiers.new(name=mod_name, type="MIRROR")
-        except Exception:
-            return
-
-    axis = str(axis or "X").upper()
-    use_x = axis == "X"
-    use_y = axis == "Y"
-    use_z = axis == "Z"
-    axis_vec = (use_x, use_y, use_z)
-    if hasattr(mod, "use_axis"):
-        mod.use_axis = axis_vec
-    if hasattr(mod, "use_bisect_axis"):
-        mod.use_bisect_axis = axis_vec
-    if hasattr(mod, "use_bisect_flip_axis"):
-        mod.use_bisect_flip_axis = (False, False, False)
-    if hasattr(mod, "use_clip"):
-        mod.use_clip = True
-    if hasattr(mod, "use_mirror_merge"):
-        mod.use_mirror_merge = True
-    if hasattr(mod, "merge_threshold"):
-        mod.merge_threshold = 1e-4
 
 
 def _cleanup_stale_root_proxies(sync, vis_col, root_name, live_ids):
@@ -323,7 +249,7 @@ def _handle_extension_updates(sync, root, scene, vis_col, obj, depsgraph, change
     if not classified:
         return False, False
     ctype = str(classified["control_type"])
-    if ctype not in ("SCP_CURVE_POINT", "SCP_PARALLELEPIPED_VERTEX", "SCP_ELLIPSOID_CLIP"):
+    if ctype not in ("SCP_CURVE_POINT", "SCP_PARALLELEPIPED_VERTEX"):
         return False, False
     payload = dict(classified["payload"])
     payload["binding"] = classified.get("binding")
@@ -341,29 +267,69 @@ def _handle_proxy_transform_update(sync, root, scene, obj, depsgraph, changed_id
         return False
     if sync._is_synced_matrix(obj):
         return False
-    if not enqueue_scp_transform_intent(root, scp_id, obj.matrix_world.copy()):
+    _ = (sync, root, scene, obj, depsgraph, changed_ids, non_source_scp_ids, scp_id)
+    # Strict policy: direct Blender proxy transforms do not feed SCP transform
+    # writes through deps pipeline.
+    return False
+
+
+def _handle_proxy_modifier_update(root, obj, update, changed_ids):
+    if not obj.get("af_proxy") or obj.get("af_mirror_proxy"):
         return False
-    changed_ids.add(scp_id)
-    scp_prop = sync._get_scp_prop_by_id(root, scp_id)
-    if scp_prop is not None and bool(getattr(scp_prop, "parent_id", "")):
-        non_source_scp_ids.add(scp_id)
-    return True
+    scp_id = str(obj.get("af_scp_id") or "")
+    if not scp_id:
+        return False
+
+    # Ignore pure selection refreshes and react to real object updates.
+    upd_geom = bool(getattr(update, "is_updated_geometry", False))
+    upd_xf = bool(getattr(update, "is_updated_transform", False))
+    if not upd_geom and not upd_xf:
+        return False
+
+    changed = False
+
+    if upd_geom:
+        gfp = geometry_fingerprint(obj)
+        if str(obj.get("af_fp_modifier_geom", "") or "") != gfp:
+            obj["af_fp_modifier_geom"] = gfp
+            changed = True
+
+    state = scp_modifier_state(obj)
+    sfp = modifier_state_fingerprint(state)
+    if str(obj.get("af_fp_modifier_state", "") or "") != sfp:
+        obj["af_fp_modifier_state"] = sfp
+        if enqueue_scp_modifier_intent(
+            root,
+            scp_id,
+            state,
+            source="blender_modifier",
+            payload={"object_name": str(getattr(obj, "name", "") or "")},
+        ):
+            changed = True
+
+    if changed:
+        changed_ids.add(scp_id)
+    return changed
 
 
 def _collect_changed_scp_ids(sync, root, scene, depsgraph, vis_col):
     changed = False
     changed_scp_ids = set()
     non_source_scp_ids = set()
+    modifier_changed = False
     for update in depsgraph.updates:
         obj = update.id
         if not _is_relevant_proxy_update(root, vis_col, obj):
             continue
+        if _handle_proxy_modifier_update(root, obj, update, changed_scp_ids):
+            changed = True
+            modifier_changed = True
         consumed, did = _handle_extension_updates(sync, root, scene, vis_col, obj, depsgraph, changed_scp_ids)
         changed |= did
         if consumed:
             continue
         changed |= _handle_proxy_transform_update(sync, root, scene, obj, depsgraph, changed_scp_ids, non_source_scp_ids)
-    return changed, changed_scp_ids, non_source_scp_ids
+    return changed, changed_scp_ids, non_source_scp_ids, modifier_changed
 
 
 def on_depsgraph_update(sync, scene, depsgraph):
@@ -380,18 +346,21 @@ def on_depsgraph_update(sync, scene, depsgraph):
 
     sync._syncing = True
     try:
-        changed, changed_scp_ids, non_source_scp_ids = _collect_changed_scp_ids(sync, root, scene, depsgraph, vis_col)
+        changed, changed_scp_ids, non_source_scp_ids, modifier_changed = _collect_changed_scp_ids(
+            sync, root, scene, depsgraph, vis_col
+        )
     finally:
         sync._syncing = False
 
     if changed and changed_scp_ids:
         from .sync_runner import sync_from_dirty_hints
 
+        event_type = "MODIFIER" if modifier_changed else "TRANSFORM"
         sync_from_dirty_hints(
             root=root,
             scene=scene,
             dirty_hints=dirty_hints_for("SCP", changed_scp_ids),
             source="depsgraph",
-            event_type="TRANSFORM",
+            event_type=event_type,
             payload={"non_source_ids_by_type": {"SCP": set(non_source_scp_ids)}},
         )

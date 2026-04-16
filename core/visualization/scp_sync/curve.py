@@ -1,11 +1,36 @@
 import bpy
 from mathutils import Vector
 from ...shapes.registry import ShapeRegistry
+from ...deps.conflict_resolver import resolve_conflict
 from ..control_runtime import active_entity_id
 
 
 class CurveSCPSyncExtension:
     shape_type = "CURVE"
+
+    def _set_curve_point(self, scp_prop, point_index, target_local, *, source="blender_control", payload=None):
+        if point_index < 0 or point_index >= len(scp_prop.curve_points):
+            return False
+        point = scp_prop.curve_points[point_index]
+        current = (float(point.co[0]), float(point.co[1]), float(point.co[2]))
+        incoming = (float(target_local.x), float(target_local.y), float(target_local.z))
+        resolved = resolve_conflict(
+            entity_type="SCP",
+            entity_id=str(getattr(scp_prop, "id", "") or ""),
+            aspect=f"geometry.curve_points[{int(point_index)}].co",
+            source=source,
+            current=current,
+            incoming=incoming,
+            payload=dict(payload or {}),
+        )
+        try:
+            next_value = (float(resolved[0]), float(resolved[1]), float(resolved[2]))
+        except Exception:
+            next_value = incoming
+        if tuple(current) == tuple(next_value):
+            return False
+        point.co = next_value
+        return True
 
     def _find_curve_point_handle(self, vis_col, root_name, scp_id, point_index):
         for obj in vis_col.objects:
@@ -40,7 +65,8 @@ class CurveSCPSyncExtension:
         t = d / radius
         return (1.0 - (t * t * (3.0 - 2.0 * t))) * strength
 
-    def _apply_weighted_delta(self, points, center_idx, delta, radius, strength):
+    def _apply_weighted_delta(self, scp_prop, points, center_idx, delta, radius, strength, *, source="blender_control", payload=None):
+        changed = False
         for i in range(len(points)):
             if i == center_idx:
                 continue
@@ -48,9 +74,16 @@ class CurveSCPSyncExtension:
             if w <= 0.0:
                 continue
             p = self._point_vec(points[i]) + (delta * w)
-            points[i].co = (p.x, p.y, p.z)
+            changed |= self._set_curve_point(
+                scp_prop,
+                i,
+                p,
+                source=source,
+                payload=dict(payload or {}, influence=float(w), center_index=int(center_idx)),
+            )
+        return changed
 
-    def _apply_curve_proportional_delta(self, scp_prop, center_idx, center_new_local):
+    def _apply_curve_proportional_delta(self, scp_prop, center_idx, center_new_local, *, source="blender_control", payload=None):
         points = scp_prop.curve_points
         n = len(points)
         if not (0 <= center_idx < n):
@@ -61,16 +94,31 @@ class CurveSCPSyncExtension:
         if delta.length_squared <= 1e-14:
             return False
 
-        points[center_idx].co = (center_new_local.x, center_new_local.y, center_new_local.z)
+        changed = self._set_curve_point(
+            scp_prop,
+            center_idx,
+            center_new_local,
+            source=source,
+            payload=dict(payload or {}, center_index=int(center_idx), role="center"),
+        )
         if not bool(getattr(scp_prop, "curve_proportional_enabled", False)):
-            return True
+            return changed
 
         radius = max(0.001, float(getattr(scp_prop, "curve_proportional_radius", 2.0)))
         strength = max(0.0, min(1.0, float(getattr(scp_prop, "curve_proportional_strength", 0.65))))
         if strength <= 0.0:
-            return True
-        self._apply_weighted_delta(points, center_idx, delta, radius, strength)
-        return True
+            return changed
+        changed |= self._apply_weighted_delta(
+            scp_prop,
+            points,
+            center_idx,
+            delta,
+            radius,
+            strength,
+            source=source,
+            payload=dict(payload or {}, role="proportional"),
+        )
+        return changed
 
     def _active_scp_id(self, root):
         _bpy = bpy
@@ -127,11 +175,17 @@ class CurveSCPSyncExtension:
             return True, False, None
 
         local_deformed = proxy.matrix_world.inverted() @ obj.location
+        space = str(getattr(control_binding, "space", "FINAL") or "FINAL")
         shape = ShapeRegistry.create_from_prop(scp_prop)
         if shape is not None:
-            space = str(getattr(control_binding, "space", "FINAL") or "FINAL")
             local = shape.invert_point_from_space(local_deformed, space=space)
         else:
             local = local_deformed
-        did = self._apply_curve_proportional_delta(scp_prop, point_index, local)
+        did = self._apply_curve_proportional_delta(
+            scp_prop,
+            point_index,
+            local,
+            source="blender_control",
+            payload={"point_index": int(point_index), "space": str(space)},
+        )
         return True, did, scp_id if did else None

@@ -2,9 +2,8 @@ import bpy
 from mathutils import Vector
 
 from .base import ShapeStrategy
-from .deformer_impl import ParallelepipedBendDeformer, ParallelepipedMirrorPairDeformer
+from .deformer_impl import ParallelepipedMirrorPairDeformer
 from .deformers import ShapeSizeDeformer, ResolutionDeformer
-from .state_codec import get_deformer_param_overrides
 from .registry import ShapeRegistry
 
 
@@ -18,7 +17,6 @@ class ParallelepipedShape(ShapeStrategy):
 
     _MIRROR_PAIR = ParallelepipedMirrorPairDeformer()
     _SIZE = ShapeSizeDeformer()
-    _BEND = ParallelepipedBendDeformer()
     _RES = ResolutionDeformer()
     _SURFACE_FACES = ("X_MIN", "X_MAX", "Y_MIN", "Y_MAX", "Z_MIN", "Z_MAX")
 
@@ -43,7 +41,7 @@ class ParallelepipedShape(ShapeStrategy):
     def get_deformers(self):
         # Explicit stack order:
         # Shape Size -> Resolution -> Dynamic Deformers -> Control
-        return [self._SIZE, self._RES, self._BEND]
+        return [self._SIZE, self._RES]
 
     def get_control_behaviors(self):
         return [self._MIRROR_PAIR]
@@ -76,15 +74,13 @@ class ParallelepipedShape(ShapeStrategy):
 
     @classmethod
     def from_scp_prop(cls, scp_prop):
-        overrides = get_deformer_param_overrides(scp_prop)
-        bend = dict(overrides.get("parallelepiped_bend", {}) or {})
         shape = cls(
             size=tuple(scp_prop.parallelepiped_size),
             points=cls._points_from_prop(scp_prop),
-            bend_enabled=bool(bend.get("enabled", False)),
-            bend_axis=str(bend.get("axis", "X")),
-            bend_angle_deg=float(bend.get("angle_deg", 0.0)),
-            bend_radius=float(bend.get("radius", 1.0)),
+            bend_enabled=False,
+            bend_axis="X",
+            bend_angle_deg=0.0,
+            bend_radius=1.0,
             resolution=int(getattr(scp_prop, "parallelepiped_resolution", 4)),
         )
         return cls.hydrate_from_scp_prop(shape, scp_prop)

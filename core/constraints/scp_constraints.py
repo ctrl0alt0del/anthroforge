@@ -1,5 +1,6 @@
 
 import math
+from ..deps.conflict_resolver import resolve_conflict
 
 def _get_scp_by_id(root, scp_id):
     for s in root.af_scp_system.scps:
@@ -38,20 +39,38 @@ def _get_source_value(scp, key):
     return None
 
 
-def _set_dest_value(scp, key, value):
+def _set_dest_value(scp, key, value, source="deps_constraint"):
     if key == "PAR_BEND_RADIUS":
-        return _set_float_attr(scp, "parallelepiped_bend_radius", value, lo=0.001)
+        return _set_float_attr(scp, "parallelepiped_bend_radius", value, lo=0.001, source=source)
     if key == "PAR_BEND_ANGLE":
-        return _set_float_attr(scp, "parallelepiped_bend_angle_deg", value, lo=-360.0, hi=360.0)
+        return _set_float_attr(scp, "parallelepiped_bend_angle_deg", value, lo=-360.0, hi=360.0, source=source)
     if key == "PAR_RESOLUTION":
-        return _set_int_attr(scp, "parallelepiped_resolution", value, lo=1, hi=64)
+        return _set_int_attr(scp, "parallelepiped_resolution", value, lo=1, hi=64, source=source)
     scale_axis = {"LOCAL_SCALE_X": 0, "LOCAL_SCALE_Y": 1, "LOCAL_SCALE_Z": 2}.get(key, None)
-    return _set_scale_axis(scp, scale_axis, value) if scale_axis is not None else False
+    return _set_scale_axis(scp, scale_axis, value, source=source) if scale_axis is not None else False
 
 
-def _set_float_attr(scp, attr, value, lo=None, hi=None):
+def _set_float_attr(scp, attr, value, lo=None, hi=None, source="deps_constraint"):
     old = float(getattr(scp, attr))
     new = float(value)
+    if lo is not None:
+        new = max(lo, new)
+    if hi is not None:
+        new = min(hi, new)
+    sid = str(getattr(scp, "id", "") or "")
+    resolved = resolve_conflict(
+        entity_type="SCP",
+        entity_id=sid,
+        aspect=f"prop.{attr}",
+        source=source,
+        current=old,
+        incoming=new,
+        payload={"attr": str(attr)},
+    )
+    try:
+        new = float(resolved)
+    except Exception:
+        new = old
     if lo is not None:
         new = max(lo, new)
     if hi is not None:
@@ -62,9 +81,27 @@ def _set_float_attr(scp, attr, value, lo=None, hi=None):
     return True
 
 
-def _set_int_attr(scp, attr, value, lo=None, hi=None):
+def _set_int_attr(scp, attr, value, lo=None, hi=None, source="deps_constraint"):
     old = int(getattr(scp, attr))
     new = int(round(float(value)))
+    if lo is not None:
+        new = max(lo, new)
+    if hi is not None:
+        new = min(hi, new)
+    sid = str(getattr(scp, "id", "") or "")
+    resolved = resolve_conflict(
+        entity_type="SCP",
+        entity_id=sid,
+        aspect=f"prop.{attr}",
+        source=source,
+        current=old,
+        incoming=new,
+        payload={"attr": str(attr)},
+    )
+    try:
+        new = int(round(float(resolved)))
+    except Exception:
+        new = old
     if lo is not None:
         new = max(lo, new)
     if hi is not None:
@@ -75,9 +112,23 @@ def _set_int_attr(scp, attr, value, lo=None, hi=None):
     return True
 
 
-def _set_scale_axis(scp, axis, value):
+def _set_scale_axis(scp, axis, value, source="deps_constraint"):
     old = float(scp.local_scale[axis])
     new = max(1e-6, float(value))
+    sid = str(getattr(scp, "id", "") or "")
+    resolved = resolve_conflict(
+        entity_type="SCP",
+        entity_id=sid,
+        aspect=f"prop.local_scale[{int(axis)}]",
+        source=source,
+        current=old,
+        incoming=new,
+        payload={"axis": int(axis)},
+    )
+    try:
+        new = max(1e-6, float(resolved))
+    except Exception:
+        new = old
     if abs(new - old) <= 1e-9:
         return False
     sc = list(scp.local_scale)
@@ -121,11 +172,11 @@ def _eval_constraint_value(c, src):
     return a * float(src) + b
 
 
-def apply_scp_input_write(root, scp_id, dest_prop, value):
+def apply_scp_input_write(root, scp_id, dest_prop, value, source="deps_constraint"):
     dest = _get_scp_by_id(root, scp_id)
     if dest is None:
         return False
-    return _set_dest_value(dest, dest_prop, value)
+    return _set_dest_value(dest, dest_prop, value, source=source)
 
 
 def evaluate_scp_constraints_runtime(root, changed_source_ids, is_cyclic_pair, delayed_writer):

@@ -71,7 +71,7 @@ def _apply_blob_control(root, scene, intent):
 
 def apply_control_intent(root, scene, intent):
     ctype = str(getattr(intent, "control_type", "") or "")
-    if ctype in ("SCP_CURVE_POINT", "SCP_PARALLELEPIPED_VERTEX", "SCP_ELLIPSOID_CLIP"):
+    if ctype in ("SCP_CURVE_POINT", "SCP_PARALLELEPIPED_VERTEX"):
         return _apply_scp_control(root, scene, intent)
     if ctype in ("FIBER_ENDPOINT", "FIBER_TOUCH"):
         return _apply_fiber_control(root, scene, intent)

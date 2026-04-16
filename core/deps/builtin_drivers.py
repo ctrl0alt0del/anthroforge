@@ -4,10 +4,12 @@ from .controls import pop_control_intents
 from .control_behaviors import apply_control_intent
 from ..constraints.scp_constraints import evaluate_scp_constraints_runtime, apply_scp_input_write
 from .transform_intents import pop_scp_transform_intents
+from .modifier_intents import pop_scp_modifier_intents
 from .scp_transform_intent_apply import (
     apply_scp_transform_intent,
     build_scp_transform_apply_context,
 )
+from .modifier_intent_apply import apply_scp_modifier_intent
 from ..visualization.sync import register_sync
 from ..visualization.fiber_sync import register_fiber_sync
 from ..visualization.muscle_sync import register_muscle_sync
@@ -42,7 +44,7 @@ class SCPConstraintDriver(DependencyDriver):
         changed_scps = set()
         for (etype, eid, port), value in list(self._delayed_writes.items()):
             if etype == "SCP":
-                if apply_scp_input_write(root, eid, port, value):
+                if apply_scp_input_write(root, eid, port, value, source="deps_constraint_delayed"):
                     changed_scps.add(eid)
         self._delayed_writes.clear()
         return changed_scps
@@ -99,10 +101,52 @@ class SCPTransformIntentDriver(DependencyDriver):
         if not intents:
             return {}
 
-        apply_ctx = build_scp_transform_apply_context(ctx.root)
-        for scp_id, matrix_world in intents:
-            if apply_scp_transform_intent(ctx.root, scp_id, matrix_world, context=apply_ctx):
+        apply_ctx = build_scp_transform_apply_context(ctx.root, scene=ctx.scene)
+        for item in intents:
+            if not isinstance(item, (list, tuple)) or len(item) < 2:
+                continue
+            scp_id = item[0]
+            matrix_world = item[1]
+            meta = dict(item[2] or {}) if len(item) >= 3 and isinstance(item[2], dict) else {}
+            if apply_scp_transform_intent(
+                ctx.root,
+                scp_id,
+                matrix_world,
+                context=apply_ctx,
+                source=str(meta.get("source", "unknown") or "unknown"),
+                payload=dict(meta.get("payload", {}) or {}),
+            ):
                 changed.add(scp_id)
+        if not changed:
+            return {}
+        return {"SCP": changed}
+
+
+class SCPModifierIntentDriver(DependencyDriver):
+    name = "scp_modifier_intent_driver"
+
+    def entity_types(self):
+        return ("SCP",)
+
+    def apply_constraints(self, ctx):
+        changed = set()
+        intents = pop_scp_modifier_intents(ctx.root)
+        if not intents:
+            return {}
+        for item in intents:
+            if not isinstance(item, (list, tuple)) or len(item) < 2:
+                continue
+            scp_id = item[0]
+            state = item[1]
+            meta = dict(item[2] or {}) if len(item) >= 3 and isinstance(item[2], dict) else {}
+            if apply_scp_modifier_intent(
+                ctx.root,
+                scp_id,
+                state,
+                source=str(meta.get("source", "unknown") or "unknown"),
+                payload=dict(meta.get("payload", {}) or {}),
+            ):
+                changed.add(str(scp_id))
         if not changed:
             return {}
         return {"SCP": changed}

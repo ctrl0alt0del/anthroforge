@@ -55,93 +55,6 @@ class AF_PT_EditPanel(bpy.types.Panel):
         editable_shapes = {"CURVE", "PARALLELEPIPED", "ELLIPSOID"}
         ShapeRegistry.draw_scp_ui(scp.shape_type, layout, scp, readonly=(scp.shape_type not in editable_shapes))
 
-    def _draw_parallelepiped_deformers(self, layout, scp):
-        col = layout.column()
-        col.prop(scp, "parallelepiped_bend_axis", text="Axis")
-        col.prop(scp, "parallelepiped_bend_angle_deg", text="Angle")
-        col.prop(scp, "parallelepiped_bend_radius", text="Radius")
-
-    def _draw_ellipsoid_deformers(self, layout, scp):
-        c1 = layout.box()
-        c1h = c1.row(align=True)
-        c1h.label(text="Plane 1")
-        c1h.prop(scp, "ellipsoid_clip1_enabled", text="Enabled")
-        c1b = c1.column()
-        c1b.enabled = bool(getattr(scp, "ellipsoid_clip1_enabled", False))
-        c1b.prop(scp, "ellipsoid_clip1_normal", text="Normal")
-        c1b.prop(scp, "ellipsoid_clip1_offset", text="Offset")
-        c1b.prop(scp, "ellipsoid_clip1_keep_side", text="Keep")
-
-        c2 = layout.box()
-        c2h = c2.row(align=True)
-        c2h.label(text="Plane 2")
-        c2h.prop(scp, "ellipsoid_clip2_enabled", text="Enabled")
-        c2b = c2.column()
-        c2b.enabled = bool(getattr(scp, "ellipsoid_clip2_enabled", False))
-        c2b.prop(scp, "ellipsoid_clip2_normal", text="Normal")
-        c2b.prop(scp, "ellipsoid_clip2_offset", text="Offset")
-        c2b.prop(scp, "ellipsoid_clip2_keep_side", text="Keep")
-
-    def _deformer_defs(self, scp):
-        st = str(getattr(scp, "shape_type", "") or "")
-        if st == "PARALLELEPIPED":
-            return [
-                {
-                    "id": "parallelepiped_bend",
-                    "label": "Bend",
-                    "icon": "MOD_SIMPLEDEFORM",
-                    "enabled_prop": "parallelepiped_bend_enabled",
-                    "draw_fn": self._draw_parallelepiped_deformers,
-                }
-            ]
-        if st == "ELLIPSOID":
-            return [
-                {
-                    "id": "ellipsoid_clip",
-                    "label": "Clip",
-                    "icon": "MOD_BOOLEAN",
-                    "enabled_prop": "ellipsoid_clip_enabled",
-                    "draw_fn": self._draw_ellipsoid_deformers,
-                }
-            ]
-        return []
-
-    def _draw_deformers(self, layout, scp):
-        layout.separator()
-        layout.label(text="Deformers")
-        flow = layout.box()
-        flow.label(text="Pipeline: Shape Size (D) -> Resolution (D) -> Deformer Stack (D) -> Control")
-        defs = self._deformer_defs(scp)
-        if not defs:
-            box = layout.box()
-            box.label(text="No deformers for this shape")
-            return
-
-        add_row = layout.row(align=True)
-        add_row.label(text="Add")
-        available = []
-        for d in defs:
-            enabled = bool(getattr(scp, d["enabled_prop"], False))
-            if not enabled:
-                available.append(d)
-        if not available:
-            add_row.label(text="(all added)")
-        else:
-            for d in available:
-                op = add_row.operator("af.add_scp_deformer", text=d["label"], icon="ADD")
-                op.scp_id = scp.id
-                op.deformer_id = d["id"]
-
-        for d in defs:
-            if not bool(getattr(scp, d["enabled_prop"], False)):
-                continue
-            box = layout.box()
-            hdr = box.row(align=True)
-            hdr.label(text=d["label"], icon=d["icon"])
-            rm = hdr.operator("af.remove_scp_deformer", text="", icon="X", emboss=False)
-            rm.scp_id = scp.id
-            rm.deformer_id = d["id"]
-            d["draw_fn"](box, scp)
 
     def _draw_constraints_header(self, layout, scp):
         layout.separator()
@@ -223,7 +136,6 @@ class AF_PT_EditPanel(bpy.types.Panel):
         self._draw_transform(layout, scp)
         self._draw_mirror(layout, scp)
         self._draw_shape_params(layout, scp)
-        self._draw_deformers(layout, scp)
         self._draw_constraints_header(layout, scp)
         for i, c in enumerate(scp.constraints):
             self._draw_constraint_item(layout, scp, i, c)

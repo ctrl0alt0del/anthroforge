@@ -5,7 +5,6 @@ from ..shapes.state import ControlBinding
 CONTROL_FLAG_KEYS = (
     "af_curve_point_handle",
     "af_parallelepiped_vert_handle",
-    "af_ellipsoid_clip_handle",
     "af_fiber_endpoint_handle",
     "af_fiber_touch_handle",
     "af_muscle_inflation_ctrl",
@@ -84,16 +83,6 @@ def classify_control_object(obj):
                 "payload": {"root_name": root_name, "object_name": str(obj.name), "scp_id": scp_id, "vert_index": idx},
                 "dirty_hints": {"SCP": {scp_id}},
                 "binding": ControlBinding(kind="GEOMETRY_SAMPLE", space="FINAL", target_path=f"SCP/{scp_id}/parallelepiped_points/{idx}"),
-            }
-    if obj.get("af_ellipsoid_clip_handle"):
-        scp_id = _as_id(obj.get("af_scp_id"))
-        idx = int(obj.get("af_ellipsoid_clip_index", -1))
-        if scp_id and idx in (1, 2):
-            return {
-                "control_type": "SCP_ELLIPSOID_CLIP",
-                "payload": {"root_name": root_name, "object_name": str(obj.name), "scp_id": scp_id, "clip_index": idx},
-                "dirty_hints": {"SCP": {scp_id}},
-                "binding": ControlBinding(kind="FRAME_SAMPLE", space="FINAL", target_path=f"SCP/{scp_id}/ellipsoid_clip{idx}"),
             }
     if obj.get("af_fiber_endpoint_handle"):
         fid = _as_id(obj.get("af_fiber_id"))

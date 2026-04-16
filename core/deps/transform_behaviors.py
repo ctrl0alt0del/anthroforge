@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from mathutils import Matrix, Vector
+from mathutils.bvhtree import BVHTree
 
 from ..attachment_codec import (
     encode_scp_mesh_anchor,
@@ -30,7 +31,16 @@ class TransformIntent:
 class BehaviorStrategy:
     behavior_id = ""
 
-    def compose_world_matrix(self, child_scp, parent_scp, parent_world, desc: RelationDescriptor):
+    def compose_world_matrix(
+        self,
+        child_scp,
+        parent_scp,
+        parent_world,
+        desc: RelationDescriptor,
+        *,
+        parent_proxy=None,
+        depsgraph=None,
+    ):
         raise NotImplementedError
 
     def update_attachment_from_world(
@@ -50,7 +60,74 @@ class BehaviorStrategy:
 class SurfaceFollowStrategy(BehaviorStrategy):
     behavior_id = "surface_follow"
 
-    def compose_world_matrix(self, child_scp, parent_scp, parent_world, desc: RelationDescriptor):
+    @staticmethod
+    def _safe_normalize(v, fallback):
+        out = v.copy()
+        if out.length <= 1e-9:
+            return fallback.copy()
+        out.normalize()
+        return out
+
+    def _eval_surface_frame(
+        self,
+        *,
+        parent_scp,
+        parent_world,
+        parent_param,
+        parent_proxy,
+        depsgraph,
+    ):
+        if parent_proxy is None or depsgraph is None:
+            return None
+        if str(getattr(parent_proxy, "type", "") or "") != "MESH":
+            return None
+        try:
+            bvh = BVHTree.FromObject(parent_proxy, depsgraph)
+        except Exception:
+            return None
+        if bvh is None:
+            return None
+
+        base_local = parent_scp.shape.compute_local_point(parent_param)
+        base_world = parent_world @ base_local
+        target_local = parent_proxy.matrix_world.inverted() @ base_world
+        nearest = bvh.find_nearest(target_local)
+        if nearest is None:
+            return None
+        co_local, n_local, _idx, _dist = nearest
+        if co_local is None:
+            return None
+        if n_local is None or n_local.length <= 1e-9:
+            n_local = Vector((0.0, 0.0, 1.0))
+        n_local = self._safe_normalize(n_local, Vector((0.0, 0.0, 1.0)))
+
+        mw = parent_proxy.matrix_world
+        mw3 = mw.to_3x3()
+        origin_world = mw @ co_local
+        normal_world = self._safe_normalize(mw3.inverted_safe().transposed() @ n_local, Vector((0.0, 0.0, 1.0)))
+
+        # Preserve parametric directionality when possible by projecting
+        # domain tangent onto the evaluated-surface tangent plane.
+        _p0, t_local, _n0 = parent_scp.shape.sample_attachment_frame_local(parent_param)
+        t_world = mw3 @ t_local
+        tangent_world = t_world - normal_world * float(t_world.dot(normal_world))
+        if tangent_world.length <= 1e-9:
+            tangent_world = normal_world.cross(Vector((0.0, 0.0, 1.0)))
+        if tangent_world.length <= 1e-9:
+            tangent_world = normal_world.cross(Vector((0.0, 1.0, 0.0)))
+        tangent_world = self._safe_normalize(tangent_world, Vector((1.0, 0.0, 0.0)))
+        return origin_world, tangent_world, normal_world
+
+    def compose_world_matrix(
+        self,
+        child_scp,
+        parent_scp,
+        parent_world,
+        desc: RelationDescriptor,
+        *,
+        parent_proxy=None,
+        depsgraph=None,
+    ):
         payload = dict(desc.payload or {})
         behavior = normalize_behavior(desc.mode, desc.behavior)
         aspects = tuple(behavior.get("aspects", []))
@@ -61,11 +138,21 @@ class SurfaceFollowStrategy(BehaviorStrategy):
         child_tangent_local = payload.get("child_tangent_local", Vector((1.0, 0.0, 0.0)))
         child_normal_local = payload.get("child_normal_local", Vector((0.0, 0.0, 1.0)))
 
-        p_origin_local, p_tangent_local, p_normal_local = parent_scp.shape.sample_attachment_frame_local(parent_param)
-        parent_world3 = parent_world.to_3x3()
-        p_origin_world = parent_world @ p_origin_local
-        p_tangent_world = parent_world3 @ p_tangent_local
-        p_normal_world = parent_world3 @ p_normal_local
+        sampled = self._eval_surface_frame(
+            parent_scp=parent_scp,
+            parent_world=parent_world,
+            parent_param=parent_param,
+            parent_proxy=parent_proxy,
+            depsgraph=depsgraph,
+        )
+        if sampled is not None:
+            p_origin_world, p_tangent_world, p_normal_world = sampled
+        else:
+            p_origin_local, p_tangent_local, p_normal_local = parent_scp.shape.sample_attachment_frame_local(parent_param)
+            parent_world3 = parent_world.to_3x3()
+            p_origin_world = parent_world @ p_origin_local
+            p_tangent_world = parent_world3 @ p_tangent_local
+            p_normal_world = parent_world3 @ p_normal_local
 
         if follow_rot:
             parent_basis = frame_basis3(p_tangent_world, p_normal_world)
@@ -141,8 +228,19 @@ class SurfaceFollowStrategy(BehaviorStrategy):
 class MeshAnchorStrategy(BehaviorStrategy):
     behavior_id = "mesh_anchor"
 
-    def compose_world_matrix(self, child_scp, parent_scp, parent_world, desc: RelationDescriptor):
+    def compose_world_matrix(
+        self,
+        child_scp,
+        parent_scp,
+        parent_world,
+        desc: RelationDescriptor,
+        *,
+        parent_proxy=None,
+        depsgraph=None,
+    ):
         _parent_scp = parent_scp
+        _parent_proxy = parent_proxy
+        _depsgraph = depsgraph
         behavior = normalize_behavior(desc.mode, desc.behavior)
         aspects = tuple(behavior.get("aspects", []))
         parent_local_point, child_local_point = desc.payload
@@ -211,10 +309,27 @@ _REGISTRY.register(SurfaceFollowStrategy())
 _REGISTRY.register(MeshAnchorStrategy())
 
 
-def compose_attachment_world_matrix(child_scp, parent_scp, parent_world, mode, payload, behavior):
+def compose_attachment_world_matrix(
+    child_scp,
+    parent_scp,
+    parent_world,
+    mode,
+    payload,
+    behavior,
+    *,
+    parent_proxy=None,
+    depsgraph=None,
+):
     strategy, behavior_n = _REGISTRY.resolve(mode, behavior)
     desc = RelationDescriptor(mode=mode, payload=payload, behavior=behavior_n)
-    intent = strategy.compose_world_matrix(child_scp, parent_scp, parent_world, desc)
+    intent = strategy.compose_world_matrix(
+        child_scp,
+        parent_scp,
+        parent_world,
+        desc,
+        parent_proxy=parent_proxy,
+        depsgraph=depsgraph,
+    )
     return intent.matrix_world
 
 

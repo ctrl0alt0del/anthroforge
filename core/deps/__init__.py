@@ -16,6 +16,15 @@ from .gates import (
     register_gate,
     evaluate_gates,
 )
+from .conflict_resolver import (
+    resolve_conflict,
+    register_conflict_strategy,
+    list_conflict_strategies,
+    set_conflict_policy,
+    get_conflict_policy,
+    list_conflict_policies,
+    clear_conflict_policies,
+)
 
 __all__ = [
     "run_dependency_runtime",
@@ -33,4 +42,11 @@ __all__ = [
     "GateDecision",
     "register_gate",
     "evaluate_gates",
+    "resolve_conflict",
+    "register_conflict_strategy",
+    "list_conflict_strategies",
+    "set_conflict_policy",
+    "get_conflict_policy",
+    "list_conflict_policies",
+    "clear_conflict_policies",
 ]

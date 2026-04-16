@@ -1,11 +1,37 @@
 import bpy
 from mathutils import Vector
 from ...shapes.registry import ShapeRegistry
+from ...deps.conflict_resolver import resolve_conflict
 from ..control_runtime import active_entity_id
 
 
 class ParallelepipedSCPSyncExtension:
     shape_type = "PARALLELEPIPED"
+
+    def _set_vertex_point(self, scp_prop, vert_index, target_local, *, source="blender_control", payload=None):
+        if vert_index < 0 or vert_index >= len(scp_prop.parallelepiped_points):
+            return False
+        point = scp_prop.parallelepiped_points[vert_index]
+        current = (float(point.co[0]), float(point.co[1]), float(point.co[2]))
+        incoming = (float(target_local.x), float(target_local.y), float(target_local.z))
+        resolved = resolve_conflict(
+            entity_type="SCP",
+            entity_id=str(getattr(scp_prop, "id", "") or ""),
+            aspect=f"geometry.parallelepiped_points[{int(vert_index)}].co",
+            source=source,
+            current=current,
+            incoming=incoming,
+            payload=dict(payload or {}),
+        )
+        try:
+            next_value = (float(resolved[0]), float(resolved[1]), float(resolved[2]))
+        except Exception:
+            next_value = incoming
+        if tuple(current) == tuple(next_value):
+            return False
+        point.co = next_value
+        return True
+
     def _find_vertex_handle(self, vis_col, root_name, scp_id, vert_index):
         for obj in vis_col.objects:
             if (
@@ -82,9 +108,22 @@ class ParallelepipedSCPSyncExtension:
         old = self._point_vec(scp_prop.parallelepiped_points[vert_index])
         if (local - old).length_squared <= 1e-10:
             return True, False, None
-        scp_prop.parallelepiped_points[vert_index].co = (local.x, local.y, local.z)
-        self._apply_pair_update_if_needed(scp_prop, proxy, obj.location, vert_index)
-        return True, True, scp_id
+        changed = self._set_vertex_point(
+            scp_prop,
+            vert_index,
+            local,
+            source="blender_control",
+            payload={"vert_index": int(vert_index), "space": str(space)},
+        )
+        changed |= self._apply_pair_update_if_needed(
+            scp_prop,
+            proxy,
+            obj.location,
+            vert_index,
+            source="deps_control_mirror_pair",
+            payload={"trigger_vert_index": int(vert_index)},
+        )
+        return True, changed, scp_id if changed else None
 
     def _activate_scp(self, root, scp_id):
         for i, s in enumerate(root.af_scp_system.scps):
@@ -105,13 +144,20 @@ class ParallelepipedSCPSyncExtension:
             return local_deformed
         return shape.invert_point_from_space(local_deformed, space=space)
 
-    def _apply_pair_update_if_needed(self, scp_prop, proxy, world_location, vert_index):
+    def _apply_pair_update_if_needed(self, scp_prop, proxy, world_location, vert_index, *, source="deps_control_mirror_pair", payload=None):
         shape = ShapeRegistry.create_from_prop(scp_prop)
         if shape is None:
-            return
+            return False
         pair_update = shape.mirror_pair_update_from_handle(proxy, world_location, vert_index, scp_prop)
         if pair_update is None:
-            return
+            return False
         pair_index, mirrored_local = pair_update
         if 0 <= pair_index < len(scp_prop.parallelepiped_points):
-            scp_prop.parallelepiped_points[pair_index].co = (mirrored_local.x, mirrored_local.y, mirrored_local.z)
+            return self._set_vertex_point(
+                scp_prop,
+                pair_index,
+                mirrored_local,
+                source=source,
+                payload=dict(payload or {}, pair_index=int(pair_index)),
+            )
+        return False

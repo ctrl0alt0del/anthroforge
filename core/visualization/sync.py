@@ -19,7 +19,6 @@ from .scp_sync_helpers import (
 from .colors import next_color
 from .scp_sync import (
     CurveSCPSyncExtension,
-    EllipsoidSCPSyncExtension,
     MeshAssetSCPSyncExtension,
     ParallelepipedSCPSyncExtension,
 )
@@ -31,7 +30,6 @@ class SCPSceneSync:
         self._syncing = False
         self._shape_sync_extensions = [
             CurveSCPSyncExtension(),
-            EllipsoidSCPSyncExtension(),
             MeshAssetSCPSyncExtension(),
             ParallelepipedSCPSyncExtension(),
         ]
@@ -173,6 +171,7 @@ class SCPSceneSync:
         parent_scp = runtime_registry.get(scp.attachment.parent_id)
         if parent_proxy and parent_scp:
             parent_world = parent_proxy.matrix_world.copy()
+            depsgraph = bpy.context.evaluated_depsgraph_get()
             try:
                 return compose_attachment_world_matrix(
                     child_scp=scp,
@@ -181,6 +180,8 @@ class SCPSceneSync:
                     mode=mode,
                     payload=payload,
                     behavior=behavior,
+                    parent_proxy=parent_proxy,
+                    depsgraph=depsgraph,
                 )
             except Exception:
                 pass

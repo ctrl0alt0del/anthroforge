@@ -2,6 +2,7 @@ import bpy
 
 from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
+from ..deps.conflict_resolver import resolve_conflict
 from ..utils import get_af_root
 from ..vcp.muscle_surface import (
     build_surface_data,
@@ -246,10 +247,24 @@ class MuscleSceneSync:
         if snapped is None:
             return False
         obj.location = snapped
-        new_loc = (snapped.x, snapped.y, snapped.z)
-        if tuple(muscle.inflation_ctrl_world) == new_loc:
+        incoming = (snapped.x, snapped.y, snapped.z)
+        current = tuple(muscle.inflation_ctrl_world)
+        resolved = resolve_conflict(
+            entity_type="MUSCLE",
+            entity_id=str(muscle_id or ""),
+            aspect="inflation.ctrl_world",
+            source="blender_control",
+            current=current,
+            incoming=incoming,
+            payload={"control": "inflation"},
+        )
+        try:
+            new_loc = (float(resolved[0]), float(resolved[1]), float(resolved[2]))
+        except Exception:
+            new_loc = incoming
+        if tuple(muscle.inflation_ctrl_world) == tuple(new_loc):
             return False
-        muscle.inflation_ctrl_world = new_loc
+        muscle.inflation_ctrl_world = tuple(new_loc)
         changed_muscle_ids.add(muscle_id)
         return True
 

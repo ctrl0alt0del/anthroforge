@@ -5,8 +5,6 @@ import bmesh
 from mathutils import Vector
 from .base import ShapeStrategy
 from .deformers import ShapeSizeDeformer, ResolutionDeformer
-from .deformer_impl import EllipsoidClipDeformer
-from .state_codec import get_deformer_param_overrides
 from .registry import ShapeRegistry
 
 
@@ -17,7 +15,6 @@ class EllipsoidShape(ShapeStrategy):
     proxy_object_type = "MESH"
     proxy_data_type = "MESH"
     _SIZE = ShapeSizeDeformer()
-    _CLIP = EllipsoidClipDeformer()
     _RESOLUTION = ResolutionDeformer()
 
     def __init__(
@@ -48,20 +45,18 @@ class EllipsoidShape(ShapeStrategy):
 
     @classmethod
     def from_scp_prop(cls, scp_prop):
-        overrides = get_deformer_param_overrides(scp_prop)
-        clip = dict(overrides.get("ellipsoid_clip", {}) or {})
         shape = cls(
             radii=tuple(scp_prop.ellipsoid_radii),
             resolution=scp_prop.ellipsoid_resolution,
-            clip_enabled=bool(clip.get("enabled", False)),
-            clip1_enabled=bool(clip.get("clip1_enabled", False)),
-            clip1_normal=tuple(clip.get("clip1_normal", (1.0, 0.0, 0.0))),
-            clip1_offset=float(clip.get("clip1_offset", 0.0)),
-            clip1_keep_side=str(clip.get("clip1_keep_side", "POS")),
-            clip2_enabled=bool(clip.get("clip2_enabled", False)),
-            clip2_normal=tuple(clip.get("clip2_normal", (-1.0, 0.0, 0.0))),
-            clip2_offset=float(clip.get("clip2_offset", 0.0)),
-            clip2_keep_side=str(clip.get("clip2_keep_side", "POS")),
+            clip_enabled=False,
+            clip1_enabled=False,
+            clip1_normal=(1.0, 0.0, 0.0),
+            clip1_offset=0.0,
+            clip1_keep_side="POS",
+            clip2_enabled=False,
+            clip2_normal=(-1.0, 0.0, 0.0),
+            clip2_offset=0.0,
+            clip2_keep_side="POS",
         )
         return cls.hydrate_from_scp_prop(shape, scp_prop)
 
@@ -172,18 +167,14 @@ class EllipsoidShape(ShapeStrategy):
     def get_deformers(self):
         # Explicit stack order:
         # Shape Size -> Resolution -> Dynamic Deformers -> Control
-        return [self._SIZE, self._RESOLUTION, self._CLIP]
+        return [self._SIZE, self._RESOLUTION]
 
     def get_attach_params(self):
-        clip_state = self.get_deformer_state(self._CLIP.deformer_id)
         params = []
         for i in range(self.resolution):
             theta = (2 * math.pi * i) / self.resolution
             for j in range(1, self.resolution):
-                phi = (math.pi * j) / self.resolution
-                p = self._compute_base_local_point(theta, phi)
-                if self._CLIP.is_kept(p, self, deformer_state=clip_state):
-                    params.append((theta, phi))
+                params.append((theta, (math.pi * j) / self.resolution))
         if not params:
             params.append((0.0, math.pi * 0.5))
         return params

@@ -2,7 +2,6 @@ import bpy
 from mathutils import Euler, Quaternion
 from ..core.utils import get_af_root
 from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
-from ..core.shapes.state_codec import set_deformer_param_patch
 from ..core.attachment_codec import (
     parse_scp_attach_descriptor,
     encode_surface_frame,
@@ -17,24 +16,7 @@ from ..core.visualization.control_runtime import notify_selection_changed
 
 
 def _sync_deformer_state_from_scp_prop(scp_prop):
-    if scp_prop is None:
-        return
-    st = str(getattr(scp_prop, "shape_type", "") or "")
-    if st == "PARALLELEPIPED":
-        set_deformer_param_patch(scp_prop, "parallelepiped_bend", "enabled", bool(getattr(scp_prop, "parallelepiped_bend_enabled", False)))
-        set_deformer_param_patch(scp_prop, "parallelepiped_bend", "axis", str(getattr(scp_prop, "parallelepiped_bend_axis", "X")))
-        set_deformer_param_patch(scp_prop, "parallelepiped_bend", "angle_deg", float(getattr(scp_prop, "parallelepiped_bend_angle_deg", 0.0)))
-        set_deformer_param_patch(scp_prop, "parallelepiped_bend", "radius", float(getattr(scp_prop, "parallelepiped_bend_radius", 1.0)))
-    elif st == "ELLIPSOID":
-        set_deformer_param_patch(scp_prop, "ellipsoid_clip", "enabled", bool(getattr(scp_prop, "ellipsoid_clip_enabled", False)))
-        set_deformer_param_patch(scp_prop, "ellipsoid_clip", "clip1_enabled", bool(getattr(scp_prop, "ellipsoid_clip1_enabled", False)))
-        set_deformer_param_patch(scp_prop, "ellipsoid_clip", "clip1_normal", tuple(getattr(scp_prop, "ellipsoid_clip1_normal", (1.0, 0.0, 0.0))))
-        set_deformer_param_patch(scp_prop, "ellipsoid_clip", "clip1_offset", float(getattr(scp_prop, "ellipsoid_clip1_offset", 0.0)))
-        set_deformer_param_patch(scp_prop, "ellipsoid_clip", "clip1_keep_side", str(getattr(scp_prop, "ellipsoid_clip1_keep_side", "POS")))
-        set_deformer_param_patch(scp_prop, "ellipsoid_clip", "clip2_enabled", bool(getattr(scp_prop, "ellipsoid_clip2_enabled", False)))
-        set_deformer_param_patch(scp_prop, "ellipsoid_clip", "clip2_normal", tuple(getattr(scp_prop, "ellipsoid_clip2_normal", (-1.0, 0.0, 0.0))))
-        set_deformer_param_patch(scp_prop, "ellipsoid_clip", "clip2_offset", float(getattr(scp_prop, "ellipsoid_clip2_offset", 0.0)))
-        set_deformer_param_patch(scp_prop, "ellipsoid_clip", "clip2_keep_side", str(getattr(scp_prop, "ellipsoid_clip2_keep_side", "POS")))
+    _ = scp_prop
 
 
 def _sync_attach_behavior_from_scp_prop(scp_prop):

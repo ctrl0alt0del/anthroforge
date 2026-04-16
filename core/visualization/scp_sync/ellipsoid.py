@@ -2,6 +2,7 @@ import bpy
 from mathutils import Vector
 from ...shapes.state_codec import set_deformer_param_patch
 from ...shapes.registry import ShapeRegistry
+from ...deps.conflict_resolver import resolve_conflict
 from ..control_runtime import active_entity_id
 
 
@@ -177,15 +178,102 @@ class EllipsoidSCPSyncExtension:
             n = Vector((1.0, 0.0, 0.0))
         n.normalize()
         n_local, off = self._world_plane_to_local(proxy, n, mw.translation)
-        self._write_clip_props(scp_prop, clip_index, n_local, off)
-        return True, True, scp_id
+        changed = self._write_clip_props(
+            scp_prop,
+            clip_index,
+            n_local,
+            off,
+            source="blender_control",
+            payload={"clip_index": int(clip_index)},
+        )
+        return True, changed, scp_id if changed else None
 
-    def _write_clip_props(self, scp_prop, clip_index, n_local, off):
-        set_deformer_param_patch(scp_prop, "ellipsoid_clip", "enabled", True)
-        set_deformer_param_patch(scp_prop, "ellipsoid_clip", f"clip{clip_index}_enabled", True)
-        set_deformer_param_patch(scp_prop, "ellipsoid_clip", f"clip{clip_index}_normal", (n_local.x, n_local.y, n_local.z))
-        set_deformer_param_patch(scp_prop, "ellipsoid_clip", f"clip{clip_index}_offset", float(off))
-        setattr(scp_prop, "ellipsoid_clip_enabled", True)
-        setattr(scp_prop, f"ellipsoid_clip{clip_index}_enabled", True)
-        setattr(scp_prop, f"ellipsoid_clip{clip_index}_normal", (n_local.x, n_local.y, n_local.z))
-        setattr(scp_prop, f"ellipsoid_clip{clip_index}_offset", float(off))
+    def _resolve_clip_value(self, scp_prop, aspect, current, incoming, *, source="blender_control", payload=None):
+        resolved = resolve_conflict(
+            entity_type="SCP",
+            entity_id=str(getattr(scp_prop, "id", "") or ""),
+            aspect=str(aspect or ""),
+            source=source,
+            current=current,
+            incoming=incoming,
+            payload=dict(payload or {}),
+        )
+        return resolved
+
+    def _write_clip_props(self, scp_prop, clip_index, n_local, off, *, source="blender_control", payload=None):
+        changed = False
+
+        current_enabled = bool(getattr(scp_prop, "ellipsoid_clip_enabled", False))
+        next_enabled_raw = self._resolve_clip_value(
+            scp_prop,
+            "geometry.ellipsoid.clip.enabled",
+            current_enabled,
+            True,
+            source=source,
+            payload=payload,
+        )
+        next_enabled = bool(next_enabled_raw)
+        if current_enabled != next_enabled:
+            setattr(scp_prop, "ellipsoid_clip_enabled", next_enabled)
+            changed = True
+
+        clip_enabled_attr = f"ellipsoid_clip{clip_index}_enabled"
+        current_clip_enabled = bool(getattr(scp_prop, clip_enabled_attr, False))
+        next_clip_enabled_raw = self._resolve_clip_value(
+            scp_prop,
+            f"geometry.ellipsoid.clip[{int(clip_index)}].enabled",
+            current_clip_enabled,
+            True,
+            source=source,
+            payload=payload,
+        )
+        next_clip_enabled = bool(next_clip_enabled_raw)
+        if current_clip_enabled != next_clip_enabled:
+            setattr(scp_prop, clip_enabled_attr, next_clip_enabled)
+            changed = True
+
+        incoming_normal = (float(n_local.x), float(n_local.y), float(n_local.z))
+        current_normal = tuple(getattr(scp_prop, f"ellipsoid_clip{clip_index}_normal", (1.0, 0.0, 0.0)))
+        next_normal_raw = self._resolve_clip_value(
+            scp_prop,
+            f"geometry.ellipsoid.clip[{int(clip_index)}].normal",
+            current_normal,
+            incoming_normal,
+            source=source,
+            payload=payload,
+        )
+        try:
+            next_normal = (
+                float(next_normal_raw[0]),
+                float(next_normal_raw[1]),
+                float(next_normal_raw[2]),
+            )
+        except Exception:
+            next_normal = incoming_normal
+        if tuple(current_normal) != tuple(next_normal):
+            setattr(scp_prop, f"ellipsoid_clip{clip_index}_normal", next_normal)
+            changed = True
+
+        incoming_offset = float(off)
+        current_offset = float(getattr(scp_prop, f"ellipsoid_clip{clip_index}_offset", 0.0))
+        next_offset_raw = self._resolve_clip_value(
+            scp_prop,
+            f"geometry.ellipsoid.clip[{int(clip_index)}].offset",
+            current_offset,
+            incoming_offset,
+            source=source,
+            payload=payload,
+        )
+        try:
+            next_offset = float(next_offset_raw)
+        except Exception:
+            next_offset = incoming_offset
+        if abs(next_offset - current_offset) > 1e-10:
+            setattr(scp_prop, f"ellipsoid_clip{clip_index}_offset", next_offset)
+            changed = True
+
+        set_deformer_param_patch(scp_prop, "ellipsoid_clip", "enabled", bool(next_enabled))
+        set_deformer_param_patch(scp_prop, "ellipsoid_clip", f"clip{clip_index}_enabled", bool(next_clip_enabled))
+        set_deformer_param_patch(scp_prop, "ellipsoid_clip", f"clip{clip_index}_normal", tuple(next_normal))
+        set_deformer_param_patch(scp_prop, "ellipsoid_clip", f"clip{clip_index}_offset", float(next_offset))
+        return changed
