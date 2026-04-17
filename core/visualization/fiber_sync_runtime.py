@@ -3,9 +3,8 @@ import bpy
 from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..deps.conflict_resolver import resolve_conflict
-from ..registry import SCPRegistry
 from ..utils import get_af_root
-from ..attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param
+from ..attachment_codec import encode_fiber_mesh_anchor
 from .control_runtime import active_entity_id
 
 
@@ -120,8 +119,6 @@ def sync_root_to_scene(sync, root=None, scene=None, bake=False, target_fiber_ids
     try:
         vis_col = sync._get_vis_collection(scene)
         depsgraph = bpy.context.evaluated_depsgraph_get()
-        runtime = SCPRegistry(root)
-        runtime.build()
 
         fibers_to_sync = _fibers_to_sync(root, target_fiber_ids)
 
@@ -132,7 +129,7 @@ def sync_root_to_scene(sync, root=None, scene=None, bake=False, target_fiber_ids
 
         _cleanup_stale_fiber_proxies(vis_col, root.name, {f.id for f in root.af_vcp_system.fibers})
 
-        sync._sync_handles(root, scene, vis_col, runtime.registry)
+        sync._sync_handles(root, scene, vis_col, {})
         sync._apply_selection_highlight(root, scene)
     finally:
         sync._syncing = False
@@ -142,25 +139,21 @@ def _find_fiber(root, fiber_id):
     return next((f for f in root.af_vcp_system.fibers if f.id == fiber_id), None)
 
 
-def _compute_attach_raw(sync, parent_scp, parent_proxy, moved_world):
-    if getattr(parent_scp.shape, "type_id", "") == "MESH_ASSET":
-        local_pt = sync._nearest_parent_mesh_vertex_local_point(parent_proxy, moved_world)
-        return None if local_pt is None else encode_fiber_mesh_anchor(local_pt)
-    param = sync._nearest_param(parent_scp, parent_proxy, moved_world)
-    return encode_fiber_shape_param(param)
+def _compute_attach_raw(sync, parent_obj, moved_world):
+    local_pt = sync._nearest_parent_mesh_vertex_local_point(parent_obj, moved_world)
+    return None if local_pt is None else encode_fiber_mesh_anchor(local_pt)
 
 
-def _update_endpoint_handle(sync, root, scene, runtime, obj, changed_ids):
+def _update_endpoint_handle(sync, root, scene, obj, changed_ids):
     fiber = _find_fiber(root, obj.get("af_fiber_id"))
     endpoint = obj.get("af_fiber_endpoint")
     if fiber is None:
         return False
     parent_id = fiber.a_parent_id if endpoint == "A" else fiber.b_parent_id
-    parent_scp = runtime.registry.get(parent_id)
-    parent_proxy = sync._get_scp_proxy(scene, root.name, parent_id)
-    if parent_scp is None or parent_proxy is None:
+    parent_obj = sync._get_scp_proxy(scene, root.name, parent_id)
+    if parent_obj is None:
         return False
-    raw = _compute_attach_raw(sync, parent_scp, parent_proxy, obj.location.copy())
+    raw = _compute_attach_raw(sync, parent_obj, obj.location.copy())
     if raw is None:
         return False
     slot = "a_attach_param" if endpoint == "A" else "b_attach_param"
@@ -186,17 +179,16 @@ def _update_endpoint_handle(sync, root, scene, runtime, obj, changed_ids):
     return True
 
 
-def _update_touch_handle(sync, root, scene, runtime, obj, changed_ids):
+def _update_touch_handle(sync, root, scene, obj, changed_ids):
     fiber = _find_fiber(root, obj.get("af_fiber_id"))
     touch_index = int(obj.get("af_fiber_touch_index", -1))
     if fiber is None or touch_index < 0 or touch_index >= len(fiber.mid_touches):
         return False
     tp = fiber.mid_touches[touch_index]
-    parent_scp = runtime.registry.get(tp.parent_id)
-    parent_proxy = sync._get_scp_proxy(scene, root.name, tp.parent_id)
-    if parent_scp is None or parent_proxy is None:
+    parent_obj = sync._get_scp_proxy(scene, root.name, tp.parent_id)
+    if parent_obj is None:
         return False
-    raw = _compute_attach_raw(sync, parent_scp, parent_proxy, obj.location.copy())
+    raw = _compute_attach_raw(sync, parent_obj, obj.location.copy())
     if raw is None:
         return False
     current = str(tp.attach_param or "")
@@ -230,26 +222,26 @@ def _is_relevant_update_obj(sync, root, vis_col, obj):
 
 
 def _collect_changed_fiber_ids(sync, root, scene, depsgraph, vis_col, runtime):
+    _ = runtime
     changed_fiber_ids = set()
     for upd in depsgraph.updates:
         obj = upd.id
         if not _is_relevant_update_obj(sync, root, vis_col, obj):
             continue
         if obj.get("af_fiber_endpoint_handle"):
-            _update_endpoint_handle(sync, root, scene, runtime, obj, changed_fiber_ids)
+            _update_endpoint_handle(sync, root, scene, obj, changed_fiber_ids)
         elif obj.get("af_fiber_touch_handle"):
-            _update_touch_handle(sync, root, scene, runtime, obj, changed_fiber_ids)
+            _update_touch_handle(sync, root, scene, obj, changed_fiber_ids)
     return changed_fiber_ids
 
 
 def apply_fiber_control_update(sync, root, scene, obj, depsgraph):
-    runtime = SCPRegistry(root)
-    runtime.build()
+    _ = depsgraph
     changed = set()
     if obj.get("af_fiber_endpoint_handle"):
-        _update_endpoint_handle(sync, root, scene, runtime, obj, changed)
+        _update_endpoint_handle(sync, root, scene, obj, changed)
     elif obj.get("af_fiber_touch_handle"):
-        _update_touch_handle(sync, root, scene, runtime, obj, changed)
+        _update_touch_handle(sync, root, scene, obj, changed)
     return next(iter(changed), None)
 
 

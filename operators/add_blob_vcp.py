@@ -27,7 +27,7 @@ def _set_blob_target(blob, target):
     if target.get("af_muscle_proxy") and target.get("af_muscle_id"):
         blob.attach_target_type, blob.attach_target_id, blob.attach_target_object_name = "MUSCLE", target.get("af_muscle_id"), ""
         return
-    if target.get("af_proxy") and target.get("af_scp_id"):
+    if target.get("af_scp") and not target.get("af_scp_mirror") and target.get("af_scp_id"):
         blob.attach_target_type, blob.attach_target_id, blob.attach_target_object_name = "SCP", target.get("af_scp_id"), ""
         return
     blob.attach_target_type, blob.attach_target_id, blob.attach_target_object_name = "OBJECT", "", target.name

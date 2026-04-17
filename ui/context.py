@@ -1,8 +1,9 @@
 def _entity_from_active_object(root_name, obj):
     if not obj or obj.get("af_root_name") != root_name:
         return None
+    if obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_scp_id"):
+        return "SCP", obj.get("af_scp_id")
     checks = (
-        ("af_proxy", "af_scp_id", "SCP"),
         ("af_fiber_proxy", "af_fiber_id", "FIBER"),
         ("af_muscle_proxy", "af_muscle_id", "MUSCLE"),
         ("af_blob_proxy", "af_blob_id", "BLOB"),
@@ -10,8 +11,6 @@ def _entity_from_active_object(root_name, obj):
         ("af_fiber_touch_handle", "af_fiber_id", "FIBER"),
         ("af_muscle_inflation_ctrl", "af_muscle_id", "MUSCLE"),
         ("af_blob_control_gizmo", "af_blob_id", "BLOB"),
-        ("af_curve_point_handle", "af_scp_id", "SCP"),
-        ("af_parallelepiped_vert_handle", "af_scp_id", "SCP"),
     )
     for flag, id_key, kind in checks:
         if obj.get(flag) and obj.get(id_key):

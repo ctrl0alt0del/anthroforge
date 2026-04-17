@@ -3,18 +3,10 @@ from .drivers import DependencyDriver
 from .controls import pop_control_intents
 from .control_behaviors import apply_control_intent
 from ..constraints.scp_constraints import evaluate_scp_constraints_runtime, apply_scp_input_write
-from .transform_intents import pop_scp_transform_intents
-from .modifier_intents import pop_scp_modifier_intents
-from .scp_transform_intent_apply import (
-    apply_scp_transform_intent,
-    build_scp_transform_apply_context,
-)
-from .modifier_intent_apply import apply_scp_modifier_intent
 from ..visualization.sync import register_sync
 from ..visualization.fiber_sync import register_fiber_sync
 from ..visualization.muscle_sync import register_muscle_sync
 from ..visualization.blob_sync import register_blob_sync
-from ..visualization.mirror_sync import register_mirror_sync
 
 
 class RuntimeGraphDriver(DependencyDriver):
@@ -38,21 +30,21 @@ class SCPConstraintDriver(DependencyDriver):
     def entity_types(self):
         return ("SCP",)
 
-    def _apply_delayed_queue(self, root):
+    def _apply_delayed_queue(self, root, scene):
         if not self._delayed_writes:
             return set()
         changed_scps = set()
         for (etype, eid, port), value in list(self._delayed_writes.items()):
             if etype == "SCP":
-                if apply_scp_input_write(root, eid, port, value, source="deps_constraint_delayed"):
+                if apply_scp_input_write(root, eid, port, value, source="deps_constraint_delayed", scene=scene):
                     changed_scps.add(eid)
         self._delayed_writes.clear()
         return changed_scps
 
-    def inject_delayed_dirty(self, root, dirty):
+    def inject_delayed_dirty(self, root, dirty, scene=None):
         if "SCP" not in dirty:
             return set()
-        changed = self._apply_delayed_queue(root)
+        changed = self._apply_delayed_queue(root, scene)
         dirty["SCP"] |= changed
         return changed
 
@@ -83,73 +75,11 @@ class SCPConstraintDriver(DependencyDriver):
             changed_source_ids=changed_source_scps,
             is_cyclic_pair=is_cyclic_pair,
             delayed_writer=delayed_writer,
+            scene=ctx.scene,
         )
         self._delayed_writes.clear()
         self._delayed_writes.update(new_delayed)
         return {"SCP": set(changed_dest_scps)}
-
-
-class SCPTransformIntentDriver(DependencyDriver):
-    name = "scp_transform_intent_driver"
-
-    def entity_types(self):
-        return ("SCP",)
-
-    def apply_constraints(self, ctx):
-        changed = set()
-        intents = pop_scp_transform_intents(ctx.root)
-        if not intents:
-            return {}
-
-        apply_ctx = build_scp_transform_apply_context(ctx.root, scene=ctx.scene)
-        for item in intents:
-            if not isinstance(item, (list, tuple)) or len(item) < 2:
-                continue
-            scp_id = item[0]
-            matrix_world = item[1]
-            meta = dict(item[2] or {}) if len(item) >= 3 and isinstance(item[2], dict) else {}
-            if apply_scp_transform_intent(
-                ctx.root,
-                scp_id,
-                matrix_world,
-                context=apply_ctx,
-                source=str(meta.get("source", "unknown") or "unknown"),
-                payload=dict(meta.get("payload", {}) or {}),
-            ):
-                changed.add(scp_id)
-        if not changed:
-            return {}
-        return {"SCP": changed}
-
-
-class SCPModifierIntentDriver(DependencyDriver):
-    name = "scp_modifier_intent_driver"
-
-    def entity_types(self):
-        return ("SCP",)
-
-    def apply_constraints(self, ctx):
-        changed = set()
-        intents = pop_scp_modifier_intents(ctx.root)
-        if not intents:
-            return {}
-        for item in intents:
-            if not isinstance(item, (list, tuple)) or len(item) < 2:
-                continue
-            scp_id = item[0]
-            state = item[1]
-            meta = dict(item[2] or {}) if len(item) >= 3 and isinstance(item[2], dict) else {}
-            if apply_scp_modifier_intent(
-                ctx.root,
-                scp_id,
-                state,
-                source=str(meta.get("source", "unknown") or "unknown"),
-                payload=dict(meta.get("payload", {}) or {}),
-            ):
-                changed.add(str(scp_id))
-        if not changed:
-            return {}
-        return {"SCP": changed}
 
 
 class ControlIntentDriver(DependencyDriver):
@@ -175,6 +105,7 @@ class SCPSyncDriver(DependencyDriver):
         return ("SCP",)
 
     def sync(self, root, scene, is_full, impacted, bake):
+        _ = bake
         ids = set(impacted.get("SCP", set()) or set())
         if is_full:
             register_sync().sync_root_to_scene(root=root, scene=scene)
@@ -222,10 +153,3 @@ class BlobSyncDriver(DependencyDriver):
             register_blob_sync().sync_root_to_scene(root=root, scene=scene)
         elif ids:
             register_blob_sync().sync_root_to_scene(root=root, scene=scene, target_blob_ids=ids)
-
-
-class MirrorPostSyncDriver(DependencyDriver):
-    name = "mirror_post_sync_driver"
-
-    def post_sync(self, root, scene, is_full, impacted, bake):
-        register_mirror_sync().sync_root_to_scene(root=root, scene=scene)

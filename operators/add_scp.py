@@ -1,87 +1,186 @@
 import bpy
-from mathutils import Vector
 
-from ..core.attachment_codec import encode_surface_frame
 from ..core.utils import get_af_root
-from ..core.registry import SCPRegistry
-from ..core.shapes.registry import ShapeRegistry
 from ..core.id_utils import next_prefixed_id
 from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.visualization.sync_runner import sync_from_dirty_hints
 
 
+def _is_marked_source_scp(obj, root_name):
+    return bool(
+        obj
+        and obj.type == "MESH"
+        and obj.get("af_scp")
+        and not obj.get("af_scp_mirror")
+        and obj.get("af_root_name") == root_name
+        and obj.get("af_scp_id")
+    )
+
+
+def _find_scp_by_id(root, scp_id):
+    for scp in root.af_scp_system.scps:
+        if scp.id == scp_id:
+            return scp
+    return None
+
+
+def _find_scp_by_object_name(root, object_name):
+    for scp in root.af_scp_system.scps:
+        if str(getattr(scp, "object_name", "") or "") == str(object_name or ""):
+            return scp
+    return None
+
+
+def _find_scp_index(root, scp_id):
+    for i, scp in enumerate(root.af_scp_system.scps):
+        if scp.id == scp_id:
+            return i
+    return -1
+
+
+def _effective_parent_obj(scene, root, child_obj):
+    parent_candidate = getattr(scene, "af_scp_parent_obj", None)
+    if _is_marked_source_scp(parent_candidate, root.name):
+        return parent_candidate
+    parent = getattr(child_obj, "parent", None)
+    if _is_marked_source_scp(parent, root.name):
+        return parent
+    return None
+
+
+def _is_parent_cycle(child_obj, parent_obj):
+    cur = parent_obj
+    while cur is not None:
+        if cur == child_obj:
+            return True
+        cur = getattr(cur, "parent", None)
+    return False
+
+
+def _set_parent_relation(root, child_obj, child_scp, parent_obj):
+    if parent_obj is None:
+        child_obj.parent = None
+        child_scp.parent_id = ""
+        child_scp.attach_param = ""
+        return
+
+    child_obj.parent = parent_obj
+    child_scp.parent_id = str(parent_obj.get("af_scp_id") or "")
+    child_scp.attach_param = ""
+
+
 class AF_OT_AddSCP(bpy.types.Operator):
     bl_idname = "af.add_scp"
-    bl_label = "Add SCP"
-    bl_description = "Add a new Structural Control Primitive"
+    bl_label = "Mark Selected Mesh As SCP"
+    bl_description = "Mark active mesh object as SCP"
 
-    def _init_scp(self, context, root):
-        scp_collection = root.af_scp_system.scps
-        new_scp = scp_collection.add()
-        new_scp.id = next_prefixed_id(scp_collection, "SCP")
-        new_scp.name = new_scp.id
-        new_scp.shape_type = context.scene.af_scp_type
-        new_scp.local_origin = (0.0, 0.0, 0.0)
-        new_scp.local_rotation = (1.0, 0.0, 0.0, 0.0)
-        new_scp.local_rotation_euler = (0.0, 0.0, 0.0)
-        new_scp.local_scale = (1.0, 1.0, 1.0)
-        shape_cls = ShapeRegistry.get(new_scp.shape_type)
-        if shape_cls:
-            shape_cls.init_scp_prop_defaults(new_scp)
-        ShapeRegistry.apply_creation_to_scp(new_scp.shape_type, context.scene, new_scp)
-        return new_scp
+    def _ensure_marked_tags(self, obj, root_name, scp_id):
+        obj["af_scp"] = True
+        obj["af_root_name"] = root_name
+        obj["af_scp_id"] = scp_id
 
-    def _parent_first_param(self, root, parent_id):
-        runtime = SCPRegistry(root)
-        runtime.build()
-        parent_scp = runtime.registry.get(parent_id)
-        if parent_scp is None:
-            return 0.0
-        params = parent_scp.shape.get_attach_params()
-        return params[0] if params else 0.0
+    def _ensure_collection_entry(self, root, obj):
+        existing_id = str(obj.get("af_scp_id") or "")
+        existing = _find_scp_by_id(root, existing_id) if existing_id else None
+        if existing is None:
+            existing = _find_scp_by_object_name(root, obj.name)
 
-    def _apply_parent_attachment(self, context, root, new_scp):
-        parent_obj = context.scene.af_new_parent_obj
-        parent_id = parent_obj.get("af_scp_id", "") if parent_obj else ""
-        if not parent_id:
-            new_scp.parent_id, new_scp.attach_param = "", ""
-            return
-        new_scp.parent_id = parent_id
-        new_scp.attach_param = encode_surface_frame(
-            parent_param=self._parent_first_param(root, parent_id),
-            child_origin_local=Vector((0.0, 0.0, 0.0)),
-            child_tangent_local=Vector((1.0, 0.0, 0.0)),
-            child_normal_local=Vector((0.0, 0.0, 1.0)),
-        )
+        if existing is None:
+            scp = root.af_scp_system.scps.add()
+            scp.id = next_prefixed_id(root.af_scp_system.scps, "SCP")
+            scp.name = obj.name
+            scp.object_name = obj.name
+            scp.parent_id = ""
+            scp.attach_param = ""
+            scp.attach_follow_parent_rotation = True
+            scp.mirror_enabled = False
+            scp.mirror_axis = "X"
+            scp.mirror_origin = (0.0, 0.0, 0.0)
+            return scp
 
-    def _find_proxy(self, scene, root_name, scp_id):
-        for obj in scene.objects:
-            if obj.get("af_proxy") and obj.get("af_root_name") == root_name and obj.get("af_scp_id") == scp_id:
-                if not obj.get("af_mirror_proxy"):
-                    return obj
-        return None
-
-    def _select_proxy(self, context, proxy):
-        if proxy is None:
-            return
-        for o in context.selected_objects:
-            o.select_set(False)
-        proxy.select_set(True)
-        context.view_layer.objects.active = proxy
+        existing.name = obj.name
+        existing.object_name = obj.name
+        return existing
 
     def execute(self, context):
         root = get_af_root(context.scene)
         if root is None:
             self.report({"ERROR"}, "No AF_ROOT found in scene.")
             return {"CANCELLED"}
-        new_scp = self._init_scp(context, root)
-        self._apply_parent_attachment(context, root, new_scp)
+
+        obj = context.active_object
+        if obj is None or obj.type != "MESH":
+            self.report({"ERROR"}, "Select a mesh object first.")
+            return {"CANCELLED"}
+
+        if obj.get("af_scp_mirror"):
+            self.report({"ERROR"}, "Cannot mark mirror object as SCP.")
+            return {"CANCELLED"}
+
+        scp = self._ensure_collection_entry(root, obj)
+        self._ensure_marked_tags(obj, root.name, scp.id)
+
+        parent_obj = _effective_parent_obj(context.scene, root, obj)
+        if parent_obj is not None and _is_parent_cycle(obj, parent_obj):
+            self.report({"ERROR"}, "Parent relation would create a cycle.")
+            return {"CANCELLED"}
+        _set_parent_relation(root, obj, scp, parent_obj)
+
+        idx = _find_scp_index(root, scp.id)
+        if idx >= 0:
+            root.af_scp_system.active_scp_index = idx
+
         sync_from_dirty_hints(
             root=root,
             scene=context.scene,
-            dirty_hints=dirty_hints_for("SCP", {new_scp.id}),
+            dirty_hints=dirty_hints_for("SCP", {scp.id}),
+            source="operator",
+            event_type="MARK",
         )
-        root.af_scp_system.active_scp_index = len(root.af_scp_system.scps) - 1
-        self._select_proxy(context, self._find_proxy(context.scene, root.name, new_scp.id))
-        self.report({"INFO"}, f"Added {new_scp.shape_type} SCP")
+        self.report({"INFO"}, f"Marked '{obj.name}' as {scp.id}")
+        return {"FINISHED"}
+
+
+class AF_OT_SetSCPParent(bpy.types.Operator):
+    bl_idname = "af.set_scp_parent"
+    bl_label = "Set SCP Parent"
+    bl_description = "Assign or clear parent for active SCP"
+
+    def execute(self, context):
+        root = get_af_root(context.scene)
+        if root is None:
+            return {"CANCELLED"}
+
+        child_obj = context.active_object
+        if not _is_marked_source_scp(child_obj, root.name):
+            self.report({"ERROR"}, "Active object must be a marked SCP mesh.")
+            return {"CANCELLED"}
+
+        child_id = str(child_obj.get("af_scp_id") or "")
+        child_scp = _find_scp_by_id(root, child_id)
+        if child_scp is None:
+            self.report({"ERROR"}, "Active SCP entry not found.")
+            return {"CANCELLED"}
+
+        parent_obj = getattr(context.scene, "af_scp_parent_obj", None)
+        if parent_obj is not None:
+            if not _is_marked_source_scp(parent_obj, root.name):
+                self.report({"ERROR"}, "Parent must be another marked SCP mesh.")
+                return {"CANCELLED"}
+            if parent_obj == child_obj:
+                self.report({"ERROR"}, "SCP cannot be parent of itself.")
+                return {"CANCELLED"}
+            if _is_parent_cycle(child_obj, parent_obj):
+                self.report({"ERROR"}, "Parent relation would create a cycle.")
+                return {"CANCELLED"}
+
+        _set_parent_relation(root, child_obj, child_scp, parent_obj)
+
+        sync_from_dirty_hints(
+            root=root,
+            scene=context.scene,
+            dirty_hints=dirty_hints_for("SCP", {child_id}),
+            source="operator",
+            event_type="UPDATE",
+        )
         return {"FINISHED"}

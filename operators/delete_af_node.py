@@ -28,6 +28,25 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
                 return i
         return -1
 
+    def _find_scp_object(self, context, root_name, scp_id):
+        for obj in context.scene.objects:
+            if (
+                obj.get("af_scp")
+                and not obj.get("af_scp_mirror")
+                and obj.get("af_root_name") == root_name
+                and obj.get("af_scp_id") == scp_id
+            ):
+                return obj
+        return None
+
+    def _remove_scp_tags(self, obj):
+        for key in ("af_scp", "af_root_name", "af_scp_id"):
+            try:
+                if key in obj:
+                    del obj[key]
+            except Exception:
+                pass
+
     def _collect_scp_children(self, root, scps, scp_id):
         child_scps = [scp.id for scp in scps if scp.parent_id == scp_id]
         child_fibers = []
@@ -55,10 +74,23 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
                 parts.append(f"Fiber children: {', '.join(child_fibers[:5])}")
             self.report({"ERROR"}, "Cannot delete SCP with children. " + " | ".join(parts))
             return {"CANCELLED"}
+
+        obj = self._find_scp_object(context, root.name, scp_id)
+        if obj is not None:
+            self._remove_scp_tags(obj)
+            if getattr(context.scene, "af_scp_parent_obj", None) == obj:
+                context.scene.af_scp_parent_obj = None
+
         scps.remove(idx)
         self._set_active_scp_after_remove(root, scps, idx)
-        sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=dirty_hints_for("SCP", {scp_id}))
-        self.report({"INFO"}, f"Deleted SCP '{scp_id}'")
+        sync_from_dirty_hints(
+            root=root,
+            scene=context.scene,
+            dirty_hints=dirty_hints_for("SCP", {scp_id}),
+            source="operator",
+            event_type="UNMARK",
+        )
+        self.report({"INFO"}, f"Unmarked SCP '{scp_id}'")
         return {"FINISHED"}
 
     def _delete_fiber(self, context, root, fiber_id):
@@ -128,7 +160,7 @@ class AF_OT_DeleteSelectedAFNode(bpy.types.Operator):
         if obj is None:
             return bpy.ops.object.delete("INVOKE_DEFAULT")
 
-        if obj.get("af_proxy") and obj.get("af_root_name") == root.name and obj.get("af_scp_id"):
+        if obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_root_name") == root.name and obj.get("af_scp_id"):
             return self._delete_scp(context, root, obj.get("af_scp_id"))
 
         if obj.get("af_fiber_proxy") and obj.get("af_root_name") == root.name and obj.get("af_fiber_id"):

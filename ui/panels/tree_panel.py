@@ -8,7 +8,12 @@ from ..sections.vcp_tree_section import draw_vcp_tree_section
 def _selected_scp_ids(context, root):
     out = set()
     for obj in context.selected_objects:
-        if obj.get("af_proxy") and obj.get("af_root_name") == root.name and obj.get("af_scp_id"):
+        if (
+            obj.get("af_scp")
+            and not obj.get("af_scp_mirror")
+            and obj.get("af_root_name") == root.name
+            and obj.get("af_scp_id")
+        ):
             out.add(obj.get("af_scp_id"))
     return out
 

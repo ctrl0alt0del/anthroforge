@@ -43,13 +43,6 @@ def _draw_select_and_delete(row, scp, selected_ids):
     del_op.target_id = scp.id
 
 
-def _draw_shape_tag(row, scp):
-    right = row.row()
-    right.alignment = "RIGHT"
-    right.enabled = False
-    right.label(text=scp.shape_type)
-
-
 def _draw_node(layout, scene, scp, children_map, depth, active_id, selected_ids, visited):
     if scp.id in visited:
         return
@@ -64,7 +57,6 @@ def _draw_node(layout, scene, scp, children_map, depth, active_id, selected_ids,
     _draw_indent(row, depth)
     _draw_expand_toggle(row, scene, scp.id, has_children, collapsed)
     _draw_select_and_delete(row, scp, selected_ids)
-    _draw_shape_tag(row, scp)
 
     if has_children and not collapsed:
         for child in children:

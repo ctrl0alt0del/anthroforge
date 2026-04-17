@@ -1,0 +1,176 @@
+bl_info = {
+  "name": "AnthroForge",
+  "author": "AnthroForge Team",
+  "version": (0, 1, 0),
+  "blender": (4, 4, 0),
+  "location": "View3D > Sidebar > AnthroForge",
+  "description": "Procedural anatomical construction system",
+  "category": "Object",
+}
+
+import bpy
+
+from .operators.create_root import AF_OT_CreateRoot
+from .operators.add_scp import AF_OT_AddSCP
+from .operators.tree import (
+    AF_OT_ToggleSCPCollapse,
+    AF_OT_SelectSCPInTree,
+    AF_OT_ToggleVCPCollapse,
+    AF_OT_SelectVCPInTree,
+)
+from .operators.add_fiber_vcp import AF_OT_AddFiberVCP
+from .operators.add_muscle_vcp import AF_OT_AddMuscleVCP
+from .operators.add_blob_vcp import AF_OT_AddBlobVCP
+from .operators.delete_af_node import AF_OT_DeleteSelectedAFNode
+from .operators.fiber_tools import (
+    AF_OT_ClearFiberWarmStart,
+    AF_OT_RecomputeFiber,
+    AF_OT_AddFiberTouchPoint,
+    AF_OT_RemoveFiberTouchPoint,
+)
+from .operators.muscle_tools import (
+    AF_OT_FlipMuscleNormals,
+    AF_OT_SelectMuscleInflationCtrl,
+)
+from .operators.blob_tools import AF_OT_SelectBlobControl
+from .operators.register_mesh_scp_asset import AF_OT_RegisterMeshSCPAsset
+from .operators.mesh_asset_list import AF_OT_SelectMeshSCPAsset, AF_OT_DeleteMeshSCPAsset
+from .operators.scp_constraints import AF_OT_AddSCPConstraint, AF_OT_RemoveSCPConstraint
+
+from .ui.main_panel import AF_PT_MainPanel
+from .ui.panels.create_panel import AF_PT_CreatePanel
+from .ui.panels.tree_panel import AF_PT_TreePanel
+from .ui.panels.edit_panel import AF_PT_EditPanel
+from .ui.panels.fiber_edit_panel import AF_PT_FiberEditPanel
+from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
+from .ui.panels.vcp_edit_panel import AF_PT_VCPEditPanel
+from .ui.panels.blob_create_panel import AF_PT_BlobCreatePanel
+from .ui.panels.blob_edit_panel import AF_PT_BlobEditPanel
+
+from .properties.scp_properties import (
+    AF_CurvePoint_Property,
+    AF_ParallelepipedPoint_Property,
+    AF_SCP_Constraint_Property,
+    AF_SCP_Property,
+    AF_SCP_System_Property,
+)
+from .properties.vcp_properties import (
+    AF_MuscleFiberRef_Property,
+    AF_MuscleVCP_Property,
+    AF_FiberTouchPoint_Property,
+    AF_FiberVCP_Property,
+    AF_BlobVCP_Property,
+    AF_VCP_System_Property,
+)
+
+# Import shape modules for registration side-effects.
+from .core.shapes import curve as _shape_curve
+from .core.shapes import ellipsoid as _shape_ellipsoid
+from .core.shapes import mesh_asset as _shape_mesh_asset
+from .core.shapes import parallelepiped as _shape_parallelepiped
+from .core.visualization.sync import register_sync, unregister_sync
+from .core.visualization.fiber_sync import register_fiber_sync, unregister_fiber_sync
+from .core.visualization.muscle_sync import register_muscle_sync, unregister_muscle_sync
+from .core.visualization.blob_sync import register_blob_sync, unregister_blob_sync
+from .core.visualization.mirror_sync import register_mirror_sync, unregister_mirror_sync
+from .core.visualization.control_runtime import (
+    register_control_runtime,
+    unregister_control_runtime,
+)
+from .ui.scene_props import register_scene_props, unregister_scene_props
+
+addon_keymaps = []
+
+classes = (
+    AF_OT_CreateRoot,
+    AF_OT_AddSCP,
+    AF_OT_RegisterMeshSCPAsset,
+    AF_OT_ToggleSCPCollapse,
+    AF_OT_SelectSCPInTree,
+    AF_OT_SelectMeshSCPAsset,
+    AF_OT_DeleteMeshSCPAsset,
+    AF_OT_AddSCPConstraint,
+    AF_OT_RemoveSCPConstraint,
+    AF_PT_MainPanel,
+    AF_PT_CreatePanel,
+    AF_PT_TreePanel,
+    AF_PT_EditPanel,
+
+    AF_CurvePoint_Property,
+    AF_ParallelepipedPoint_Property,
+    AF_SCP_Constraint_Property,
+    AF_SCP_Property,
+    AF_SCP_System_Property,
+
+    AF_OT_ClearFiberWarmStart,
+    AF_OT_RecomputeFiber,
+    AF_OT_AddFiberTouchPoint,
+    AF_OT_RemoveFiberTouchPoint,
+
+    AF_PT_FiberEditPanel,
+    AF_PT_FiberCreatePanel,
+
+    AF_MuscleFiberRef_Property,
+    AF_MuscleVCP_Property,
+    AF_FiberTouchPoint_Property,
+    AF_FiberVCP_Property,
+    AF_BlobVCP_Property,
+    AF_VCP_System_Property,
+
+    AF_OT_AddFiberVCP,
+    AF_OT_AddMuscleVCP,
+    AF_OT_AddBlobVCP,
+    AF_OT_ToggleVCPCollapse,
+    AF_OT_SelectVCPInTree,
+
+    AF_OT_DeleteSelectedAFNode,
+    AF_PT_VCPEditPanel,
+    AF_OT_FlipMuscleNormals,
+    AF_OT_SelectMuscleInflationCtrl,
+    AF_OT_SelectBlobControl,
+    AF_PT_BlobCreatePanel,
+    AF_PT_BlobEditPanel,
+)
+
+
+def register():
+    for cls in classes:
+        bpy.utils.register_class(cls)
+
+    bpy.types.Object.af_scp_system = bpy.props.PointerProperty(type=AF_SCP_System_Property)
+    bpy.types.Object.af_vcp_system = bpy.props.PointerProperty(type=AF_VCP_System_Property)
+
+    register_scene_props()
+    register_sync()
+    register_fiber_sync()
+    register_muscle_sync()
+    register_blob_sync()
+    register_mirror_sync()
+    register_control_runtime()
+
+    wm = bpy.context.window_manager
+    kc = wm.keyconfigs.addon
+    if kc:
+        km = kc.keymaps.new(name="Object Mode", space_type="EMPTY")
+        kmi = km.keymap_items.new("af.delete_selected_af_node", "DEL", "PRESS")
+        addon_keymaps.append((km, kmi))
+
+
+def unregister():
+    unregister_mirror_sync()
+    unregister_control_runtime()
+    unregister_blob_sync()
+    unregister_muscle_sync()
+    unregister_fiber_sync()
+    unregister_sync()
+    unregister_scene_props()
+
+    del bpy.types.Object.af_scp_system
+    del bpy.types.Object.af_vcp_system
+
+    for km, kmi in addon_keymaps:
+        km.keymap_items.remove(kmi)
+    addon_keymaps.clear()
+
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)

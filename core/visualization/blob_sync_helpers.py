@@ -93,7 +93,7 @@ def _find_muscle_surface(scene, root_name, muscle_id, surface):
 
 def _find_scp_target(scene, root_name, scp_id):
     for o in scene.objects:
-        if o.get("af_proxy") and not o.get("af_mirror_proxy") and o.get("af_root_name") == root_name:
+        if o.get("af_scp") and not o.get("af_scp_mirror") and o.get("af_root_name") == root_name:
             if o.get("af_scp_id") == scp_id:
                 return o
     return None

@@ -11,7 +11,7 @@ bl_info = {
 import bpy
 
 from .operators.create_root import AF_OT_CreateRoot
-from .operators.add_scp import AF_OT_AddSCP
+from .operators.add_scp import AF_OT_AddSCP, AF_OT_SetSCPParent
 from .operators.tree import (
     AF_OT_ToggleSCPCollapse,
     AF_OT_SelectSCPInTree,
@@ -33,8 +33,6 @@ from .operators.muscle_tools import (
     AF_OT_SelectMuscleInflationCtrl,
 )
 from .operators.blob_tools import AF_OT_SelectBlobControl
-from .operators.register_mesh_scp_asset import AF_OT_RegisterMeshSCPAsset
-from .operators.mesh_asset_list import AF_OT_SelectMeshSCPAsset, AF_OT_DeleteMeshSCPAsset
 from .operators.scp_constraints import AF_OT_AddSCPConstraint, AF_OT_RemoveSCPConstraint
 
 from .ui.main_panel import AF_PT_MainPanel
@@ -48,8 +46,6 @@ from .ui.panels.blob_create_panel import AF_PT_BlobCreatePanel
 from .ui.panels.blob_edit_panel import AF_PT_BlobEditPanel
 
 from .properties.scp_properties import (
-    AF_CurvePoint_Property,
-    AF_ParallelepipedPoint_Property,
     AF_SCP_Constraint_Property,
     AF_SCP_Property,
     AF_SCP_System_Property,
@@ -63,16 +59,10 @@ from .properties.vcp_properties import (
     AF_VCP_System_Property,
 )
 
-# Import shape modules for registration side-effects.
-from .core.shapes import curve as _shape_curve
-from .core.shapes import ellipsoid as _shape_ellipsoid
-from .core.shapes import mesh_asset as _shape_mesh_asset
-from .core.shapes import parallelepiped as _shape_parallelepiped
 from .core.visualization.sync import register_sync, unregister_sync
 from .core.visualization.fiber_sync import register_fiber_sync, unregister_fiber_sync
 from .core.visualization.muscle_sync import register_muscle_sync, unregister_muscle_sync
 from .core.visualization.blob_sync import register_blob_sync, unregister_blob_sync
-from .core.visualization.mirror_sync import register_mirror_sync, unregister_mirror_sync
 from .core.visualization.control_runtime import (
     register_control_runtime,
     unregister_control_runtime,
@@ -84,11 +74,9 @@ addon_keymaps = []
 classes = (
     AF_OT_CreateRoot,
     AF_OT_AddSCP,
-    AF_OT_RegisterMeshSCPAsset,
+    AF_OT_SetSCPParent,
     AF_OT_ToggleSCPCollapse,
     AF_OT_SelectSCPInTree,
-    AF_OT_SelectMeshSCPAsset,
-    AF_OT_DeleteMeshSCPAsset,
     AF_OT_AddSCPConstraint,
     AF_OT_RemoveSCPConstraint,
     AF_PT_MainPanel,
@@ -96,8 +84,6 @@ classes = (
     AF_PT_TreePanel,
     AF_PT_EditPanel,
 
-    AF_CurvePoint_Property,
-    AF_ParallelepipedPoint_Property,
     AF_SCP_Constraint_Property,
     AF_SCP_Property,
     AF_SCP_System_Property,
@@ -145,7 +131,6 @@ def register():
     register_fiber_sync()
     register_muscle_sync()
     register_blob_sync()
-    register_mirror_sync()
     register_control_runtime()
 
     wm = bpy.context.window_manager
@@ -157,7 +142,6 @@ def register():
 
 
 def unregister():
-    unregister_mirror_sync()
     unregister_control_runtime()
     unregister_blob_sync()
     unregister_muscle_sync()

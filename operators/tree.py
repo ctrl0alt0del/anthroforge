@@ -36,9 +36,14 @@ class AF_OT_SelectSCPInTree(bpy.types.Operator):
                 return i
         return -1
 
-    def _find_scp_proxy(self, context, root_name):
+    def _find_scp_object(self, context, root_name):
         for obj in context.scene.objects:
-            if obj.get("af_proxy") and obj.get("af_root_name") == root_name and obj.get("af_scp_id") == self.scp_id:
+            if (
+                obj.get("af_scp")
+                and not obj.get("af_scp_mirror")
+                and obj.get("af_root_name") == root_name
+                and obj.get("af_scp_id") == self.scp_id
+            ):
                 return obj
         return None
 
@@ -63,7 +68,7 @@ class AF_OT_SelectSCPInTree(bpy.types.Operator):
         target_index = self._target_index(root)
         if target_index < 0:
             return {"CANCELLED"}
-        target_obj = self._find_scp_proxy(context, root.name)
+        target_obj = self._find_scp_object(context, root.name)
         if target_obj is None:
             return {"CANCELLED"}
         self._select_only(context, target_obj)

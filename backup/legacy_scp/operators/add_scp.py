@@ -1,0 +1,87 @@
+import bpy
+from mathutils import Vector
+
+from ..core.attachment_codec import encode_surface_frame
+from ..core.utils import get_af_root
+from ..core.registry import SCPRegistry
+from ..core.shapes.registry import ShapeRegistry
+from ..core.id_utils import next_prefixed_id
+from ..core.deps.dirty_hints import dirty_hints_for
+from ..core.visualization.sync_runner import sync_from_dirty_hints
+
+
+class AF_OT_AddSCP(bpy.types.Operator):
+    bl_idname = "af.add_scp"
+    bl_label = "Add SCP"
+    bl_description = "Add a new Structural Control Primitive"
+
+    def _init_scp(self, context, root):
+        scp_collection = root.af_scp_system.scps
+        new_scp = scp_collection.add()
+        new_scp.id = next_prefixed_id(scp_collection, "SCP")
+        new_scp.name = new_scp.id
+        new_scp.shape_type = context.scene.af_scp_type
+        new_scp.local_origin = (0.0, 0.0, 0.0)
+        new_scp.local_rotation = (1.0, 0.0, 0.0, 0.0)
+        new_scp.local_rotation_euler = (0.0, 0.0, 0.0)
+        new_scp.local_scale = (1.0, 1.0, 1.0)
+        shape_cls = ShapeRegistry.get(new_scp.shape_type)
+        if shape_cls:
+            shape_cls.init_scp_prop_defaults(new_scp)
+        ShapeRegistry.apply_creation_to_scp(new_scp.shape_type, context.scene, new_scp)
+        return new_scp
+
+    def _parent_first_param(self, root, parent_id):
+        runtime = SCPRegistry(root)
+        runtime.build()
+        parent_scp = runtime.registry.get(parent_id)
+        if parent_scp is None:
+            return 0.0
+        params = parent_scp.shape.get_attach_params()
+        return params[0] if params else 0.0
+
+    def _apply_parent_attachment(self, context, root, new_scp):
+        parent_obj = context.scene.af_new_parent_obj
+        parent_id = parent_obj.get("af_scp_id", "") if parent_obj else ""
+        if not parent_id:
+            new_scp.parent_id, new_scp.attach_param = "", ""
+            return
+        new_scp.parent_id = parent_id
+        new_scp.attach_param = encode_surface_frame(
+            parent_param=self._parent_first_param(root, parent_id),
+            child_origin_local=Vector((0.0, 0.0, 0.0)),
+            child_tangent_local=Vector((1.0, 0.0, 0.0)),
+            child_normal_local=Vector((0.0, 0.0, 1.0)),
+        )
+
+    def _find_proxy(self, scene, root_name, scp_id):
+        for obj in scene.objects:
+            if obj.get("af_proxy") and obj.get("af_root_name") == root_name and obj.get("af_scp_id") == scp_id:
+                if not obj.get("af_mirror_proxy"):
+                    return obj
+        return None
+
+    def _select_proxy(self, context, proxy):
+        if proxy is None:
+            return
+        for o in context.selected_objects:
+            o.select_set(False)
+        proxy.select_set(True)
+        context.view_layer.objects.active = proxy
+
+    def execute(self, context):
+        root = get_af_root(context.scene)
+        if root is None:
+            self.report({"ERROR"}, "No AF_ROOT found in scene.")
+            return {"CANCELLED"}
+        new_scp = self._init_scp(context, root)
+        self._apply_parent_attachment(context, root, new_scp)
+        sync_from_dirty_hints(
+            root=root,
+            scene=context.scene,
+            dirty_hints=dirty_hints_for("SCP", {new_scp.id}),
+        )
+        root.af_scp_system.active_scp_index = len(root.af_scp_system.scps) - 1
+        self._select_proxy(context, self._find_proxy(context.scene, root.name, new_scp.id))
+        self.report({"INFO"}, f"Added {new_scp.shape_type} SCP")
+        return {"FINISHED"}

@@ -1,8 +1,8 @@
+import bpy
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
 from ..attachment_codec import parse_fiber_attach_param
-from ..registry import SCPRegistry
 
 
 class FiberSolver:
@@ -110,9 +110,8 @@ class FiberSolver:
         return nodes
 
     def _runtime_registry(self, root):
-        runtime = SCPRegistry(root)
-        runtime.build()
-        return runtime.registry
+        _ = root
+        return {}
 
     def _mark_failed(self, fiber_prop):
         fiber_prop.not_converged = True
@@ -226,20 +225,42 @@ class FiberSolver:
     def _get_scp_proxy(self, root, scene, scp_id):
         for obj in scene.objects:
             if (
-                obj.get("af_proxy")
-                and not obj.get("af_mirror_proxy")
+                obj.get("af_scp")
+                and not obj.get("af_scp_mirror")
                 and obj.get("af_root_name") == root.name
                 and obj.get("af_scp_id") == scp_id
             ):
                 return obj
         return None
 
-    def _endpoint_world(self, root, scene, runtime_registry, parent_id, attach_param_raw):
-        if not parent_id:
+    def _mesh_local_point_from_shape_param(self, parent_obj, payload):
+        if parent_obj is None or parent_obj.type != "MESH" or parent_obj.data is None:
+            return None
+        try:
+            p = max(0.0, min(1.0, float(payload)))
+        except Exception:
+            p = 0.0
+
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        obj_eval = parent_obj.evaluated_get(depsgraph)
+        mesh_eval = obj_eval.to_mesh()
+        if mesh_eval is None or len(mesh_eval.vertices) == 0:
+            if mesh_eval is not None:
+                obj_eval.to_mesh_clear()
             return None
 
-        scp = runtime_registry.get(parent_id)
-        if scp is None:
+        try:
+            if len(mesh_eval.vertices) == 1:
+                return mesh_eval.vertices[0].co.copy()
+            idx = int(round(p * float(len(mesh_eval.vertices) - 1)))
+            idx = max(0, min(len(mesh_eval.vertices) - 1, idx))
+            return mesh_eval.vertices[idx].co.copy()
+        finally:
+            obj_eval.to_mesh_clear()
+
+    def _endpoint_world(self, root, scene, runtime_registry, parent_id, attach_param_raw):
+        _ = runtime_registry
+        if not parent_id:
             return None
 
         proxy = self._get_scp_proxy(root, scene, parent_id)
@@ -250,29 +271,25 @@ class FiberSolver:
         if mode == "mesh_anchor":
             local = payload
         elif mode == "shape_param_v1":
-            local = scp.shape.compute_local_point(payload)
+            local = self._mesh_local_point_from_shape_param(proxy, payload)
         else:
             return None
 
+        if local is None:
+            return None
         return proxy.matrix_world @ local
 
     def _surface_colliders(self, root, scene, runtime_registry):
+        _ = runtime_registry
         out = []
         for obj in scene.objects:
-            if not obj.get("af_proxy"):
+            if not obj.get("af_scp"):
                 continue
-            if obj.get("af_mirror_proxy"):
+            if obj.get("af_scp_mirror"):
                 continue
             if obj.get("af_root_name") != root.name:
                 continue
             if obj.type != "MESH":
-                continue
-
-            scp_id = obj.get("af_scp_id")
-            scp = runtime_registry.get(scp_id)
-            if scp is None:
-                continue
-            if not getattr(scp.shape, "supports_fiber_collision", True):
                 continue
 
             out.append(obj)

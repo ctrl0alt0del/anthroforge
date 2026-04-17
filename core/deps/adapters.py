@@ -56,6 +56,8 @@ def _add_scp_entities(root, graph, entity_sets):
 
 
 def _add_fiber_entities(root, graph, entity_sets):
+    if not hasattr(root, "af_vcp_system"):
+        return
     for f in root.af_vcp_system.fibers:
         fid = f.id
         entity_sets["FIBER"].add(fid)
@@ -76,6 +78,8 @@ def _add_fiber_entities(root, graph, entity_sets):
 
 
 def _add_muscle_entities(root, graph, entity_sets):
+    if not hasattr(root, "af_vcp_system"):
+        return
     for m in root.af_vcp_system.muscles:
         mid = m.id
         entity_sets["MUSCLE"].add(mid)
@@ -94,6 +98,8 @@ def _add_muscle_entities(root, graph, entity_sets):
 
 
 def _add_blob_entities(root, graph, entity_sets):
+    if not hasattr(root, "af_vcp_system"):
+        return
     for b in root.af_vcp_system.blobs:
         bid = b.id
         entity_sets["BLOB"].add(bid)

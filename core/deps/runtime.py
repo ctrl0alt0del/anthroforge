@@ -10,15 +10,12 @@ from .drivers import (
 )
 from .builtin_drivers import (
     RuntimeGraphDriver,
-    SCPTransformIntentDriver,
-    SCPModifierIntentDriver,
     ControlIntentDriver,
     SCPConstraintDriver,
     SCPSyncDriver,
     FiberSyncDriver,
     MuscleSyncDriver,
     BlobSyncDriver,
-    MirrorPostSyncDriver,
 )
 from .gates import (
     GateContext,
@@ -282,7 +279,7 @@ def _build_runtime_context(root, scene, dirty_hints, gate_meta=None):
     for d in get_dependency_drivers():
         if hasattr(d, "inject_delayed_dirty"):
             try:
-                d.inject_delayed_dirty(root, dirty)
+                d.inject_delayed_dirty(root, dirty, scene=scene)
             except Exception:
                 continue
 
@@ -414,12 +411,9 @@ def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=
 
 # Register built-in drivers.
 register_dependency_driver(RuntimeGraphDriver(), replace=True)
-register_dependency_driver(SCPTransformIntentDriver(), replace=True)
-register_dependency_driver(SCPModifierIntentDriver(), replace=True)
 register_dependency_driver(ControlIntentDriver(), replace=True)
 register_dependency_driver(SCPConstraintDriver(), replace=True)
 register_dependency_driver(SCPSyncDriver(), replace=True)
 register_dependency_driver(FiberSyncDriver(), replace=True)
 register_dependency_driver(MuscleSyncDriver(), replace=True)
 register_dependency_driver(BlobSyncDriver(), replace=True)
-register_dependency_driver(MirrorPostSyncDriver(), replace=True)

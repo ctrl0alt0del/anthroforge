@@ -17,7 +17,7 @@ class AF_OT_AddSCPConstraint(bpy.types.Operator):
                 if s.id == self.scp_id:
                     return s
         obj = context.active_object
-        if obj and obj.get("af_scp_id"):
+        if obj and obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_scp_id"):
             sid = str(obj.get("af_scp_id"))
             for s in root.af_scp_system.scps:
                 if s.id == sid:
@@ -31,11 +31,9 @@ class AF_OT_AddSCPConstraint(bpy.types.Operator):
         c.enabled = True
         c.priority = 100
         c.source_scp_id = ""
-        c.source_prop = "PAR_SIZE_X"
-        c.dest_prop = "PAR_BEND_RADIUS"
+        c.source_prop = "SCALE_X"
+        c.dest_prop = "SCALE_X"
         c.calculator_type = "LINEAR"
-        c.arc_source_width_prop = "PAR_SIZE_X"
-        c.arc_dest_angle_prop = "PAR_BEND_ANGLE"
         c.linear_a = 1.0
         c.linear_b = 0.0
         c.in_min = 0.0
@@ -43,13 +41,9 @@ class AF_OT_AddSCPConstraint(bpy.types.Operator):
         c.out_min = 0.0
         c.out_max = 1.0
         c.clamp = True
-        c.arc_full_angle = 360.0
-        c.arc_width_scale = 1.0
-        c.arc_width_offset = 0.0
         c.delta_initialized = False
         c.delta_src_base = 0.0
         c.delta_dst_base = 0.0
-        c.delta_dst_base_2 = 0.0
         c.runtime_status = "OK"
         c.runtime_message = ""
 
@@ -88,7 +82,7 @@ class AF_OT_RemoveSCPConstraint(bpy.types.Operator):
                 if s.id == self.scp_id:
                     return s
         obj = context.active_object
-        if obj and obj.get("af_scp_id"):
+        if obj and obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_scp_id"):
             sid = str(obj.get("af_scp_id"))
             for s in root.af_scp_system.scps:
                 if s.id == sid:

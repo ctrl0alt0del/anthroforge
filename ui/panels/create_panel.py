@@ -1,10 +1,14 @@
 import bpy
+
 from ...core.utils import get_af_root
-from ...core.shapes.registry import ShapeRegistry
+
+
+def _is_marked_scp_obj(obj):
+    return bool(obj and obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_scp_id"))
 
 
 class AF_PT_CreatePanel(bpy.types.Panel):
-    bl_label = "SCP Creation"
+    bl_label = "SCP Marking"
     bl_idname = "AF_PT_create_panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -18,19 +22,26 @@ class AF_PT_CreatePanel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-
-        layout.prop(scene, "af_scp_type", text="Shape")
-
-        # Global mesh asset registration
-        lib = layout.box()
-        lib.label(text="SCP Mesh Library")
-        lib.prop(scene, "af_new_scp_source_mesh_obj", text="Source Mesh")
-        
-        lib.operator("af.register_mesh_scp_asset", icon="ADD")
+        obj = context.active_object
 
         box = layout.box()
-        box.label(text="New SCP Params")
-        box.prop(scene, "af_new_parent_obj", text="Parent")
-        ShapeRegistry.draw_creation_ui(scene.af_scp_type, box, scene)
+        box.label(text="Mark Existing Mesh As SCP")
+        if obj is None:
+            box.label(text="No active object", icon="INFO")
+        else:
+            box.label(text=f"Active: {obj.name}")
+            box.label(text=f"Type: {obj.type}")
 
-        layout.operator("af.add_scp", icon="ADD")
+        row = layout.row(align=True)
+        row.operator("af.add_scp", icon="ADD", text="Mark Selected Mesh")
+
+        if _is_marked_scp_obj(obj):
+            op = layout.operator("af.delete_selected_af_node", icon="TRASH", text="Unmark Selected SCP")
+            op.target_type = "SCP"
+            op.target_id = str(obj.get("af_scp_id"))
+
+            layout.separator()
+            pbox = layout.box()
+            pbox.label(text="Parent Relation")
+            pbox.prop(scene, "af_scp_parent_obj", text="Parent")
+            pbox.operator("af.set_scp_parent", text="Apply Parent", icon="CONSTRAINT")

@@ -130,8 +130,8 @@ def update_curve_points(obj, points, thickness, bake=False):
 def get_scp_proxy(scene, root_name, scp_id):
     for obj in scene.objects:
         if (
-            obj.get("af_proxy")
-            and not obj.get("af_mirror_proxy")
+            obj.get("af_scp")
+            and not obj.get("af_scp_mirror")
             and obj.get("af_root_name") == root_name
             and obj.get("af_scp_id") == scp_id
         ):
@@ -139,12 +139,35 @@ def get_scp_proxy(scene, root_name, scp_id):
     return None
 
 
-def endpoint_world(root, scene, runtime_registry, parent_id, attach_param_raw):
-    if not parent_id:
+def _mesh_local_point_from_shape_param(parent_obj, payload):
+    if parent_obj is None or parent_obj.type != "MESH" or parent_obj.data is None:
         return None
 
-    scp = runtime_registry.get(parent_id)
-    if scp is None:
+    try:
+        p = max(0.0, min(1.0, float(payload)))
+    except Exception:
+        p = 0.0
+
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    obj_eval = parent_obj.evaluated_get(depsgraph)
+    mesh_eval = obj_eval.to_mesh()
+    if mesh_eval is None or len(mesh_eval.vertices) == 0:
+        if mesh_eval is not None:
+            obj_eval.to_mesh_clear()
+        return None
+    try:
+        if len(mesh_eval.vertices) == 1:
+            return mesh_eval.vertices[0].co.copy()
+        idx = int(round(p * float(len(mesh_eval.vertices) - 1)))
+        idx = max(0, min(len(mesh_eval.vertices) - 1, idx))
+        return mesh_eval.vertices[idx].co.copy()
+    finally:
+        obj_eval.to_mesh_clear()
+
+
+def endpoint_world(root, scene, runtime_registry, parent_id, attach_param_raw):
+    _ = runtime_registry
+    if not parent_id:
         return None
 
     proxy = get_scp_proxy(scene, root.name, parent_id)
@@ -155,26 +178,45 @@ def endpoint_world(root, scene, runtime_registry, parent_id, attach_param_raw):
     if mode == "mesh_anchor":
         local = payload
     elif mode == "shape_param_v1":
-        local = scp.shape.compute_local_point(payload)
+        local = _mesh_local_point_from_shape_param(proxy, payload)
     else:
         return None
 
+    if local is None:
+        return None
     return proxy.matrix_world @ local
 
 
 def nearest_param(parent_scp, parent_proxy, moved_world):
-    params = parent_scp.shape.get_attach_params()
-    if not params:
+    _ = parent_scp
+    if parent_proxy is None or parent_proxy.type != "MESH" or parent_proxy.data is None:
         return 0.0
-    best = params[0]
+
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    obj_eval = parent_proxy.evaluated_get(depsgraph)
+    mesh_eval = obj_eval.to_mesh()
+    if mesh_eval is None or len(mesh_eval.vertices) == 0:
+        if mesh_eval is not None:
+            obj_eval.to_mesh_clear()
+        return 0.0
+
+    mw = parent_proxy.matrix_world
+    vcount = len(mesh_eval.vertices)
+    best_index = 0
     best_d2 = None
-    for p in params:
-        w = parent_proxy.matrix_world @ parent_scp.shape.compute_local_point(p)
-        d2 = (w - moved_world).length_squared
-        if best_d2 is None or d2 < best_d2:
-            best_d2 = d2
-            best = p
-    return best
+    try:
+        for i, v in enumerate(mesh_eval.vertices):
+            w = mw @ v.co
+            d2 = (w - moved_world).length_squared
+            if best_d2 is None or d2 < best_d2:
+                best_d2 = d2
+                best_index = i
+    finally:
+        obj_eval.to_mesh_clear()
+
+    if vcount <= 1:
+        return 0.0
+    return float(best_index) / float(vcount - 1)
 
 
 def nearest_parent_mesh_vertex_local_point(parent_proxy, moved_world):

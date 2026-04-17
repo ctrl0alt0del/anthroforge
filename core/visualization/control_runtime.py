@@ -24,6 +24,9 @@ def _entity_from_active_object(root):
     if obj is None or obj.get("af_root_name") != root.name:
         return "NONE", ""
 
+    if obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_scp_id"):
+        return "SCP", str(obj.get("af_scp_id"))
+
     c = classify_control_object(obj)
     if c:
         hints = dict(c.get("dirty_hints", {}) or {})
@@ -33,7 +36,6 @@ def _entity_from_active_object(root):
                 return et, str(next(iter(vals)))
 
     checks = (
-        ("af_proxy", "af_scp_id", "SCP"),
         ("af_fiber_proxy", "af_fiber_id", "FIBER"),
         ("af_muscle_proxy", "af_muscle_id", "MUSCLE"),
         ("af_blob_proxy", "af_blob_id", "BLOB"),

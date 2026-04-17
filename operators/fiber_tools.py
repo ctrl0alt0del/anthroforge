@@ -1,11 +1,12 @@
-import json
 import bpy
 import time
+from mathutils import Vector
 
 from ..core.utils import get_af_root
-from ..core.registry import SCPRegistry
+from ..core.attachment_codec import encode_fiber_mesh_anchor
 from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.visualization.fiber_sync import register_fiber_sync
+from ..core.visualization.fiber_sync_helpers import nearest_parent_mesh_vertex_local_point
 from ..core.visualization.sync_runner import sync_from_dirty_hints
 
 
@@ -120,21 +121,33 @@ class AF_OT_AddFiberTouchPoint(bpy.types.Operator):
 
     def _resolve_touch_parent_id(self, context, root):
         obj = context.active_object
-        if obj and obj.get("af_proxy") and obj.get("af_root_name") == root.name:
+        if obj and obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_root_name") == root.name:
             return obj.get("af_scp_id", "")
         idx = root.af_scp_system.active_scp_index
         if 0 <= idx < len(root.af_scp_system.scps):
             return root.af_scp_system.scps[idx].id
         return ""
 
-    def _first_attach_param(self, root, scp_id):
-        runtime = SCPRegistry(root)
-        runtime.build()
-        parent = runtime.registry.get(scp_id)
-        if parent is None:
+    def _find_scp_source(self, scene, root_name, scp_id):
+        sid = str(scp_id or "")
+        for obj in scene.objects:
+            if (
+                obj.get("af_scp")
+                and not obj.get("af_scp_mirror")
+                and obj.get("af_root_name") == root_name
+                and str(obj.get("af_scp_id") or "") == sid
+            ):
+                return obj
+        return None
+
+    def _first_attach_param(self, scene, root, scp_id):
+        parent_obj = self._find_scp_source(scene, root.name, scp_id)
+        if parent_obj is None:
             return None
-        params = parent.shape.get_attach_params()
-        return params[0] if params else 0.0
+        local_pt = nearest_parent_mesh_vertex_local_point(parent_obj, parent_obj.matrix_world.translation.copy())
+        if local_pt is None:
+            local_pt = Vector((0.0, 0.0, 0.0))
+        return encode_fiber_mesh_anchor(local_pt)
 
     def _mark_interactive_preferred(self, fiber):
         try:
@@ -157,14 +170,14 @@ class AF_OT_AddFiberTouchPoint(bpy.types.Operator):
         if not scp_id:
             self.report({"ERROR"}, "Select an SCP in viewport or SCP tree first.")
             return {"CANCELLED"}
-        p = self._first_attach_param(root, scp_id)
-        if p is None:
-            self.report({"ERROR"}, "Selected SCP not found in runtime registry.")
+        p = self._first_attach_param(context.scene, root, scp_id)
+        if not p:
+            self.report({"ERROR"}, "Selected SCP source object was not found.")
             return {"CANCELLED"}
 
         tp = fiber.mid_touches.add()
         tp.parent_id = scp_id
-        tp.attach_param = json.dumps(p)
+        tp.attach_param = p
         self._mark_interactive_preferred(fiber)
         sync = register_fiber_sync()
         sync.clear_solver_cache(fiber.id)

@@ -23,6 +23,8 @@ def _apply_scp_control(root, scene, intent):
     if obj is None:
         return {}
     sync = register_sync()
+    if not hasattr(sync, "collection_name") or not hasattr(sync, "_shape_sync_extensions"):
+        return {}
     vis_col = bpy.data.collections.get(sync.collection_name)
     if vis_col is None:
         return {}
