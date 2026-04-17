@@ -14,6 +14,7 @@ def find_muscle_proxy(vis_col, root_name, muscle_id, surface_type="BASE"):
     for obj in vis_col.objects:
         if (
             obj.get("af_muscle_proxy")
+            and not obj.get("af_muscle_mirror_proxy")
             and obj.get("af_root_name") == root_name
             and obj.get("af_muscle_id") == muscle_id
             and obj.get("af_muscle_surface") == surface_type

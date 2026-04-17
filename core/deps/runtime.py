@@ -17,6 +17,7 @@ from .builtin_drivers import (
     FiberSyncDriver,
     MuscleSyncDriver,
     BlobSyncDriver,
+    VCPMirrorSyncDriver,
 )
 from .gates import (
     GateContext,
@@ -419,3 +420,4 @@ register_dependency_driver(SCPSyncDriver(), replace=True)
 register_dependency_driver(FiberSyncDriver(), replace=True)
 register_dependency_driver(MuscleSyncDriver(), replace=True)
 register_dependency_driver(BlobSyncDriver(), replace=True)
+register_dependency_driver(VCPMirrorSyncDriver(), replace=True)

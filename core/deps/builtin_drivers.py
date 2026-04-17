@@ -8,6 +8,7 @@ from ..visualization.sync import register_sync
 from ..visualization.fiber_sync import register_fiber_sync
 from ..visualization.muscle_sync import register_muscle_sync
 from ..visualization.blob_sync import register_blob_sync
+from ..visualization.vcp_mirror_runtime import sync_vcp_mirrors
 
 
 class RuntimeGraphDriver(DependencyDriver):
@@ -173,3 +174,31 @@ class BlobSyncDriver(DependencyDriver):
             register_blob_sync().sync_root_to_scene(root=root, scene=scene)
         elif ids:
             register_blob_sync().sync_root_to_scene(root=root, scene=scene, target_blob_ids=ids)
+
+
+class VCPMirrorSyncDriver(DependencyDriver):
+    name = "vcp_mirror_sync_driver"
+
+    def entity_types(self):
+        return ("SCP", "FIBER", "MUSCLE", "BLOB")
+
+    def sync(self, root, scene, is_full, impacted, bake):
+        _ = bake
+        fiber_ids = set(impacted.get("FIBER", set()) or set())
+        muscle_ids = set(impacted.get("MUSCLE", set()) or set())
+        blob_ids = set(impacted.get("BLOB", set()) or set())
+
+        if is_full:
+            sync_vcp_mirrors(root=root, scene=scene)
+            return
+
+        if not fiber_ids and not muscle_ids and not blob_ids:
+            return
+
+        sync_vcp_mirrors(
+            root=root,
+            scene=scene,
+            target_fiber_ids=fiber_ids,
+            target_muscle_ids=muscle_ids,
+            target_blob_ids=blob_ids,
+        )

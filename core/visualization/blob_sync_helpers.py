@@ -85,7 +85,12 @@ def remove_ctrl(obj):
 
 def _find_muscle_surface(scene, root_name, muscle_id, surface):
     for o in scene.objects:
-        if o.get("af_muscle_proxy") and o.get("af_root_name") == root_name and o.get("af_muscle_id") == muscle_id:
+        if (
+            o.get("af_muscle_proxy")
+            and not o.get("af_muscle_mirror_proxy")
+            and o.get("af_root_name") == root_name
+            and o.get("af_muscle_id") == muscle_id
+        ):
             if o.get("af_muscle_surface") == surface:
                 return o
     return None

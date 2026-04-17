@@ -127,7 +127,12 @@ def _mark_changed_by_target(root, obj, changed_blob_ids):
 
 
 def _mark_changed_by_proxy(root, obj, changed_blob_ids):
-    if obj.get("af_blob_proxy") and obj.get("af_root_name") == root.name and obj.get("af_blob_id"):
+    if (
+        obj.get("af_blob_proxy")
+        and not obj.get("af_blob_mirror_proxy")
+        and obj.get("af_root_name") == root.name
+        and obj.get("af_blob_id")
+    ):
         changed_blob_ids.add(obj.get("af_blob_id"))
 
 
