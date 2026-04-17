@@ -1,5 +1,3 @@
-import json
-
 import bpy
 from mathutils import Euler, Quaternion
 
@@ -28,20 +26,6 @@ def _sync_scene(context, scp_id=None, source="property", event_type="UPDATE"):
 
 def _on_scp_prop_update(self, context):
     _sync_scene(context, getattr(self, "id", ""))
-
-
-def _on_attach_behavior_update(self, context):
-    sid = getattr(self, "id", "")
-    raw = str(getattr(self, "attach_param", "") or "").strip()
-    if raw:
-        try:
-            data = json.loads(raw)
-        except Exception:
-            data = None
-        if isinstance(data, dict):
-            data["follow_rotation"] = bool(getattr(self, "attach_follow_parent_rotation", True))
-            self["attach_param"] = json.dumps(data, separators=(",", ":"))
-    _sync_scene(context, sid)
 
 
 def _on_constraint_prop_update(self, context):
@@ -222,12 +206,6 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
 
     object_name: bpy.props.StringProperty(name="Object Name", default="", update=_on_scp_prop_update)
     parent_id: bpy.props.StringProperty(name="Parent ID", default="", update=_on_scp_prop_update)
-    attach_param: bpy.props.StringProperty(name="Attachment Param JSON", default="", update=_on_scp_prop_update)
-    attach_follow_parent_rotation: bpy.props.BoolProperty(
-        name="Follow Parent Surface Rotation",
-        default=True,
-        update=_on_attach_behavior_update,
-    )
 
     # Compatibility fields retained for auxiliary runtime modules that still read them.
     local_origin: bpy.props.FloatVectorProperty(

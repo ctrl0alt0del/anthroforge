@@ -38,35 +38,53 @@ def _find_scp_index(root, scp_id):
     return -1
 
 
-def _effective_parent_obj(scene, root, child_obj):
+def _effective_parent_obj(scene, root):
     parent_candidate = getattr(scene, "af_scp_parent_obj", None)
     if _is_marked_source_scp(parent_candidate, root.name):
         return parent_candidate
-    parent = getattr(child_obj, "parent", None)
-    if _is_marked_source_scp(parent, root.name):
-        return parent
     return None
 
 
-def _is_parent_cycle(child_obj, parent_obj):
-    cur = parent_obj
-    while cur is not None:
-        if cur == child_obj:
+def _would_create_parent_cycle(root, child_scp_id, parent_scp_id):
+    child_id = str(child_scp_id or "")
+    parent_id = str(parent_scp_id or "")
+    if not child_id or not parent_id:
+        return False
+    if child_id == parent_id:
+        return True
+
+    by_id = {str(s.id): s for s in root.af_scp_system.scps}
+    cur = parent_id
+    seen = set()
+    while cur and cur not in seen:
+        if cur == child_id:
             return True
-        cur = getattr(cur, "parent", None)
+        seen.add(cur)
+        scp = by_id.get(cur)
+        if scp is None:
+            return False
+        cur = str(getattr(scp, "parent_id", "") or "")
     return False
 
 
-def _set_parent_relation(root, child_obj, child_scp, parent_obj):
+def _clear_native_parent_keep_world(child_obj):
+    if child_obj is None:
+        return
+    if getattr(child_obj, "parent", None) is None:
+        return
+    world = child_obj.matrix_world.copy()
+    child_obj.parent = None
+    child_obj.matrix_world = world
+
+
+def _set_parent_relation(child_obj, child_scp, parent_obj):
+    _clear_native_parent_keep_world(child_obj)
+
     if parent_obj is None:
-        child_obj.parent = None
         child_scp.parent_id = ""
-        child_scp.attach_param = ""
         return
 
-    child_obj.parent = parent_obj
     child_scp.parent_id = str(parent_obj.get("af_scp_id") or "")
-    child_scp.attach_param = ""
 
 
 class AF_OT_AddSCP(bpy.types.Operator):
@@ -91,16 +109,14 @@ class AF_OT_AddSCP(bpy.types.Operator):
             scp.name = obj.name
             scp.object_name = obj.name
             scp.parent_id = ""
-            scp.attach_param = ""
-            scp.attach_follow_parent_rotation = True
             scp.mirror_enabled = False
             scp.mirror_axis = "X"
             scp.mirror_origin = (0.0, 0.0, 0.0)
-            return scp
+            return scp, True
 
         existing.name = obj.name
         existing.object_name = obj.name
-        return existing
+        return existing, False
 
     def execute(self, context):
         root = get_af_root(context.scene)
@@ -117,14 +133,20 @@ class AF_OT_AddSCP(bpy.types.Operator):
             self.report({"ERROR"}, "Cannot mark mirror object as SCP.")
             return {"CANCELLED"}
 
-        scp = self._ensure_collection_entry(root, obj)
+        scp, is_new = self._ensure_collection_entry(root, obj)
         self._ensure_marked_tags(obj, root.name, scp.id)
 
-        parent_obj = _effective_parent_obj(context.scene, root, obj)
-        if parent_obj is not None and _is_parent_cycle(obj, parent_obj):
-            self.report({"ERROR"}, "Parent relation would create a cycle.")
-            return {"CANCELLED"}
-        _set_parent_relation(root, obj, scp, parent_obj)
+        parent_obj = _effective_parent_obj(context.scene, root)
+        if parent_obj is not None:
+            parent_id = str(parent_obj.get("af_scp_id") or "")
+            if _would_create_parent_cycle(root, scp.id, parent_id):
+                self.report({"ERROR"}, "Parent relation would create a cycle.")
+                return {"CANCELLED"}
+            _set_parent_relation(obj, scp, parent_obj)
+        elif is_new:
+            _set_parent_relation(obj, scp, None)
+        else:
+            _clear_native_parent_keep_world(obj)
 
         idx = _find_scp_index(root, scp.id)
         if idx >= 0:
@@ -163,18 +185,17 @@ class AF_OT_SetSCPParent(bpy.types.Operator):
             return {"CANCELLED"}
 
         parent_obj = getattr(context.scene, "af_scp_parent_obj", None)
+        parent_id = ""
         if parent_obj is not None:
             if not _is_marked_source_scp(parent_obj, root.name):
                 self.report({"ERROR"}, "Parent must be another marked SCP mesh.")
                 return {"CANCELLED"}
-            if parent_obj == child_obj:
-                self.report({"ERROR"}, "SCP cannot be parent of itself.")
-                return {"CANCELLED"}
-            if _is_parent_cycle(child_obj, parent_obj):
+            parent_id = str(parent_obj.get("af_scp_id") or "")
+            if _would_create_parent_cycle(root, child_id, parent_id):
                 self.report({"ERROR"}, "Parent relation would create a cycle.")
                 return {"CANCELLED"}
 
-        _set_parent_relation(root, child_obj, child_scp, parent_obj)
+        _set_parent_relation(child_obj, child_scp, parent_obj)
 
         sync_from_dirty_hints(
             root=root,
