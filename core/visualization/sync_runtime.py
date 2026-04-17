@@ -68,6 +68,9 @@ def _discover_marked_scps(root, scene):
         scp.mirror_enabled = False
         scp.mirror_axis = "X"
         scp.mirror_origin = (0.0, 0.0, 0.0)
+        scp.mirror_status = "NONE"
+        scp.mirror_source_id = ""
+        scp.mirror_effective_axis = "X"
         scp_by_id[new_id] = scp
 
 
@@ -189,77 +192,33 @@ def _ensure_mirror_object(sync, scene, mirror_col, root_name, scp_id, src_obj):
     return mir
 
 
-def _build_mirror_roles(scp_by_id):
-    roles = {}
-
-    def resolve(sid, trail):
-        sid = str(sid or "")
-        if not sid:
-            return {"is_source": False, "is_target": False, "source_id": "", "propagate_source_id": ""}
-        if sid in roles:
-            return roles[sid]
-        if sid in trail:
-            roles[sid] = {"is_source": False, "is_target": False, "source_id": "", "propagate_source_id": ""}
-            return roles[sid]
-
-        scp = scp_by_id.get(sid)
-        if scp is None:
-            roles[sid] = {"is_source": False, "is_target": False, "source_id": "", "propagate_source_id": ""}
-            return roles[sid]
-
-        pid = str(getattr(scp, "parent_id", "") or "")
-        parent_role = (
-            resolve(pid, trail | {sid})
-            if pid
-            else {"is_source": False, "is_target": False, "source_id": "", "propagate_source_id": ""}
-        )
-        parent_source = str(parent_role.get("propagate_source_id", "") or "")
-
-        source_self = bool(getattr(scp, "mirror_enabled", False))
-        if source_self:
-            roles[sid] = {
-                "is_source": True,
-                "is_target": bool(parent_source),
-                "source_id": str(parent_source or ""),
-                "propagate_source_id": sid,
-            }
-        else:
-            roles[sid] = {
-                "is_source": False,
-                "is_target": bool(parent_source),
-                "source_id": str(parent_source or ""),
-                "propagate_source_id": str(parent_source or ""),
-            }
-        return roles[sid]
-
-    for sid in list(scp_by_id.keys()):
-        resolve(sid, set())
-    return roles
-
-
 def _sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=None):
     mirror_col = sync._get_mirror_collection(scene)
-    roles = _build_mirror_roles(scp_by_id)
 
     target_ids = None if target_scp_ids is None else {str(v) for v in set(target_scp_ids)}
+    affected_ids = set(target_ids) if target_ids is not None else set()
     desired = set()
-    for sid, role in roles.items():
-        if not bool(role.get("is_target", False)):
+    for sid, scp in scp_by_id.items():
+        status = str(getattr(scp, "mirror_status", "NONE") or "NONE").upper()
+        if status != "TARGET":
             continue
 
-        rule_source_id = str(role.get("source_id", "") or "")
+        rule_source_id = str(getattr(scp, "mirror_source_id", "") or "")
+        effective_axis = str(getattr(scp, "mirror_effective_axis", "X") or "X").upper()
         src_prop = scp_by_id.get(rule_source_id)
-        if src_prop is None:
-            continue
 
         if target_ids is not None and sid not in target_ids and rule_source_id not in target_ids:
+            continue
+
+        affected_ids.add(str(sid))
+        if src_prop is None:
             continue
 
         source_obj = _find_marked_object(scene, root.name, sid)
         if source_obj is None:
             continue
 
-        axis = str(getattr(src_prop, "mirror_axis", "X") or "X")
+        axis = effective_axis if effective_axis in {"X", "Y", "Z"} else str(getattr(src_prop, "mirror_axis", "X") or "X")
         origin = tuple(getattr(src_prop, "mirror_origin", (0.0, 0.0, 0.0)))
 
         mir = _ensure_mirror_object(sync, scene, mirror_col, root.name, sid, source_obj)
@@ -280,8 +239,8 @@ def _sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=None):
         sid = str(obj.get("af_source_scp_id") or "")
         if sid in desired:
             continue
-        # Keep untouched mirrors when we are in targeted mode and source was not requested.
-        if target_ids is not None and sid not in target_ids:
+        # Keep untouched mirrors when they are not part of current targeted recompute.
+        if target_ids is not None and sid not in affected_ids:
             continue
         data = obj.data
         bpy.data.objects.remove(obj, do_unlink=True)

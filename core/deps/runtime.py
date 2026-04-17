@@ -12,6 +12,7 @@ from .builtin_drivers import (
     RuntimeGraphDriver,
     ControlIntentDriver,
     SCPConstraintDriver,
+    SCPMirrorRoleDriver,
     SCPSyncDriver,
     FiberSyncDriver,
     MuscleSyncDriver,
@@ -413,6 +414,7 @@ def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=
 register_dependency_driver(RuntimeGraphDriver(), replace=True)
 register_dependency_driver(ControlIntentDriver(), replace=True)
 register_dependency_driver(SCPConstraintDriver(), replace=True)
+register_dependency_driver(SCPMirrorRoleDriver(), replace=True)
 register_dependency_driver(SCPSyncDriver(), replace=True)
 register_dependency_driver(FiberSyncDriver(), replace=True)
 register_dependency_driver(MuscleSyncDriver(), replace=True)

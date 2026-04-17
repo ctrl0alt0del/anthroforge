@@ -2,6 +2,7 @@ from .adapters import build_runtime_graph
 from .drivers import DependencyDriver
 from .controls import pop_control_intents
 from .control_behaviors import apply_control_intent
+from .mirror_roles import apply_scp_mirror_roles
 from ..constraints.scp_constraints import evaluate_scp_constraints_runtime, apply_scp_input_write
 from ..visualization.sync import register_sync
 from ..visualization.fiber_sync import register_fiber_sync
@@ -96,6 +97,25 @@ class ControlIntentDriver(DependencyDriver):
                 merged.setdefault(et, set())
                 merged[et] |= set(ids or set())
         return merged
+
+
+class SCPMirrorRoleDriver(DependencyDriver):
+    name = "scp_mirror_role_driver"
+
+    def entity_types(self):
+        return ("SCP",)
+
+    def apply_constraints(self, ctx):
+        scp_all = set(ctx.entity_sets.get("SCP", set()) or set())
+        scp_dirty = set(ctx.dirty.get("SCP", set()) or set())
+        changed_source_scps = scp_all if ctx.is_full else scp_dirty
+        if not changed_source_scps:
+            return {}
+
+        changed = apply_scp_mirror_roles(ctx.root)
+        if not changed:
+            return {}
+        return {"SCP": set(changed)}
 
 
 class SCPSyncDriver(DependencyDriver):

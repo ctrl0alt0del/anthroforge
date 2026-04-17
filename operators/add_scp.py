@@ -112,6 +112,9 @@ class AF_OT_AddSCP(bpy.types.Operator):
             scp.mirror_enabled = False
             scp.mirror_axis = "X"
             scp.mirror_origin = (0.0, 0.0, 0.0)
+            scp.mirror_status = "NONE"
+            scp.mirror_source_id = ""
+            scp.mirror_effective_axis = "X"
             return scp, True
 
         existing.name = obj.name

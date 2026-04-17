@@ -225,7 +225,7 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         name="Scale", size=3, subtype="XYZ", default=(1.0, 1.0, 1.0), update=_on_scp_prop_update
     )
 
-    mirror_enabled: bpy.props.BoolProperty(name="Mirror Enabled", default=False, update=_on_scp_prop_update)
+    mirror_enabled: bpy.props.BoolProperty(name="Mirror Children", default=False, update=_on_scp_prop_update)
     mirror_axis: bpy.props.EnumProperty(
         name="Mirror Axis",
         items=[("X", "X", ""), ("Y", "Y", ""), ("Z", "Z", "")],
@@ -238,6 +238,27 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         subtype="TRANSLATION",
         default=(0.0, 0.0, 0.0),
         update=_on_scp_prop_update,
+    )
+    mirror_status: bpy.props.EnumProperty(
+        name="Mirror Status",
+        items=[
+            ("NONE", "None", ""),
+            ("SOURCE", "Source", ""),
+            ("TARGET", "Target", ""),
+        ],
+        default="NONE",
+        options={"HIDDEN"},
+    )
+    mirror_source_id: bpy.props.StringProperty(
+        name="Mirror Source ID",
+        default="",
+        options={"HIDDEN"},
+    )
+    mirror_effective_axis: bpy.props.EnumProperty(
+        name="Mirror Effective Axis",
+        items=[("X", "X", ""), ("Y", "Y", ""), ("Z", "Z", "")],
+        default="X",
+        options={"HIDDEN"},
     )
 
     constraints: bpy.props.CollectionProperty(type=AF_SCP_Constraint_Property)
