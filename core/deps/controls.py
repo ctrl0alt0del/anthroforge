@@ -1,5 +1,13 @@
 from collections import defaultdict
-from ..shapes.state import ControlBinding
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class ControlBinding:
+    kind: str
+    space: str
+    target_path: str
+    metadata: dict | None = None
 
 
 CONTROL_FLAG_KEYS = (

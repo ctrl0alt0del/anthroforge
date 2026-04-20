@@ -1,7 +1,9 @@
-﻿from ..deps.dirty_hints import dirty_hints_for
+from ..deps.dirty_hints import dirty_hints_for
 from ..utils import get_af_root
 from ..visualization.sync_runner import sync_from_dirty_hints
+from .attachment_runtime import capture_attachment_from_link
 from .common import find_scp_by_id, is_source_scp
+from .link_state import restore_link_state, snapshot_link_state
 from .lookup import activate_scp, effective_parent_obj, ensure_collection_entry, mark_source_tags, set_parent_relation, would_create_parent_cycle
 
 
@@ -51,12 +53,27 @@ def _assign_optional_parent(operator, context, root, obj, scp, is_new):
         if is_new:
             set_parent_relation(obj, scp, None)
         return True
-    parent_id = str(parent_obj.get("af_scp_id") or "")
-    if would_create_parent_cycle(root, scp.id, parent_id):
-        operator.report({"ERROR"}, "Parent relation would create a cycle.")
+    if _would_reject_parent(operator, root, scp.id, parent_obj):
         return False
-    set_parent_relation(obj, scp, parent_obj)
+    return _set_parent_with_capture(operator, obj, scp, parent_obj)
+
+
+def _would_reject_parent(operator, root, child_id, parent_obj):
+    parent_id = str(parent_obj.get("af_scp_id") or "")
+    if not would_create_parent_cycle(root, child_id, parent_id):
+        return False
+    operator.report({"ERROR"}, "Parent relation would create a cycle.")
     return True
+
+
+def _set_parent_with_capture(operator, child_obj, child_scp, parent_obj):
+    snapshot = snapshot_link_state(child_scp)
+    set_parent_relation(child_obj, child_scp, parent_obj)
+    if capture_attachment_from_link(child_scp, child_obj, parent_obj):
+        return True
+    restore_link_state(child_scp, snapshot)
+    operator.report({"ERROR"}, "Failed to capture attachment from child face center.")
+    return False
 
 
 def _sync_mark(context, scp_id):
@@ -89,23 +106,23 @@ def _report_error_obj(operator, message):
 
 def _apply_parent_change(operator, context, root, child_obj, child_scp):
     parent_obj = getattr(context.scene, "af_scp_parent_obj", None)
-    if not _valid_parent(operator, root, child_scp.id, parent_obj):
+    if _invalid_parent(operator, root, child_scp.id, parent_obj):
         return {"CANCELLED"}
-    set_parent_relation(child_obj, child_scp, parent_obj)
+    if parent_obj is None:
+        set_parent_relation(child_obj, child_scp, None)
+    elif not _set_parent_with_capture(operator, child_obj, child_scp, parent_obj):
+        return {"CANCELLED"}
     _sync_parent(context, child_scp.id)
     return {"FINISHED"}
 
 
-def _valid_parent(operator, root, child_id, parent_obj):
+def _invalid_parent(operator, root, child_id, parent_obj):
     if parent_obj is None:
-        return True
+        return False
     if not is_source_scp(parent_obj, root.name):
         operator.report({"ERROR"}, "Parent must be another marked SCP mesh.")
-        return False
-    if would_create_parent_cycle(root, child_id, parent_obj.get("af_scp_id")):
-        operator.report({"ERROR"}, "Parent relation would create a cycle.")
-        return False
-    return True
+        return True
+    return _would_reject_parent(operator, root, child_id, parent_obj)
 
 
 def _sync_parent(context, child_id):

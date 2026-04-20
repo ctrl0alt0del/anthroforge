@@ -1,7 +1,7 @@
-﻿from mathutils import Matrix, Vector
+from mathutils import Matrix, Vector
 from mathutils.geometry import closest_point_on_tri
 
-from .common import _EPS, as_vec3
+from .common import _EPS
 
 
 def _normalized(vector, fallback):
@@ -48,6 +48,25 @@ def _surface_payload(obj_eval, mesh_eval):
     return None if not triangles else {"verts_world": verts, "triangles": triangles}
 
 
+def build_face_centers(mesh_obj, depsgraph):
+    obj_eval = mesh_obj.evaluated_get(depsgraph)
+    mesh_eval = obj_eval.to_mesh()
+    if mesh_eval is None:
+        return None
+    try:
+        return _face_center_payload(obj_eval, mesh_eval)
+    finally:
+        obj_eval.to_mesh_clear()
+
+
+def _face_center_payload(obj_eval, mesh_eval):
+    if len(mesh_eval.polygons) <= 0:
+        return None
+    matrix_world = obj_eval.matrix_world.copy()
+    centers = [matrix_world @ poly.center for poly in mesh_eval.polygons]
+    return None if not centers else centers
+
+
 def _iter_triangles(surface):
     verts = surface["verts_world"]
     for tri in surface["triangles"]:
@@ -74,15 +93,6 @@ def _normalized_weights(d00, d01, d11, d20, d21, denom):
     return None if abs(total) <= _EPS else tuple(weight / total for weight in weights)
 
 
-def nearest_parent_param_from_world(parent_obj, target_world, depsgraph):
-    surface = build_mesh_surface_data(parent_obj, depsgraph)
-    hit = _nearest_triangle_hit(surface, target_world)
-    if hit is None:
-        return None
-    weights = _closest_point_barycentric(*hit["abc"], hit["cp"])
-    return None if weights is None else {"tri_vidx": hit["tri"], "tri_weights": tuple(float(v) for v in weights)}
-
-
 def _nearest_triangle_hit(surface, target_world):
     if not surface:
         return None
@@ -96,6 +106,37 @@ def _triangle_hit(tri, abc, target_world):
     if cp is None:
         return None
     return {"tri": tri, "abc": abc, "cp": cp, "d2": (cp - target_world).length_squared}
+
+
+def _param_from_hit(hit):
+    weights = _closest_point_barycentric(*hit["abc"], hit["cp"])
+    if weights is None:
+        return None
+    return {"tri_vidx": hit["tri"], "tri_weights": tuple(float(value) for value in weights)}
+
+
+def nearest_parent_param_from_world(parent_obj, target_world, depsgraph):
+    surface = build_mesh_surface_data(parent_obj, depsgraph)
+    hit = _nearest_triangle_hit(surface, target_world)
+    return None if hit is None else _param_from_hit(hit)
+
+
+def closest_child_face_center_to_parent(child_obj, parent_obj, depsgraph):
+    centers = build_face_centers(child_obj, depsgraph)
+    parent_surface = build_mesh_surface_data(parent_obj, depsgraph)
+    if not centers or not parent_surface:
+        return None
+    candidates = [_child_face_candidate(center, parent_surface) for center in centers]
+    candidates = [candidate for candidate in candidates if candidate is not None]
+    return None if not candidates else min(candidates, key=lambda candidate: candidate["d2"])
+
+
+def _child_face_candidate(child_center_world, parent_surface):
+    hit = _nearest_triangle_hit(parent_surface, child_center_world)
+    param = None if hit is None else _param_from_hit(hit)
+    if param is None:
+        return None
+    return {"child_center_world": child_center_world, "parent_param": param, "d2": hit["d2"]}
 
 
 def frame_from_parent_param(parent_obj, param, depsgraph):
@@ -129,9 +170,3 @@ def _frame_axes(parent_obj, a, b, c):
     tangent = world @ Vector((1.0, 0.0, 0.0)) if tangent.length <= _EPS else tangent
     normal = world @ Vector((0.0, 0.0, 1.0)) if normal.length <= _EPS else normal
     return tangent, normal
-
-
-def nearest_world_point_on_surface(mesh_obj, target_world, depsgraph):
-    surface = build_mesh_surface_data(mesh_obj, depsgraph)
-    hit = _nearest_triangle_hit(surface, target_world)
-    return None if hit is None else hit["cp"]

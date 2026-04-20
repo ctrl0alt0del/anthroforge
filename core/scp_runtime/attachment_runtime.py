@@ -1,9 +1,9 @@
-﻿import bpy
+import bpy
 from mathutils import Matrix, Vector
 
 from .common import as_bool, as_id, as_vec3, find_source_scp_obj, is_runtime_applied_matrix, mark_applied_matrix
 from .common import set_prop_raw, vec3_close, is_matrix_close, matrix_flat16
-from .surface import basis_from_tangent_normal, frame_from_parent_param, nearest_parent_param_from_world, nearest_world_point_on_surface
+from .surface import basis_from_tangent_normal, closest_child_face_center_to_parent, frame_from_parent_param
 from .tree import children_depth_order
 
 
@@ -21,23 +21,17 @@ class AttachmentCapture:
         self.depsgraph = depsgraph
 
     def run(self):
-        param = nearest_parent_param_from_world(self.parent_obj, self._target_world(), self.depsgraph)
-        frame = None if param is None else frame_from_parent_param(self.parent_obj, param, self.depsgraph)
+        candidate = closest_child_face_center_to_parent(self.child_obj, self.parent_obj, self.depsgraph)
+        if candidate is None:
+            return False
+        frame = frame_from_parent_param(self.parent_obj, candidate["parent_param"], self.depsgraph)
         if frame is None:
             return False
-        child_frame = self._child_frame(frame)
-        return self._write_capture(param, *child_frame)
+        child_frame = self._child_frame(candidate["child_center_world"], frame)
+        return self._write_capture(candidate["parent_param"], *child_frame)
 
-    def _target_world(self):
-        if as_bool(getattr(self.child_scp, "attach_initialized", False), default=False):
-            origin_local = as_vec3(getattr(self.child_scp, "attach_child_origin_local", (0.0, 0.0, 0.0)), (0.0, 0.0, 0.0))
-            return self.child_obj.matrix_world @ origin_local
-        return self.child_obj.matrix_world.translation.copy()
-
-    def _child_frame(self, frame):
-        anchor_world = nearest_world_point_on_surface(self.child_obj, frame["point_world"], self.depsgraph)
-        anchor_world = frame["point_world"].copy() if anchor_world is None else anchor_world
-        origin = self.child_obj.matrix_world.inverted() @ anchor_world
+    def _child_frame(self, child_anchor_world, frame):
+        origin = self.child_obj.matrix_world.inverted() @ child_anchor_world
         rotation_inv = self.child_obj.matrix_world.to_quaternion().to_matrix().inverted()
         tangent = rotation_inv @ frame["tangent_world"]
         normal = rotation_inv @ frame["normal_world"]
@@ -74,6 +68,11 @@ class AttachmentCapture:
         return True
 
 
+def capture_attachment_from_link(child_scp, child_obj, parent_obj, depsgraph=None):
+    depsgraph = depsgraph or bpy.context.evaluated_depsgraph_get()
+    return AttachmentCapture(child_scp, child_obj, parent_obj, depsgraph).run()
+
+
 class AttachmentApply:
     def __init__(self, child_scp, child_obj, parent_obj, depsgraph):
         self.child_scp = child_scp
@@ -93,7 +92,10 @@ class AttachmentApply:
         return True
 
     def _parent_param(self):
-        return {"tri_vidx": tuple(int(v) for v in getattr(self.child_scp, "attach_parent_tri_vidx", (-1, -1, -1))), "tri_weights": tuple(float(v) for v in getattr(self.child_scp, "attach_parent_tri_weights", (1.0, 0.0, 0.0)))}
+        return {
+            "tri_vidx": tuple(int(v) for v in getattr(self.child_scp, "attach_parent_tri_vidx", (-1, -1, -1))),
+            "tri_weights": tuple(float(v) for v in getattr(self.child_scp, "attach_parent_tri_weights", (1.0, 0.0, 0.0))),
+        }
 
     def _matrix_world(self, frame):
         follow = as_bool(getattr(self.child_scp, "attach_follow_rotation", True), default=True)
@@ -119,12 +121,21 @@ class AttachmentApply:
         return matrix_world
 
 
-def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", event_type=""):
+def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", event_type="", source_transform_ids=None):
     if as_id(source).lower() != "depsgraph" or as_id(event_type).upper() != "TRANSFORM":
+        return set()
+    direct_ids = _direct_capture_ids(dirty_scp_ids, source_transform_ids)
+    if not direct_ids:
         return set()
     depsgraph = bpy.context.evaluated_depsgraph_get()
     scp_by_id = {as_id(s.id): s for s in root.af_scp_system.scps}
-    return {sid for sid in sorted({as_id(v) for v in set(dirty_scp_ids or set())}) if _capture_one(scp_by_id, scene, root.name, sid, depsgraph)}
+    return {sid for sid in sorted(direct_ids) if _capture_one(scp_by_id, scene, root.name, sid, depsgraph)}
+
+
+def _direct_capture_ids(dirty_scp_ids, source_transform_ids):
+    dirty_ids = {as_id(value) for value in set(dirty_scp_ids or set()) if as_id(value)}
+    direct_ids = {as_id(value) for value in set(source_transform_ids or set()) if as_id(value)}
+    return dirty_ids & direct_ids
 
 
 def _capture_one(scp_by_id, scene, root_name, sid, depsgraph):
@@ -175,13 +186,10 @@ def _allowed_target(sid, parent_id, targets):
 def _apply_child_runtime(root, scene, sid, child_scp, parent_id, depsgraph):
     child_obj = find_source_scp_obj(scene, root.name, sid)
     parent_obj = find_source_scp_obj(scene, root.name, parent_id)
-    if child_obj is None or parent_obj is None:
+    if child_obj is None or parent_obj is None or not _is_initialized(child_scp):
         return False
-    _ensure_capture(child_scp, child_obj, parent_obj, depsgraph)
     return AttachmentApply(child_scp, child_obj, parent_obj, depsgraph).run()
 
 
-def _ensure_capture(child_scp, child_obj, parent_obj, depsgraph):
-    if as_bool(getattr(child_scp, "attach_initialized", False), default=False):
-        return
-    AttachmentCapture(child_scp, child_obj, parent_obj, depsgraph).run()
+def _is_initialized(child_scp):
+    return as_bool(getattr(child_scp, "attach_initialized", False), default=False)

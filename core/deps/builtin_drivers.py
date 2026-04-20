@@ -142,6 +142,7 @@ class SCPAttachmentCaptureDriver(DependencyDriver):
             return {}
 
         meta = dict(ctx.gate_meta or {})
+        payload = dict(meta.get("payload", {}) or {})
         source = str(meta.get("source", "") or "")
         event_type = str(meta.get("event_type", "") or "")
         changed = capture_dirty_scp_attachments(
@@ -150,6 +151,7 @@ class SCPAttachmentCaptureDriver(DependencyDriver):
             dirty_scp_ids=scp_dirty,
             source=source,
             event_type=event_type,
+            source_transform_ids=_payload_id_set(payload, "scp_source_transform_ids"),
         )
         if not changed:
             return {}
