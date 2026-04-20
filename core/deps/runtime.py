@@ -13,6 +13,7 @@ from .builtin_drivers import (
     ControlIntentDriver,
     SCPConstraintDriver,
     SCPMirrorRoleDriver,
+    SCPAttachmentCaptureDriver,
     SCPSyncDriver,
     FiberSyncDriver,
     MuscleSyncDriver,
@@ -250,7 +251,14 @@ def _run_sync_drivers(root, scene, is_full, impacted, bake, gate_meta, profile=N
         any_ids = any(bool(v) for v in d_impacted.values())
         if d_is_full or any_ids:
             t0 = time.perf_counter()
-            d.sync(root=root, scene=scene, is_full=d_is_full, impacted=d_impacted, bake=bake)
+            d.sync(
+                root=root,
+                scene=scene,
+                is_full=d_is_full,
+                impacted=d_impacted,
+                bake=bake,
+                gate_meta=gate_meta,
+            )
             dt_ms = (time.perf_counter() - t0) * 1000.0
             if profile is not None:
                 bucket = profile.setdefault("sync", {})
@@ -416,6 +424,7 @@ register_dependency_driver(RuntimeGraphDriver(), replace=True)
 register_dependency_driver(ControlIntentDriver(), replace=True)
 register_dependency_driver(SCPConstraintDriver(), replace=True)
 register_dependency_driver(SCPMirrorRoleDriver(), replace=True)
+register_dependency_driver(SCPAttachmentCaptureDriver(), replace=True)
 register_dependency_driver(SCPSyncDriver(), replace=True)
 register_dependency_driver(FiberSyncDriver(), replace=True)
 register_dependency_driver(MuscleSyncDriver(), replace=True)

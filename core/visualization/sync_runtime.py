@@ -4,6 +4,7 @@ from mathutils import Matrix, Vector
 from ..deps.dirty_hints import dirty_hints_for
 from ..id_utils import next_prefixed_id
 from ..utils import get_af_root
+from .scp_attachment_runtime import apply_scp_attachments
 
 
 def _resolve_sync_inputs(root, scene):
@@ -65,6 +66,13 @@ def _discover_marked_scps(root, scene):
         scp.name = obj.name
         scp.object_name = obj.name
         scp.parent_id = ""
+        scp.attach_follow_rotation = True
+        scp.attach_initialized = False
+        scp.attach_parent_tri_vidx = (-1, -1, -1)
+        scp.attach_parent_tri_weights = (1.0, 0.0, 0.0)
+        scp.attach_child_origin_local = (0.0, 0.0, 0.0)
+        scp.attach_child_tangent_local = (1.0, 0.0, 0.0)
+        scp.attach_child_normal_local = (0.0, 0.0, 1.0)
         scp.mirror_enabled = False
         scp.mirror_axis = "X"
         scp.mirror_origin = (0.0, 0.0, 0.0)
@@ -135,6 +143,7 @@ def _sync_parent_links(root):
             continue
         if pid == sid or pid not in scp_by_id or _has_parent_cycle(sid, scp_by_id):
             _set_prop_raw(scp, "parent_id", "")
+            _set_prop_raw(scp, "attach_initialized", False)
 
 
 def _normalize_active_index(root):
@@ -248,7 +257,14 @@ def _sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=None):
             bpy.data.meshes.remove(data)
 
 
-def sync_root_to_scene(sync, root=None, scene=None, target_scp_ids=None):
+def sync_root_to_scene(
+    sync,
+    root=None,
+    scene=None,
+    target_scp_ids=None,
+    attachment_parent_source_ids=None,
+    attachment_gate_meta=None,
+):
     if sync._syncing:
         return
 
@@ -265,6 +281,15 @@ def sync_root_to_scene(sync, root=None, scene=None, target_scp_ids=None):
         _normalize_active_index(root)
 
         scp_by_id = _scp_prop_map(root)
+        apply_scp_attachments(
+            sync,
+            root,
+            scene,
+            scp_by_id,
+            target_scp_ids=target_scp_ids,
+            source_parent_ids=attachment_parent_source_ids,
+            gate_meta=attachment_gate_meta,
+        )
         _sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=target_scp_ids)
     finally:
         sync._syncing = False
@@ -279,7 +304,8 @@ def on_depsgraph_update(sync, scene, depsgraph):
         return
 
     changed_ids = set()
-    has_geometry = False
+    transform_ids = set()
+    geometry_ids = set()
 
     for upd in depsgraph.updates:
         obj = upd.id
@@ -287,10 +313,17 @@ def on_depsgraph_update(sync, scene, depsgraph):
             continue
         if not _is_marked_source_scp(obj, root.name):
             continue
+        is_t = bool(getattr(upd, "is_updated_transform", False))
+        is_g = bool(getattr(upd, "is_updated_geometry", False))
+        if not is_t and not is_g:
+            continue
         sid = str(obj.get("af_scp_id") or "")
         if sid:
             changed_ids.add(sid)
-        has_geometry = has_geometry or bool(getattr(upd, "is_updated_geometry", False))
+            if is_t:
+                transform_ids.add(sid)
+            if is_g:
+                geometry_ids.add(sid)
 
     if changed_ids:
         from .sync_runner import sync_from_dirty_hints
@@ -300,5 +333,9 @@ def on_depsgraph_update(sync, scene, depsgraph):
             scene=scene,
             dirty_hints=dirty_hints_for("SCP", changed_ids),
             source="depsgraph",
-            event_type="GEOMETRY" if has_geometry else "TRANSFORM",
+            event_type="GEOMETRY" if geometry_ids else "TRANSFORM",
+            payload={
+                "scp_source_transform_ids": sorted(transform_ids),
+                "scp_source_geometry_ids": sorted(geometry_ids),
+            },
         )

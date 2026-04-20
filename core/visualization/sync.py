@@ -80,8 +80,22 @@ class SCPSceneSync:
                 return scp
         return None
 
-    def sync_root_to_scene(self, root=None, scene=None, target_scp_ids=None):
-        return _sync_root_to_scene_runtime(self, root=root, scene=scene, target_scp_ids=target_scp_ids)
+    def sync_root_to_scene(
+        self,
+        root=None,
+        scene=None,
+        target_scp_ids=None,
+        attachment_parent_source_ids=None,
+        attachment_gate_meta=None,
+    ):
+        return _sync_root_to_scene_runtime(
+            self,
+            root=root,
+            scene=scene,
+            target_scp_ids=target_scp_ids,
+            attachment_parent_source_ids=attachment_parent_source_ids,
+            attachment_gate_meta=attachment_gate_meta,
+        )
 
     def on_depsgraph_update(self, scene, depsgraph):
         return _on_depsgraph_update_runtime(self, scene, depsgraph)

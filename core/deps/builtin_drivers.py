@@ -4,11 +4,22 @@ from .controls import pop_control_intents
 from .control_behaviors import apply_control_intent
 from .mirror_roles import apply_scp_mirror_roles
 from ..constraints.scp_constraints import evaluate_scp_constraints_runtime, apply_scp_input_write
+from ..visualization.scp_attachment_runtime import capture_dirty_scp_attachments
 from ..visualization.sync import register_sync
 from ..visualization.fiber_sync import register_fiber_sync
 from ..visualization.muscle_sync import register_muscle_sync
 from ..visualization.blob_sync import register_blob_sync
 from ..visualization.vcp_mirror_runtime import sync_vcp_mirrors
+
+
+def _payload_id_set(payload, key):
+    vals = (dict(payload or {})).get(str(key), ())
+    out = set()
+    for v in set(vals or ()):
+        sid = str(v or "")
+        if sid:
+            out.add(sid)
+    return out
 
 
 class RuntimeGraphDriver(DependencyDriver):
@@ -119,19 +130,61 @@ class SCPMirrorRoleDriver(DependencyDriver):
         return {"SCP": set(changed)}
 
 
+class SCPAttachmentCaptureDriver(DependencyDriver):
+    name = "scp_attachment_capture_driver"
+
+    def entity_types(self):
+        return ("SCP",)
+
+    def apply_constraints(self, ctx):
+        scp_dirty = set(ctx.dirty.get("SCP", set()) or set())
+        if not scp_dirty:
+            return {}
+
+        meta = dict(ctx.gate_meta or {})
+        source = str(meta.get("source", "") or "")
+        event_type = str(meta.get("event_type", "") or "")
+        changed = capture_dirty_scp_attachments(
+            root=ctx.root,
+            scene=ctx.scene,
+            dirty_scp_ids=scp_dirty,
+            source=source,
+            event_type=event_type,
+        )
+        if not changed:
+            return {}
+        return {"SCP": set(changed)}
+
+
 class SCPSyncDriver(DependencyDriver):
     name = "scp_sync_driver"
 
     def entity_types(self):
         return ("SCP",)
 
-    def sync(self, root, scene, is_full, impacted, bake):
+    def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
         _ = bake
         ids = set(impacted.get("SCP", set()) or set())
+        meta = dict(gate_meta or {})
+        payload = dict(meta.get("payload", {}) or {})
+        parent_source_ids = _payload_id_set(payload, "scp_source_transform_ids") | _payload_id_set(
+            payload, "scp_source_geometry_ids"
+        )
         if is_full:
-            register_sync().sync_root_to_scene(root=root, scene=scene)
+            register_sync().sync_root_to_scene(
+                root=root,
+                scene=scene,
+                attachment_parent_source_ids=parent_source_ids,
+                attachment_gate_meta=meta,
+            )
         elif ids:
-            register_sync().sync_root_to_scene(root=root, scene=scene, target_scp_ids=ids)
+            register_sync().sync_root_to_scene(
+                root=root,
+                scene=scene,
+                target_scp_ids=ids,
+                attachment_parent_source_ids=parent_source_ids,
+                attachment_gate_meta=meta,
+            )
 
 
 class FiberSyncDriver(DependencyDriver):
@@ -140,7 +193,8 @@ class FiberSyncDriver(DependencyDriver):
     def entity_types(self):
         return ("FIBER",)
 
-    def sync(self, root, scene, is_full, impacted, bake):
+    def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
+        _ = gate_meta
         ids = set(impacted.get("FIBER", set()) or set())
         if is_full:
             register_fiber_sync().sync_root_to_scene(root=root, scene=scene, bake=bake)
@@ -154,7 +208,8 @@ class MuscleSyncDriver(DependencyDriver):
     def entity_types(self):
         return ("MUSCLE",)
 
-    def sync(self, root, scene, is_full, impacted, bake):
+    def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
+        _ = gate_meta
         ids = set(impacted.get("MUSCLE", set()) or set())
         if is_full:
             register_muscle_sync().sync_root_to_scene(root=root, scene=scene)
@@ -168,7 +223,8 @@ class BlobSyncDriver(DependencyDriver):
     def entity_types(self):
         return ("BLOB",)
 
-    def sync(self, root, scene, is_full, impacted, bake):
+    def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
+        _ = gate_meta
         ids = set(impacted.get("BLOB", set()) or set())
         if is_full:
             register_blob_sync().sync_root_to_scene(root=root, scene=scene)
@@ -182,8 +238,9 @@ class VCPMirrorSyncDriver(DependencyDriver):
     def entity_types(self):
         return ("SCP", "FIBER", "MUSCLE", "BLOB")
 
-    def sync(self, root, scene, is_full, impacted, bake):
+    def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
         _ = bake
+        _ = gate_meta
         fiber_ids = set(impacted.get("FIBER", set()) or set())
         muscle_ids = set(impacted.get("MUSCLE", set()) or set())
         blob_ids = set(impacted.get("BLOB", set()) or set())

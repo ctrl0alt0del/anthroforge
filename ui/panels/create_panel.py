@@ -59,6 +59,8 @@ class AF_PT_CreatePanel(bpy.types.Panel):
             pbox.label(text="Parent Relation")
             pbox.prop(scene, "af_scp_parent_obj", text="Parent")
             pbox.operator("af.set_scp_parent", text="Apply Parent", icon="CONSTRAINT")
+            if scp is not None and str(getattr(scp, "parent_id", "") or ""):
+                pbox.prop(scp, "attach_follow_rotation", text="Follow Rotation")
 
             if scp is not None:
                 mbox = layout.box()

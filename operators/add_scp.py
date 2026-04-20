@@ -82,9 +82,11 @@ def _set_parent_relation(child_obj, child_scp, parent_obj):
 
     if parent_obj is None:
         child_scp.parent_id = ""
+        child_scp.attach_initialized = False
         return
 
     child_scp.parent_id = str(parent_obj.get("af_scp_id") or "")
+    child_scp.attach_initialized = False
 
 
 class AF_OT_AddSCP(bpy.types.Operator):
@@ -109,6 +111,13 @@ class AF_OT_AddSCP(bpy.types.Operator):
             scp.name = obj.name
             scp.object_name = obj.name
             scp.parent_id = ""
+            scp.attach_follow_rotation = True
+            scp.attach_initialized = False
+            scp.attach_parent_tri_vidx = (-1, -1, -1)
+            scp.attach_parent_tri_weights = (1.0, 0.0, 0.0)
+            scp.attach_child_origin_local = (0.0, 0.0, 0.0)
+            scp.attach_child_tangent_local = (1.0, 0.0, 0.0)
+            scp.attach_child_normal_local = (0.0, 0.0, 1.0)
             scp.mirror_enabled = False
             scp.mirror_axis = "X"
             scp.mirror_origin = (0.0, 0.0, 0.0)

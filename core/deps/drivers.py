@@ -29,7 +29,7 @@ class DependencyDriver:
     def apply_constraints(self, ctx: DependencyRuntimeContext):
         return {}
 
-    def sync(self, root, scene, is_full, impacted, bake):
+    def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
         return
 
     def post_sync(self, root, scene, is_full, impacted, bake):
@@ -63,4 +63,3 @@ def get_registered_entity_types():
             seen.add(u)
             out.append(u)
     return tuple(out)
-
