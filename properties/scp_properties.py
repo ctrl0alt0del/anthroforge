@@ -1,8 +1,7 @@
-import bpy
-from mathutils import Euler, Quaternion
+﻿import bpy
 
-from ..core.utils import get_af_root
 from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
+from ..core.utils import get_af_root
 from ..core.visualization.control_runtime import notify_selection_changed
 
 
@@ -11,45 +10,33 @@ def _sync_scene(context, scp_id=None, source="property", event_type="UPDATE"):
     root = get_af_root(scene)
     if root is None:
         return
-
     from ..core.visualization.sync_runner import sync_from_dirty_hints
-
     hints = dirty_hints_for("SCP", {scp_id}) if scp_id else empty_dirty_hints()
-    sync_from_dirty_hints(
-        root=root,
-        scene=scene,
-        dirty_hints=hints,
-        source=source,
-        event_type=event_type,
-    )
+    sync_from_dirty_hints(root=root, scene=scene, dirty_hints=hints, source=source, event_type=event_type)
 
 
 def _on_scp_prop_update(self, context):
     _sync_scene(context, getattr(self, "id", ""))
 
 
-def _on_constraint_prop_update(self, context):
+def _reset_constraint_runtime_state(prop):
     try:
-        self.delta_initialized = False
-        self.runtime_status = "OK"
-        self.runtime_message = ""
+        prop.delta_initialized = False
+        prop.runtime_status = "OK"
+        prop.runtime_message = ""
     except Exception:
         pass
+
+
+def _on_constraint_prop_update(self, context):
+    _reset_constraint_runtime_state(self)
     _sync_scene(context, None)
 
 
 def _poll_constraint_source_scp_object(self, obj):
     scene = getattr(bpy.context, "scene", None)
     root = get_af_root(scene)
-    if root is None or obj is None:
-        return False
-    return bool(
-        obj.type == "MESH"
-        and obj.get("af_scp")
-        and not obj.get("af_scp_mirror")
-        and obj.get("af_root_name") == root.name
-        and obj.get("af_scp_id")
-    )
+    return bool(root and obj and obj.type == "MESH" and obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_root_name") == root.name and obj.get("af_scp_id"))
 
 
 def _on_constraint_source_obj_update(self, context):
@@ -59,28 +46,9 @@ def _on_constraint_source_obj_update(self, context):
     _on_constraint_prop_update(self, context)
 
 
-def _on_euler_update(self, context):
-    e = Euler(self.local_rotation_euler, "XYZ")
-    q = e.to_quaternion()
-    self.local_rotation = (q.w, q.x, q.y, q.z)
-    _sync_scene(context, getattr(self, "id", ""))
-
-
-def _on_quat_update(self, context):
-    q = Quaternion(self.local_rotation)
-    e = q.to_euler("XYZ")
-    self["local_rotation_euler"] = (e.x, e.y, e.z)
-    _sync_scene(context, getattr(self, "id", ""))
-
-
 def _find_scene_scp_object(scene, root_name, scp_id):
     for obj in scene.objects:
-        if (
-            obj.get("af_scp")
-            and not obj.get("af_scp_mirror")
-            and obj.get("af_root_name") == root_name
-            and obj.get("af_scp_id") == scp_id
-        ):
+        if obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_root_name") == root_name and obj.get("af_scp_id") == scp_id:
             return obj
     return None
 
@@ -88,29 +56,28 @@ def _find_scene_scp_object(scene, root_name, scp_id):
 def _select_only_object(scene, context, target):
     scene.af_selection_sync_lock = True
     try:
-        for o in context.selected_objects:
-            o.select_set(False)
+        for obj in context.selected_objects:
+            obj.select_set(False)
         target.select_set(True)
         context.view_layer.objects.active = target
     finally:
         scene.af_selection_sync_lock = False
 
 
-def _on_active_scp_index_update(self, context):
+def _active_scp_selection_target(system_prop, context):
     scene = context.scene if context else None
-    if not scene or scene.af_selection_sync_lock:
-        return
-
     root = get_af_root(scene)
-    if root is None:
-        return
+    index = int(getattr(system_prop, "active_scp_index", -1))
+    if not scene or scene.af_selection_sync_lock or root is None:
+        return None, scene
+    if index < 0 or index >= len(system_prop.scps):
+        return None, scene
+    scp_id = system_prop.scps[index].id
+    return _find_scene_scp_object(scene, root.name, scp_id), scene
 
-    idx = int(self.active_scp_index)
-    if idx < 0 or idx >= len(self.scps):
-        return
 
-    scp_id = self.scps[idx].id
-    obj = _find_scene_scp_object(scene, root.name, scp_id)
+def _on_active_scp_index_update(self, context):
+    obj, scene = _active_scp_selection_target(self, context)
     if obj is None:
         return
     _select_only_object(scene, context, obj)
@@ -207,58 +174,13 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
     object_name: bpy.props.StringProperty(name="Object Name", default="", update=_on_scp_prop_update)
     parent_id: bpy.props.StringProperty(name="Parent ID", default="", update=_on_scp_prop_update)
 
-    attach_follow_rotation: bpy.props.BoolProperty(
-        name="Follow Parent Rotation", default=True, update=_on_scp_prop_update
-    )
+    attach_follow_rotation: bpy.props.BoolProperty(name="Follow Parent Rotation", default=True, update=_on_scp_prop_update)
     attach_initialized: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
-    attach_parent_tri_vidx: bpy.props.IntVectorProperty(
-        name="Attach Parent Triangle Vertex Indices",
-        size=3,
-        default=(-1, -1, -1),
-        options={"HIDDEN"},
-    )
-    attach_parent_tri_weights: bpy.props.FloatVectorProperty(
-        name="Attach Parent Triangle Barycentric",
-        size=3,
-        default=(1.0, 0.0, 0.0),
-        options={"HIDDEN"},
-    )
-    attach_child_origin_local: bpy.props.FloatVectorProperty(
-        name="Attach Child Origin Local",
-        size=3,
-        default=(0.0, 0.0, 0.0),
-        options={"HIDDEN"},
-    )
-    attach_child_tangent_local: bpy.props.FloatVectorProperty(
-        name="Attach Child Tangent Local",
-        size=3,
-        default=(1.0, 0.0, 0.0),
-        options={"HIDDEN"},
-    )
-    attach_child_normal_local: bpy.props.FloatVectorProperty(
-        name="Attach Child Normal Local",
-        size=3,
-        default=(0.0, 0.0, 1.0),
-        options={"HIDDEN"},
-    )
-
-    # Compatibility fields retained for auxiliary runtime modules that still read them.
-    local_origin: bpy.props.FloatVectorProperty(
-        name="Translate", size=3, subtype="TRANSLATION", default=(0.0, 0.0, 0.0), update=_on_scp_prop_update
-    )
-    local_rotation: bpy.props.FloatVectorProperty(
-        name="Rotation (Quat)",
-        size=4,
-        subtype="QUATERNION",
-        default=(1.0, 0.0, 0.0, 0.0),
-        update=_on_quat_update,
-    )
-    local_rotation_euler: bpy.props.FloatVectorProperty(
-        name="Rotate", size=3, subtype="EULER", default=(0.0, 0.0, 0.0), update=_on_euler_update
-    )
-    local_scale: bpy.props.FloatVectorProperty(
-        name="Scale", size=3, subtype="XYZ", default=(1.0, 1.0, 1.0), update=_on_scp_prop_update
-    )
+    attach_parent_tri_vidx: bpy.props.IntVectorProperty(name="Attach Parent Triangle Vertex Indices", size=3, default=(-1, -1, -1), options={"HIDDEN"})
+    attach_parent_tri_weights: bpy.props.FloatVectorProperty(name="Attach Parent Triangle Barycentric", size=3, default=(1.0, 0.0, 0.0), options={"HIDDEN"})
+    attach_child_origin_local: bpy.props.FloatVectorProperty(name="Attach Child Origin Local", size=3, default=(0.0, 0.0, 0.0), options={"HIDDEN"})
+    attach_child_tangent_local: bpy.props.FloatVectorProperty(name="Attach Child Tangent Local", size=3, default=(1.0, 0.0, 0.0), options={"HIDDEN"})
+    attach_child_normal_local: bpy.props.FloatVectorProperty(name="Attach Child Normal Local", size=3, default=(0.0, 0.0, 1.0), options={"HIDDEN"})
 
     mirror_enabled: bpy.props.BoolProperty(name="Mirror Children", default=False, update=_on_scp_prop_update)
     mirror_axis: bpy.props.EnumProperty(
@@ -267,13 +189,7 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         default="X",
         update=_on_scp_prop_update,
     )
-    mirror_origin: bpy.props.FloatVectorProperty(
-        name="Mirror Origin",
-        size=3,
-        subtype="TRANSLATION",
-        default=(0.0, 0.0, 0.0),
-        update=_on_scp_prop_update,
-    )
+    mirror_origin: bpy.props.FloatVectorProperty(name="Mirror Origin", size=3, subtype="TRANSLATION", default=(0.0, 0.0, 0.0), update=_on_scp_prop_update)
     mirror_status: bpy.props.EnumProperty(
         name="Mirror Status",
         items=[
@@ -284,11 +200,7 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         default="NONE",
         options={"HIDDEN"},
     )
-    mirror_source_id: bpy.props.StringProperty(
-        name="Mirror Source ID",
-        default="",
-        options={"HIDDEN"},
-    )
+    mirror_source_id: bpy.props.StringProperty(name="Mirror Source ID", default="", options={"HIDDEN"})
     mirror_effective_axis: bpy.props.EnumProperty(
         name="Mirror Effective Axis",
         items=[("X", "X", ""), ("Y", "Y", ""), ("Z", "Z", "")],

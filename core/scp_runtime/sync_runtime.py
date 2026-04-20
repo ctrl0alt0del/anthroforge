@@ -1,0 +1,92 @@
+﻿import bpy
+
+from ..deps.dirty_hints import dirty_hints_for
+from ..utils import get_af_root
+from .attachment_runtime import apply_scp_attachments
+from .common import as_id, is_source_scp, payload_id_set, scp_prop_map
+from .marking import detach_native_scp_parent_links, discover_marked_scps, normalize_active_index, prune_invalid_scps, sync_parent_links
+from .mirror_scene import sync_mirrors
+
+
+def _resolve_sync_inputs(root, scene):
+    scene = scene or bpy.context.scene
+    root = root or get_af_root(scene)
+    return (None, None) if root is None or scene is None else (root, scene)
+
+
+def sync_root_to_scene(sync, root=None, scene=None, target_scp_ids=None, attachment_parent_source_ids=None, attachment_gate_meta=None):
+    if sync._syncing:
+        return
+    root, scene = _resolve_sync_inputs(root, scene)
+    if root is None:
+        return
+    _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_source_ids, attachment_gate_meta)
+
+
+def _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_source_ids, attachment_gate_meta):
+    sync._syncing = True
+    try:
+        discover_marked_scps(root, scene)
+        prune_invalid_scps(root, scene)
+        detach_native_scp_parent_links(root, scene)
+        sync_parent_links(root)
+        normalize_active_index(root)
+        scp_by_id = scp_prop_map(root)
+        apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids, attachment_parent_source_ids, attachment_gate_meta)
+        sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=target_scp_ids)
+    finally:
+        sync._syncing = False
+
+
+def on_depsgraph_update(sync, scene, depsgraph):
+    if sync._syncing:
+        return
+    root = get_af_root(scene)
+    if root is None:
+        return
+    _sync_from_depsgraph(sync, root, scene, depsgraph)
+
+
+def _sync_from_depsgraph(sync, root, scene, depsgraph):
+    changed_ids, transform_ids, geometry_ids = _depsgraph_change_sets(root, depsgraph)
+    if not changed_ids:
+        return
+    from ..visualization.sync_runner import sync_from_dirty_hints
+    sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("SCP", changed_ids), source="depsgraph", event_type=_event_type(geometry_ids), payload=_payload(transform_ids, geometry_ids))
+
+
+def _depsgraph_change_sets(root, depsgraph):
+    changed_ids, transform_ids, geometry_ids = set(), set(), set()
+    for update in depsgraph.updates:
+        _collect_update(root, update, changed_ids, transform_ids, geometry_ids)
+    return changed_ids, transform_ids, geometry_ids
+
+
+def _collect_update(root, update, changed_ids, transform_ids, geometry_ids):
+    obj = update.id
+    if not isinstance(obj, bpy.types.Object) or not is_source_scp(obj, root.name):
+        return
+    is_transform = bool(getattr(update, "is_updated_transform", False))
+    is_geometry = bool(getattr(update, "is_updated_geometry", False))
+    if not is_transform and not is_geometry:
+        return
+    _record_update_ids(obj, changed_ids, transform_ids if is_transform else None, geometry_ids if is_geometry else None)
+
+
+def _record_update_ids(obj, changed_ids, transform_ids, geometry_ids):
+    sid = as_id(obj.get("af_scp_id"))
+    if not sid:
+        return
+    changed_ids.add(sid)
+    if transform_ids is not None:
+        transform_ids.add(sid)
+    if geometry_ids is not None:
+        geometry_ids.add(sid)
+
+
+def _event_type(geometry_ids):
+    return "GEOMETRY" if geometry_ids else "TRANSFORM"
+
+
+def _payload(transform_ids, geometry_ids):
+    return {"scp_source_transform_ids": sorted(transform_ids), "scp_source_geometry_ids": sorted(geometry_ids)}
