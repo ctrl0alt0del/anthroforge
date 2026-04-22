@@ -19,33 +19,6 @@ def _on_scp_prop_update(self, context):
     _sync_scene(context, getattr(self, "id", ""))
 
 
-def _reset_constraint_runtime_state(prop):
-    try:
-        prop.delta_initialized = False
-        prop.runtime_status = "OK"
-        prop.runtime_message = ""
-    except Exception:
-        pass
-
-
-def _on_constraint_prop_update(self, context):
-    _reset_constraint_runtime_state(self)
-    _sync_scene(context, None)
-
-
-def _poll_constraint_source_scp_object(self, obj):
-    scene = getattr(bpy.context, "scene", None)
-    root = get_af_root(scene)
-    return bool(root and obj and obj.type == "MESH" and obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_root_name") == root.name and obj.get("af_scp_id"))
-
-
-def _on_constraint_source_obj_update(self, context):
-    src_obj = getattr(self, "source_obj", None)
-    if src_obj and src_obj.get("af_scp_id"):
-        self.source_scp_id = str(src_obj.get("af_scp_id"))
-    _on_constraint_prop_update(self, context)
-
-
 def _find_scene_scp_object(scene, root_name, scp_id):
     for obj in scene.objects:
         if obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_root_name") == root_name and obj.get("af_scp_id") == scp_id:
@@ -82,89 +55,6 @@ def _on_active_scp_index_update(self, context):
         return
     _select_only_object(scene, context, obj)
     notify_selection_changed(scene)
-
-
-class AF_SCP_Constraint_Property(bpy.types.PropertyGroup):
-    enabled: bpy.props.BoolProperty(name="Enabled", default=True, update=_on_constraint_prop_update)
-    priority: bpy.props.IntProperty(name="Priority", default=100, min=0, max=10000, update=_on_constraint_prop_update)
-
-    source_scp_id: bpy.props.StringProperty(name="Source SCP ID", default="", update=_on_constraint_prop_update)
-    source_obj: bpy.props.PointerProperty(
-        name="Source SCP",
-        type=bpy.types.Object,
-        poll=_poll_constraint_source_scp_object,
-        update=_on_constraint_source_obj_update,
-    )
-
-    source_prop: bpy.props.EnumProperty(
-        name="Source",
-        items=[
-            ("LOC_X", "Location X", ""),
-            ("LOC_Y", "Location Y", ""),
-            ("LOC_Z", "Location Z", ""),
-            ("ROT_X", "Rotation X", ""),
-            ("ROT_Y", "Rotation Y", ""),
-            ("ROT_Z", "Rotation Z", ""),
-            ("SCALE_X", "Scale X", ""),
-            ("SCALE_Y", "Scale Y", ""),
-            ("SCALE_Z", "Scale Z", ""),
-            ("DIM_X", "Dimensions X", ""),
-            ("DIM_Y", "Dimensions Y", ""),
-            ("DIM_Z", "Dimensions Z", ""),
-        ],
-        default="SCALE_X",
-        update=_on_constraint_prop_update,
-    )
-
-    dest_prop: bpy.props.EnumProperty(
-        name="Destination",
-        items=[
-            ("LOC_X", "Location X", ""),
-            ("LOC_Y", "Location Y", ""),
-            ("LOC_Z", "Location Z", ""),
-            ("ROT_X", "Rotation X", ""),
-            ("ROT_Y", "Rotation Y", ""),
-            ("ROT_Z", "Rotation Z", ""),
-            ("SCALE_X", "Scale X", ""),
-            ("SCALE_Y", "Scale Y", ""),
-            ("SCALE_Z", "Scale Z", ""),
-        ],
-        default="SCALE_X",
-        update=_on_constraint_prop_update,
-    )
-
-    calculator_type: bpy.props.EnumProperty(
-        name="Calculator",
-        items=[
-            ("LINEAR", "Linear", ""),
-            ("RANGE_REMAP", "Range Remap", ""),
-        ],
-        default="LINEAR",
-        update=_on_constraint_prop_update,
-    )
-
-    linear_a: bpy.props.FloatProperty(name="a", default=1.0, update=_on_constraint_prop_update)
-    linear_b: bpy.props.FloatProperty(name="b", default=0.0, update=_on_constraint_prop_update)
-
-    in_min: bpy.props.FloatProperty(name="In Min", default=0.0, update=_on_constraint_prop_update)
-    in_max: bpy.props.FloatProperty(name="In Max", default=1.0, update=_on_constraint_prop_update)
-    out_min: bpy.props.FloatProperty(name="Out Min", default=0.0, update=_on_constraint_prop_update)
-    out_max: bpy.props.FloatProperty(name="Out Max", default=1.0, update=_on_constraint_prop_update)
-    clamp: bpy.props.BoolProperty(name="Clamp", default=True, update=_on_constraint_prop_update)
-
-    delta_initialized: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
-    delta_src_base: bpy.props.FloatProperty(default=0.0, options={"HIDDEN"})
-    delta_dst_base: bpy.props.FloatProperty(default=0.0, options={"HIDDEN"})
-    runtime_status: bpy.props.EnumProperty(
-        name="Status",
-        items=[
-            ("OK", "OK", ""),
-            ("DELAYED_CYCLE", "Delayed Cycle", ""),
-        ],
-        default="OK",
-        options={"HIDDEN"},
-    )
-    runtime_message: bpy.props.StringProperty(name="Runtime Message", default="", options={"HIDDEN"})
 
 
 class AF_SCP_Property(bpy.types.PropertyGroup):
@@ -207,9 +97,6 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         default="X",
         options={"HIDDEN"},
     )
-
-    constraints: bpy.props.CollectionProperty(type=AF_SCP_Constraint_Property)
-    active_constraint_index: bpy.props.IntProperty(default=0)
 
 
 class AF_SCP_System_Property(bpy.types.PropertyGroup):

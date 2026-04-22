@@ -33,7 +33,6 @@ from .operators.muscle_tools import (
     AF_OT_SelectMuscleInflationCtrl,
 )
 from .operators.blob_tools import AF_OT_SelectBlobControl
-from .operators.scp_constraints import AF_OT_AddSCPConstraint, AF_OT_RemoveSCPConstraint
 
 from .ui.main_panel import AF_PT_MainPanel
 from .ui.panels.create_panel import AF_PT_CreatePanel
@@ -46,7 +45,6 @@ from .ui.panels.blob_create_panel import AF_PT_BlobCreatePanel
 from .ui.panels.blob_edit_panel import AF_PT_BlobEditPanel
 
 from .properties.scp_properties import (
-    AF_SCP_Constraint_Property,
     AF_SCP_Property,
     AF_SCP_System_Property,
 )
@@ -77,14 +75,11 @@ classes = (
     AF_OT_SetSCPParent,
     AF_OT_ToggleSCPCollapse,
     AF_OT_SelectSCPInTree,
-    AF_OT_AddSCPConstraint,
-    AF_OT_RemoveSCPConstraint,
     AF_PT_MainPanel,
     AF_PT_CreatePanel,
     AF_PT_TreePanel,
     AF_PT_EditPanel,
 
-    AF_SCP_Constraint_Property,
     AF_SCP_Property,
     AF_SCP_System_Property,
 

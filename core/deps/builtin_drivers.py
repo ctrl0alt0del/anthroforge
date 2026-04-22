@@ -3,7 +3,6 @@ from .drivers import DependencyDriver
 from .controls import pop_control_intents
 from .control_behaviors import apply_control_intent
 from .mirror_roles import apply_scp_mirror_roles
-from ..constraints.scp_constraints import evaluate_scp_constraints_runtime, apply_scp_input_write
 from ..visualization.scp_attachment_runtime import capture_dirty_scp_attachments
 from ..visualization.sync import register_sync
 from ..visualization.fiber_sync import register_fiber_sync
@@ -32,67 +31,6 @@ class RuntimeGraphDriver(DependencyDriver):
         built = build_runtime_graph(root, graph)
         for et, ids in built.items():
             entity_sets.setdefault(et, set()).update(set(ids or set()))
-
-
-class SCPConstraintDriver(DependencyDriver):
-    name = "scp_constraint_driver"
-
-    def __init__(self):
-        self._delayed_writes = {}
-
-    def entity_types(self):
-        return ("SCP",)
-
-    def _apply_delayed_queue(self, root, scene):
-        if not self._delayed_writes:
-            return set()
-        changed_scps = set()
-        for (etype, eid, port), value in list(self._delayed_writes.items()):
-            if etype == "SCP":
-                if apply_scp_input_write(root, eid, port, value, source="deps_constraint_delayed", scene=scene):
-                    changed_scps.add(eid)
-        self._delayed_writes.clear()
-        return changed_scps
-
-    def inject_delayed_dirty(self, root, dirty, scene=None):
-        if "SCP" not in dirty:
-            return set()
-        changed = self._apply_delayed_queue(root, scene)
-        dirty["SCP"] |= changed
-        return changed
-
-    def apply_constraints(self, ctx):
-        scp_all = set(ctx.entity_sets.get("SCP", set()) or set())
-        scp_dirty = set(ctx.dirty.get("SCP", set()) or set())
-        changed_source_scps = scp_all if ctx.is_full else scp_dirty
-        if not changed_source_scps:
-            return {}
-
-        new_delayed = {}
-
-        def delayed_writer(etype, eid, port, value):
-            new_delayed[(etype, eid, port)] = value
-
-        def is_cyclic_pair(src_id, dst_id):
-            src_node = ("SCP", src_id)
-            dst_node = ("SCP", dst_id)
-            if src_node not in ctx.scc_idx or dst_node not in ctx.scc_idx:
-                return False
-            if ctx.scc_idx[src_node] != ctx.scc_idx[dst_node]:
-                return False
-            size = ctx.scc_sizes.get(ctx.scc_idx[src_node], 1)
-            return size > 1
-
-        changed_dest_scps = evaluate_scp_constraints_runtime(
-            root=ctx.root,
-            changed_source_ids=changed_source_scps,
-            is_cyclic_pair=is_cyclic_pair,
-            delayed_writer=delayed_writer,
-            scene=ctx.scene,
-        )
-        self._delayed_writes.clear()
-        self._delayed_writes.update(new_delayed)
-        return {"SCP": set(changed_dest_scps)}
 
 
 class ControlIntentDriver(DependencyDriver):

@@ -10,14 +10,7 @@ from .types import (
     MUT_PROBE,
     EDGE_EVAL,
     EDGE_ATTACHMENT,
-    EDGE_CONSTRAINT_READ,
 )
-
-def _src_id_from_constraint(c):
-    src_obj = getattr(c, "source_obj", None)
-    if src_obj and src_obj.get("af_scp_id"):
-        return str(src_obj.get("af_scp_id"))
-    return str(getattr(c, "source_scp_id", "") or "")
 
 
 def _add_dependency_edge(graph, src_entity, dst_entity):
@@ -43,16 +36,6 @@ def _add_scp_entities(root, graph, entity_sets):
             parent_probe = graph.add_port(PortRef("SCP", scp.parent_id, "probe", PHASE_PROBES, MUT_PROBE))
             graph.add_edge(Edge(parent_probe, p_att, EDGE_ATTACHMENT))
             _add_dependency_edge(graph, ("SCP", scp.parent_id), ("SCP", sid))
-
-        for c in scp.constraints:
-            if not bool(getattr(c, "enabled", True)):
-                continue
-            src_id = _src_id_from_constraint(c)
-            if not src_id or src_id == sid:
-                continue
-            src_probe = graph.add_port(PortRef("SCP", src_id, "probe", PHASE_PROBES, MUT_PROBE))
-            graph.add_edge(Edge(src_probe, p_in, EDGE_CONSTRAINT_READ))
-            _add_dependency_edge(graph, ("SCP", src_id), ("SCP", sid))
 
 
 def _add_fiber_entities(root, graph, entity_sets):
