@@ -49,10 +49,6 @@ def _draw_fiber_row(layout, fiber, depth, selected_fiber_ids):
     op.node_id = fiber.id
     op.node_type = "FIBER"
 
-    del_op = row.operator("af.delete_selected_af_node", text="", icon="TRASH", emboss=False)
-    del_op.target_type = "FIBER"
-    del_op.target_id = fiber.id
-
     a = fiber.a_parent_id if fiber.a_parent_id else "?"
     b = fiber.b_parent_id if fiber.b_parent_id else "?"
     right = row.row(align=True)
@@ -73,10 +69,6 @@ def _draw_blob_row(layout, blob, selected_blob_ids):
     )
     op.node_id = blob.id
     op.node_type = "BLOB"
-
-    del_op = row.operator("af.delete_selected_af_node", text="", icon="TRASH", emboss=False)
-    del_op.target_type = "BLOB"
-    del_op.target_id = blob.id
 
     right = row.row(align=True)
     right.alignment = "RIGHT"

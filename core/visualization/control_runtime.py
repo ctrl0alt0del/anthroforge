@@ -46,6 +46,29 @@ def _entity_from_active_object(root):
     return "NONE", ""
 
 
+def _scp_index(root, scp_id):
+    sid = str(scp_id or "")
+    for index, scp in enumerate(root.af_scp_system.scps):
+        if str(getattr(scp, "id", "") or "") == sid:
+            return index
+    return -1
+
+
+def _set_active_scp_index(root, scene, index):
+    if int(getattr(root.af_scp_system, "active_scp_index", -1)) == int(index):
+        return
+    scene.af_selection_sync_lock = True
+    try:
+        root.af_scp_system.active_scp_index = int(index)
+    finally:
+        scene.af_selection_sync_lock = False
+
+
+def _sync_active_scp_state(root, scene, entity):
+    if entity[0] == "SCP":
+        _set_active_scp_index(root, scene, _scp_index(root, entity[1]))
+
+
 def resolve_active_entity(root):
     direct = _entity_from_active_object(root)
     if direct[0] != "NONE":
@@ -148,6 +171,7 @@ class ControlRuntimeOrchestrator:
             self._last_active = ("NONE", "")
             return
         current = resolve_active_entity(root)
+        _sync_active_scp_state(root, scene, current)
         if not force and current == self._last_active:
             return
         prev = self._last_active

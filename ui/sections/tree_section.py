@@ -38,9 +38,6 @@ def _draw_select_and_delete(row, scp, selected_ids):
     label = scp.name if scp.name else scp.id
     op = row.operator("af.select_scp_in_tree", text=label, emboss=True, depress=(scp.id in selected_ids))
     op.scp_id = scp.id
-    del_op = row.operator("af.delete_selected_af_node", text="", icon="TRASH", emboss=False)
-    del_op.target_type = "SCP"
-    del_op.target_id = scp.id
 
 
 def _draw_node(layout, scene, scp, children_map, depth, active_id, selected_ids, visited):

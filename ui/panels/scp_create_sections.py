@@ -27,9 +27,8 @@ def draw_mark_button(layout):
 
 
 def draw_delete_button(layout, obj):
-    operator = layout.operator("af.delete_selected_af_node", icon="TRASH", text="Unmark Selected SCP")
-    operator.target_type = "SCP"
-    operator.target_id = str(obj.get("af_scp_id"))
+    _ = obj
+    layout.operator("af.unmark_scp", icon="TRASH", text="Unmark Selected SCP")
 
 
 def draw_parent_box(layout, scene, scp):

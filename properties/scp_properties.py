@@ -2,7 +2,6 @@
 
 from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 from ..core.utils import get_af_root
-from ..core.visualization.control_runtime import notify_selection_changed
 
 
 def _sync_scene(context, scp_id=None, source="property", event_type="UPDATE"):
@@ -17,44 +16,6 @@ def _sync_scene(context, scp_id=None, source="property", event_type="UPDATE"):
 
 def _on_scp_prop_update(self, context):
     _sync_scene(context, getattr(self, "id", ""))
-
-
-def _find_scene_scp_object(scene, root_name, scp_id):
-    for obj in scene.objects:
-        if obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_root_name") == root_name and obj.get("af_scp_id") == scp_id:
-            return obj
-    return None
-
-
-def _select_only_object(scene, context, target):
-    scene.af_selection_sync_lock = True
-    try:
-        for obj in context.selected_objects:
-            obj.select_set(False)
-        target.select_set(True)
-        context.view_layer.objects.active = target
-    finally:
-        scene.af_selection_sync_lock = False
-
-
-def _active_scp_selection_target(system_prop, context):
-    scene = context.scene if context else None
-    root = get_af_root(scene)
-    index = int(getattr(system_prop, "active_scp_index", -1))
-    if not scene or scene.af_selection_sync_lock or root is None:
-        return None, scene
-    if index < 0 or index >= len(system_prop.scps):
-        return None, scene
-    scp_id = system_prop.scps[index].id
-    return _find_scene_scp_object(scene, root.name, scp_id), scene
-
-
-def _on_active_scp_index_update(self, context):
-    obj, scene = _active_scp_selection_target(self, context)
-    if obj is None:
-        return
-    _select_only_object(scene, context, obj)
-    notify_selection_changed(scene)
 
 
 class AF_SCP_Property(bpy.types.PropertyGroup):
@@ -101,4 +62,4 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
 
 class AF_SCP_System_Property(bpy.types.PropertyGroup):
     scps: bpy.props.CollectionProperty(type=AF_SCP_Property)
-    active_scp_index: bpy.props.IntProperty(default=-1, update=_on_active_scp_index_update)
+    active_scp_index: bpy.props.IntProperty(default=-1)

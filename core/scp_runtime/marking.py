@@ -59,4 +59,6 @@ def sync_parent_links(root):
 def normalize_active_index(root):
     count = len(root.af_scp_system.scps)
     index = int(getattr(root.af_scp_system, "active_scp_index", -1))
-    root.af_scp_system.active_scp_index = -1 if count <= 0 else min(max(index, 0), count - 1)
+    target = -1 if count <= 0 else min(max(index, 0), count - 1)
+    if target != index:
+        root.af_scp_system.active_scp_index = target

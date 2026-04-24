@@ -11,7 +11,7 @@ bl_info = {
 import bpy
 
 from .operators.create_root import AF_OT_CreateRoot
-from .operators.add_scp import AF_OT_AddSCP, AF_OT_SetSCPParent
+from .operators.add_scp import AF_OT_AddSCP, AF_OT_SetSCPParent, AF_OT_UnmarkSCP
 from .operators.tree import (
     AF_OT_ToggleSCPCollapse,
     AF_OT_SelectSCPInTree,
@@ -21,7 +21,6 @@ from .operators.tree import (
 from .operators.add_fiber_vcp import AF_OT_AddFiberVCP
 from .operators.add_muscle_vcp import AF_OT_AddMuscleVCP
 from .operators.add_blob_vcp import AF_OT_AddBlobVCP
-from .operators.delete_af_node import AF_OT_DeleteSelectedAFNode
 from .operators.fiber_tools import (
     AF_OT_ClearFiberWarmStart,
     AF_OT_RecomputeFiber,
@@ -65,14 +64,17 @@ from .core.visualization.control_runtime import (
     register_control_runtime,
     unregister_control_runtime,
 )
+from .core.visualization.delete_reconcile import (
+    register_delete_reconcile,
+    unregister_delete_reconcile,
+)
 from .ui.scene_props import register_scene_props, unregister_scene_props
-
-addon_keymaps = []
 
 classes = (
     AF_OT_CreateRoot,
     AF_OT_AddSCP,
     AF_OT_SetSCPParent,
+    AF_OT_UnmarkSCP,
     AF_OT_ToggleSCPCollapse,
     AF_OT_SelectSCPInTree,
     AF_PT_MainPanel,
@@ -103,8 +105,6 @@ classes = (
     AF_OT_AddBlobVCP,
     AF_OT_ToggleVCPCollapse,
     AF_OT_SelectVCPInTree,
-
-    AF_OT_DeleteSelectedAFNode,
     AF_PT_VCPEditPanel,
     AF_OT_FlipMuscleNormals,
     AF_OT_SelectMuscleInflationCtrl,
@@ -127,16 +127,11 @@ def register():
     register_muscle_sync()
     register_blob_sync()
     register_control_runtime()
-
-    wm = bpy.context.window_manager
-    kc = wm.keyconfigs.addon
-    if kc:
-        km = kc.keymaps.new(name="Object Mode", space_type="EMPTY")
-        kmi = km.keymap_items.new("af.delete_selected_af_node", "DEL", "PRESS")
-        addon_keymaps.append((km, kmi))
+    register_delete_reconcile()
 
 
 def unregister():
+    unregister_delete_reconcile()
     unregister_control_runtime()
     unregister_blob_sync()
     unregister_muscle_sync()
@@ -146,10 +141,6 @@ def unregister():
 
     del bpy.types.Object.af_scp_system
     del bpy.types.Object.af_vcp_system
-
-    for km, kmi in addon_keymaps:
-        km.keymap_items.remove(kmi)
-    addon_keymaps.clear()
 
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

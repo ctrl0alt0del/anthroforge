@@ -1,10 +1,11 @@
-from ..deps.dirty_hints import dirty_hints_for
+from ..deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 from ..utils import get_af_root
 from ..visualization.sync_runner import sync_from_dirty_hints
 from .attachment_runtime import capture_attachment_from_link
 from .common import find_scp_by_id, is_source_scp
 from .link_state import restore_link_state, snapshot_link_state
 from .lookup import activate_scp, effective_parent_obj, ensure_collection_entry, mark_source_tags, set_parent_relation, would_create_parent_cycle
+from .object_colors import apply_scp_object_color, enable_object_color_view
 
 
 def execute_mark_scp(operator, context):
@@ -12,6 +13,17 @@ def execute_mark_scp(operator, context):
     if root is None or obj is None:
         return {"CANCELLED"}
     return _mark_object(operator, context, root, obj)
+
+
+def execute_unmark_scp(operator, context):
+    root, obj = _active_marked_scp(operator, context)
+    if root is None or obj is None:
+        return {"CANCELLED"}
+    _remove_scp_tags(obj)
+    _clear_parent_picker(context, obj)
+    _sync_unmark(context)
+    operator.report({"INFO"}, f"Unmarked '{obj.name}'")
+    return {"FINISHED"}
 
 
 def _mark_inputs(operator, context):
@@ -30,15 +42,36 @@ def _mark_error_message(obj):
     return "Cannot mark mirror object as SCP."
 
 
+def _active_marked_scp(operator, context):
+    root = get_af_root(context.scene)
+    obj = context.active_object
+    if root and is_source_scp(obj, root.name):
+        return root, obj
+    return _report_error(operator, "Active object must be a marked SCP mesh."), None
+
+
 def _report_error(operator, message):
     if operator is not None:
         operator.report({"ERROR"}, message)
     return None
 
 
+def _remove_scp_tags(obj):
+    for key in ("af_scp", "af_root_name", "af_scp_id"):
+        if key in obj:
+            del obj[key]
+
+
+def _clear_parent_picker(context, obj):
+    if getattr(context.scene, "af_scp_parent_obj", None) == obj:
+        context.scene.af_scp_parent_obj = None
+
+
 def _mark_object(operator, context, root, obj):
     scp, is_new = ensure_collection_entry(root, obj)
     mark_source_tags(obj, root.name, scp.id)
+    apply_scp_object_color(obj, context.scene, root.name, scp.id)
+    enable_object_color_view(context)
     if not _assign_optional_parent(operator, context, root, obj, scp, is_new):
         return {"CANCELLED"}
     activate_scp(root, scp.id)
@@ -78,6 +111,10 @@ def _set_parent_with_capture(operator, child_obj, child_scp, parent_obj):
 
 def _sync_mark(context, scp_id):
     sync_from_dirty_hints(root=get_af_root(context.scene), scene=context.scene, dirty_hints=dirty_hints_for("SCP", {scp_id}), source="operator", event_type="MARK")
+
+
+def _sync_unmark(context):
+    sync_from_dirty_hints(root=get_af_root(context.scene), scene=context.scene, dirty_hints=empty_dirty_hints(), source="operator", event_type="UNMARK")
 
 
 def execute_set_scp_parent(operator, context):
