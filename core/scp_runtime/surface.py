@@ -67,6 +67,11 @@ def _face_center_payload(obj_eval, mesh_eval):
     return None if not centers else centers
 
 
+def build_vertex_points(mesh_obj, depsgraph):
+    surface = build_mesh_surface_data(mesh_obj, depsgraph)
+    return None if not surface else list(surface["verts_world"])
+
+
 def _iter_triangles(surface):
     verts = surface["verts_world"]
     for tri in surface["triangles"]:
@@ -126,17 +131,27 @@ def closest_child_face_center_to_parent(child_obj, parent_obj, depsgraph):
     parent_surface = build_mesh_surface_data(parent_obj, depsgraph)
     if not centers or not parent_surface:
         return None
-    candidates = [_child_face_candidate(center, parent_surface) for center in centers]
+    candidates = [_child_anchor_candidate(center, parent_surface) for center in centers]
     candidates = [candidate for candidate in candidates if candidate is not None]
     return None if not candidates else min(candidates, key=lambda candidate: candidate["d2"])
 
 
-def _child_face_candidate(child_center_world, parent_surface):
-    hit = _nearest_triangle_hit(parent_surface, child_center_world)
+def closest_child_vertex_to_parent(child_obj, parent_obj, depsgraph):
+    points = build_vertex_points(child_obj, depsgraph)
+    parent_surface = build_mesh_surface_data(parent_obj, depsgraph)
+    if not points or not parent_surface:
+        return None
+    candidates = [_child_anchor_candidate(point, parent_surface) for point in points]
+    candidates = [candidate for candidate in candidates if candidate is not None]
+    return None if not candidates else min(candidates, key=lambda candidate: candidate["d2"])
+
+
+def _child_anchor_candidate(child_anchor_world, parent_surface):
+    hit = _nearest_triangle_hit(parent_surface, child_anchor_world)
     param = None if hit is None else _param_from_hit(hit)
     if param is None:
         return None
-    return {"child_center_world": child_center_world, "parent_param": param, "d2": hit["d2"]}
+    return {"child_anchor_world": child_anchor_world, "parent_param": param, "d2": hit["d2"]}
 
 
 def frame_from_parent_param(parent_obj, param, depsgraph):

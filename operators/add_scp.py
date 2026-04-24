@@ -1,6 +1,10 @@
-﻿import bpy
+import bpy
 
-from ..core.scp_runtime.actions import execute_mark_scp, execute_set_scp_parent, execute_unmark_scp
+from ..core.scp_runtime.actions import (
+    execute_mark_scp,
+    execute_set_scp_parent,
+    execute_unmark_scp,
+)
 from ..core.scp_runtime.common import is_source_scp
 
 

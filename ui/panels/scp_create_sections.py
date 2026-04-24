@@ -36,8 +36,14 @@ def draw_parent_box(layout, scene, scp):
     box.label(text="Parent Relation")
     box.prop(scene, "af_scp_parent_obj", text="Parent")
     box.operator("af.set_scp_parent", text="Apply Parent", icon="CONSTRAINT")
-    if scp is not None and str(getattr(scp, "parent_id", "") or ""):
-        box.prop(scp, "attach_follow_rotation", text="Follow Rotation")
+    draw_attachment_settings(box, scp)
+
+
+def draw_attachment_settings(layout, scp):
+    if scp is None or not str(getattr(scp, "parent_id", "") or ""):
+        return
+    layout.prop(scp, "attach_child_anchor_mode", text="Child Anchor")
+    layout.prop(scp, "attach_follow_rotation", text="Follow Rotation")
 
 
 def draw_mirror_box(layout, scp):

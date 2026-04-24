@@ -18,12 +18,36 @@ def _on_scp_prop_update(self, context):
     _sync_scene(context, getattr(self, "id", ""))
 
 
+def _on_child_anchor_mode_update(self, context):
+    _recapture_attachment(context, self)
+    _sync_scene(context, getattr(self, "id", ""))
+
+
+def _recapture_attachment(context, scp):
+    scene = context.scene if context else None
+    root = get_af_root(scene)
+    if root is None or not getattr(scp, "parent_id", ""):
+        return
+    from ..core.scp_runtime.attachment_runtime import recapture_attachment_for_scp
+    recapture_attachment_for_scp(root, scene, getattr(scp, "id", ""))
+
+
 class AF_SCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="", update=_on_scp_prop_update)
 
     object_name: bpy.props.StringProperty(name="Object Name", default="", update=_on_scp_prop_update)
     parent_id: bpy.props.StringProperty(name="Parent ID", default="", update=_on_scp_prop_update)
+    attach_child_anchor_mode: bpy.props.EnumProperty(
+        name="Child Anchor",
+        items=[
+            ("FACE_CENTER", "Face Center", "Use the nearest child face center"),
+            ("VERTEX_NEAREST", "Nearest Vertex", "Use the nearest child mesh vertex"),
+            ("OBJECT_ORIGIN", "Object Origin", "Use the child object origin"),
+        ],
+        default="FACE_CENTER",
+        update=_on_child_anchor_mode_update,
+    )
 
     attach_follow_rotation: bpy.props.BoolProperty(name="Follow Parent Rotation", default=True, update=_on_scp_prop_update)
     attach_initialized: bpy.props.BoolProperty(default=False, options={"HIDDEN"})

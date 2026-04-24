@@ -1,6 +1,7 @@
 ﻿from .common import set_prop_raw
 
 _ATTACH_DEFAULTS = (
+    ("attach_child_anchor_mode", "FACE_CENTER"),
     ("attach_follow_rotation", True),
     ("attach_initialized", False),
     ("attach_parent_tri_vidx", (-1, -1, -1)),

@@ -3,7 +3,8 @@ from mathutils import Matrix, Vector
 
 from .common import as_bool, as_id, as_vec3, find_source_scp_obj, is_runtime_applied_matrix, mark_applied_matrix
 from .common import set_prop_raw, vec3_close, is_matrix_close, matrix_flat16
-from .surface import basis_from_tangent_normal, closest_child_face_center_to_parent, frame_from_parent_param
+from .child_anchor import capture_child_anchor
+from .surface import basis_from_tangent_normal, frame_from_parent_param
 from .tree import children_depth_order
 
 
@@ -21,13 +22,13 @@ class AttachmentCapture:
         self.depsgraph = depsgraph
 
     def run(self):
-        candidate = closest_child_face_center_to_parent(self.child_obj, self.parent_obj, self.depsgraph)
+        candidate = capture_child_anchor(self.child_scp, self.child_obj, self.parent_obj, self.depsgraph)
         if candidate is None:
             return False
         frame = frame_from_parent_param(self.parent_obj, candidate["parent_param"], self.depsgraph)
         if frame is None:
             return False
-        child_frame = self._child_frame(candidate["child_center_world"], frame)
+        child_frame = self._child_frame(candidate["child_anchor_world"], frame)
         return self._write_capture(candidate["parent_param"], *child_frame)
 
     def _child_frame(self, child_anchor_world, frame):
@@ -71,6 +72,12 @@ class AttachmentCapture:
 def capture_attachment_from_link(child_scp, child_obj, parent_obj, depsgraph=None):
     depsgraph = depsgraph or bpy.context.evaluated_depsgraph_get()
     return AttachmentCapture(child_scp, child_obj, parent_obj, depsgraph).run()
+
+
+def recapture_attachment_for_scp(root, scene, sid):
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    scp_by_id = {as_id(s.id): s for s in root.af_scp_system.scps}
+    return _capture_one(scp_by_id, scene, root.name, sid, depsgraph)
 
 
 class AttachmentApply:
