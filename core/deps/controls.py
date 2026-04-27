@@ -1,5 +1,6 @@
-from collections import defaultdict
 from dataclasses import dataclass
+
+from .runtime_intents import enqueue_runtime_intent
 
 
 @dataclass(frozen=True)
@@ -25,27 +26,20 @@ class ControlIntent:
         self.control_type = str(control_type or "")
         self.payload = dict(payload or {})
 
-
-_CONTROL_INTENTS = defaultdict(list)
-
-
-def _root_key(root):
-    return str(getattr(root, "name", "") or "")
+def _control_entity_id(payload):
+    return str(dict(payload or {}).get("object_name", "") or "")
 
 
 def enqueue_control_intent(root, control_type, payload):
-    key = _root_key(root)
-    if not key:
-        return False
-    _CONTROL_INTENTS[key].append(ControlIntent(control_type=control_type, payload=payload))
-    return True
-
-
-def pop_control_intents(root):
-    key = _root_key(root)
-    if not key:
-        return []
-    return list(_CONTROL_INTENTS.pop(key, []))
+    return enqueue_runtime_intent(
+        root=root,
+        intent_type=f"CONTROL/{str(control_type or '')}",
+        entity_type="CONTROL",
+        entity_id=_control_entity_id(payload),
+        payload=payload,
+        source="depsgraph",
+        event_type="TRANSFORM",
+    )
 
 
 def _as_id(v):

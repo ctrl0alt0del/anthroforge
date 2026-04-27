@@ -77,7 +77,7 @@ def capture_attachment_from_link(child_scp, child_obj, parent_obj, depsgraph=Non
 def recapture_attachment_for_scp(root, scene, sid):
     depsgraph = bpy.context.evaluated_depsgraph_get()
     scp_by_id = {as_id(s.id): s for s in root.af_scp_system.scps}
-    return _capture_one(scp_by_id, scene, root.name, sid, depsgraph)
+    return _authoring_capture_one(scp_by_id, scene, root.name, sid, depsgraph)
 
 
 class AttachmentApply:
@@ -146,15 +146,30 @@ def _direct_capture_ids(dirty_scp_ids, source_transform_ids):
 
 
 def _capture_one(scp_by_id, scene, root_name, sid, depsgraph):
+    args = _capture_args(scp_by_id, scene, root_name, sid)
+    if args is None or is_runtime_applied_matrix(args[1]):
+        return False
+    return _run_capture(args, depsgraph)
+
+
+def _authoring_capture_one(scp_by_id, scene, root_name, sid, depsgraph):
+    return _run_capture(_capture_args(scp_by_id, scene, root_name, sid), depsgraph)
+
+
+def _capture_args(scp_by_id, scene, root_name, sid):
     child_scp = scp_by_id.get(sid)
     parent_id = as_id(getattr(child_scp, "parent_id", ""))
     child_obj = find_source_scp_obj(scene, root_name, sid)
     parent_obj = find_source_scp_obj(scene, root_name, parent_id)
     if child_scp is None or not parent_id or child_obj is None or parent_obj is None:
+        return None
+    return child_scp, child_obj, parent_obj
+
+
+def _run_capture(args, depsgraph):
+    if args is None:
         return False
-    if is_runtime_applied_matrix(child_obj):
-        return False
-    return AttachmentCapture(child_scp, child_obj, parent_obj, depsgraph).run()
+    return AttachmentCapture(*args, depsgraph).run()
 
 
 def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, source_parent_ids=None, gate_meta=None):

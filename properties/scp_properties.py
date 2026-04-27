@@ -1,6 +1,7 @@
 ﻿import bpy
 
 from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
+from ..core.deps.runtime_intents import dispatch_runtime_intent
 from ..core.utils import get_af_root
 
 
@@ -19,17 +20,22 @@ def _on_scp_prop_update(self, context):
 
 
 def _on_child_anchor_mode_update(self, context):
-    _recapture_attachment(context, self)
-    _sync_scene(context, getattr(self, "id", ""))
-
-
-def _recapture_attachment(context, scp):
-    scene = context.scene if context else None
-    root = get_af_root(scene)
-    if root is None or not getattr(scp, "parent_id", ""):
+    if not getattr(self, "parent_id", ""):
         return
-    from ..core.scp_runtime.attachment_runtime import recapture_attachment_for_scp
-    recapture_attachment_for_scp(root, scene, getattr(scp, "id", ""))
+    _dispatch_attachment_recapture(context, getattr(self, "id", ""))
+
+
+def _dispatch_attachment_recapture(context, scp_id):
+    if not scp_id:
+        return
+    dispatch_runtime_intent(
+        scene=context.scene if context else None,
+        intent_type="SCP/RECAPTURE_ATTACHMENT",
+        entity_type="SCP",
+        entity_id=str(scp_id or ""),
+        source="property",
+        event_type="UPDATE",
+    )
 
 
 class AF_SCP_Property(bpy.types.PropertyGroup):

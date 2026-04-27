@@ -1,7 +1,7 @@
 from .adapters import build_runtime_graph
 from .drivers import DependencyDriver
-from .controls import pop_control_intents
-from .control_behaviors import apply_control_intent
+from .runtime_intents import pop_runtime_intents
+from .runtime_intent_behaviors import apply_runtime_intent
 from .mirror_roles import apply_scp_mirror_roles
 from ..visualization.scp_attachment_runtime import capture_dirty_scp_attachments
 from ..visualization.sync import register_sync
@@ -33,16 +33,16 @@ class RuntimeGraphDriver(DependencyDriver):
             entity_sets.setdefault(et, set()).update(set(ids or set()))
 
 
-class ControlIntentDriver(DependencyDriver):
-    name = "control_intent_driver"
+class RuntimeIntentDriver(DependencyDriver):
+    name = "runtime_intent_driver"
 
     def entity_types(self):
-        return ("CONTROL",)
+        return ("CONTROL", "SCP", "FIBER", "MUSCLE", "BLOB")
 
     def apply_constraints(self, ctx):
         merged = {}
-        for intent in pop_control_intents(ctx.root):
-            impacts = apply_control_intent(ctx.root, ctx.scene, intent) or {}
+        for intent in pop_runtime_intents(ctx.root):
+            impacts = apply_runtime_intent(ctx.root, ctx.scene, intent) or {}
             for et, ids in impacts.items():
                 merged.setdefault(et, set())
                 merged[et] |= set(ids or set())

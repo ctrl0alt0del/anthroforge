@@ -10,7 +10,7 @@ from .drivers import (
 )
 from .builtin_drivers import (
     RuntimeGraphDriver,
-    ControlIntentDriver,
+    RuntimeIntentDriver,
     SCPMirrorRoleDriver,
     SCPAttachmentCaptureDriver,
     SCPSyncDriver,
@@ -420,7 +420,7 @@ def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=
 
 # Register built-in drivers.
 register_dependency_driver(RuntimeGraphDriver(), replace=True)
-register_dependency_driver(ControlIntentDriver(), replace=True)
+register_dependency_driver(RuntimeIntentDriver(), replace=True)
 register_dependency_driver(SCPMirrorRoleDriver(), replace=True)
 register_dependency_driver(SCPAttachmentCaptureDriver(), replace=True)
 register_dependency_driver(SCPSyncDriver(), replace=True)
