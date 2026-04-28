@@ -21,6 +21,7 @@ class AF_OT_CreateRoot(bpy.types.Operator):
 
       # initialize system container
       root.af_scp_system  # just ensure pointer exists
+      root.af_shortcut_system
 
       self.report({'INFO'}, "AnthroForge Root created.")
       sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=empty_dirty_hints())

@@ -32,6 +32,7 @@ from .operators.muscle_tools import (
     AF_OT_SelectMuscleInflationCtrl,
 )
 from .operators.blob_tools import AF_OT_SelectBlobControl
+from .operators.shortcuts import AF_OT_AddDataShortcut, AF_OT_DeleteDataShortcut
 
 from .ui.main_panel import AF_PT_MainPanel
 from .ui.panels.create_panel import AF_PT_CreatePanel
@@ -42,6 +43,7 @@ from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
 from .ui.panels.vcp_edit_panel import AF_PT_VCPEditPanel
 from .ui.panels.blob_create_panel import AF_PT_BlobCreatePanel
 from .ui.panels.blob_edit_panel import AF_PT_BlobEditPanel
+from .ui.panels.shortcut_panel import AF_PT_ShortcutPanel
 
 from .properties.scp_properties import (
     AF_SCP_Property,
@@ -54,6 +56,10 @@ from .properties.vcp_properties import (
     AF_FiberVCP_Property,
     AF_BlobVCP_Property,
     AF_VCP_System_Property,
+)
+from .properties.shortcut_properties import (
+    AF_DataShortcut_Property,
+    AF_DataShortcut_System_Property,
 )
 
 from .core.visualization.sync import register_sync, unregister_sync
@@ -111,6 +117,11 @@ classes = (
     AF_OT_SelectBlobControl,
     AF_PT_BlobCreatePanel,
     AF_PT_BlobEditPanel,
+    AF_DataShortcut_Property,
+    AF_DataShortcut_System_Property,
+    AF_OT_AddDataShortcut,
+    AF_OT_DeleteDataShortcut,
+    AF_PT_ShortcutPanel,
 )
 
 
@@ -120,6 +131,7 @@ def register():
 
     bpy.types.Object.af_scp_system = bpy.props.PointerProperty(type=AF_SCP_System_Property)
     bpy.types.Object.af_vcp_system = bpy.props.PointerProperty(type=AF_VCP_System_Property)
+    bpy.types.Object.af_shortcut_system = bpy.props.PointerProperty(type=AF_DataShortcut_System_Property)
 
     register_scene_props()
     register_sync()
@@ -141,6 +153,7 @@ def unregister():
 
     del bpy.types.Object.af_scp_system
     del bpy.types.Object.af_vcp_system
+    del bpy.types.Object.af_shortcut_system
 
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

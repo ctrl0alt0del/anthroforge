@@ -33,10 +33,16 @@ def _register_scene_string_props():
     bpy.types.Scene.af_vcp_tree_collapsed_json = bpy.props.StringProperty(name="AF VCP Tree Collapsed", default="{}")
 
 
+def _register_scene_shortcut_props():
+    bpy.types.Scene.af_new_shortcut_name = bpy.props.StringProperty(name="Shortcut Name", default="")
+    bpy.types.Scene.af_new_shortcut_path = bpy.props.StringProperty(name="Data Path", default="")
+
+
 def register_scene_props():
     _register_scene_core_props()
     _register_scene_pointer_props()
     _register_scene_string_props()
+    _register_scene_shortcut_props()
 
 
 def _delete_scene_prop(name):
@@ -45,5 +51,5 @@ def _delete_scene_prop(name):
 
 
 def unregister_scene_props():
-    for name in ("af_vcp_tree_collapsed_json", "af_tree_collapsed_json", "af_new_blob_target_obj", "af_new_fiber_insertion_obj", "af_new_fiber_origin_obj", "af_scp_parent_obj", "af_selection_sync_lock"):
+    for name in ("af_new_shortcut_path", "af_new_shortcut_name", "af_vcp_tree_collapsed_json", "af_tree_collapsed_json", "af_new_blob_target_obj", "af_new_fiber_insertion_obj", "af_new_fiber_origin_obj", "af_scp_parent_obj", "af_selection_sync_lock"):
         _delete_scene_prop(name)
