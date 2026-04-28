@@ -3,7 +3,7 @@
 from ..deps.dirty_hints import dirty_hints_for
 from ..utils import get_af_root
 from .attachment_runtime import apply_scp_attachments
-from .common import as_id, is_source_scp, payload_id_set, scp_prop_map
+from .common import as_id, is_bound_scp_obj, payload_id_set, scp_prop_map
 from .marking import detach_native_scp_parent_links, discover_marked_scps, normalize_active_index, prune_invalid_scps, sync_parent_links
 from .mirror_scene import sync_mirrors
 
@@ -64,13 +64,25 @@ def _depsgraph_change_sets(root, depsgraph):
 
 def _collect_update(root, update, changed_ids, transform_ids, geometry_ids):
     obj = update.id
-    if not isinstance(obj, bpy.types.Object) or not is_source_scp(obj, root.name):
+    if not isinstance(obj, bpy.types.Object) or not is_bound_scp_obj(obj, root.name):
         return
     is_transform = bool(getattr(update, "is_updated_transform", False))
     is_geometry = bool(getattr(update, "is_updated_geometry", False))
-    if not is_transform and not is_geometry:
+    if not _has_role_update(obj, is_transform, is_geometry):
         return
-    _record_update_ids(obj, changed_ids, transform_ids if is_transform else None, geometry_ids if is_geometry else None)
+    _record_update_ids(obj, changed_ids, transform_ids if _transform_role_changed(obj, is_transform) else None, geometry_ids if _geometry_role_changed(obj, is_transform, is_geometry) else None)
+
+
+def _has_role_update(obj, is_transform, is_geometry):
+    return _transform_role_changed(obj, is_transform) or _geometry_role_changed(obj, is_transform, is_geometry)
+
+
+def _transform_role_changed(obj, is_transform):
+    return bool(is_transform and obj.get("af_scp_transform"))
+
+
+def _geometry_role_changed(obj, is_transform, is_geometry):
+    return bool(obj.get("af_scp_geometry") and (is_transform or is_geometry))
 
 
 def _record_update_ids(obj, changed_ids, transform_ids, geometry_ids):

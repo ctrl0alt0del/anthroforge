@@ -38,11 +38,20 @@ def _dispatch_attachment_recapture(context, scp_id):
     )
 
 
+class AF_SCP_BoundObject_Property(bpy.types.PropertyGroup):
+    id: bpy.props.StringProperty(name="ID")
+    label: bpy.props.StringProperty(name="Label", default="")
+    object_ref: bpy.props.PointerProperty(name="Object", type=bpy.types.Object)
+
+
 class AF_SCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="", update=_on_scp_prop_update)
 
     object_name: bpy.props.StringProperty(name="Object Name", default="", update=_on_scp_prop_update)
+    transform_object_ref: bpy.props.PointerProperty(name="Transform Object", type=bpy.types.Object)
+    geometry_object_ref: bpy.props.PointerProperty(name="Geometry Object", type=bpy.types.Object)
+    bound_objects: bpy.props.CollectionProperty(type=AF_SCP_BoundObject_Property)
     parent_id: bpy.props.StringProperty(name="Parent ID", default="", update=_on_scp_prop_update)
     attach_child_anchor_mode: bpy.props.EnumProperty(
         name="Child Anchor",

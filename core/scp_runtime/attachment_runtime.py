@@ -1,7 +1,7 @@
 import bpy
 from mathutils import Matrix, Vector
 
-from .common import as_bool, as_id, as_vec3, find_source_scp_obj, is_runtime_applied_matrix, mark_applied_matrix
+from .common import as_bool, as_id, as_vec3, find_source_scp_obj, find_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix
 from .common import set_prop_raw, vec3_close, is_matrix_close, matrix_flat16
 from .child_anchor import capture_child_anchor
 from .surface import basis_from_tangent_normal, frame_from_parent_param
@@ -15,25 +15,26 @@ def _child_basis_local(child_scp):
 
 
 class AttachmentCapture:
-    def __init__(self, child_scp, child_obj, parent_obj, depsgraph):
+    def __init__(self, child_scp, child_transform_obj, child_geometry_obj, parent_geometry_obj, depsgraph):
         self.child_scp = child_scp
-        self.child_obj = child_obj
-        self.parent_obj = parent_obj
+        self.child_transform_obj = child_transform_obj
+        self.child_geometry_obj = child_geometry_obj
+        self.parent_geometry_obj = parent_geometry_obj
         self.depsgraph = depsgraph
 
     def run(self):
-        candidate = capture_child_anchor(self.child_scp, self.child_obj, self.parent_obj, self.depsgraph)
+        candidate = capture_child_anchor(self.child_scp, self.child_geometry_obj, self.parent_geometry_obj, self.depsgraph, origin_obj=self.child_transform_obj)
         if candidate is None:
             return False
-        frame = frame_from_parent_param(self.parent_obj, candidate["parent_param"], self.depsgraph)
+        frame = frame_from_parent_param(self.parent_geometry_obj, candidate["parent_param"], self.depsgraph)
         if frame is None:
             return False
         child_frame = self._child_frame(candidate["child_anchor_world"], frame)
         return self._write_capture(candidate["parent_param"], *child_frame)
 
     def _child_frame(self, child_anchor_world, frame):
-        origin = self.child_obj.matrix_world.inverted() @ child_anchor_world
-        rotation_inv = self.child_obj.matrix_world.to_quaternion().to_matrix().inverted()
+        origin = self.child_transform_obj.matrix_world.inverted() @ child_anchor_world
+        rotation_inv = self.child_transform_obj.matrix_world.to_quaternion().to_matrix().inverted()
         tangent = rotation_inv @ frame["tangent_world"]
         normal = rotation_inv @ frame["normal_world"]
         return origin, tangent, normal
@@ -69,9 +70,9 @@ class AttachmentCapture:
         return True
 
 
-def capture_attachment_from_link(child_scp, child_obj, parent_obj, depsgraph=None):
+def capture_attachment_from_link(child_scp, child_transform_obj, child_geometry_obj, parent_geometry_obj, depsgraph=None):
     depsgraph = depsgraph or bpy.context.evaluated_depsgraph_get()
-    return AttachmentCapture(child_scp, child_obj, parent_obj, depsgraph).run()
+    return AttachmentCapture(child_scp, child_transform_obj, child_geometry_obj, parent_geometry_obj, depsgraph).run()
 
 
 def recapture_attachment_for_scp(root, scene, sid):
@@ -81,14 +82,14 @@ def recapture_attachment_for_scp(root, scene, sid):
 
 
 class AttachmentApply:
-    def __init__(self, child_scp, child_obj, parent_obj, depsgraph):
+    def __init__(self, child_scp, child_obj, parent_geometry_obj, depsgraph):
         self.child_scp = child_scp
         self.child_obj = child_obj
-        self.parent_obj = parent_obj
+        self.parent_geometry_obj = parent_geometry_obj
         self.depsgraph = depsgraph
 
     def run(self):
-        frame = frame_from_parent_param(self.parent_obj, self._parent_param(), self.depsgraph)
+        frame = frame_from_parent_param(self.parent_geometry_obj, self._parent_param(), self.depsgraph)
         if frame is None:
             return False
         matrix_world = self._matrix_world(frame)
@@ -159,11 +160,12 @@ def _authoring_capture_one(scp_by_id, scene, root_name, sid, depsgraph):
 def _capture_args(scp_by_id, scene, root_name, sid):
     child_scp = scp_by_id.get(sid)
     parent_id = as_id(getattr(child_scp, "parent_id", ""))
-    child_obj = find_source_scp_obj(scene, root_name, sid)
-    parent_obj = find_source_scp_obj(scene, root_name, parent_id)
-    if child_scp is None or not parent_id or child_obj is None or parent_obj is None:
+    child_transform = find_transform_scp_obj(scene, root_name, sid)
+    child_geometry = find_source_scp_obj(scene, root_name, sid)
+    parent_geometry = find_source_scp_obj(scene, root_name, parent_id)
+    if child_scp is None or not parent_id or child_transform is None or child_geometry is None or parent_geometry is None:
         return None
-    return child_scp, child_obj, parent_obj
+    return child_scp, child_transform, child_geometry, parent_geometry
 
 
 def _run_capture(args, depsgraph):
@@ -206,7 +208,7 @@ def _allowed_target(sid, parent_id, targets):
 
 
 def _apply_child_runtime(root, scene, sid, child_scp, parent_id, depsgraph):
-    child_obj = find_source_scp_obj(scene, root.name, sid)
+    child_obj = find_transform_scp_obj(scene, root.name, sid)
     parent_obj = find_source_scp_obj(scene, root.name, parent_id)
     if child_obj is None or parent_obj is None or not _is_initialized(child_scp):
         return False

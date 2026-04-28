@@ -1,15 +1,12 @@
-﻿from ...core.utils import get_af_root
+from ...core.scp_runtime.common import scp_for_object
 
 
 def is_marked_scp_obj(obj):
-    return bool(obj and obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_scp_id"))
+    return bool(obj and obj.get("af_scp_bound") and not obj.get("af_scp_mirror") and obj.get("af_scp_id"))
 
 
 def active_scp_prop(root, obj):
-    if root is None or obj is None:
-        return None
-    sid = str(obj.get("af_scp_id") or "")
-    return next((scp for scp in root.af_scp_system.scps if str(getattr(scp, "id", "") or "") == sid), None)
+    return None if root is None or obj is None else scp_for_object(root, obj)
 
 
 def draw_active_object_box(layout, obj):

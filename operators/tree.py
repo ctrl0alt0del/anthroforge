@@ -1,5 +1,6 @@
 import bpy
 from ..core.utils import get_af_root
+from ..core.scp_runtime.common import find_primary_scp_obj
 from ..ui.tree_state import toggle_collapsed, toggle_vcp_collapsed
 from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.visualization.sync_runner import sync_from_dirty_hints
@@ -37,15 +38,7 @@ class AF_OT_SelectSCPInTree(bpy.types.Operator):
         return -1
 
     def _find_scp_object(self, context, root_name):
-        for obj in context.scene.objects:
-            if (
-                obj.get("af_scp")
-                and not obj.get("af_scp_mirror")
-                and obj.get("af_root_name") == root_name
-                and obj.get("af_scp_id") == self.scp_id
-            ):
-                return obj
-        return None
+        return find_primary_scp_obj(context.scene, root_name, self.scp_id)
 
     def _select_only(self, context, obj):
         if not self.extend:
@@ -61,15 +54,15 @@ class AF_OT_SelectSCPInTree(bpy.types.Operator):
         finally:
             scene.af_selection_sync_lock = False
 
-    def execute(self, context):
+    def _selection_target(self, context):
         root = get_af_root(context.scene)
         if root is None:
-            return {"CANCELLED"}
-        target_index = self._target_index(root)
-        if target_index < 0:
-            return {"CANCELLED"}
-        target_obj = self._find_scp_object(context, root.name)
-        if target_obj is None:
+            return None, -1, None
+        return root, self._target_index(root), self._find_scp_object(context, root.name)
+
+    def execute(self, context):
+        root, target_index, target_obj = self._selection_target(context)
+        if root is None or target_index < 0 or target_obj is None:
             return {"CANCELLED"}
         self._select_only(context, target_obj)
         self._set_active_scp_index(context.scene, root, target_index)
@@ -130,6 +123,10 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
         obj.select_set(True)
         context.view_layer.objects.active = obj
 
+    def _sync_selected_vcp(self, context, root):
+        notify_selection_changed(context.scene)
+        sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=dirty_hints_for(self.node_type, {self.node_id}), bake=False)
+
     def execute(self, context):
         root = get_af_root(context.scene)
         if root is None:
@@ -141,11 +138,5 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
         v = root.af_vcp_system
         v.active_vcp_id = self.node_id
         v.active_vcp_type = self.node_type
-        notify_selection_changed(context.scene)
-        sync_from_dirty_hints(
-            root=root,
-            scene=context.scene,
-            dirty_hints=dirty_hints_for(self.node_type, {self.node_id}),
-            bake=False,
-        )
+        self._sync_selected_vcp(context, root)
         return {"FINISHED"}

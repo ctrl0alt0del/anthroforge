@@ -32,6 +32,26 @@ def _add_shortcut(root, name, data_path):
     item.data_path = data_path
 
 
+def _validated_shortcut_path(operator, root, context):
+    data_path = normalize_shortcut_path(root, context, _draft_path(context.scene))
+    if data_path:
+        return data_path
+    operator.report({"ERROR"}, "Paste a full Blender data path that points to an object bound to the active SCP.")
+    return ""
+
+
+def _resolved_shortcut_owner(root, context, data_path):
+    return resolve_shortcut(root, context, data_path).owner
+
+
+def _validated_shortcut_name(operator, scene):
+    name = _draft_name(scene)
+    if name:
+        return name
+    operator.report({"ERROR"}, "Enter a shortcut name.")
+    return ""
+
+
 class AF_OT_AddDataShortcut(bpy.types.Operator):
     bl_idname = "af.add_data_shortcut"
     bl_label = "Add Data Shortcut"
@@ -41,12 +61,11 @@ class AF_OT_AddDataShortcut(bpy.types.Operator):
         root = get_af_root(context.scene)
         if root is None:
             return {"CANCELLED"}
-        name = _draft_name(context.scene)
-        data_path = normalize_shortcut_path(root, context, _draft_path(context.scene))
+        name = _validated_shortcut_name(self, context.scene)
+        data_path = _validated_shortcut_path(self, root, context)
         if not name or not data_path:
-            self.report({"ERROR"}, "Enter a shortcut name and a supported data path.")
             return {"CANCELLED"}
-        if resolve_shortcut(root, context, data_path).owner is None:
+        if _resolved_shortcut_owner(root, context, data_path) is None:
             self.report({"ERROR"}, "Shortcut path could not be resolved.")
             return {"CANCELLED"}
         _add_shortcut(root, name, data_path)

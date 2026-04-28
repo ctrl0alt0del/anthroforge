@@ -2,6 +2,7 @@ import bpy
 from bpy.app.handlers import persistent
 
 from ..deps.dirty_hints import empty_dirty_hints
+from ..scp_runtime.bound_objects import sync_all_scp_roles
 from ..utils import get_af_root
 from ..scp_runtime.common import as_id, scp_prop_map
 from ..scp_runtime.marking import normalize_active_index
@@ -9,8 +10,8 @@ from ..scp_runtime.tree import sanitize_parent_links
 
 
 def _owner_key(obj):
-    if obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_scp_id"):
-        return ("SCP", as_id(obj.get("af_scp_id")), "SOURCE")
+    if obj.get("af_scp_bound") and not obj.get("af_scp_mirror") and obj.get("af_scp_id"):
+        return ("SCP", as_id(obj.get("af_scp_id")), _scp_role(obj))
     if obj.get("af_fiber_proxy") and not obj.get("af_fiber_mirror_proxy") and obj.get("af_fiber_id"):
         return ("FIBER", as_id(obj.get("af_fiber_id")), "PROXY")
     if obj.get("af_blob_proxy") and not obj.get("af_blob_mirror_proxy") and obj.get("af_blob_id"):
@@ -18,6 +19,14 @@ def _owner_key(obj):
     if obj.get("af_muscle_proxy") and not obj.get("af_muscle_mirror_proxy") and obj.get("af_muscle_id"):
         return ("MUSCLE", as_id(obj.get("af_muscle_id")), as_id(obj.get("af_muscle_surface")) or "BASE")
     return None
+
+
+def _scp_role(obj):
+    if obj.get("af_scp_transform"):
+        return "TRANSFORM"
+    if obj.get("af_scp_geometry"):
+        return "GEOMETRY"
+    return "BOUND"
 
 
 def _owner_keys(scene, root_name):
@@ -145,8 +154,33 @@ def reconcile_deleted_entities(root, scene, removed_keys):
     changed = _remove_muscles(root, _removed_ids(removed_keys, "MUSCLE"))
     changed = _remove_blobs(root, _removed_ids(removed_keys, "BLOB")) or changed
     changed = _remove_fibers(root, _removed_ids(removed_keys, "FIBER")) or changed
-    changed = _remove_scps(root, _removed_ids(removed_keys, "SCP")) or changed
+    changed = _reconcile_scp_objects(root) or changed
     return _reconcile_scp_dependents(root) or changed
+
+
+def _reconcile_scp_objects(root):
+    changed = False
+    for scp in root.af_scp_system.scps:
+        changed = _clear_missing_role_refs(scp) or changed
+        changed = _remove_missing_bound_entries(scp) or changed
+    sync_all_scp_roles(root)
+    normalize_active_index(root)
+    return changed
+
+
+def _clear_missing_role_refs(scp):
+    if getattr(scp, "transform_object_ref", None) is None:
+        scp.transform_object_ref = None
+    if getattr(scp, "geometry_object_ref", None) is None:
+        scp.geometry_object_ref = None
+    return False
+
+
+def _remove_missing_bound_entries(scp):
+    indexes = [i for i, entry in enumerate(scp.bound_objects) if getattr(entry, "object_ref", None) is None]
+    for index in reversed(indexes):
+        scp.bound_objects.remove(index)
+    return bool(indexes)
 
 
 class DeleteReconcileRuntime:

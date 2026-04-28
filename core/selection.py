@@ -1,3 +1,6 @@
+from .scp_runtime.common import find_primary_scp_obj, is_bound_scp_obj
+
+
 _PROXY_CHECKS = (
     ("af_fiber_proxy", "af_fiber_id", "FIBER"),
     ("af_muscle_proxy", "af_muscle_id", "MUSCLE"),
@@ -12,7 +15,7 @@ _PROXY_CHECKS = (
 def _entity_from_active_object(root_name, obj):
     if not obj or obj.get("af_root_name") != root_name:
         return None
-    if obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_scp_id"):
+    if is_bound_scp_obj(obj, root_name):
         return "SCP", obj.get("af_scp_id")
     for flag, id_key, kind in _PROXY_CHECKS:
         if obj.get(flag) and obj.get(id_key):
@@ -59,11 +62,4 @@ def get_active_scp(root, context):
 
 def get_active_scp_object(root, context):
     scp = get_active_scp(root, context)
-    if scp is None:
-        return None
-    for obj in context.scene.objects:
-        same_root = obj.get("af_root_name") == root.name
-        same_scp = obj.get("af_scp_id") == scp.id
-        if obj.get("af_scp") and not obj.get("af_scp_mirror") and same_root and same_scp:
-            return obj
-    return None
+    return None if scp is None else find_primary_scp_obj(context.scene, root.name, scp.id)

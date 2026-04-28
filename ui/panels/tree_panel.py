@@ -8,12 +8,7 @@ from ..sections.vcp_tree_section import draw_vcp_tree_section
 def _selected_scp_ids(context, root):
     out = set()
     for obj in context.selected_objects:
-        if (
-            obj.get("af_scp")
-            and not obj.get("af_scp_mirror")
-            and obj.get("af_root_name") == root.name
-            and obj.get("af_scp_id")
-        ):
+        if obj.get("af_scp_bound") and not obj.get("af_scp_mirror") and obj.get("af_root_name") == root.name and obj.get("af_scp_id"):
             out.add(obj.get("af_scp_id"))
     return out
 
@@ -34,6 +29,16 @@ def _selected_vcp_ids(context, root):
     return sel_fibers, sel_muscles, sel_blobs
 
 
+def _draw_vcp_box(box, scene, root, selected_fibers, selected_muscles, selected_blobs):
+    _ = scene
+    box.separator()
+    box.label(text="VCPs")
+    row = box.row(align=True)
+    row.operator("af.add_muscle_vcp", icon="MESH_UVSPHERE")
+    row.operator("af.add_blob_vcp", icon="META_BALL")
+    draw_vcp_tree_section(box, scene, root, selected_fibers, selected_muscles, selected_blobs)
+
+
 class AF_PT_TreePanel(bpy.types.Panel):
     bl_label = "AF Tree"
     bl_idname = "AF_PT_tree_panel"
@@ -47,22 +52,13 @@ class AF_PT_TreePanel(bpy.types.Panel):
         return get_af_root(context.scene) is not None
 
     def draw(self, context):
-        layout = self.layout
         scene = context.scene
         root = get_af_root(scene)
-
         active = get_active_scp(root, context)
         active_id = active.id if active else ""
         selected_scp = _selected_scp_ids(context, root)
         selected_fibers, selected_muscles, selected_blobs = _selected_vcp_ids(context, root)
-
-        box = layout.box()
+        box = self.layout.box()
         box.label(text="SCPs")
         draw_tree_section(box, scene, root, active_id, selected_scp)
-
-        box.separator()
-        box.label(text="VCPs")
-        row = box.row(align=True)
-        row.operator("af.add_muscle_vcp", icon="MESH_UVSPHERE")
-        row.operator("af.add_blob_vcp", icon="META_BALL")
-        draw_vcp_tree_section(box, scene, root, selected_fibers, selected_muscles, selected_blobs)
+        _draw_vcp_box(box, scene, root, selected_fibers, selected_muscles, selected_blobs)

@@ -61,7 +61,8 @@ def is_runtime_applied_matrix(obj, eps=_EPS):
 
 
 def is_source_scp(obj, root_name):
-    return bool(obj and obj.type == "MESH" and obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_root_name") == root_name)
+    valid = is_geometry_scp_obj(obj, root_name) and obj.type == "MESH"
+    return bool(valid and obj.get("af_scp"))
 
 
 def iter_source_scps(scene, root_name):
@@ -70,9 +71,47 @@ def iter_source_scps(scene, root_name):
             yield obj
 
 
+def is_bound_scp_obj(obj, root_name):
+    valid = obj and not obj.get("af_scp_mirror") and obj.get("af_root_name") == root_name
+    return bool(valid and obj.get("af_scp_bound") and obj.get("af_scp_id"))
+
+
+def is_transform_scp_obj(obj, root_name):
+    return bool(is_bound_scp_obj(obj, root_name) and obj.get("af_scp_transform"))
+
+
+def is_geometry_scp_obj(obj, root_name):
+    return bool(is_bound_scp_obj(obj, root_name) and obj.get("af_scp_geometry"))
+
+
+def iter_bound_scp_objects(scene, root_name):
+    for obj in scene.objects:
+        if is_bound_scp_obj(obj, root_name):
+            yield obj
+
+
 def find_source_scp_obj(scene, root_name, scp_id):
     sid = as_id(scp_id)
     return next((obj for obj in iter_source_scps(scene, root_name) if as_id(obj.get("af_scp_id")) == sid), None)
+
+
+def find_transform_scp_obj(scene, root_name, scp_id):
+    sid = as_id(scp_id)
+    return next((obj for obj in iter_bound_scp_objects(scene, root_name) if obj.get("af_scp_transform") and as_id(obj.get("af_scp_id")) == sid), None)
+
+
+def find_bound_scp_obj_by_id(scene, root_name, scp_id, bound_id):
+    sid, bid = as_id(scp_id), as_id(bound_id)
+    return next((obj for obj in iter_bound_scp_objects(scene, root_name) if as_id(obj.get("af_scp_id")) == sid and as_id(obj.get("af_scp_bound_id")) == bid), None)
+
+
+def find_primary_scp_obj(scene, root_name, scp_id):
+    return find_transform_scp_obj(scene, root_name, scp_id) or find_source_scp_obj(scene, root_name, scp_id) or _first_bound_scp_obj(scene, root_name, scp_id)
+
+
+def _first_bound_scp_obj(scene, root_name, scp_id):
+    sid = as_id(scp_id)
+    return next((obj for obj in iter_bound_scp_objects(scene, root_name) if as_id(obj.get("af_scp_id")) == sid), None)
 
 
 def scp_prop_map(root):
@@ -87,6 +126,13 @@ def find_scp_by_id(root, scp_id):
 def find_scp_by_object_name(root, object_name):
     name = str(object_name or "")
     return next((scp for scp in root.af_scp_system.scps if str(getattr(scp, "object_name", "") or "") == name), None)
+
+
+def scp_for_object(root, obj):
+    sid = "" if obj is None else as_id(obj.get("af_scp_id"))
+    if sid:
+        return find_scp_by_id(root, sid)
+    return find_scp_by_object_name(root, getattr(obj, "name", ""))
 
 
 def find_scp_index(root, scp_id):

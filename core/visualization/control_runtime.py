@@ -3,6 +3,7 @@ from bpy.app.handlers import persistent
 
 from ..deps.controls import classify_control_object, is_control_object
 from ..deps.dirty_hints import dirty_hints_for
+from ..scp_runtime.common import is_bound_scp_obj
 from ..utils import get_af_root
 
 
@@ -23,27 +24,26 @@ def _entity_from_active_object(root):
     obj = _active_object()
     if obj is None or obj.get("af_root_name") != root.name:
         return "NONE", ""
-
-    if obj.get("af_scp") and not obj.get("af_scp_mirror") and obj.get("af_scp_id"):
+    if is_bound_scp_obj(obj, root.name):
         return "SCP", str(obj.get("af_scp_id"))
+    return _entity_from_control(obj) or _entity_from_proxy(obj) or ("NONE", "")
 
-    c = classify_control_object(obj)
-    if c:
-        hints = dict(c.get("dirty_hints", {}) or {})
-        for et in ENTITY_TYPES:
-            vals = set(hints.get(et, set()) or set())
-            if vals:
-                return et, str(next(iter(vals)))
 
-    checks = (
-        ("af_fiber_proxy", "af_fiber_id", "FIBER"),
-        ("af_muscle_proxy", "af_muscle_id", "MUSCLE"),
-        ("af_blob_proxy", "af_blob_id", "BLOB"),
-    )
+def _entity_from_control(obj):
+    hints = dict((classify_control_object(obj) or {}).get("dirty_hints", {}) or {})
+    for et in ENTITY_TYPES:
+        vals = set(hints.get(et, set()) or set())
+        if vals:
+            return et, str(next(iter(vals)))
+    return None
+
+
+def _entity_from_proxy(obj):
+    checks = (("af_fiber_proxy", "af_fiber_id", "FIBER"), ("af_muscle_proxy", "af_muscle_id", "MUSCLE"), ("af_blob_proxy", "af_blob_id", "BLOB"))
     for flag, id_key, kind in checks:
         if obj.get(flag) and obj.get(id_key):
             return kind, str(obj.get(id_key))
-    return "NONE", ""
+    return None
 
 
 def _scp_index(root, scp_id):
@@ -113,23 +113,29 @@ def _remove_transient_controls():
 
 
 def _hints_for_switch(prev_entity, curr_entity):
-    dirty = {}
-    prev_type, prev_id = prev_entity
-    curr_type, curr_id = curr_entity
-    if prev_type in ENTITY_TYPES and prev_id:
-        dirty.setdefault(prev_type, set()).add(str(prev_id))
-    if curr_type in ENTITY_TYPES and curr_id:
-        dirty.setdefault(curr_type, set()).add(str(curr_id))
-    if not dirty:
-        return {}
+    dirty = _switch_dirty(prev_entity, curr_entity)
+    return {} if not dirty else _merge_switch_hints(dirty)
 
+
+def _switch_dirty(prev_entity, curr_entity):
+    dirty = {}
+    for et, eid in (prev_entity, curr_entity):
+        if et in ENTITY_TYPES and eid:
+            dirty.setdefault(et, set()).add(str(eid))
+    return dirty
+
+
+def _merge_switch_hints(dirty):
     hints = {}
     for et, ids in dirty.items():
-        h = dirty_hints_for(et, ids)
-        for k, vals in h.items():
-            hints.setdefault(k, set())
-            hints[k] |= set(vals or set())
+        _merge_hints(hints, dirty_hints_for(et, ids))
     return hints
+
+
+def _merge_hints(target, source):
+    for key, vals in source.items():
+        target.setdefault(key, set())
+        target[key] |= set(vals or set())
 
 
 class ControlRuntimeOrchestrator:
@@ -166,21 +172,30 @@ class ControlRuntimeOrchestrator:
     def sync_now(self, scene, force=False):
         if self._syncing:
             return
-        root = get_af_root(scene)
-        if root is None:
-            self._last_active = ("NONE", "")
+        state = self._sync_state(scene, force)
+        if state is None:
             return
-        current = resolve_active_entity(root)
-        _sync_active_scp_state(root, scene, current)
-        if not force and current == self._last_active:
-            return
-        prev = self._last_active
-        self._last_active = current
+        prev, current = state
         self._syncing = True
         try:
             self._sync_for_scene(scene, prev, current)
         finally:
             self._syncing = False
+
+    def _clear_last_active(self):
+        self._last_active = ("NONE", "")
+
+    def _sync_state(self, scene, force):
+        root, current = _root_and_current(scene)
+        if root is None:
+            self._clear_last_active()
+            return None
+        _sync_active_scp_state(root, scene, current)
+        if not force and current == self._last_active:
+            return None
+        prev = self._last_active
+        self._last_active = current
+        return prev, current
 
 
 _CONTROL_RUNTIME = None
@@ -196,25 +211,21 @@ def _on_load_post(_dummy):
     _remove_transient_controls()
     if _CONTROL_RUNTIME is not None:
         _CONTROL_RUNTIME.reset()
-    ctx = bpy.context
-    scene = getattr(ctx, "scene", None)
-    if scene is None:
+    scene = getattr(bpy.context, "scene", None)
+    root, current = _root_and_current(scene)
+    if root is None or current[0] == "NONE":
         return
-    root = get_af_root(scene)
-    if root is None:
-        return
-    current = resolve_active_entity(root)
-    if current[0] == "NONE":
-        return
-    from .sync_runner import sync_from_dirty_hints
+    _sync_load_post(scene, root, current)
 
-    sync_from_dirty_hints(
-        root=root,
-        scene=scene,
-        dirty_hints=_hints_for_switch(("NONE", ""), current),
-        source="load_post",
-        event_type="SELECTION",
-    )
+
+def _root_and_current(scene):
+    root = get_af_root(scene)
+    return root, ("NONE", "") if root is None else resolve_active_entity(root)
+
+
+def _sync_load_post(scene, root, current):
+    from .sync_runner import sync_from_dirty_hints
+    sync_from_dirty_hints(root=root, scene=scene, dirty_hints=_hints_for_switch(("NONE", ""), current), source="load_post", event_type="SELECTION")
 
 
 def register_control_runtime():

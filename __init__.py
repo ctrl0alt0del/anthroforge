@@ -33,6 +33,13 @@ from .operators.muscle_tools import (
 )
 from .operators.blob_tools import AF_OT_SelectBlobControl
 from .operators.shortcuts import AF_OT_AddDataShortcut, AF_OT_DeleteDataShortcut
+from .operators.scp_objects import (
+    AF_OT_AddSCPBoundObject,
+    AF_OT_CreateEmptySCP,
+    AF_OT_RemoveSCPBoundObject,
+    AF_OT_SetSCPGeometryObject,
+    AF_OT_SetSCPTransformObject,
+)
 
 from .ui.main_panel import AF_PT_MainPanel
 from .ui.panels.create_panel import AF_PT_CreatePanel
@@ -43,9 +50,11 @@ from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
 from .ui.panels.vcp_edit_panel import AF_PT_VCPEditPanel
 from .ui.panels.blob_create_panel import AF_PT_BlobCreatePanel
 from .ui.panels.blob_edit_panel import AF_PT_BlobEditPanel
+from .ui.panels.scp_objects_panel import AF_PT_SCPObjectsPanel
 from .ui.panels.shortcut_panel import AF_PT_ShortcutPanel
 
 from .properties.scp_properties import (
+    AF_SCP_BoundObject_Property,
     AF_SCP_Property,
     AF_SCP_System_Property,
 )
@@ -81,13 +90,20 @@ classes = (
     AF_OT_AddSCP,
     AF_OT_SetSCPParent,
     AF_OT_UnmarkSCP,
+    AF_OT_CreateEmptySCP,
+    AF_OT_SetSCPTransformObject,
+    AF_OT_SetSCPGeometryObject,
+    AF_OT_AddSCPBoundObject,
+    AF_OT_RemoveSCPBoundObject,
     AF_OT_ToggleSCPCollapse,
     AF_OT_SelectSCPInTree,
     AF_PT_MainPanel,
     AF_PT_CreatePanel,
+    AF_PT_SCPObjectsPanel,
     AF_PT_TreePanel,
     AF_PT_EditPanel,
 
+    AF_SCP_BoundObject_Property,
     AF_SCP_Property,
     AF_SCP_System_Property,
 

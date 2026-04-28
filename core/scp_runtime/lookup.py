@@ -1,5 +1,5 @@
 ﻿from ..id_utils import next_prefixed_id
-from .common import find_scp_by_id, find_scp_by_object_name, find_scp_index, is_source_scp
+from .common import find_scp_by_id, find_scp_index, is_transform_scp_obj, scp_for_object
 from .common import scp_prop_map, set_prop_raw
 from .defaults import initialize_scp_entry
 
@@ -19,7 +19,7 @@ def clear_native_parent_keep_world(obj):
 
 def effective_parent_obj(scene, root):
     parent_obj = getattr(scene, "af_scp_parent_obj", None)
-    return parent_obj if is_source_scp(parent_obj, root.name) else None
+    return parent_obj if is_transform_scp_obj(parent_obj, root.name) else None
 
 
 def would_create_parent_cycle(root, child_scp_id, parent_scp_id):
@@ -39,8 +39,7 @@ def would_create_parent_cycle(root, child_scp_id, parent_scp_id):
 
 
 def _existing_collection_entry(root, obj):
-    scp = find_scp_by_id(root, obj.get("af_scp_id"))
-    return scp if scp is not None else find_scp_by_object_name(root, obj.name)
+    return scp_for_object(root, obj)
 
 
 def ensure_collection_entry(root, obj):
