@@ -117,12 +117,6 @@ def _orphan_blob_scp_ids(root):
     return {as_id(blob.attach_target_id) for blob in root.af_vcp_system.blobs if str(blob.attach_target_type) == "SCP" and _missing_scp_id(blob.attach_target_id, live)}
 
 
-def _remove_scps(root, scp_ids):
-    changed = _remove_items_by_id(root.af_scp_system.scps, scp_ids)
-    normalize_active_index(root)
-    return changed
-
-
 def _remove_fibers(root, fiber_ids):
     changed = _remove_items_by_id(root.af_vcp_system.fibers, fiber_ids)
     changed = _clear_active_vcp(root, "FIBER", fiber_ids) or changed
@@ -147,6 +141,12 @@ def _reconcile_scp_dependents(root):
     changed = _remove_fibers(root, _fiber_orphan_ids(root, live_scp_ids))
     changed = _clear_blob_targets(root, "SCP", _orphan_blob_scp_ids(root)) or changed
     return bool(parent_changed) or changed
+
+
+def cleanup_scp_dependents(root):
+    changed = _reconcile_scp_dependents(root)
+    normalize_active_index(root)
+    return changed
 
 
 def reconcile_deleted_entities(root, scene, removed_keys):

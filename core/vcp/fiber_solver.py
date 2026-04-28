@@ -3,6 +3,7 @@ from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
 from ..attachment_codec import parse_fiber_attach_param
+from ..scp_runtime.common import find_geometry_scp_obj, iter_geometry_mesh_scp_objects
 
 
 class FiberSolver:
@@ -223,15 +224,7 @@ class FiberSolver:
         return nodes, pin_targets
 
     def _get_scp_proxy(self, root, scene, scp_id):
-        for obj in scene.objects:
-            if (
-                obj.get("af_scp")
-                and not obj.get("af_scp_mirror")
-                and obj.get("af_root_name") == root.name
-                and obj.get("af_scp_id") == scp_id
-            ):
-                return obj
-        return None
+        return find_geometry_scp_obj(scene, root.name, scp_id)
 
     def _mesh_local_point_from_shape_param(self, parent_obj, payload):
         if parent_obj is None or parent_obj.type != "MESH" or parent_obj.data is None:
@@ -282,18 +275,8 @@ class FiberSolver:
     def _surface_colliders(self, root, scene, runtime_registry):
         _ = runtime_registry
         out = []
-        for obj in scene.objects:
-            if not obj.get("af_scp"):
-                continue
-            if obj.get("af_scp_mirror"):
-                continue
-            if obj.get("af_root_name") != root.name:
-                continue
-            if obj.type != "MESH":
-                continue
-
+        for obj in iter_geometry_mesh_scp_objects(scene, root.name):
             out.append(obj)
-
         out.sort(key=lambda o: str(o.get("af_scp_id", "")))
         return out
 

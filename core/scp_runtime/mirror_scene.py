@@ -1,7 +1,7 @@
 ﻿import bpy
 from mathutils import Matrix, Vector
 
-from .common import as_axis, as_id, find_source_scp_obj
+from .common import as_axis, as_id, find_geometry_mesh_scp_obj
 
 
 def _axis_to_scale(axis):
@@ -46,11 +46,11 @@ class MirrorSceneSync:
     def _sync_target(self, sid, scp):
         if not self._should_sync_target(sid, scp):
             return
-        source_obj = find_source_scp_obj(self.scene, self.root.name, sid)
-        if source_obj is None:
+        geometry_obj = find_geometry_mesh_scp_obj(self.scene, self.root.name, sid)
+        if geometry_obj is None:
             return
-        mirror_obj = self._ensure_mirror_object(sid, source_obj)
-        self._apply_mirror_object(mirror_obj, scp, source_obj)
+        mirror_obj = self._ensure_mirror_object(sid, geometry_obj)
+        self._apply_mirror_object(mirror_obj, scp, geometry_obj)
         self.desired_ids.add(sid)
 
     def _should_sync_target(self, sid, scp):
@@ -73,7 +73,7 @@ class MirrorSceneSync:
         return mirror_obj
 
     def _tag_mirror_object(self, mirror_obj, sid):
-        mirror_obj["af_scp"] = True
+        mirror_obj["af_scp_geometry"] = True
         mirror_obj["af_scp_mirror"] = True
         mirror_obj["af_root_name"] = self.root.name
         mirror_obj["af_source_scp_id"] = sid

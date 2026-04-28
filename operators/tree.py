@@ -1,5 +1,7 @@
 import bpy
 from ..core.utils import get_af_root
+from ..core.deps.dirty_hints import empty_dirty_hints
+from ..core.scp_runtime.delete import delete_scp
 from ..core.scp_runtime.common import find_primary_scp_obj
 from ..ui.tree_state import toggle_collapsed, toggle_vcp_collapsed
 from ..core.deps.dirty_hints import dirty_hints_for
@@ -67,6 +69,24 @@ class AF_OT_SelectSCPInTree(bpy.types.Operator):
         self._select_only(context, target_obj)
         self._set_active_scp_index(context.scene, root, target_index)
         notify_selection_changed(context.scene)
+        return {"FINISHED"}
+
+
+class AF_OT_DeleteSCPInTree(bpy.types.Operator):
+    bl_idname = "af.delete_scp_in_tree"
+    bl_label = "Delete SCP In Tree"
+    bl_options = {"REGISTER", "UNDO"}
+
+    scp_id: bpy.props.StringProperty()
+
+    def execute(self, context):
+        root = get_af_root(context.scene)
+        if root is None or not self.scp_id:
+            return {"CANCELLED"}
+        if not delete_scp(root, context.scene, self.scp_id):
+            return {"CANCELLED"}
+        sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=empty_dirty_hints(), source="operator", event_type="DELETE")
+        notify_selection_changed(context.scene, force=True)
         return {"FINISHED"}
 
 

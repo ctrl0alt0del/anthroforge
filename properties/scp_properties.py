@@ -47,8 +47,6 @@ class AF_SCP_BoundObject_Property(bpy.types.PropertyGroup):
 class AF_SCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="", update=_on_scp_prop_update)
-
-    object_name: bpy.props.StringProperty(name="Object Name", default="", update=_on_scp_prop_update)
     transform_object_ref: bpy.props.PointerProperty(name="Transform Object", type=bpy.types.Object)
     geometry_object_ref: bpy.props.PointerProperty(name="Geometry Object", type=bpy.types.Object)
     bound_objects: bpy.props.CollectionProperty(type=AF_SCP_BoundObject_Property)

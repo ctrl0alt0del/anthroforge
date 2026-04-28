@@ -3,8 +3,9 @@
 from ..deps.dirty_hints import dirty_hints_for
 from ..utils import get_af_root
 from .attachment_runtime import apply_scp_attachments
+from .bound_objects import sync_all_scp_roles
 from .common import as_id, is_bound_scp_obj, payload_id_set, scp_prop_map
-from .marking import detach_native_scp_parent_links, discover_marked_scps, normalize_active_index, prune_invalid_scps, sync_parent_links
+from .marking import detach_native_scp_parent_links, normalize_active_index, sync_parent_links
 from .mirror_scene import sync_mirrors
 
 
@@ -14,25 +15,24 @@ def _resolve_sync_inputs(root, scene):
     return (None, None) if root is None or scene is None else (root, scene)
 
 
-def sync_root_to_scene(sync, root=None, scene=None, target_scp_ids=None, attachment_parent_source_ids=None, attachment_gate_meta=None):
+def sync_root_to_scene(sync, root=None, scene=None, target_scp_ids=None, attachment_parent_ids=None, attachment_gate_meta=None):
     if sync._syncing:
         return
     root, scene = _resolve_sync_inputs(root, scene)
     if root is None:
         return
-    _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_source_ids, attachment_gate_meta)
+    _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta)
 
 
-def _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_source_ids, attachment_gate_meta):
+def _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta):
     sync._syncing = True
     try:
-        discover_marked_scps(root, scene)
-        prune_invalid_scps(root, scene)
+        sync_all_scp_roles(root)
         detach_native_scp_parent_links(root, scene)
         sync_parent_links(root)
         normalize_active_index(root)
         scp_by_id = scp_prop_map(root)
-        apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids, attachment_parent_source_ids, attachment_gate_meta)
+        apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids, attachment_parent_ids, attachment_gate_meta)
         sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=target_scp_ids)
     finally:
         sync._syncing = False
@@ -101,4 +101,4 @@ def _event_type(geometry_ids):
 
 
 def _payload(transform_ids, geometry_ids):
-    return {"scp_source_transform_ids": sorted(transform_ids), "scp_source_geometry_ids": sorted(geometry_ids)}
+    return {"scp_transform_ids": sorted(transform_ids), "scp_geometry_ids": sorted(geometry_ids)}

@@ -23,11 +23,6 @@ def draw_mark_button(layout):
     layout.row(align=True).operator("af.add_scp", icon="ADD", text="Mark Selected Mesh")
 
 
-def draw_delete_button(layout, obj):
-    _ = obj
-    layout.operator("af.unmark_scp", icon="TRASH", text="Unmark Selected SCP")
-
-
 def draw_parent_box(layout, scene, scp):
     box = layout.box()
     box.label(text="Parent Relation")

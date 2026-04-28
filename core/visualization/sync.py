@@ -14,7 +14,8 @@ class SCPSceneSync:
 
     def _iter_scp_objects(self, scene, root_name, include_mirror=False):
         for obj in scene.objects:
-            if obj.get("af_scp") and obj.get("af_root_name") == root_name and (include_mirror or not obj.get("af_scp_mirror")):
+            valid = obj.get("af_root_name") == root_name and (obj.get("af_scp_geometry") or obj.get("af_scp_mirror"))
+            if valid and (include_mirror or not obj.get("af_scp_mirror")):
                 yield obj
 
     def _find_scp_object(self, scene, root_name, scp_id):
@@ -32,8 +33,8 @@ class SCPSceneSync:
             scene.collection.children.link(collection)
         return collection
 
-    def sync_root_to_scene(self, root=None, scene=None, target_scp_ids=None, attachment_parent_source_ids=None, attachment_gate_meta=None):
-        return _sync_root_to_scene_runtime(self, root=root, scene=scene, target_scp_ids=target_scp_ids, attachment_parent_source_ids=attachment_parent_source_ids, attachment_gate_meta=attachment_gate_meta)
+    def sync_root_to_scene(self, root=None, scene=None, target_scp_ids=None, attachment_parent_ids=None, attachment_gate_meta=None):
+        return _sync_root_to_scene_runtime(self, root=root, scene=scene, target_scp_ids=target_scp_ids, attachment_parent_ids=attachment_parent_ids, attachment_gate_meta=attachment_gate_meta)
 
     def on_depsgraph_update(self, scene, depsgraph):
         return _on_depsgraph_update_runtime(self, scene, depsgraph)

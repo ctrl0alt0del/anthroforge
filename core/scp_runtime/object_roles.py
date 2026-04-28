@@ -6,6 +6,14 @@ from .common import scp_for_object
 from .defaults import initialize_scp_entry
 
 
+def create_scp(root, label=""):
+    scp = root.af_scp_system.scps.add()
+    scp_id = next_prefixed_id(root.af_scp_system.scps, "SCP")
+    initialize_scp_entry(scp, scp_id, str(label or scp_id))
+    root.af_scp_system.active_scp_index = len(root.af_scp_system.scps) - 1
+    return scp
+
+
 def active_scp_from_context(root, context):
     scp = scp_for_object(root, context.active_object) if context else None
     return scp or _active_scp_from_index(root)
@@ -16,16 +24,6 @@ def _active_scp_from_index(root):
     return root.af_scp_system.scps[index] if 0 <= index < len(root.af_scp_system.scps) else None
 
 
-def create_empty_scp(root, context):
-    scp = root.af_scp_system.scps.add()
-    scp_id = next_prefixed_id(root.af_scp_system.scps, "SCP")
-    initialize_scp_entry(scp, scp_id, scp_id)
-    obj = bpy.data.objects.new(f"{scp_id}_XFORM", None)
-    _target_collection(context).objects.link(obj)
-    set_transform_object(root, scp, obj)
-    return scp, obj
-
-
 def _target_collection(context):
     scene = None if context is None else getattr(context, "scene", None)
     view_layer = None if context is None else getattr(context, "view_layer", None)
@@ -33,6 +31,12 @@ def _target_collection(context):
     if layer is not None:
         return layer.collection
     return scene.collection if scene is not None else bpy.context.scene.collection
+
+
+def create_transform_empty(context, scp):
+    obj = bpy.data.objects.new(f"{scp.id}_XFORM", None)
+    _target_collection(context).objects.link(obj)
+    return obj
 
 
 def add_bound_object_to_scp(root, scp, obj):

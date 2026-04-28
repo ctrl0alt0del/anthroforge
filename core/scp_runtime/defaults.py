@@ -33,15 +33,9 @@ def reset_mirror_state(prop):
     _apply_defaults(prop, _MIRROR_DEFAULTS)
 
 
-def initialize_scp_entry(prop, scp_id, object_name):
+def initialize_scp_entry(prop, scp_id, label):
     set_prop_raw(prop, "id", scp_id)
-    set_prop_raw(prop, "name", object_name)
-    set_prop_raw(prop, "object_name", object_name)
+    set_prop_raw(prop, "name", label)
     set_prop_raw(prop, "parent_id", "")
     reset_attachment_state(prop)
     reset_mirror_state(prop)
-
-
-def sync_scp_identity(prop, object_name):
-    set_prop_raw(prop, "name", object_name)
-    set_prop_raw(prop, "object_name", object_name)

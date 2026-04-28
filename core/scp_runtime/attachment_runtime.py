@@ -1,7 +1,7 @@
 import bpy
 from mathutils import Matrix, Vector
 
-from .common import as_bool, as_id, as_vec3, find_source_scp_obj, find_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix
+from .common import as_bool, as_id, as_vec3, find_geometry_mesh_scp_obj, find_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix
 from .common import set_prop_raw, vec3_close, is_matrix_close, matrix_flat16
 from .child_anchor import capture_child_anchor
 from .surface import basis_from_tangent_normal, frame_from_parent_param
@@ -129,10 +129,10 @@ class AttachmentApply:
         return matrix_world
 
 
-def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", event_type="", source_transform_ids=None):
+def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", event_type="", transform_ids=None):
     if as_id(source).lower() != "depsgraph" or as_id(event_type).upper() != "TRANSFORM":
         return set()
-    direct_ids = _direct_capture_ids(dirty_scp_ids, source_transform_ids)
+    direct_ids = _direct_capture_ids(dirty_scp_ids, transform_ids)
     if not direct_ids:
         return set()
     depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -140,9 +140,9 @@ def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", event_t
     return {sid for sid in sorted(direct_ids) if _capture_one(scp_by_id, scene, root.name, sid, depsgraph)}
 
 
-def _direct_capture_ids(dirty_scp_ids, source_transform_ids):
+def _direct_capture_ids(dirty_scp_ids, transform_ids):
     dirty_ids = {as_id(value) for value in set(dirty_scp_ids or set()) if as_id(value)}
-    direct_ids = {as_id(value) for value in set(source_transform_ids or set()) if as_id(value)}
+    direct_ids = {as_id(value) for value in set(transform_ids or set()) if as_id(value)}
     return dirty_ids & direct_ids
 
 
@@ -161,8 +161,8 @@ def _capture_args(scp_by_id, scene, root_name, sid):
     child_scp = scp_by_id.get(sid)
     parent_id = as_id(getattr(child_scp, "parent_id", ""))
     child_transform = find_transform_scp_obj(scene, root_name, sid)
-    child_geometry = find_source_scp_obj(scene, root_name, sid)
-    parent_geometry = find_source_scp_obj(scene, root_name, parent_id)
+    child_geometry = find_geometry_mesh_scp_obj(scene, root_name, sid)
+    parent_geometry = find_geometry_mesh_scp_obj(scene, root_name, parent_id)
     if child_scp is None or not parent_id or child_transform is None or child_geometry is None or parent_geometry is None:
         return None
     return child_scp, child_transform, child_geometry, parent_geometry
@@ -174,13 +174,13 @@ def _run_capture(args, depsgraph):
     return AttachmentCapture(*args, depsgraph).run()
 
 
-def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, source_parent_ids=None, gate_meta=None):
+def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, parent_ids=None, gate_meta=None):
     _ = sync
     _ = gate_meta
-    parent_ids = {as_id(v) for v in set(source_parent_ids or set()) if as_id(v)}
-    if not parent_ids:
+    active_parent_ids = {as_id(v) for v in set(parent_ids or set()) if as_id(v)}
+    if not active_parent_ids:
         return set()
-    return _apply_attachment_targets(root, scene, scp_by_id, target_scp_ids, parent_ids)
+    return _apply_attachment_targets(root, scene, scp_by_id, target_scp_ids, active_parent_ids)
 
 
 def _apply_attachment_targets(root, scene, scp_by_id, target_scp_ids, active_parent_ids):
@@ -209,7 +209,7 @@ def _allowed_target(sid, parent_id, targets):
 
 def _apply_child_runtime(root, scene, sid, child_scp, parent_id, depsgraph):
     child_obj = find_transform_scp_obj(scene, root.name, sid)
-    parent_obj = find_source_scp_obj(scene, root.name, parent_id)
+    parent_obj = find_geometry_mesh_scp_obj(scene, root.name, parent_id)
     if child_obj is None or parent_obj is None or not _is_initialized(child_scp):
         return False
     return AttachmentApply(child_scp, child_obj, parent_obj, depsgraph).run()

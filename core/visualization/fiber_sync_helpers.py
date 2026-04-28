@@ -4,6 +4,7 @@ from mathutils import Vector
 from bpy_extras import view3d_utils
 
 from ..attachment_codec import parse_fiber_attach_param
+from ..scp_runtime.common import find_geometry_scp_obj
 
 
 def get_vis_collection(scene, collection_name):
@@ -128,15 +129,7 @@ def update_curve_points(obj, points, thickness, bake=False):
 
 
 def get_scp_proxy(scene, root_name, scp_id):
-    for obj in scene.objects:
-        if (
-            obj.get("af_scp")
-            and not obj.get("af_scp_mirror")
-            and obj.get("af_root_name") == root_name
-            and obj.get("af_scp_id") == scp_id
-        ):
-            return obj
-    return None
+    return find_geometry_scp_obj(scene, root_name, scp_id)
 
 
 def _mesh_local_point_from_shape_param(parent_obj, payload):

@@ -21,6 +21,40 @@ def _payload_id_set(payload, key):
     return out
 
 
+def _scp_dirty_ids(ctx):
+    return set(ctx.dirty.get("SCP", set()) or set())
+
+
+def _meta_payload(meta):
+    return dict(meta.get("payload", {}) or {})
+
+
+def _scp_attachment_changes(ctx, scp_dirty):
+    meta = dict(ctx.gate_meta or {})
+    return capture_dirty_scp_attachments(
+        root=ctx.root,
+        scene=ctx.scene,
+        dirty_scp_ids=scp_dirty,
+        source=str(meta.get("source", "") or ""),
+        event_type=str(meta.get("event_type", "") or ""),
+        transform_ids=_payload_id_set(_meta_payload(meta), "scp_transform_ids"),
+    )
+
+
+def _scp_parent_ids(meta):
+    payload = _meta_payload(meta)
+    ids = _payload_id_set(payload, "scp_transform_ids")
+    return ids | _payload_id_set(payload, "scp_geometry_ids")
+
+
+def _sync_scp_scene(root, scene, ids, is_full, meta):
+    kwargs = {"root": root, "scene": scene, "attachment_parent_ids": _scp_parent_ids(meta), "attachment_gate_meta": meta}
+    if is_full:
+        register_sync().sync_root_to_scene(**kwargs)
+    elif ids:
+        register_sync().sync_root_to_scene(target_scp_ids=ids, **kwargs)
+
+
 class RuntimeGraphDriver(DependencyDriver):
     name = "runtime_graph_driver"
 
@@ -58,8 +92,8 @@ class SCPMirrorRoleDriver(DependencyDriver):
     def apply_constraints(self, ctx):
         scp_all = set(ctx.entity_sets.get("SCP", set()) or set())
         scp_dirty = set(ctx.dirty.get("SCP", set()) or set())
-        changed_source_scps = scp_all if ctx.is_full else scp_dirty
-        if not changed_source_scps:
+        changed_scps = scp_all if ctx.is_full else scp_dirty
+        if not changed_scps:
             return {}
 
         changed = apply_scp_mirror_roles(ctx.root)
@@ -75,22 +109,10 @@ class SCPAttachmentCaptureDriver(DependencyDriver):
         return ("SCP",)
 
     def apply_constraints(self, ctx):
-        scp_dirty = set(ctx.dirty.get("SCP", set()) or set())
+        scp_dirty = _scp_dirty_ids(ctx)
         if not scp_dirty:
             return {}
-
-        meta = dict(ctx.gate_meta or {})
-        payload = dict(meta.get("payload", {}) or {})
-        source = str(meta.get("source", "") or "")
-        event_type = str(meta.get("event_type", "") or "")
-        changed = capture_dirty_scp_attachments(
-            root=ctx.root,
-            scene=ctx.scene,
-            dirty_scp_ids=scp_dirty,
-            source=source,
-            event_type=event_type,
-            source_transform_ids=_payload_id_set(payload, "scp_source_transform_ids"),
-        )
+        changed = _scp_attachment_changes(ctx, scp_dirty)
         if not changed:
             return {}
         return {"SCP": set(changed)}
@@ -105,26 +127,7 @@ class SCPSyncDriver(DependencyDriver):
     def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
         _ = bake
         ids = set(impacted.get("SCP", set()) or set())
-        meta = dict(gate_meta or {})
-        payload = dict(meta.get("payload", {}) or {})
-        parent_source_ids = _payload_id_set(payload, "scp_source_transform_ids") | _payload_id_set(
-            payload, "scp_source_geometry_ids"
-        )
-        if is_full:
-            register_sync().sync_root_to_scene(
-                root=root,
-                scene=scene,
-                attachment_parent_source_ids=parent_source_ids,
-                attachment_gate_meta=meta,
-            )
-        elif ids:
-            register_sync().sync_root_to_scene(
-                root=root,
-                scene=scene,
-                target_scp_ids=ids,
-                attachment_parent_source_ids=parent_source_ids,
-                attachment_gate_meta=meta,
-            )
+        _sync_scp_scene(root, scene, ids, is_full, dict(gate_meta or {}))
 
 
 class FiberSyncDriver(DependencyDriver):

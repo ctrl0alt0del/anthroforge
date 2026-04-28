@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from ..selection import get_active_scp, get_active_scp_object
-from ..scp_runtime.common import find_bound_scp_obj_by_id, find_scp_by_id, find_source_scp_obj
+from ..scp_runtime.common import find_bound_scp_obj_by_id, find_geometry_scp_obj, find_scp_by_id
 from .path_codec import parse_prop_spec, parse_shortcut_path, split_bound_entity_id
 
 
@@ -25,7 +25,7 @@ def _owner_for_kind(root, context, kind, entity_id):
     if kind == "scp_prop":
         return find_scp_by_id(root, entity_id)
     if kind == "scp_object":
-        return find_source_scp_obj(context.scene, root.name, entity_id)
+        return find_geometry_scp_obj(context.scene, root.name, entity_id)
     return _bound_owner(root, context, kind, entity_id)
 
 

@@ -3,6 +3,7 @@ import bmesh
 from mathutils import Vector
 
 from ..vcp.blob import BlobVCPRuntime
+from ..scp_runtime.common import find_geometry_scp_obj
 
 
 def get_vis_collection(scene, collection_name):
@@ -97,11 +98,7 @@ def _find_muscle_surface(scene, root_name, muscle_id, surface):
 
 
 def _find_scp_target(scene, root_name, scp_id):
-    for o in scene.objects:
-        if o.get("af_scp") and not o.get("af_scp_mirror") and o.get("af_root_name") == root_name:
-            if o.get("af_scp_id") == scp_id:
-                return o
-    return None
+    return find_geometry_scp_obj(scene, root_name, scp_id)
 
 
 def target_object_for_blob(scene, root, blob_prop):

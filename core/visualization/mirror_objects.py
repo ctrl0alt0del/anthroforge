@@ -13,7 +13,7 @@ def fiber_prop_map(root):
     return {f.id: f for f in root.af_vcp_system.fibers}
 
 
-def find_source_scp_obj(scp_col, root_name, scp_id):
+def find_scp_proxy_obj(scp_col, root_name, scp_id):
     if scp_col is None:
         return None
     for obj in scp_col.objects:
@@ -56,7 +56,7 @@ def find_source_muscle_obj(vcp_col, root_name, muscle_id, surface):
     return None
 
 
-def find_mirror_scp_obj(scp_col, root_name, source_scp_id):
+def find_mirror_scp_obj(scp_col, root_name, scp_id):
     if scp_col is None:
         return None
     for obj in scp_col.objects:
@@ -64,7 +64,7 @@ def find_mirror_scp_obj(scp_col, root_name, source_scp_id):
             obj.get("af_proxy")
             and obj.get("af_mirror_proxy")
             and obj.get("af_root_name") == root_name
-            and obj.get("af_source_scp_id") == source_scp_id
+            and obj.get("af_source_scp_id") == scp_id
         ):
             return obj
     return None

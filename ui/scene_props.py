@@ -1,13 +1,13 @@
 ﻿import bpy
 
+from ..core.scp_runtime.common import is_geometry_mesh_scp_obj
 from ..core.utils import get_af_root
 
 
-def _poll_marked_scp_source(self, obj):
+def _poll_geometry_scp_mesh(self, obj):
     scene = getattr(bpy.context, "scene", None)
     root = get_af_root(scene)
-    valid = root and obj and obj.type == "MESH" and obj.get("af_root_name") == root.name
-    return bool(valid and obj.get("af_scp") and obj.get("af_scp_geometry") and obj.get("af_scp_id"))
+    return bool(root and is_geometry_mesh_scp_obj(obj, root.name))
 
 
 def _poll_parent_proxy(self, obj):
@@ -28,8 +28,8 @@ def _register_scene_core_props():
 def _register_scene_pointer_props():
     bpy.types.Scene.af_scp_parent_obj = bpy.props.PointerProperty(name="SCP Parent", type=bpy.types.Object, poll=_poll_parent_proxy)
     bpy.types.Scene.af_scp_object_picker = bpy.props.PointerProperty(name="SCP Object", type=bpy.types.Object, poll=_poll_any_obj)
-    bpy.types.Scene.af_new_fiber_origin_obj = bpy.props.PointerProperty(name="Fiber Origin", type=bpy.types.Object, poll=_poll_marked_scp_source)
-    bpy.types.Scene.af_new_fiber_insertion_obj = bpy.props.PointerProperty(name="Fiber Insertion", type=bpy.types.Object, poll=_poll_marked_scp_source)
+    bpy.types.Scene.af_new_fiber_origin_obj = bpy.props.PointerProperty(name="Fiber Origin", type=bpy.types.Object, poll=_poll_geometry_scp_mesh)
+    bpy.types.Scene.af_new_fiber_insertion_obj = bpy.props.PointerProperty(name="Fiber Insertion", type=bpy.types.Object, poll=_poll_geometry_scp_mesh)
     bpy.types.Scene.af_new_blob_target_obj = bpy.props.PointerProperty(name="Blob Target", type=bpy.types.Object, poll=_poll_any_obj)
 
 

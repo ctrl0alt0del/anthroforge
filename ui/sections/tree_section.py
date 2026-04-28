@@ -38,26 +38,28 @@ def _draw_select_and_delete(row, scp, selected_ids):
     label = scp.name if scp.name else scp.id
     op = row.operator("af.select_scp_in_tree", text=label, emboss=True, depress=(scp.id in selected_ids))
     op.scp_id = scp.id
+    delete_op = row.operator("af.delete_scp_in_tree", text="", icon="TRASH", emboss=False)
+    delete_op.scp_id = scp.id
+
+
+def _draw_children(layout, scene, children, children_map, depth, active_id, selected_ids, visited):
+    for child in children:
+        _draw_node(layout, scene, child, children_map, depth + 1, active_id, selected_ids, visited)
 
 
 def _draw_node(layout, scene, scp, children_map, depth, active_id, selected_ids, visited):
     if scp.id in visited:
         return
     visited.add(scp.id)
-
     children = children_map.get(scp.id, [])
     has_children = len(children) > 0
     collapsed = is_collapsed(scene, scp.id)
-
     row = layout.row(align=True)
-
     _draw_indent(row, depth)
     _draw_expand_toggle(row, scene, scp.id, has_children, collapsed)
     _draw_select_and_delete(row, scp, selected_ids)
-
     if has_children and not collapsed:
-        for child in children:
-            _draw_node(layout, scene, child, children_map, depth + 1, active_id, selected_ids, visited)
+        _draw_children(layout, scene, children, children_map, depth, active_id, selected_ids, visited)
 
 
 def draw_tree_section(layout, scene, root, active_scp_id, selected_scp_ids):

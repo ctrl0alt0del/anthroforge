@@ -1,7 +1,7 @@
 ﻿import bpy
 
 from ...core.utils import get_af_root
-from .scp_create_sections import active_scp_prop, draw_active_object_box, draw_delete_button, draw_mark_button, draw_mirror_box, draw_parent_box, is_marked_scp_obj
+from .scp_create_sections import active_scp_prop, draw_active_object_box, draw_mark_button, draw_mirror_box, draw_parent_box, is_marked_scp_obj
 
 
 class AF_PT_CreatePanel(bpy.types.Panel):
@@ -25,7 +25,6 @@ class AF_PT_CreatePanel(bpy.types.Panel):
             return
         scp = active_scp_prop(root, obj)
         self.layout.separator()
-        draw_delete_button(self.layout, obj)
         draw_parent_box(self.layout, context.scene, scp)
         if scp is not None:
             draw_mirror_box(self.layout, scp)

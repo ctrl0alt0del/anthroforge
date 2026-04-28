@@ -16,7 +16,7 @@ def _color_key(color):
 def _used_color_keys(scene, root_name, exclude_obj=None):
     keys = set()
     for obj in getattr(scene, "objects", ()):
-        valid = obj is not exclude_obj and obj.get("af_scp") and not obj.get("af_scp_mirror")
+        valid = obj is not exclude_obj and obj.get("af_scp_geometry") and not obj.get("af_scp_mirror")
         valid = valid and obj.get("af_root_name") == root_name and obj.get("af_scp_id")
         if valid:
             keys.add(_color_key(getattr(obj, "color", (0.0, 0.0, 0.0, 1.0))))

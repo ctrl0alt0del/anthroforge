@@ -11,9 +11,10 @@ bl_info = {
 import bpy
 
 from .operators.create_root import AF_OT_CreateRoot
-from .operators.add_scp import AF_OT_AddSCP, AF_OT_SetSCPParent, AF_OT_UnmarkSCP
+from .operators.add_scp import AF_OT_AddSCP, AF_OT_SetSCPParent
 from .operators.tree import (
     AF_OT_ToggleSCPCollapse,
+    AF_OT_DeleteSCPInTree,
     AF_OT_SelectSCPInTree,
     AF_OT_ToggleVCPCollapse,
     AF_OT_SelectVCPInTree,
@@ -89,13 +90,13 @@ classes = (
     AF_OT_CreateRoot,
     AF_OT_AddSCP,
     AF_OT_SetSCPParent,
-    AF_OT_UnmarkSCP,
     AF_OT_CreateEmptySCP,
     AF_OT_SetSCPTransformObject,
     AF_OT_SetSCPGeometryObject,
     AF_OT_AddSCPBoundObject,
     AF_OT_RemoveSCPBoundObject,
     AF_OT_ToggleSCPCollapse,
+    AF_OT_DeleteSCPInTree,
     AF_OT_SelectSCPInTree,
     AF_PT_MainPanel,
     AF_PT_CreatePanel,

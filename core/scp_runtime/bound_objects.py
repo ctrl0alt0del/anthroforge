@@ -18,7 +18,6 @@ def _sync_identity(scp):
     obj = _identity_obj(scp)
     name = "" if obj is None else str(obj.name)
     set_prop_raw(scp, "name", name or as_id(getattr(scp, "id", "")))
-    set_prop_raw(scp, "object_name", name)
 
 
 def find_bound_entry_by_id(scp, bound_id):
@@ -40,7 +39,7 @@ def iter_bound_objects(scp):
 def clear_scp_tags(obj):
     if obj is None:
         return
-    for key in ("af_scp", "af_root_name", "af_scp_id", "af_scp_bound", "af_scp_bound_id", "af_scp_transform", "af_scp_geometry"):
+    for key in ("af_root_name", "af_scp_id", "af_scp_bound", "af_scp_bound_id", "af_scp_transform", "af_scp_geometry"):
         if key in obj:
             del obj[key]
 
@@ -52,10 +51,6 @@ def _tag_object(root_name, scp, entry, obj):
     obj["af_scp_bound_id"] = as_id(getattr(entry, "id", ""))
     obj["af_scp_transform"] = obj == getattr(scp, "transform_object_ref", None)
     obj["af_scp_geometry"] = obj == getattr(scp, "geometry_object_ref", None)
-    if obj.get("af_scp_geometry"):
-        obj["af_scp"] = True
-    elif "af_scp" in obj:
-        del obj["af_scp"]
 
 
 def _clear_missing_refs(scp, obj):
