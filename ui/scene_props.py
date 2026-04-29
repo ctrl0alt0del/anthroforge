@@ -41,6 +41,11 @@ def _register_scene_string_props():
 def _register_scene_shortcut_props():
     bpy.types.Scene.af_new_shortcut_name = bpy.props.StringProperty(name="Shortcut Name", default="")
     bpy.types.Scene.af_new_shortcut_path = bpy.props.StringProperty(name="Data Path", default="")
+    bpy.types.Scene.af_shortcut_view_mode = bpy.props.EnumProperty(
+        name="Shortcut View",
+        items=(("SELECTED", "Selected", ""), ("ALL", "All", "")),
+        default="SELECTED",
+    )
 
 
 def register_scene_props():
@@ -56,5 +61,5 @@ def _delete_scene_prop(name):
 
 
 def unregister_scene_props():
-    for name in ("af_new_shortcut_path", "af_new_shortcut_name", "af_vcp_tree_collapsed_json", "af_tree_collapsed_json", "af_new_blob_target_obj", "af_new_fiber_insertion_obj", "af_new_fiber_origin_obj", "af_scp_object_picker", "af_scp_parent_obj", "af_selection_sync_lock"):
+    for name in ("af_shortcut_view_mode", "af_new_shortcut_path", "af_new_shortcut_name", "af_vcp_tree_collapsed_json", "af_tree_collapsed_json", "af_new_blob_target_obj", "af_new_fiber_insertion_obj", "af_new_fiber_origin_obj", "af_scp_object_picker", "af_scp_parent_obj", "af_selection_sync_lock"):
         _delete_scene_prop(name)

@@ -1,5 +1,6 @@
 import bpy
 
+from ...core.shortcuts.owners import current_shortcut_owner, matches_shortcut_owner
 from ...core.shortcuts import resolve_shortcut
 from ...core.utils import get_af_root
 
@@ -37,11 +38,24 @@ def _draw_shortcut_row(layout, root, context, shortcut):
     _draw_valid_shortcut(box, shortcut, target)
 
 
+def _draw_shortcut_mode(layout, scene):
+    layout.row(align=True).prop(scene, "af_shortcut_view_mode", expand=True)
+
+
+def _visible_shortcuts(root, context):
+    items = tuple(root.af_shortcut_system.shortcuts)
+    if getattr(context.scene, "af_shortcut_view_mode", "SELECTED") == "ALL":
+        return items
+    kind, owner_id = current_shortcut_owner(root, context)
+    return [item for item in items if matches_shortcut_owner(item, kind, owner_id)]
+
+
 def _draw_shortcut_list(layout, root, context):
-    if not root.af_shortcut_system.shortcuts:
+    shortcuts = _visible_shortcuts(root, context)
+    if not shortcuts:
         layout.label(text="No shortcuts")
         return
-    for shortcut in root.af_shortcut_system.shortcuts:
+    for shortcut in shortcuts:
         _draw_shortcut_row(layout, root, context, shortcut)
 
 
@@ -67,5 +81,6 @@ class AF_PT_ShortcutPanel(bpy.types.Panel):
 
     def draw(self, context):
         root = get_af_root(context.scene)
+        _draw_shortcut_mode(self.layout, context.scene)
         _draw_shortcut_form(self.layout, context.scene)
         _draw_shortcut_list(self.layout, root, context)

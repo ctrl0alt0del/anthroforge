@@ -1,6 +1,7 @@
 import re
 
 from ..id_utils import next_prefixed_id
+from ..shortcuts.owners import remapped_shortcut_owner
 from .bound_objects import clear_scp_tags, iter_bound_objects
 from .common import as_id, find_scp_by_id, scp_prop_map, set_prop_raw
 from .lookup import clear_native_parent_keep_world
@@ -35,7 +36,7 @@ def _copy_name(src, dst, dst_id):
 
 
 def _new_maps():
-    return {"scps": {}, "objects": {}, "names": {}, "fibers": {}, "muscles": {}}
+    return {"scps": {}, "objects": {}, "names": {}, "fibers": {}, "muscles": {}, "blobs": {}}
 
 
 def _subtree_ids(root, scp_id):
@@ -191,6 +192,7 @@ def _copy_blob_item(root, src, maps):
     if remap is None:
         return
     dst = _new_item(root.af_vcp_system.blobs, "BLOB")
+    maps["blobs"][as_id(src.id)] = as_id(dst.id)
     _copy_scalars(src, dst, skip=_BLOB_SKIP), _copy_name(src, dst, dst.id)
     dst.attach_target_type, dst.attach_target_id, dst.attach_target_object_name = remap
 
@@ -202,21 +204,24 @@ def _copy_blobs(root, maps):
 
 def _rewritten_path(raw, name_map):
     match = _FULL_OBJECT_RE.match(str(raw or "").strip())
-    if match is None or match.group(1) not in name_map:
-        return ""
-    return f"bpy.data.objects[{repr(name_map[match.group(1)])}]{match.group(2)}"
+    if match is None:
+        return str(raw or "")
+    name = name_map.get(match.group(1), match.group(1))
+    return f"bpy.data.objects[{repr(name)}]{match.group(2)}"
 
 
-def _add_shortcut(root, shortcut, data_path):
+def _add_shortcut(root, shortcut, data_path, owner_type, owner_id):
     item = root.af_shortcut_system.shortcuts.add()
     item.id = next_prefixed_id(root.af_shortcut_system.shortcuts, "SHORTCUT")
     item.name, item.data_path = str(shortcut.name or item.id), data_path
+    item.owner_type, item.owner_id = owner_type, owner_id
 
 
 def _copy_shortcuts(root, maps):
     for shortcut in tuple(root.af_shortcut_system.shortcuts):
-        path = _rewritten_path(getattr(shortcut, "data_path", ""), maps["names"])
-        _add_shortcut(root, shortcut, path) if path else None
+        owner_type, owner_id = remapped_shortcut_owner(shortcut, maps)
+        if owner_type != "NONE":
+            _add_shortcut(root, shortcut, _rewritten_path(getattr(shortcut, "data_path", ""), maps["names"]), owner_type, owner_id)
 
 
 def copy_scp_subtree(root, scene, scp_id):

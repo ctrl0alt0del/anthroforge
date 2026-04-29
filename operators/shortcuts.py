@@ -1,6 +1,7 @@
 import bpy
 
 from ..core.id_utils import next_prefixed_id
+from ..core.shortcuts.owners import current_shortcut_owner
 from ..core.shortcuts import normalize_shortcut_path, resolve_shortcut
 from ..core.utils import get_af_root
 
@@ -25,11 +26,21 @@ def _shortcut_index(root, shortcut_id):
     return -1
 
 
-def _add_shortcut(root, name, data_path):
+def _add_shortcut(root, name, data_path, owner_type, owner_id):
     item = root.af_shortcut_system.shortcuts.add()
     item.id = next_prefixed_id(root.af_shortcut_system.shortcuts, "SHORTCUT")
     item.name = name
+    item.owner_type = owner_type
+    item.owner_id = owner_id
     item.data_path = data_path
+
+
+def _validated_shortcut_owner(operator, root, context):
+    owner = current_shortcut_owner(root, context)
+    if owner[0] != "NONE":
+        return owner
+    operator.report({"ERROR"}, "Select an SCP or VCP first.")
+    return "NONE", ""
 
 
 def _validated_shortcut_path(operator, root, context):
@@ -63,12 +74,13 @@ class AF_OT_AddDataShortcut(bpy.types.Operator):
             return {"CANCELLED"}
         name = _validated_shortcut_name(self, context.scene)
         data_path = _validated_shortcut_path(self, root, context)
-        if not name or not data_path:
+        owner_type, owner_id = _validated_shortcut_owner(self, root, context)
+        if not name or not data_path or owner_type == "NONE":
             return {"CANCELLED"}
         if _resolved_shortcut_owner(root, context, data_path) is None:
             self.report({"ERROR"}, "Shortcut path could not be resolved.")
             return {"CANCELLED"}
-        _add_shortcut(root, name, data_path)
+        _add_shortcut(root, name, data_path, owner_type, owner_id)
         _clear_shortcut_draft(context.scene)
         return {"FINISHED"}
 
