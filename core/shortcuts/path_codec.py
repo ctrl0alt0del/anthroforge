@@ -6,9 +6,10 @@ from ..selection import get_active_scp
 
 
 _SPEC_RE = re.compile(r"^([A-Za-z_]\w*)(?:\[(\d+)\])?$")
-_FULL_OBJECT_RE = re.compile(r"^bpy\.data\.objects\[(['\"])(.+?)\1\]\.(.+)$")
+_FULL_OBJECT_RE = re.compile(r"^bpy\.data\.objects\[(['\"])(.+?)\1\](.+)$")
 _ACTIVE_KINDS = {"active_scp_prop", "active_scp_object"}
 _FIXED_KINDS = {"scp_prop", "scp_object"}
+_RAW_KIND = "object_rna"
 
 
 def make_shortcut_path(kind, prop_spec, entity_id=""):
@@ -28,13 +29,18 @@ def parse_prop_spec(raw):
 def parse_shortcut_path(raw):
     text = str(raw or "").strip()
     if not text.startswith("af://"):
-        return "", "", ""
+        return _raw_object_path(text)
     parts = text[5:].split("/", 2)
     if len(parts) == 2 and parts[0] in _ACTIVE_KINDS:
         return parts[0], "", parts[1]
     if len(parts) == 3 and parts[0] in (_FIXED_KINDS | {"scp_bound_rna"}):
         return parts[0], parts[1], parts[2]
     return "", "", ""
+
+
+def _raw_object_path(text):
+    obj, tail = _object_path_parts(text)
+    return ("", "", "") if obj is None or not tail else (_RAW_KIND, obj.name, tail)
 
 
 def split_bound_entity_id(entity_id):
@@ -55,21 +61,28 @@ def _full_object_match(raw):
     return _FULL_OBJECT_RE.match(str(raw or "").strip())
 
 
+def _normalize_tail(raw):
+    text = str(raw or "").strip()
+    return text[1:] if text.startswith(".") else text
+
+
 def _object_path_parts(raw):
     match = _full_object_match(raw)
-    return (None, "") if match is None else (bpy.data.objects.get(match.group(2)), match.group(3))
+    if match is None:
+        return None, ""
+    return bpy.data.objects.get(match.group(2)), _normalize_tail(match.group(3))
+
+
+def _valid_bound_tail(tail):
+    return bool(str(tail or "").strip())
 
 
 def _bound_shortcut(root, context, raw):
     scp = get_active_scp(root, context)
     obj, tail = _object_path_parts(raw)
-    if scp is None or obj is None or not tail:
+    if scp is None or obj is None or not _valid_bound_tail(tail):
         return ""
-    entry = find_bound_entry_by_object(scp, obj)
-    if entry is None:
-        return ""
-    entity_id = make_bound_entity_id(scp.id, entry.id)
-    return make_shortcut_path("scp_bound_rna", tail, entity_id=entity_id)
+    return str(raw or "").strip() if find_bound_entry_by_object(scp, obj) is not None else ""
 
 
 def normalize_shortcut_path(root, context, raw):

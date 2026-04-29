@@ -11,7 +11,7 @@ def active_scp_prop(root, obj):
 
 def draw_active_object_box(layout, obj):
     box = layout.box()
-    box.label(text="Mark Existing Mesh As SCP")
+    box.label(text="Create SCP")
     if obj is None:
         box.label(text="No active object", icon="INFO")
         return
@@ -19,8 +19,10 @@ def draw_active_object_box(layout, obj):
     box.label(text=f"Type: {obj.type}")
 
 
-def draw_mark_button(layout):
-    layout.row(align=True).operator("af.add_scp", icon="ADD", text="Mark Selected Mesh")
+def draw_create_buttons(layout):
+    row = layout.row(align=True)
+    row.operator("af.add_scp", icon="ADD", text="Mark Selected Mesh")
+    row.operator("af.create_empty_scp", icon="EMPTY_AXIS", text="Create Empty SCP")
 
 
 def draw_parent_box(layout, scene, scp):

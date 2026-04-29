@@ -16,24 +16,16 @@ def _draw_shortcut_value(row, target, shortcut):
     row.prop(target.owner, target.prop_name, **kwargs)
 
 
-def _draw_shortcut_path(box, shortcut):
-    row = box.row()
-    row.enabled = False
-    row.label(text=shortcut.data_path)
-
-
 def _draw_invalid_shortcut(box, shortcut, error):
     row = box.row(align=True)
     row.label(text=f"{shortcut.name}: {error}", icon="ERROR")
     _draw_delete_button(row, shortcut)
-    _draw_shortcut_path(box, shortcut)
 
 
 def _draw_valid_shortcut(box, shortcut, target):
     row = box.row(align=True)
     _draw_shortcut_value(row, target, shortcut)
     _draw_delete_button(row, shortcut)
-    _draw_shortcut_path(box, shortcut)
 
 
 def _draw_shortcut_row(layout, root, context, shortcut):

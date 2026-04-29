@@ -51,7 +51,6 @@ from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
 from .ui.panels.vcp_edit_panel import AF_PT_VCPEditPanel
 from .ui.panels.blob_create_panel import AF_PT_BlobCreatePanel
 from .ui.panels.blob_edit_panel import AF_PT_BlobEditPanel
-from .ui.panels.scp_objects_panel import AF_PT_SCPObjectsPanel
 from .ui.panels.shortcut_panel import AF_PT_ShortcutPanel
 
 from .properties.scp_properties import (
@@ -100,7 +99,6 @@ classes = (
     AF_OT_SelectSCPInTree,
     AF_PT_MainPanel,
     AF_PT_CreatePanel,
-    AF_PT_SCPObjectsPanel,
     AF_PT_TreePanel,
     AF_PT_EditPanel,
 

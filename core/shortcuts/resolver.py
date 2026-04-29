@@ -1,8 +1,13 @@
+import bpy
 from dataclasses import dataclass
+import re
 
 from ..selection import get_active_scp, get_active_scp_object
 from ..scp_runtime.common import find_bound_scp_obj_by_id, find_geometry_scp_obj, find_scp_by_id
 from .path_codec import parse_prop_spec, parse_shortcut_path, split_bound_entity_id
+
+
+_CUSTOM_PROP_RE = re.compile(r'^\[([\'"])(.+?)\1\](?:\[(\d+)\])?$')
 
 
 @dataclass(frozen=True)
@@ -22,6 +27,8 @@ def _owner_for_kind(root, context, kind, entity_id):
         return get_active_scp(root, context)
     if kind == "active_scp_object":
         return get_active_scp_object(root, context)
+    if kind == "object_rna":
+        return bpy.data.objects.get(entity_id)
     if kind == "scp_prop":
         return find_scp_by_id(root, entity_id)
     if kind == "scp_object":
@@ -37,7 +44,14 @@ def _bound_owner(root, context, kind, entity_id):
 
 
 def _split_owner_prop(prop_spec):
-    return tuple(prop_spec.rsplit(".", 1)) if "." in prop_spec else ("", prop_spec)
+    text = str(prop_spec or "")
+    if text.startswith("["):
+        return "", text
+    bracket = text.rfind('["')
+    bracket = max(bracket, text.rfind("['"))
+    if bracket > 0 and bracket > text.rfind("."):
+        return text[:bracket], text[bracket:]
+    return tuple(text.rsplit(".", 1)) if "." in text else ("", text)
 
 
 def _resolved_owner(owner, owner_path):
@@ -54,6 +68,37 @@ def _prop_rna(owner, prop_name):
     return None if props is None else props.get(prop_name)
 
 
+def _custom_prop_parts(prop_name):
+    match = _CUSTOM_PROP_RE.match(str(prop_name or "").strip())
+    if match is None:
+        return "", -1
+    key = f'["{match.group(2)}"]'
+    index = -1 if match.group(3) is None else int(match.group(3))
+    return key, index
+
+
+def _custom_prop_value(owner, prop_name):
+    key, _index = _custom_prop_parts(prop_name)
+    return None if owner is None or not key else owner.get(key[2:-2])
+
+
+def _custom_index_error(value, index):
+    sized = hasattr(value, "__len__") and not isinstance(value, (str, bytes))
+    if index < 0:
+        return ""
+    if not sized:
+        return "Property is not an array."
+    return "" if index < len(value) else "Array index is out of range."
+
+
+def _custom_target(owner, prop_name):
+    value = _custom_prop_value(owner, prop_name)
+    if value is None:
+        return _invalid("Property was not found on the bound target.")
+    key, index = _custom_prop_parts(prop_name)
+    return ShortcutTarget(owner=owner, prop_name=key, index=index, error=_custom_index_error(value, index))
+
+
 def _missing_owner_error(kind):
     return "Select an SCP to resolve this shortcut." if kind.startswith("active_") else "The bound shortcut target was not found."
 
@@ -68,10 +113,12 @@ def _index_error(prop_rna, index):
 
 def _resolve_prop(kind, owner, prop_spec):
     final_owner, leaf = _owner_and_leaf(owner, prop_spec)
-    prop_name, index = parse_prop_spec(leaf)
-    prop_rna = _prop_rna(final_owner, prop_name)
     if final_owner is None:
         return _invalid(_missing_owner_error(kind))
+    if _custom_prop_parts(leaf)[0]:
+        return _custom_target(final_owner, leaf)
+    prop_name, index = parse_prop_spec(leaf)
+    prop_rna = _prop_rna(final_owner, prop_name)
     if prop_rna is None:
         return _invalid("Property was not found on the bound target.")
     if getattr(prop_rna, "type", "") in {"POINTER", "COLLECTION"}:
