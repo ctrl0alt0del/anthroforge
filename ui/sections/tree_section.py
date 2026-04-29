@@ -38,6 +38,8 @@ def _draw_select_and_delete(row, scp, selected_ids):
     label = scp.name if scp.name else scp.id
     op = row.operator("af.select_scp_in_tree", text=label, emboss=True, depress=(scp.id in selected_ids))
     op.scp_id = scp.id
+    copy_op = row.operator("af.copy_scp_in_tree", text="", icon="DUPLICATE", emboss=False)
+    copy_op.scp_id = scp.id
     delete_op = row.operator("af.delete_scp_in_tree", text="", icon="TRASH", emboss=False)
     delete_op.scp_id = scp.id
 

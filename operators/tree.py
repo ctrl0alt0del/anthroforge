@@ -1,8 +1,11 @@
 import bpy
 from ..core.utils import get_af_root
 from ..core.deps.dirty_hints import empty_dirty_hints
+from ..core.scp_runtime.copy import copy_scp_subtree
 from ..core.scp_runtime.delete import delete_scp
 from ..core.scp_runtime.common import find_primary_scp_obj
+from ..core.scp_runtime.lookup import activate_scp
+from ..core.scp_runtime.object_colors import enable_object_color_view
 from ..ui.tree_state import toggle_collapsed, toggle_vcp_collapsed
 from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.visualization.sync_runner import sync_from_dirty_hints
@@ -88,6 +91,35 @@ class AF_OT_DeleteSCPInTree(bpy.types.Operator):
         sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=empty_dirty_hints(), source="operator", event_type="DELETE")
         notify_selection_changed(context.scene, force=True)
         return {"FINISHED"}
+
+
+class AF_OT_CopySCPInTree(bpy.types.Operator):
+    bl_idname = "af.copy_scp_in_tree"
+    bl_label = "Copy SCP In Tree"
+    bl_options = {"REGISTER", "UNDO"}
+
+    scp_id: bpy.props.StringProperty()
+
+    def execute(self, context):
+        root = get_af_root(context.scene)
+        new_id = "" if root is None else copy_scp_subtree(root, context.scene, self.scp_id)
+        if root is None or not new_id:
+            return {"CANCELLED"}
+        _select_copied_scp(context, root, new_id)
+        sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=empty_dirty_hints(), source="operator", event_type="MARK")
+        notify_selection_changed(context.scene, force=True)
+        return {"FINISHED"}
+
+
+def _select_copied_scp(context, root, scp_id):
+    obj = find_primary_scp_obj(context.scene, root.name, scp_id)
+    activate_scp(root, scp_id), enable_object_color_view(context)
+    if obj is None:
+        return
+    for other in context.selected_objects:
+        other.select_set(False)
+    obj.select_set(True)
+    context.view_layer.objects.active = obj
 
 
 class AF_OT_ToggleVCPCollapse(bpy.types.Operator):

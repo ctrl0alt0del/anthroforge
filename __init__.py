@@ -14,6 +14,7 @@ from .operators.create_root import AF_OT_CreateRoot
 from .operators.add_scp import AF_OT_AddSCP, AF_OT_SetSCPParent
 from .operators.tree import (
     AF_OT_ToggleSCPCollapse,
+    AF_OT_CopySCPInTree,
     AF_OT_DeleteSCPInTree,
     AF_OT_SelectSCPInTree,
     AF_OT_ToggleVCPCollapse,
@@ -95,6 +96,7 @@ classes = (
     AF_OT_AddSCPBoundObject,
     AF_OT_RemoveSCPBoundObject,
     AF_OT_ToggleSCPCollapse,
+    AF_OT_CopySCPInTree,
     AF_OT_DeleteSCPInTree,
     AF_OT_SelectSCPInTree,
     AF_PT_MainPanel,
