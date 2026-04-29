@@ -52,7 +52,7 @@ def _sync_from_depsgraph(sync, root, scene, depsgraph):
     if not changed_ids:
         return
     from ..visualization.sync_runner import sync_from_dirty_hints
-    sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("SCP", changed_ids), source="depsgraph", event_type=_event_type(geometry_ids), payload=_payload(transform_ids, geometry_ids))
+    sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("SCP", changed_ids), source="depsgraph", event_type="SCP_UPDATE", payload=_payload(transform_ids, geometry_ids))
 
 
 def _depsgraph_change_sets(root, depsgraph):
@@ -96,9 +96,6 @@ def _record_update_ids(obj, changed_ids, transform_ids, geometry_ids):
         geometry_ids.add(sid)
 
 
-def _event_type(geometry_ids):
-    return "GEOMETRY" if geometry_ids else "TRANSFORM"
-
-
 def _payload(transform_ids, geometry_ids):
-    return {"scp_transform_ids": sorted(transform_ids), "scp_geometry_ids": sorted(geometry_ids)}
+    apply_ids = set(geometry_ids or set()) - set(transform_ids or set())
+    return {"scp_recapture_ids": sorted(transform_ids), "scp_apply_parent_ids": sorted(apply_ids)}

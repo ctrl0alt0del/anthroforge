@@ -30,7 +30,10 @@ class AttachmentCapture:
         if frame is None:
             return False
         child_frame = self._child_frame(candidate["child_anchor_world"], frame)
-        return self._write_capture(candidate["parent_param"], *child_frame)
+        return self._write_capture(candidate["parent_param"], self._offset_local(candidate["child_anchor_world"], frame), *child_frame)
+
+    def _offset_local(self, child_anchor_world, frame):
+        return frame["basis_world"].inverted() @ (child_anchor_world - frame["point_world"])
 
     def _child_frame(self, child_anchor_world, frame):
         origin = self.child_transform_obj.matrix_world.inverted() @ child_anchor_world
@@ -39,10 +42,11 @@ class AttachmentCapture:
         normal = rotation_inv @ frame["normal_world"]
         return origin, tangent, normal
 
-    def _write_capture(self, param, child_origin, child_tangent, child_normal):
+    def _write_capture(self, param, parent_offset, child_origin, child_tangent, child_normal):
         changed = False
         changed |= self._write_field("attach_parent_tri_vidx", tuple(int(v) for v in param["tri_vidx"]))
         changed |= self._write_field("attach_parent_tri_weights", tuple(float(v) for v in param["tri_weights"]), eps=1.0e-7)
+        changed |= self._write_vec("attach_parent_offset_local", parent_offset)
         changed |= self._write_vec("attach_child_origin_local", child_origin)
         changed |= self._write_vec("attach_child_tangent_local", child_tangent)
         changed |= self._write_vec("attach_child_normal_local", child_normal)
@@ -108,8 +112,12 @@ class AttachmentApply:
     def _matrix_world(self, frame):
         follow = as_bool(getattr(self.child_scp, "attach_follow_rotation", True), default=True)
         rotation = self._rotation_world(frame, follow)
-        position = frame["point_world"] - (rotation @ self._scaled_child_anchor())
+        position = frame["point_world"] + self._parent_offset_world(frame) - (rotation @ self._scaled_child_anchor())
         return self._compose_matrix(position, rotation, follow)
+
+    def _parent_offset_world(self, frame):
+        offset = as_vec3(getattr(self.child_scp, "attach_parent_offset_local", (0.0, 0.0, 0.0)), (0.0, 0.0, 0.0))
+        return frame["basis_world"] @ offset
 
     def _rotation_world(self, frame, follow_rotation):
         if not follow_rotation:
@@ -129,10 +137,10 @@ class AttachmentApply:
         return matrix_world
 
 
-def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", event_type="", transform_ids=None):
-    if as_id(source).lower() != "depsgraph" or as_id(event_type).upper() != "TRANSFORM":
+def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", recapture_ids=None):
+    if as_id(source).lower() != "depsgraph":
         return set()
-    direct_ids = _direct_capture_ids(dirty_scp_ids, transform_ids)
+    direct_ids = _direct_capture_ids(dirty_scp_ids, recapture_ids)
     if not direct_ids:
         return set()
     depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -140,9 +148,9 @@ def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", event_t
     return {sid for sid in sorted(direct_ids) if _capture_one(scp_by_id, scene, root.name, sid, depsgraph)}
 
 
-def _direct_capture_ids(dirty_scp_ids, transform_ids):
+def _direct_capture_ids(dirty_scp_ids, recapture_ids):
     dirty_ids = {as_id(value) for value in set(dirty_scp_ids or set()) if as_id(value)}
-    direct_ids = {as_id(value) for value in set(transform_ids or set()) if as_id(value)}
+    direct_ids = {as_id(value) for value in set(recapture_ids or set()) if as_id(value)}
     return dirty_ids & direct_ids
 
 

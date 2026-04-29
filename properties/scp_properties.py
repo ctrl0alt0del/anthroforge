@@ -76,6 +76,7 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
     attach_initialized: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
     attach_parent_tri_vidx: bpy.props.IntVectorProperty(name="Attach Parent Triangle Vertex Indices", size=3, default=(-1, -1, -1), options={"HIDDEN"})
     attach_parent_tri_weights: bpy.props.FloatVectorProperty(name="Attach Parent Triangle Barycentric", size=3, default=(1.0, 0.0, 0.0), options={"HIDDEN"})
+    attach_parent_offset_local: bpy.props.FloatVectorProperty(name="Attach Parent Offset Local", size=3, default=(0.0, 0.0, 0.0), options={"HIDDEN"})
     attach_child_origin_local: bpy.props.FloatVectorProperty(name="Attach Child Origin Local", size=3, default=(0.0, 0.0, 0.0), options={"HIDDEN"})
     attach_child_tangent_local: bpy.props.FloatVectorProperty(name="Attach Child Tangent Local", size=3, default=(1.0, 0.0, 0.0), options={"HIDDEN"})
     attach_child_normal_local: bpy.props.FloatVectorProperty(name="Attach Child Normal Local", size=3, default=(0.0, 0.0, 1.0), options={"HIDDEN"})

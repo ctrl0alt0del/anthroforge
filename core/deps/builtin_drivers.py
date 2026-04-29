@@ -36,15 +36,13 @@ def _scp_attachment_changes(ctx, scp_dirty):
         scene=ctx.scene,
         dirty_scp_ids=scp_dirty,
         source=str(meta.get("source", "") or ""),
-        event_type=str(meta.get("event_type", "") or ""),
-        transform_ids=_payload_id_set(_meta_payload(meta), "scp_transform_ids"),
+        recapture_ids=_payload_id_set(_meta_payload(meta), "scp_recapture_ids"),
     )
 
 
 def _scp_parent_ids(meta):
     payload = _meta_payload(meta)
-    ids = _payload_id_set(payload, "scp_transform_ids")
-    return ids | _payload_id_set(payload, "scp_geometry_ids")
+    return _payload_id_set(payload, "scp_apply_parent_ids")
 
 
 def _sync_scp_scene(root, scene, ids, is_full, meta):
@@ -181,20 +179,14 @@ class VCPMirrorSyncDriver(DependencyDriver):
     def entity_types(self):
         return ("SCP", "FIBER", "MUSCLE", "BLOB")
 
-    def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
-        _ = bake
-        _ = gate_meta
-        fiber_ids = set(impacted.get("FIBER", set()) or set())
-        muscle_ids = set(impacted.get("MUSCLE", set()) or set())
-        blob_ids = set(impacted.get("BLOB", set()) or set())
+    def _impacted_ids(self, impacted):
+        return (
+            set(impacted.get("FIBER", set()) or set()),
+            set(impacted.get("MUSCLE", set()) or set()),
+            set(impacted.get("BLOB", set()) or set()),
+        )
 
-        if is_full:
-            sync_vcp_mirrors(root=root, scene=scene)
-            return
-
-        if not fiber_ids and not muscle_ids and not blob_ids:
-            return
-
+    def _sync_targets(self, root, scene, fiber_ids, muscle_ids, blob_ids):
         sync_vcp_mirrors(
             root=root,
             scene=scene,
@@ -202,3 +194,14 @@ class VCPMirrorSyncDriver(DependencyDriver):
             target_muscle_ids=muscle_ids,
             target_blob_ids=blob_ids,
         )
+
+    def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
+        _ = bake
+        _ = gate_meta
+        fiber_ids, muscle_ids, blob_ids = self._impacted_ids(impacted)
+        if is_full:
+            sync_vcp_mirrors(root=root, scene=scene)
+            return
+        if not fiber_ids and not muscle_ids and not blob_ids:
+            return
+        self._sync_targets(root, scene, fiber_ids, muscle_ids, blob_ids)

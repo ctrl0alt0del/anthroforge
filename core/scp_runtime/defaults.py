@@ -6,6 +6,7 @@ _ATTACH_DEFAULTS = (
     ("attach_initialized", False),
     ("attach_parent_tri_vidx", (-1, -1, -1)),
     ("attach_parent_tri_weights", (1.0, 0.0, 0.0)),
+    ("attach_parent_offset_local", (0.0, 0.0, 0.0)),
     ("attach_child_origin_local", (0.0, 0.0, 0.0)),
     ("attach_child_tangent_local", (1.0, 0.0, 0.0)),
     ("attach_child_normal_local", (0.0, 0.0, 1.0)),
