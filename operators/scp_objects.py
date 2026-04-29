@@ -2,6 +2,7 @@ import bpy
 
 from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.scp_runtime.object_roles import active_scp_from_context, add_bound_object_to_scp, create_scp, create_transform_empty, remove_scp_bound_object, set_scp_geometry_object, set_scp_transform_object
+from ..core.scp_runtime.object_colors import enable_object_color_view
 from ..core.scp_runtime.lookup import activate_scp
 from ..core.utils import get_af_root
 from ..core.visualization.control_runtime import notify_selection_changed
@@ -46,6 +47,7 @@ class AF_OT_CreateEmptySCP(bpy.types.Operator):
         scp = create_scp(root)
         obj = create_transform_empty(context, scp)
         set_scp_transform_object(root, scp, obj)
+        enable_object_color_view(context)
         activate_scp(root, scp.id)
         _select_only(context, obj)
         _sync_scp(context, scp.id, event_type="MARK")

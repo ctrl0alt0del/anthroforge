@@ -1,6 +1,8 @@
 import colorsys
 import zlib
 
+from .common import set_prop_raw
+
 
 def _slot_color(slot):
     hue = (float(slot) * 0.61803398875) % 1.0
@@ -13,13 +15,16 @@ def _color_key(color):
     return tuple(round(float(v), 4) for v in tuple(color or ())[:3])
 
 
-def _used_color_keys(scene, root_name, exclude_obj=None):
+def _scp_color(scp):
+    color = tuple(getattr(scp, "color", (0.0, 0.0, 0.0, 1.0)) or ())
+    return tuple(float(v) for v in color[:4]) if len(color) >= 4 else (0.0, 0.0, 0.0, 1.0)
+
+
+def _used_color_keys(root, exclude_scp=None):
     keys = set()
-    for obj in getattr(scene, "objects", ()):
-        valid = obj is not exclude_obj and obj.get("af_scp_geometry") and not obj.get("af_scp_mirror")
-        valid = valid and obj.get("af_root_name") == root_name and obj.get("af_scp_id")
-        if valid:
-            keys.add(_color_key(getattr(obj, "color", (0.0, 0.0, 0.0, 1.0))))
+    for scp in getattr(root.af_scp_system, "scps", ()):
+        if scp != exclude_scp and getattr(scp, "color_initialized", False):
+            keys.add(_color_key(_scp_color(scp)))
     return keys
 
 
@@ -27,8 +32,8 @@ def _seed_slot(scp_id):
     return zlib.crc32(str(scp_id or "").encode("utf-8")) % 4096
 
 
-def scp_object_color(scene, root_name, scp_id, exclude_obj=None):
-    used = _used_color_keys(scene, root_name, exclude_obj=exclude_obj)
+def next_scp_color(root, scp_id, exclude_scp=None):
+    used = _used_color_keys(root, exclude_scp=exclude_scp)
     start = _seed_slot(scp_id)
     for offset in range(4096):
         color = _slot_color(start + offset)
@@ -37,9 +42,18 @@ def scp_object_color(scene, root_name, scp_id, exclude_obj=None):
     return _slot_color(start)
 
 
-def apply_scp_object_color(obj, scene, root_name, scp_id):
+def ensure_scp_color(root, scp):
+    if getattr(scp, "color_initialized", False):
+        return _scp_color(scp)
+    color = next_scp_color(root, getattr(scp, "id", ""), exclude_scp=scp)
+    set_prop_raw(scp, "color", color)
+    set_prop_raw(scp, "color_initialized", True)
+    return color
+
+
+def apply_object_color(obj, color):
     if obj is not None:
-        obj.color = scp_object_color(scene, root_name, scp_id, exclude_obj=obj)
+        obj.color = tuple(color or (0.0, 0.0, 0.0, 1.0))
 
 
 def enable_object_color_view(context):

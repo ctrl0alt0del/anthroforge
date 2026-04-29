@@ -69,23 +69,27 @@ def _sync_active_scp_state(root, scene, entity):
         _set_active_scp_index(root, scene, _scp_index(root, entity[1]))
 
 
-def resolve_active_entity(root):
-    direct = _entity_from_active_object(root)
-    if direct[0] != "NONE":
-        return direct
-
+def _active_scp_entity(root):
     idx = int(getattr(root.af_scp_system, "active_scp_index", -1))
     if 0 <= idx < len(root.af_scp_system.scps):
         sid = str(root.af_scp_system.scps[idx].id or "")
         if sid:
             return "SCP", sid
+    return None
 
+
+def _active_vcp_entity(root):
     vcp = root.af_vcp_system
     vtype = str(getattr(vcp, "active_vcp_type", "NONE") or "NONE")
     vid = str(getattr(vcp, "active_vcp_id", "") or "")
-    if vtype in ("FIBER", "MUSCLE", "BLOB") and vid:
-        return vtype, vid
-    return "NONE", ""
+    return (vtype, vid) if vtype in ENTITY_TYPES[1:] and vid else None
+
+
+def resolve_active_entity(root):
+    direct = _entity_from_active_object(root)
+    if direct[0] != "NONE":
+        return direct
+    return _active_scp_entity(root) or _active_vcp_entity(root) or ("NONE", "")
 
 
 def active_entity_id(root, entity_type):
@@ -138,6 +142,17 @@ def _merge_hints(target, source):
         target[key] |= set(vals or set())
 
 
+def _sync_from_hints(root, scene, hints):
+    from .sync_runner import sync_from_dirty_hints
+    sync_from_dirty_hints(
+        root=root,
+        scene=scene,
+        dirty_hints=hints,
+        source="depsgraph",
+        event_type="SELECTION",
+    )
+
+
 class ControlRuntimeOrchestrator:
     def __init__(self):
         self._last_active = ("NONE", "")
@@ -148,20 +163,9 @@ class ControlRuntimeOrchestrator:
 
     def _sync_for_scene(self, scene, prev_entity, curr_entity):
         root = get_af_root(scene)
-        if root is None:
-            return
         hints = _hints_for_switch(prev_entity, curr_entity)
-        if not hints:
-            return
-        from .sync_runner import sync_from_dirty_hints
-
-        sync_from_dirty_hints(
-            root=root,
-            scene=scene,
-            dirty_hints=hints,
-            source="depsgraph",
-            event_type="SELECTION",
-        )
+        if root is not None and hints:
+            _sync_from_hints(root, scene, hints)
 
     def on_depsgraph_update(self, scene, depsgraph):
         _depsgraph = depsgraph
@@ -213,14 +217,21 @@ def _on_load_post(_dummy):
         _CONTROL_RUNTIME.reset()
     scene = getattr(bpy.context, "scene", None)
     root, current = _root_and_current(scene)
-    if root is None or current[0] == "NONE":
+    if root is None:
         return
-    _sync_load_post(scene, root, current)
+    _sync_load_roles(root)
+    if current[0] != "NONE":
+        _sync_load_post(scene, root, current)
 
 
 def _root_and_current(scene):
     root = get_af_root(scene)
     return root, ("NONE", "") if root is None else resolve_active_entity(root)
+
+
+def _sync_load_roles(root):
+    from ..scp_runtime.bound_objects import sync_all_scp_roles
+    sync_all_scp_roles(root)
 
 
 def _sync_load_post(scene, root, current):

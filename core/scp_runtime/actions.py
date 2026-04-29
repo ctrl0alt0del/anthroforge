@@ -6,7 +6,7 @@ from .bound_objects import set_geometry_object, set_transform_object
 from .common import find_geometry_mesh_scp_obj, find_transform_scp_obj, is_transform_scp_obj, scp_for_object
 from .link_state import restore_link_state, snapshot_link_state
 from .lookup import activate_scp, effective_parent_obj, set_parent_relation, would_create_parent_cycle
-from .object_colors import apply_scp_object_color, enable_object_color_view
+from .object_colors import enable_object_color_view
 from .object_roles import create_scp
 
 
@@ -45,7 +45,6 @@ def _mark_object(operator, context, root, obj):
     scp = create_scp(root, obj.name)
     set_transform_object(root, scp, obj)
     set_geometry_object(root, scp, obj)
-    apply_scp_object_color(obj, context.scene, root.name, scp.id)
     enable_object_color_view(context)
     if not _assign_optional_parent(operator, context, root, scp):
         return {"CANCELLED"}

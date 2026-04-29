@@ -18,6 +18,10 @@ _MIRROR_DEFAULTS = (
     ("mirror_source_id", ""),
     ("mirror_effective_axis", "X"),
 )
+_COLOR_DEFAULTS = (
+    ("color", (0.0, 0.0, 0.0, 1.0)),
+    ("color_initialized", False),
+)
 
 
 def _apply_defaults(prop, pairs):
@@ -33,9 +37,14 @@ def reset_mirror_state(prop):
     _apply_defaults(prop, _MIRROR_DEFAULTS)
 
 
+def reset_color_state(prop):
+    _apply_defaults(prop, _COLOR_DEFAULTS)
+
+
 def initialize_scp_entry(prop, scp_id, label):
     set_prop_raw(prop, "id", scp_id)
     set_prop_raw(prop, "name", label)
     set_prop_raw(prop, "parent_id", "")
+    reset_color_state(prop)
     reset_attachment_state(prop)
     reset_mirror_state(prop)

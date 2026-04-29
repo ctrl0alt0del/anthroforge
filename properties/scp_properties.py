@@ -50,6 +50,16 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
     transform_object_ref: bpy.props.PointerProperty(name="Transform Object", type=bpy.types.Object)
     geometry_object_ref: bpy.props.PointerProperty(name="Geometry Object", type=bpy.types.Object)
     bound_objects: bpy.props.CollectionProperty(type=AF_SCP_BoundObject_Property)
+    color: bpy.props.FloatVectorProperty(
+        name="Color",
+        size=4,
+        subtype="COLOR",
+        min=0.0,
+        max=1.0,
+        default=(0.0, 0.0, 0.0, 1.0),
+        update=_on_scp_prop_update,
+    )
+    color_initialized: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
     parent_id: bpy.props.StringProperty(name="Parent ID", default="", update=_on_scp_prop_update)
     attach_child_anchor_mode: bpy.props.EnumProperty(
         name="Child Anchor",

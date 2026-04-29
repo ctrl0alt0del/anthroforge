@@ -4,12 +4,14 @@ from ..id_utils import next_prefixed_id
 from .bound_objects import ensure_bound_object, remove_bound_object, set_geometry_object, set_transform_object
 from .common import scp_for_object
 from .defaults import initialize_scp_entry
+from .object_colors import ensure_scp_color
 
 
 def create_scp(root, label=""):
     scp = root.af_scp_system.scps.add()
     scp_id = next_prefixed_id(root.af_scp_system.scps, "SCP")
     initialize_scp_entry(scp, scp_id, str(label or scp_id))
+    ensure_scp_color(root, scp)
     root.af_scp_system.active_scp_index = len(root.af_scp_system.scps) - 1
     return scp
 

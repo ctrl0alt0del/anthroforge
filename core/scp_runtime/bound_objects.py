@@ -1,5 +1,6 @@
 from ..id_utils import next_prefixed_id
 from .common import as_id, set_prop_raw
+from .object_colors import apply_object_color, ensure_scp_color
 
 
 def _entry_obj(entry):
@@ -114,6 +115,12 @@ def _sync_parenting(scp):
         _parent_keep_world(obj, parent) if parent and obj != parent else None
 
 
+def _sync_color(root, scp):
+    color = ensure_scp_color(root, scp)
+    for _entry, obj in iter_bound_objects(scp):
+        apply_object_color(obj, color)
+
+
 def sync_scp_roles(root, scp):
     for obj in list(_live_bound_objects(scp)):
         clear_scp_tags(obj)
@@ -122,6 +129,7 @@ def sync_scp_roles(root, scp):
         _tag_object(root.name, scp, entry, obj)
     _sync_parenting(scp)
     _sync_identity(scp)
+    _sync_color(root, scp)
 
 
 def _live_bound_objects(scp):
