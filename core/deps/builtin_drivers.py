@@ -37,6 +37,7 @@ def _scp_attachment_changes(ctx, scp_dirty):
         dirty_scp_ids=scp_dirty,
         source=str(meta.get("source", "") or ""),
         recapture_ids=_payload_id_set(_meta_payload(meta), "scp_recapture_ids"),
+        apply_parent_ids=_scp_parent_ids(meta),
     )
 
 

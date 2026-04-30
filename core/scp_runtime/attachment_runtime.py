@@ -137,7 +137,7 @@ class AttachmentApply:
         return matrix_world
 
 
-def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", recapture_ids=None):
+def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", recapture_ids=None, apply_parent_ids=None):
     if as_id(source).lower() != "depsgraph":
         return set()
     direct_ids = _direct_capture_ids(dirty_scp_ids, recapture_ids)
@@ -145,6 +145,7 @@ def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", recaptu
         return set()
     depsgraph = bpy.context.evaluated_depsgraph_get()
     scp_by_id = {as_id(s.id): s for s in root.af_scp_system.scps}
+    direct_ids -= _blocked_capture_ids(scp_by_id, direct_ids, apply_parent_ids)
     return {sid for sid in sorted(direct_ids) if _capture_one(scp_by_id, scene, root.name, sid, depsgraph)}
 
 
@@ -152,6 +153,11 @@ def _direct_capture_ids(dirty_scp_ids, recapture_ids):
     dirty_ids = {as_id(value) for value in set(dirty_scp_ids or set()) if as_id(value)}
     direct_ids = {as_id(value) for value in set(recapture_ids or set()) if as_id(value)}
     return dirty_ids & direct_ids
+
+
+def _blocked_capture_ids(scp_by_id, direct_ids, apply_parent_ids):
+    parent_ids = {as_id(value) for value in set(apply_parent_ids or set()) if as_id(value)}
+    return {sid for sid in set(direct_ids or set()) if as_id(getattr(scp_by_id.get(sid), "parent_id", "")) in parent_ids}
 
 
 def _capture_one(scp_by_id, scene, root_name, sid, depsgraph):
