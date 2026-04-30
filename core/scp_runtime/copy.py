@@ -49,6 +49,12 @@ def _subtree_ids(root, scp_id):
     return out
 
 
+def _source_ids(root, scp_id, child_ids=None):
+    ordered = _subtree_ids(root, scp_id)
+    allowed = {as_id(scp_id)} | {as_id(sid) for sid in set(child_ids or ()) if as_id(sid)}
+    return [sid for sid in ordered if sid in allowed]
+
+
 def _source_scps(root, scp_ids):
     return [find_scp_by_id(root, sid) for sid in scp_ids if find_scp_by_id(root, sid) is not None]
 
@@ -224,9 +230,9 @@ def _copy_shortcuts(root, maps):
             _add_shortcut(root, shortcut, _rewritten_path(getattr(shortcut, "data_path", ""), maps["names"]), owner_type, owner_id)
 
 
-def copy_scp_subtree(root, scene, scp_id):
+def copy_scp_subtree(root, scene, scp_id, child_ids=None):
     maps = _new_maps()
-    source_ids = _subtree_ids(root, scp_id)
+    source_ids = _source_ids(root, scp_id, child_ids)
     if not source_ids:
         return ""
     pairs = _copy_scps(root, scene, _source_scps(root, source_ids), maps)

@@ -6,6 +6,7 @@ from ..core.scp_runtime.delete import delete_scp
 from ..core.scp_runtime.common import find_primary_scp_obj
 from ..core.scp_runtime.lookup import activate_scp
 from ..core.scp_runtime.object_colors import enable_object_color_view
+from ..core.scp_runtime.tree import children_map
 from ..ui.tree_state import toggle_collapsed, toggle_vcp_collapsed
 from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.visualization.sync_runner import sync_from_dirty_hints
@@ -97,18 +98,55 @@ class AF_OT_CopySCPInTree(bpy.types.Operator):
     bl_idname = "af.copy_scp_in_tree"
     bl_label = "Copy SCP In Tree"
     bl_options = {"REGISTER", "UNDO"}
+    bl_property = "copy_scope"
 
     scp_id: bpy.props.StringProperty()
+    copy_scope: bpy.props.EnumProperty(
+        name="Copy Scope",
+        items=(
+            ("PARENT_ONLY", "Copy Parent Only", ""),
+            ("ALL", "Copy All", ""),
+        ),
+        default="PARENT_ONLY",
+    )
+
+    def invoke(self, context, event):
+        _ = event
+        root = get_af_root(context.scene)
+        return self.execute(context) if not _has_children(root, self.scp_id) else context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        _ = context
+        self.layout.prop(self, "copy_scope", expand=True)
+
+    def _child_ids(self, root):
+        return [] if self.copy_scope == "PARENT_ONLY" else _subtree_child_ids(root, self.scp_id)
 
     def execute(self, context):
         root = get_af_root(context.scene)
-        new_id = "" if root is None else copy_scp_subtree(root, context.scene, self.scp_id)
+        new_id = "" if root is None else copy_scp_subtree(root, context.scene, self.scp_id, self._child_ids(root))
         if root is None or not new_id:
             return {"CANCELLED"}
         _select_copied_scp(context, root, new_id)
         sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=empty_dirty_hints(), source="operator", event_type="MARK")
         notify_selection_changed(context.scene, force=True)
         return {"FINISHED"}
+
+
+def _subtree_child_ids(root, scp_id):
+    kids = children_map({str(s.id): s for s in root.af_scp_system.scps})
+    stack, out = list(reversed(kids.get(str(scp_id), []))), []
+    while stack:
+        sid = stack.pop()
+        out.append(sid), stack.extend(reversed(kids.get(sid, [])))
+    return out
+
+
+def _has_children(root, scp_id):
+    if root is None or not scp_id:
+        return False
+    kids = children_map({str(s.id): s for s in root.af_scp_system.scps})
+    return bool(kids.get(str(scp_id), []))
 
 
 def _select_copied_scp(context, root, scp_id):
