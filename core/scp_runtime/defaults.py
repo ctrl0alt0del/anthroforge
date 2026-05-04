@@ -13,6 +13,7 @@ _ATTACH_DEFAULTS = (
 )
 _MIRROR_DEFAULTS = (
     ("mirror_enabled", False),
+    ("mirror_inherit_parent", True),
     ("mirror_axis", "X"),
     ("mirror_origin", (0.0, 0.0, 0.0)),
     ("mirror_status", "NONE"),

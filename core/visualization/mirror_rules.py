@@ -40,26 +40,27 @@ def effective_rule_for_scp(scp_id, scp_map):
         rule = explicit_mirror_rule_for_scp(s)
         if rule is not None:
             return rule
+        if not bool(getattr(s, "mirror_inherit_parent", True)):
+            return None
         cur = s.parent_id or ""
     return None
 
 
+def _fiber_parent_ids(fiber_prop):
+    ids = [pid for pid in (fiber_prop.a_parent_id, fiber_prop.b_parent_id) if pid]
+    return ids + [tp.parent_id for tp in fiber_prop.mid_touches if tp.parent_id]
+
+
+def _first_scp_rule(parent_ids, scp_map):
+    for pid in parent_ids:
+        rule = effective_rule_for_scp(pid, scp_map)
+        if rule is not None:
+            return rule
+    return None
+
+
 def effective_rule_for_fiber(fiber_prop, scp_map):
-    candidates = []
-    if fiber_prop.a_parent_id:
-        r = effective_rule_for_scp(fiber_prop.a_parent_id, scp_map)
-        if r is not None:
-            candidates.append(r)
-    if fiber_prop.b_parent_id:
-        r = effective_rule_for_scp(fiber_prop.b_parent_id, scp_map)
-        if r is not None:
-            candidates.append(r)
-    for tp in fiber_prop.mid_touches:
-        if tp.parent_id:
-            r = effective_rule_for_scp(tp.parent_id, scp_map)
-            if r is not None:
-                candidates.append(r)
-    return candidates[0] if candidates else None
+    return _first_scp_rule(_fiber_parent_ids(fiber_prop), scp_map)
 
 
 def effective_rule_for_muscle(muscle_prop, fibers_by_id, scp_map):

@@ -44,6 +44,7 @@ def draw_mirror_box(layout, scp):
     box = layout.box()
     box.label(text="Mirror")
     box.prop(scp, "mirror_enabled", text="Mirror Children")
+    box.prop(scp, "mirror_inherit_parent", text="Inherit Parent Mirror")
     axis_row = box.row()
     axis_row.enabled = bool(scp.mirror_enabled)
     axis_row.prop(scp, "mirror_axis", text="Axis")

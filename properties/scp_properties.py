@@ -82,6 +82,7 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
     attach_child_normal_local: bpy.props.FloatVectorProperty(name="Attach Child Normal Local", size=3, default=(0.0, 0.0, 1.0), options={"HIDDEN"})
 
     mirror_enabled: bpy.props.BoolProperty(name="Mirror Children", default=False, update=_on_scp_prop_update)
+    mirror_inherit_parent: bpy.props.BoolProperty(name="Inherit Parent Mirror", default=True, update=_on_scp_prop_update)
     mirror_axis: bpy.props.EnumProperty(
         name="Mirror Axis",
         items=[("X", "X", ""), ("Y", "Y", ""), ("Z", "Z", "")],

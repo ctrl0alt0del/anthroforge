@@ -41,6 +41,8 @@ class MirrorRoleResolver:
         scp = self.scp_by_id[sid]
         if bool(getattr(scp, "mirror_enabled", False)):
             return {"status": STATUS_SOURCE, "source_id": sid, "effective_axis": as_axis(getattr(scp, "mirror_axis", "X"))}
+        if not bool(getattr(scp, "mirror_inherit_parent", True)):
+            return {"status": STATUS_NONE, "source_id": "", "effective_axis": as_axis(getattr(scp, "mirror_axis", "X"))}
         if inherited_source_id:
             return {"status": STATUS_TARGET, "source_id": as_id(inherited_source_id), "effective_axis": as_axis(inherited_axis)}
         return {"status": STATUS_NONE, "source_id": "", "effective_axis": as_axis(getattr(scp, "mirror_axis", "X"))}
