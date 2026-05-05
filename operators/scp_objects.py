@@ -35,6 +35,21 @@ def _select_only(context, obj):
     context.view_layer.objects.active = obj
 
 
+def _discard_obj(obj):
+    if obj is None:
+        return
+    obj.parent = None
+    obj.users_collection[0].objects.unlink(obj) if obj.users_collection else None
+    bpy.data.objects.remove(obj)
+
+
+def _finish_transform_replace(context, scp, obj):
+    _select_only(context, obj)
+    _sync_scp(context, scp.id)
+    notify_selection_changed(context.scene, force=True)
+    return {"FINISHED"}
+
+
 class AF_OT_CreateEmptySCP(bpy.types.Operator):
     bl_idname = "af.create_empty_scp"
     bl_label = "Create Empty SCP"
@@ -76,6 +91,26 @@ class AF_OT_SetSCPTransformObject(_AF_OT_SCPObjectBase):
             return _report_error(self, "Object already belongs to another SCP.")
         _sync_scp(context, scp.id)
         return {"FINISHED"}
+
+
+class AF_OT_ReplaceSCPTransformWithEmpty(bpy.types.Operator):
+    bl_idname = "af.replace_scp_transform_with_empty"
+    bl_label = "Replace SCP Transform With Empty"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        root, scp = _active_scp(context)
+        obj = None if scp is None else getattr(scp, "transform_object_ref", None)
+        if root is None or scp is None or obj is None:
+            return _report_error(self, "Select an SCP with a transform object first.")
+        if obj.type == "EMPTY":
+            return _report_error(self, "Transform object already uses an Empty.")
+        new_obj = create_transform_empty(context, scp)
+        new_obj.matrix_world = obj.matrix_world.copy()
+        if set_scp_transform_object(root, scp, new_obj):
+            return _finish_transform_replace(context, scp, new_obj)
+        _discard_obj(new_obj)
+        return _report_error(self, "Could not replace SCP transform object.")
 
 
 class AF_OT_SetSCPGeometryObject(_AF_OT_SCPObjectBase):

@@ -6,10 +6,24 @@ def _role_text(scp, entry):
     return ", ".join(roles) if roles else "Bound"
 
 
-def _draw_role_value(box, label, obj):
-    row = box.row()
-    row.label(text=label)
+def _draw_transform_value(box, obj):
+    row = box.row(align=True)
+    row.label(text="Transform")
     row.label(text="" if obj is None else obj.name)
+    row.operator("af.replace_scp_transform_with_empty", text="", icon="X") if obj and obj.type != "EMPTY" else None
+
+
+def _draw_geometry_value(box, obj):
+    row = box.row()
+    row.label(text="Geometry")
+    row.label(text="" if obj is None else obj.name)
+
+
+def _draw_role_values(layout, scp):
+    box = layout.box()
+    box.label(text="Current Roles")
+    _draw_transform_value(box, getattr(scp, "transform_object_ref", None))
+    _draw_geometry_value(box, getattr(scp, "geometry_object_ref", None))
 
 
 def _draw_bound_row(box, scp, entry):
@@ -38,9 +52,8 @@ def _draw_picker(layout, scene):
     row.operator("af.set_scp_geometry_object", text="Set as Geometry")
     box.operator("af.add_scp_bound_object", text="Add to Bound Objects")
 
+
 def draw_scp_object_section(layout, scene, scp):
-    roles = layout.box()
-    _draw_role_value(roles, "Transform", getattr(scp, "transform_object_ref", None))
-    _draw_role_value(roles, "Geometry", getattr(scp, "geometry_object_ref", None))
+    _draw_role_values(layout, scp)
     _draw_picker(layout, scene)
     _draw_bound_list(layout, scp)

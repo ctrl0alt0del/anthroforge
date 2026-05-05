@@ -39,6 +39,7 @@ from .operators.scp_objects import (
     AF_OT_AddSCPBoundObject,
     AF_OT_CreateEmptySCP,
     AF_OT_RemoveSCPBoundObject,
+    AF_OT_ReplaceSCPTransformWithEmpty,
     AF_OT_SetSCPGeometryObject,
     AF_OT_SetSCPTransformObject,
 )
@@ -92,6 +93,7 @@ classes = (
     AF_OT_SetSCPParent,
     AF_OT_CreateEmptySCP,
     AF_OT_SetSCPTransformObject,
+    AF_OT_ReplaceSCPTransformWithEmpty,
     AF_OT_SetSCPGeometryObject,
     AF_OT_AddSCPBoundObject,
     AF_OT_RemoveSCPBoundObject,
