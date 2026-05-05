@@ -133,6 +133,58 @@ def create_mirror_from_source(collection, src_obj, name):
     return obj
 
 
+def clone_native_object(collection, src_obj, name):
+    obj = src_obj.copy()
+    obj.name = name
+    obj.data = None if getattr(src_obj, "data", None) is None else src_obj.data.copy()
+    obj.parent = None
+    collection.objects.link(obj)
+    return obj
+
+
+def remap_object_cluster_refs(obj_map):
+    for obj in obj_map.values():
+        _remap_owner_refs(obj, obj_map, {"parent"})
+        _remap_owner_refs(getattr(obj, "data", None), obj_map)
+        _remap_iter_refs(getattr(obj, "modifiers", ()), obj_map)
+        _remap_iter_refs(getattr(obj, "constraints", ()), obj_map)
+
+
+def _remap_iter_refs(items, obj_map):
+    for item in items or ():
+        _remap_owner_refs(item, obj_map)
+
+
+def _remap_owner_refs(owner, obj_map, skip=()):
+    if owner is None or not hasattr(owner, "bl_rna"):
+        return
+    for prop in owner.bl_rna.properties:
+        _remap_pointer_prop(owner, prop, obj_map, set(skip or ()))
+
+
+def _remap_pointer_prop(owner, prop, obj_map, skip):
+    key = prop.identifier
+    if key == "rna_type" or key in skip or prop.is_readonly or prop.type != "POINTER":
+        return
+    value = getattr(owner, key, None)
+    if value in obj_map:
+        setattr(owner, key, obj_map[value])
+
+
+def remap_object_cluster_parents(obj_map):
+    for src_obj, clone in obj_map.items():
+        _remap_parent(src_obj, clone, obj_map)
+
+
+def _remap_parent(src_obj, clone, obj_map):
+    parent = obj_map.get(getattr(src_obj, "parent", None))
+    if parent is None:
+        return
+    world = clone.matrix_world.copy()
+    clone.parent = parent
+    clone.matrix_world = world
+
+
 def copy_mesh_data(src_obj, dst_obj):
     src = src_obj.data
     verts = [v.co.copy() for v in src.vertices]
@@ -144,22 +196,30 @@ def copy_mesh_data(src_obj, dst_obj):
 
 
 def copy_curve_data(src_obj, dst_obj):
-    src = src_obj.data
-    dst = dst_obj.data
+    src, dst = src_obj.data, dst_obj.data
+    _copy_curve_shape_settings(src, dst)
+    _clear_splines(dst)
+    _copy_splines(src, dst)
 
+
+def _copy_curve_shape_settings(src, dst):
     dst.dimensions = src.dimensions
     dst.fill_mode = src.fill_mode
     dst.bevel_depth = src.bevel_depth
     dst.bevel_resolution = src.bevel_resolution
     dst.resolution_u = src.resolution_u
 
-    while dst.splines:
-        dst.splines.remove(dst.splines[0])
 
-    for s in src.splines:
-        ns = dst.splines.new(type=s.type)
-        _copy_spline_points(s, ns)
-        ns.use_cyclic_u = s.use_cyclic_u
+def _clear_splines(curve):
+    while curve.splines:
+        curve.splines.remove(curve.splines[0])
+
+
+def _copy_splines(src, dst):
+    for spline in src.splines:
+        new_spline = dst.splines.new(type=spline.type)
+        _copy_spline_points(spline, new_spline)
+        new_spline.use_cyclic_u = spline.use_cyclic_u
 
 
 def _copy_spline_points(src_spline, dst_spline):
@@ -201,27 +261,37 @@ def ensure_mirror_material(obj, alpha_mult=0.35):
     if obj is None or obj.data is None or not hasattr(obj.data, "materials"):
         return
     src_mat = obj.data.materials[0] if obj.data.materials else None
+    mat = _ensure_material(_mirror_material_name(obj, src_mat))
+    mat.diffuse_color = _mirror_color(src_mat, alpha_mult)
+    _configure_material(mat)
+    obj.data.materials.clear()
+    obj.data.materials.append(mat)
+
+
+def _mirror_material_name(obj, src_mat):
     base_name = src_mat.name if src_mat else f"AF_MIRROR_{obj.name}"
-    mir_name = f"{base_name}_MIR"
+    return f"{base_name}_MIR"
 
-    mat = bpy.data.materials.get(mir_name)
-    if mat is None:
-        mat = bpy.data.materials.new(mir_name)
-        mat.use_nodes = False
 
-    if src_mat is not None:
-        r, g, b, a = src_mat.diffuse_color
-    else:
-        r, g, b, a = (0.8, 0.8, 0.8, 1.0)
+def _ensure_material(name):
+    mat = bpy.data.materials.get(name)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = False
+    return mat
 
-    mat.diffuse_color = (r, g, b, max(0.05, min(1.0, a * alpha_mult)))
 
+def _mirror_color(src_mat, alpha_mult):
+    color = src_mat.diffuse_color if src_mat is not None else (0.8, 0.8, 0.8, 1.0)
+    r, g, b, a = color
+    return (r, g, b, max(0.05, min(1.0, a * alpha_mult)))
+
+
+def _configure_material(mat):
     if hasattr(mat, "blend_method"):
         mat.blend_method = "BLEND"
     if hasattr(mat, "shadow_method"):
         mat.shadow_method = "NONE"
     if hasattr(mat, "show_transparent_back"):
         mat.show_transparent_back = True
-
-    obj.data.materials.clear()
-    obj.data.materials.append(mat)

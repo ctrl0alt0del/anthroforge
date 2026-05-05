@@ -1,16 +1,13 @@
-﻿import bpy
 from mathutils import Matrix, Vector
 
-from .common import as_axis, as_id, find_geometry_mesh_scp_obj
+from ..visualization.mirror_objects import clone_native_object, remap_object_cluster_parents, remap_object_cluster_refs, remove_obj
+from .bound_objects import iter_bound_objects
+from .common import as_axis, as_id
 
 
 def _axis_to_scale(axis):
     axis = as_axis(axis)
-    if axis == "Y":
-        return (1.0, -1.0, 1.0)
-    if axis == "Z":
-        return (1.0, 1.0, -1.0)
-    return (-1.0, 1.0, 1.0)
+    return (1.0, -1.0, 1.0) if axis == "Y" else ((1.0, 1.0, -1.0) if axis == "Z" else (-1.0, 1.0, 1.0))
 
 
 def _mirror_matrix(axis="X", origin=(0.0, 0.0, 0.0)):
@@ -19,12 +16,8 @@ def _mirror_matrix(axis="X", origin=(0.0, 0.0, 0.0)):
     return Matrix.Translation(origin_vec) @ Matrix.Diagonal((sx, sy, sz, 1.0)) @ Matrix.Translation(-origin_vec)
 
 
-def _copy_mesh_data(src_obj, dst_obj):
-    if src_obj.type != "MESH" or dst_obj.type != "MESH" or dst_obj.data is None:
-        return
-    dst_obj.data.clear_geometry()
-    dst_obj.data.from_pydata([v.co.copy() for v in src_obj.data.vertices], [], [tuple(p.vertices) for p in src_obj.data.polygons])
-    dst_obj.data.update()
+def _bound_pairs(scp):
+    return tuple(iter_bound_objects(scp))
 
 
 class MirrorSceneSync:
@@ -33,7 +26,7 @@ class MirrorSceneSync:
         self.root = root
         self.scene = scene
         self.scp_by_id = scp_by_id
-        self.target_ids = None if target_scp_ids is None else {as_id(value) for value in set(target_scp_ids)}
+        self.target_ids = None if target_scp_ids is None else {as_id(v) for v in set(target_scp_ids)}
         self.affected_ids = set() if self.target_ids is None else set(self.target_ids)
         self.desired_ids = set()
         self.mirror_col = sync._get_mirror_collection(scene)
@@ -44,73 +37,82 @@ class MirrorSceneSync:
         self._remove_stale()
 
     def _sync_target(self, sid, scp):
-        if not self._should_sync_target(sid, scp):
+        if not self._should_sync_target(sid, scp) or not _bound_pairs(scp):
             return
-        geometry_obj = find_geometry_mesh_scp_obj(self.scene, self.root.name, sid)
-        if geometry_obj is None:
-            return
-        mirror_obj = self._ensure_mirror_object(sid, geometry_obj)
-        self._apply_mirror_object(mirror_obj, scp, geometry_obj)
+        self._rebuild_target_cluster(sid, scp)
         self.desired_ids.add(sid)
 
     def _should_sync_target(self, sid, scp):
-        if as_id(getattr(scp, "mirror_status", "NONE")).upper() != "TARGET":
-            return False
         source_id = as_id(getattr(scp, "mirror_source_id", ""))
-        if self.target_ids and sid not in self.target_ids and source_id not in self.target_ids:
-            return False
-        self.affected_ids.add(sid)
-        return as_id(getattr(scp, "mirror_source_id", "")) in self.scp_by_id
+        status_ok = as_id(getattr(scp, "mirror_status", "NONE")).upper() == "TARGET"
+        in_scope = not self.target_ids or sid in self.target_ids or source_id in self.target_ids
+        self.affected_ids.add(sid) if status_ok and in_scope else None
+        return bool(status_ok and in_scope and source_id in self.scp_by_id)
 
-    def _ensure_mirror_object(self, sid, source_obj):
-        mirror_obj = self.sync._find_mirror_object(self.scene, self.root.name, sid)
-        if mirror_obj is not None:
-            return mirror_obj
-        mesh = bpy.data.meshes.new(f"{source_obj.name}_AF_MIRROR_MESH")
-        mirror_obj = bpy.data.objects.new(f"{source_obj.name}_AF_MIR", mesh)
-        self.mirror_col.objects.link(mirror_obj)
-        self._tag_mirror_object(mirror_obj, sid)
-        return mirror_obj
+    def _rebuild_target_cluster(self, sid, scp):
+        self._remove_target_cluster(sid)
+        clones = self._clone_bound_cluster(sid, scp)
+        remap_object_cluster_refs(clones)
+        remap_object_cluster_parents(clones)
+        self._apply_cluster_mirror(scp, clones)
 
-    def _tag_mirror_object(self, mirror_obj, sid):
-        mirror_obj["af_scp_geometry"] = True
-        mirror_obj["af_scp_mirror"] = True
-        mirror_obj["af_root_name"] = self.root.name
-        mirror_obj["af_source_scp_id"] = sid
-        mirror_obj.hide_select = True
+    def _clone_bound_cluster(self, sid, scp):
+        clones = {}
+        for entry, obj in _bound_pairs(scp):
+            clones[obj] = self._clone_bound_object(sid, scp, entry.id, obj)
+        return clones
 
-    def _apply_mirror_object(self, mirror_obj, scp, source_obj):
+    def _clone_bound_object(self, sid, scp, bound_id, obj):
+        clone = clone_native_object(self.mirror_col, obj, f"{obj.name}_AF_MIR")
+        self._tag_mirror_object(clone, sid, bound_id, scp, obj)
+        return clone
+
+    def _tag_mirror_object(self, obj, sid, bound_id, scp, source_obj):
+        self._clear_mirror_tags(obj)
+        obj["af_root_name"] = self.root.name
+        obj["af_scp_mirror"] = True
+        obj["af_source_scp_id"] = sid
+        obj["af_source_bound_id"] = as_id(bound_id)
+        obj["af_scp_geometry"] = source_obj == getattr(scp, "geometry_object_ref", None)
+        obj["af_scp_transform"] = source_obj == getattr(scp, "transform_object_ref", None)
+        obj.hide_select = True
+
+    def _clear_mirror_tags(self, obj):
+        for key in ("af_scp_bound", "af_scp_bound_id", "af_scp_id", "af_scp_transform", "af_scp_geometry", "af_scp_mirror", "af_source_scp_id", "af_source_bound_id"):
+            obj.pop(key, None)
+
+    def _apply_cluster_mirror(self, scp, clones):
+        axis, origin = self._mirror_rule(scp)
+        for source_obj, clone in clones.items():
+            clone.matrix_world = _mirror_matrix(axis=axis, origin=origin) @ source_obj.matrix_world
+
+    def _mirror_rule(self, scp):
         source_scp = self.scp_by_id[as_id(getattr(scp, "mirror_source_id", ""))]
         axis = self._mirror_axis(scp, source_scp)
         origin = tuple(getattr(source_scp, "mirror_origin", (0.0, 0.0, 0.0)))
-        _copy_mesh_data(source_obj, mirror_obj)
-        mirror_obj.matrix_world = _mirror_matrix(axis=axis, origin=origin) @ source_obj.matrix_world
-        mirror_obj["af_source_scp_id"] = as_id(getattr(scp, "id", ""))
-        mirror_obj["af_root_name"] = self.root.name
+        return axis, origin
 
     def _mirror_axis(self, scp, source_scp):
         axis = as_axis(getattr(scp, "mirror_effective_axis", "X"))
         return axis if axis in {"X", "Y", "Z"} else as_axis(getattr(source_scp, "mirror_axis", "X"))
 
+    def _remove_target_cluster(self, sid):
+        for obj in list(self.scene.objects):
+            remove_obj(obj) if self._is_target_mirror(obj, sid) else None
+
+    def _is_target_mirror(self, obj, sid):
+        same_root = obj.get("af_root_name") == self.root.name
+        return bool(obj.get("af_scp_mirror") and same_root and as_id(obj.get("af_source_scp_id")) == sid)
+
     def _remove_stale(self):
         for obj in list(self.scene.objects):
-            if self._should_keep_existing(obj):
-                continue
-            self._remove_object(obj)
+            if not self._should_keep_existing(obj):
+                remove_obj(obj)
 
     def _should_keep_existing(self, obj):
         sid = as_id(obj.get("af_source_scp_id"))
-        if not obj.get("af_scp_mirror") or obj.get("af_root_name") != self.root.name:
-            return True
-        if sid in self.desired_ids:
-            return True
-        return bool(self.target_ids and sid not in self.affected_ids)
-
-    def _remove_object(self, obj):
-        data = obj.data
-        bpy.data.objects.remove(obj, do_unlink=True)
-        if data and data.users == 0 and isinstance(data, bpy.types.Mesh):
-            bpy.data.meshes.remove(data)
+        ours = obj.get("af_scp_mirror") and obj.get("af_root_name") == self.root.name
+        return bool(not ours or sid in self.desired_ids or (self.target_ids and sid not in self.affected_ids))
 
 
 def sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=None):
