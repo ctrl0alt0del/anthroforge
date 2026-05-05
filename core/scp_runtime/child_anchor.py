@@ -4,8 +4,8 @@ from .surface import closest_child_face_center_to_parent, closest_child_vertex_t
 _MODES = {"FACE_CENTER", "VERTEX_NEAREST", "OBJECT_ORIGIN"}
 
 
-def capture_child_anchor(child_scp, child_obj, parent_obj, depsgraph, origin_obj=None):
-    return _capture_for_mode(_mode(child_scp))(child_obj, parent_obj, depsgraph, origin_obj or child_obj)
+def capture_child_anchor(child_scp, child_obj, parent_obj, depsgraph, origin_obj=None, surface_cache=None):
+    return _capture_for_mode(_mode(child_scp))(child_obj, parent_obj, depsgraph, origin_obj or child_obj, surface_cache)
 
 
 def _mode(child_scp):
@@ -21,20 +21,20 @@ def _capture_for_mode(mode):
     }.get(mode, _capture_face_center)
 
 
-def _capture_face_center(child_obj, parent_obj, depsgraph, origin_obj):
+def _capture_face_center(child_obj, parent_obj, depsgraph, origin_obj, surface_cache):
     _ = origin_obj
-    return _capture_candidate(closest_child_face_center_to_parent(child_obj, parent_obj, depsgraph))
+    return _capture_candidate(closest_child_face_center_to_parent(child_obj, parent_obj, depsgraph, cache=surface_cache))
 
 
-def _capture_vertex_nearest(child_obj, parent_obj, depsgraph, origin_obj):
+def _capture_vertex_nearest(child_obj, parent_obj, depsgraph, origin_obj, surface_cache):
     _ = origin_obj
-    return _capture_candidate(closest_child_vertex_to_parent(child_obj, parent_obj, depsgraph))
+    return _capture_candidate(closest_child_vertex_to_parent(child_obj, parent_obj, depsgraph, cache=surface_cache))
 
 
-def _capture_object_origin(child_obj, parent_obj, depsgraph, origin_obj):
+def _capture_object_origin(child_obj, parent_obj, depsgraph, origin_obj, surface_cache):
     _ = child_obj
     anchor = origin_obj.matrix_world.to_translation().copy()
-    param = nearest_parent_param_from_world(parent_obj, anchor, depsgraph)
+    param = nearest_parent_param_from_world(parent_obj, anchor, depsgraph, cache=surface_cache)
     return None if param is None else _candidate(anchor, param)
 
 

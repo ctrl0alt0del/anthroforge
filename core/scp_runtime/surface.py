@@ -1,5 +1,5 @@
 from mathutils import Matrix, Vector
-from mathutils.geometry import closest_point_on_tri
+from mathutils.bvhtree import BVHTree
 
 from .common import _EPS
 
@@ -28,7 +28,21 @@ def _fallback_normal(tangent_vec, normal_vec):
     return _normalized(axis - tangent_vec * axis.dot(tangent_vec), (0.0, 0.0, 1.0))
 
 
-def build_mesh_surface_data(mesh_obj, depsgraph):
+def _cache_key(mesh_obj):
+    return None if mesh_obj is None else int(mesh_obj.as_pointer())
+
+
+def build_mesh_surface_data(mesh_obj, depsgraph, cache=None):
+    key = _cache_key(mesh_obj)
+    if cache is not None and key in cache:
+        return cache[key]
+    surface = _build_surface(mesh_obj, depsgraph)
+    if cache is not None and key is not None and surface is not None:
+        cache[key] = surface
+    return surface
+
+
+def _build_surface(mesh_obj, depsgraph):
     obj_eval = mesh_obj.evaluated_get(depsgraph)
     mesh_eval = obj_eval.to_mesh()
     if mesh_eval is None:
@@ -45,39 +59,23 @@ def _surface_payload(obj_eval, mesh_eval):
     mesh_eval.calc_loop_triangles()
     verts = [obj_eval.matrix_world @ v.co for v in mesh_eval.vertices]
     triangles = [tuple(tri.vertices) for tri in mesh_eval.loop_triangles]
-    return None if not triangles else {"verts_world": verts, "triangles": triangles}
+    bvh = None if not triangles else BVHTree.FromPolygons(verts, triangles, all_triangles=True)
+    return None if bvh is None else {"bvh": bvh, "face_centers": _face_centers(obj_eval, mesh_eval), "triangles": triangles, "verts_world": verts}
 
 
-def build_face_centers(mesh_obj, depsgraph):
-    obj_eval = mesh_obj.evaluated_get(depsgraph)
-    mesh_eval = obj_eval.to_mesh()
-    if mesh_eval is None:
-        return None
-    try:
-        return _face_center_payload(obj_eval, mesh_eval)
-    finally:
-        obj_eval.to_mesh_clear()
-
-
-def _face_center_payload(obj_eval, mesh_eval):
-    if len(mesh_eval.polygons) <= 0:
-        return None
+def _face_centers(obj_eval, mesh_eval):
     matrix_world = obj_eval.matrix_world.copy()
-    centers = [matrix_world @ poly.center for poly in mesh_eval.polygons]
-    return None if not centers else centers
+    return [matrix_world @ poly.center for poly in mesh_eval.polygons]
 
 
-def build_vertex_points(mesh_obj, depsgraph):
-    surface = build_mesh_surface_data(mesh_obj, depsgraph)
-    return None if not surface else list(surface["verts_world"])
+def build_face_centers(mesh_obj, depsgraph, cache=None):
+    surface = build_mesh_surface_data(mesh_obj, depsgraph, cache=cache)
+    return None if not surface else surface["face_centers"]
 
 
-def _iter_triangles(surface):
-    verts = surface["verts_world"]
-    for tri in surface["triangles"]:
-        i0, i1, i2 = (int(tri[0]), int(tri[1]), int(tri[2]))
-        if min(i0, i1, i2) >= 0 and max(i0, i1, i2) < len(verts):
-            yield (i0, i1, i2), (verts[i0], verts[i1], verts[i2])
+def build_vertex_points(mesh_obj, depsgraph, cache=None):
+    surface = build_mesh_surface_data(mesh_obj, depsgraph, cache=cache)
+    return None if not surface else surface["verts_world"]
 
 
 def _closest_point_barycentric(a, b, c, point):
@@ -101,16 +99,19 @@ def _normalized_weights(d00, d01, d11, d20, d21, denom):
 def _nearest_triangle_hit(surface, target_world):
     if not surface:
         return None
-    hits = [_triangle_hit(tri, abc, target_world) for tri, abc in _iter_triangles(surface)]
-    hits = [hit for hit in hits if hit is not None]
-    return None if not hits else min(hits, key=lambda hit: hit["d2"])
+    hit = surface["bvh"].find_nearest(target_world)
+    return _hit_from_bvh(surface, hit)
 
 
-def _triangle_hit(tri, abc, target_world):
-    cp = closest_point_on_tri(target_world, *abc)
-    if cp is None:
+def _hit_from_bvh(surface, hit):
+    if not hit or hit[2] is None:
         return None
-    return {"tri": tri, "abc": abc, "cp": cp, "d2": (cp - target_world).length_squared}
+    cp, _normal, index, dist = hit
+    if not (0 <= int(index) < len(surface["triangles"])):
+        return None
+    tri = surface["triangles"][int(index)]
+    abc = tuple(surface["verts_world"][int(i)] for i in tri)
+    return {"tri": tri, "abc": abc, "cp": cp, "d2": float(dist) * float(dist)}
 
 
 def _param_from_hit(hit):
@@ -120,30 +121,30 @@ def _param_from_hit(hit):
     return {"tri_vidx": hit["tri"], "tri_weights": tuple(float(value) for value in weights)}
 
 
-def nearest_parent_param_from_world(parent_obj, target_world, depsgraph):
-    surface = build_mesh_surface_data(parent_obj, depsgraph)
+def nearest_parent_param_from_world(parent_obj, target_world, depsgraph, cache=None):
+    surface = build_mesh_surface_data(parent_obj, depsgraph, cache=cache)
     hit = _nearest_triangle_hit(surface, target_world)
     return None if hit is None else _param_from_hit(hit)
 
 
-def closest_child_face_center_to_parent(child_obj, parent_obj, depsgraph):
-    centers = build_face_centers(child_obj, depsgraph)
-    parent_surface = build_mesh_surface_data(parent_obj, depsgraph)
-    if not centers or not parent_surface:
-        return None
-    candidates = [_child_anchor_candidate(center, parent_surface) for center in centers]
-    candidates = [candidate for candidate in candidates if candidate is not None]
-    return None if not candidates else min(candidates, key=lambda candidate: candidate["d2"])
+def closest_child_face_center_to_parent(child_obj, parent_obj, depsgraph, cache=None):
+    centers = build_face_centers(child_obj, depsgraph, cache=cache)
+    parent_surface = build_mesh_surface_data(parent_obj, depsgraph, cache=cache)
+    return _closest_child_points_to_parent(centers, parent_surface)
 
 
-def closest_child_vertex_to_parent(child_obj, parent_obj, depsgraph):
-    points = build_vertex_points(child_obj, depsgraph)
-    parent_surface = build_mesh_surface_data(parent_obj, depsgraph)
-    if not points or not parent_surface:
-        return None
-    candidates = [_child_anchor_candidate(point, parent_surface) for point in points]
-    candidates = [candidate for candidate in candidates if candidate is not None]
-    return None if not candidates else min(candidates, key=lambda candidate: candidate["d2"])
+def closest_child_vertex_to_parent(child_obj, parent_obj, depsgraph, cache=None):
+    points = build_vertex_points(child_obj, depsgraph, cache=cache)
+    parent_surface = build_mesh_surface_data(parent_obj, depsgraph, cache=cache)
+    return _closest_child_points_to_parent(points, parent_surface)
+
+
+def _closest_child_points_to_parent(points, parent_surface):
+    best = None
+    for point in points or ():
+        candidate = _child_anchor_candidate(point, parent_surface)
+        best = candidate if candidate and (best is None or candidate["d2"] < best["d2"]) else best
+    return best
 
 
 def _child_anchor_candidate(child_anchor_world, parent_surface):
@@ -154,8 +155,8 @@ def _child_anchor_candidate(child_anchor_world, parent_surface):
     return {"child_anchor_world": child_anchor_world, "parent_param": param, "d2": hit["d2"]}
 
 
-def frame_from_parent_param(parent_obj, param, depsgraph):
-    surface = build_mesh_surface_data(parent_obj, depsgraph)
+def frame_from_parent_param(parent_obj, param, depsgraph, cache=None):
+    surface = build_mesh_surface_data(parent_obj, depsgraph, cache=cache)
     if not surface:
         return None
     return _frame_from_surface(parent_obj, surface["verts_world"], param)

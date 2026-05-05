@@ -14,19 +14,24 @@ def _child_basis_local(child_scp):
     return basis_from_tangent_normal(tangent, normal)[0]
 
 
+def _new_surface_cache():
+    return {}
+
+
 class AttachmentCapture:
-    def __init__(self, child_scp, child_transform_obj, child_geometry_obj, parent_geometry_obj, depsgraph):
+    def __init__(self, child_scp, child_transform_obj, child_geometry_obj, parent_geometry_obj, depsgraph, surface_cache=None):
         self.child_scp = child_scp
         self.child_transform_obj = child_transform_obj
         self.child_geometry_obj = child_geometry_obj
         self.parent_geometry_obj = parent_geometry_obj
         self.depsgraph = depsgraph
+        self.surface_cache = surface_cache or {}
 
     def run(self):
-        candidate = capture_child_anchor(self.child_scp, self.child_geometry_obj, self.parent_geometry_obj, self.depsgraph, origin_obj=self.child_transform_obj)
+        candidate = capture_child_anchor(self.child_scp, self.child_geometry_obj, self.parent_geometry_obj, self.depsgraph, origin_obj=self.child_transform_obj, surface_cache=self.surface_cache)
         if candidate is None:
             return False
-        frame = frame_from_parent_param(self.parent_geometry_obj, candidate["parent_param"], self.depsgraph)
+        frame = frame_from_parent_param(self.parent_geometry_obj, candidate["parent_param"], self.depsgraph, cache=self.surface_cache)
         if frame is None:
             return False
         child_frame = self._child_frame(candidate["child_anchor_world"], frame)
@@ -76,24 +81,25 @@ class AttachmentCapture:
 
 def capture_attachment_from_link(child_scp, child_transform_obj, child_geometry_obj, parent_geometry_obj, depsgraph=None):
     depsgraph = depsgraph or bpy.context.evaluated_depsgraph_get()
-    return AttachmentCapture(child_scp, child_transform_obj, child_geometry_obj, parent_geometry_obj, depsgraph).run()
+    return AttachmentCapture(child_scp, child_transform_obj, child_geometry_obj, parent_geometry_obj, depsgraph, _new_surface_cache()).run()
 
 
 def recapture_attachment_for_scp(root, scene, sid):
     depsgraph = bpy.context.evaluated_depsgraph_get()
     scp_by_id = {as_id(s.id): s for s in root.af_scp_system.scps}
-    return _authoring_capture_one(scp_by_id, scene, root.name, sid, depsgraph)
+    return _authoring_capture_one(scp_by_id, scene, root.name, sid, depsgraph, _new_surface_cache())
 
 
 class AttachmentApply:
-    def __init__(self, child_scp, child_obj, parent_geometry_obj, depsgraph):
+    def __init__(self, child_scp, child_obj, parent_geometry_obj, depsgraph, surface_cache=None):
         self.child_scp = child_scp
         self.child_obj = child_obj
         self.parent_geometry_obj = parent_geometry_obj
         self.depsgraph = depsgraph
+        self.surface_cache = surface_cache or {}
 
     def run(self):
-        frame = frame_from_parent_param(self.parent_geometry_obj, self._parent_param(), self.depsgraph)
+        frame = frame_from_parent_param(self.parent_geometry_obj, self._parent_param(), self.depsgraph, cache=self.surface_cache)
         if frame is None:
             return False
         matrix_world = self._matrix_world(frame)
@@ -144,9 +150,10 @@ def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", recaptu
     if not direct_ids:
         return set()
     depsgraph = bpy.context.evaluated_depsgraph_get()
+    surface_cache = _new_surface_cache()
     scp_by_id = {as_id(s.id): s for s in root.af_scp_system.scps}
     direct_ids -= _blocked_capture_ids(scp_by_id, direct_ids, apply_parent_ids)
-    return {sid for sid in sorted(direct_ids) if _capture_one(scp_by_id, scene, root.name, sid, depsgraph)}
+    return {sid for sid in sorted(direct_ids) if _capture_one(scp_by_id, scene, root.name, sid, depsgraph, surface_cache)}
 
 
 def _direct_capture_ids(dirty_scp_ids, recapture_ids):
@@ -160,15 +167,15 @@ def _blocked_capture_ids(scp_by_id, direct_ids, apply_parent_ids):
     return {sid for sid in set(direct_ids or set()) if as_id(getattr(scp_by_id.get(sid), "parent_id", "")) in parent_ids}
 
 
-def _capture_one(scp_by_id, scene, root_name, sid, depsgraph):
+def _capture_one(scp_by_id, scene, root_name, sid, depsgraph, surface_cache):
     args = _capture_args(scp_by_id, scene, root_name, sid)
     if args is None or is_runtime_applied_matrix(args[1]):
         return False
-    return _run_capture(args, depsgraph)
+    return _run_capture(args, depsgraph, surface_cache)
 
 
-def _authoring_capture_one(scp_by_id, scene, root_name, sid, depsgraph):
-    return _run_capture(_capture_args(scp_by_id, scene, root_name, sid), depsgraph)
+def _authoring_capture_one(scp_by_id, scene, root_name, sid, depsgraph, surface_cache):
+    return _run_capture(_capture_args(scp_by_id, scene, root_name, sid), depsgraph, surface_cache)
 
 
 def _capture_args(scp_by_id, scene, root_name, sid):
@@ -182,10 +189,10 @@ def _capture_args(scp_by_id, scene, root_name, sid):
     return child_scp, child_transform, child_geometry, parent_geometry
 
 
-def _run_capture(args, depsgraph):
+def _run_capture(args, depsgraph, surface_cache):
     if args is None:
         return False
-    return AttachmentCapture(*args, depsgraph).run()
+    return AttachmentCapture(*args, depsgraph, surface_cache).run()
 
 
 def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, parent_ids=None, gate_meta=None):
@@ -199,19 +206,20 @@ def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, par
 
 def _apply_attachment_targets(root, scene, scp_by_id, target_scp_ids, active_parent_ids):
     depsgraph = bpy.context.evaluated_depsgraph_get()
+    surface_cache = _new_surface_cache()
     changed = set()
     targets = None if target_scp_ids is None else {as_id(v) for v in set(target_scp_ids)}
     for sid in children_depth_order(scp_by_id):
-        changed |= _apply_child(root, scene, scp_by_id, sid, targets, active_parent_ids, depsgraph)
+        changed |= _apply_child(root, scene, scp_by_id, sid, targets, active_parent_ids, depsgraph, surface_cache)
     return changed
 
 
-def _apply_child(root, scene, scp_by_id, sid, targets, active_parent_ids, depsgraph):
+def _apply_child(root, scene, scp_by_id, sid, targets, active_parent_ids, depsgraph, surface_cache):
     child_scp = scp_by_id.get(sid)
     parent_id = as_id(getattr(child_scp, "parent_id", ""))
     if child_scp is None or parent_id not in active_parent_ids or not _allowed_target(sid, parent_id, targets):
         return set()
-    changed = _apply_child_runtime(root, scene, sid, child_scp, parent_id, depsgraph)
+    changed = _apply_child_runtime(root, scene, sid, child_scp, parent_id, depsgraph, surface_cache)
     if changed:
         active_parent_ids.add(sid)
     return {sid} if changed else set()
@@ -221,12 +229,12 @@ def _allowed_target(sid, parent_id, targets):
     return targets is None or sid in targets or parent_id in targets
 
 
-def _apply_child_runtime(root, scene, sid, child_scp, parent_id, depsgraph):
+def _apply_child_runtime(root, scene, sid, child_scp, parent_id, depsgraph, surface_cache):
     child_obj = find_transform_scp_obj(scene, root.name, sid)
     parent_obj = find_geometry_mesh_scp_obj(scene, root.name, parent_id)
     if child_obj is None or parent_obj is None or not _is_initialized(child_scp):
         return False
-    return AttachmentApply(child_scp, child_obj, parent_obj, depsgraph).run()
+    return AttachmentApply(child_scp, child_obj, parent_obj, depsgraph, surface_cache).run()
 
 
 def _is_initialized(child_scp):
