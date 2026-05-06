@@ -28,6 +28,11 @@ def _fallback_normal(tangent_vec, normal_vec):
     return _normalized(axis - tangent_vec * axis.dot(tangent_vec), (0.0, 0.0, 1.0))
 
 
+def project_tangent_hint(tangent_hint, normal, fallback):
+    hint = Vector(tangent_hint) - Vector(normal) * Vector(tangent_hint).dot(Vector(normal))
+    return _normalized(hint, fallback)
+
+
 def _cache_key(mesh_obj):
     return None if mesh_obj is None else int(mesh_obj.as_pointer())
 
@@ -155,34 +160,40 @@ def _child_anchor_candidate(child_anchor_world, parent_surface):
     return {"child_anchor_world": child_anchor_world, "parent_param": param, "d2": hit["d2"]}
 
 
-def frame_from_parent_param(parent_obj, param, depsgraph, cache=None):
+def frame_from_parent_param(parent_obj, param, depsgraph, cache=None, tangent_hint=None):
     surface = build_mesh_surface_data(parent_obj, depsgraph, cache=cache)
     if not surface:
         return None
-    return _frame_from_surface(parent_obj, surface["verts_world"], param)
+    return _frame_from_surface(parent_obj, surface["verts_world"], param, tangent_hint)
 
 
-def _frame_from_surface(parent_obj, verts, param):
+def _frame_from_surface(parent_obj, verts, param, tangent_hint):
     tri = tuple(param.get("tri_vidx", (-1, -1, -1)))
     weights = tuple(param.get("tri_weights", (1.0, 0.0, 0.0)))
-    return None if len(tri) != 3 or len(weights) != 3 else _frame_from_tri(parent_obj, verts, tri, weights)
+    return None if len(tri) != 3 or len(weights) != 3 else _frame_from_tri(parent_obj, verts, tri, weights, tangent_hint)
 
 
-def _frame_from_tri(parent_obj, verts, tri, weights):
+def _frame_from_tri(parent_obj, verts, tri, weights, tangent_hint):
     i0, i1, i2 = (int(tri[0]), int(tri[1]), int(tri[2]))
     if min(i0, i1, i2) < 0 or max(i0, i1, i2) >= len(verts):
         return None
     a, b, c = verts[i0], verts[i1], verts[i2]
     point = (a * float(weights[0])) + (b * float(weights[1])) + (c * float(weights[2]))
-    tangent, normal = _frame_axes(parent_obj, a, b, c)
+    tangent, normal = _frame_axes(parent_obj, a, b, c, tangent_hint)
     basis, tangent, normal = basis_from_tangent_normal(tangent, normal)
     return {"point_world": point, "basis_world": basis, "tangent_world": tangent, "normal_world": normal}
 
 
-def _frame_axes(parent_obj, a, b, c):
-    tangent = b - a
+def _frame_axes(parent_obj, a, b, c, tangent_hint):
     normal = (b - a).cross(c - a)
     world = parent_obj.matrix_world.to_3x3()
-    tangent = world @ Vector((1.0, 0.0, 0.0)) if tangent.length <= _EPS else tangent
     normal = world @ Vector((0.0, 0.0, 1.0)) if normal.length <= _EPS else normal
+    tangent = _frame_tangent(world, normal, tangent_hint, b - a)
     return tangent, normal
+
+
+def _frame_tangent(world, normal, tangent_hint, fallback):
+    if tangent_hint is not None:
+        return project_tangent_hint(world @ Vector(tangent_hint), normal, fallback)
+    tangent = Vector(fallback)
+    return world @ Vector((1.0, 0.0, 0.0)) if tangent.length <= _EPS else tangent

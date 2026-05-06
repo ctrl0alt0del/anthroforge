@@ -31,11 +31,17 @@ class AttachmentCapture:
         candidate = capture_child_anchor(self.child_scp, self.child_geometry_obj, self.parent_geometry_obj, self.depsgraph, origin_obj=self.child_transform_obj, surface_cache=self.surface_cache)
         if candidate is None:
             return False
-        frame = frame_from_parent_param(self.parent_geometry_obj, candidate["parent_param"], self.depsgraph, cache=self.surface_cache)
+        tangent_hint = self._parent_tangent_hint_local(candidate["parent_param"])
+        frame = frame_from_parent_param(self.parent_geometry_obj, candidate["parent_param"], self.depsgraph, cache=self.surface_cache, tangent_hint=tangent_hint)
         if frame is None:
             return False
         child_frame = self._child_frame(candidate["child_anchor_world"], frame)
-        return self._write_capture(candidate["parent_param"], self._offset_local(candidate["child_anchor_world"], frame), *child_frame)
+        return self._write_capture(candidate["parent_param"], self._offset_local(candidate["child_anchor_world"], frame), tangent_hint, *child_frame)
+
+    def _parent_tangent_hint_local(self, parent_param):
+        frame = frame_from_parent_param(self.parent_geometry_obj, parent_param, self.depsgraph, cache=self.surface_cache)
+        world_inv = self.parent_geometry_obj.matrix_world.to_quaternion().to_matrix().inverted()
+        return world_inv @ frame["tangent_world"] if frame else Vector((1.0, 0.0, 0.0))
 
     def _offset_local(self, child_anchor_world, frame):
         return frame["basis_world"].inverted() @ (child_anchor_world - frame["point_world"])
@@ -47,11 +53,12 @@ class AttachmentCapture:
         normal = rotation_inv @ frame["normal_world"]
         return origin, tangent, normal
 
-    def _write_capture(self, param, parent_offset, child_origin, child_tangent, child_normal):
+    def _write_capture(self, param, parent_offset, parent_tangent, child_origin, child_tangent, child_normal):
         changed = False
         changed |= self._write_field("attach_parent_tri_vidx", tuple(int(v) for v in param["tri_vidx"]))
         changed |= self._write_field("attach_parent_tri_weights", tuple(float(v) for v in param["tri_weights"]), eps=1.0e-7)
         changed |= self._write_vec("attach_parent_offset_local", parent_offset)
+        changed |= self._write_vec("attach_parent_tangent_hint_local", parent_tangent)
         changed |= self._write_vec("attach_child_origin_local", child_origin)
         changed |= self._write_vec("attach_child_tangent_local", child_tangent)
         changed |= self._write_vec("attach_child_normal_local", child_normal)
@@ -99,7 +106,7 @@ class AttachmentApply:
         self.surface_cache = surface_cache or {}
 
     def run(self):
-        frame = frame_from_parent_param(self.parent_geometry_obj, self._parent_param(), self.depsgraph, cache=self.surface_cache)
+        frame = frame_from_parent_param(self.parent_geometry_obj, self._parent_param(), self.depsgraph, cache=self.surface_cache, tangent_hint=self._parent_tangent_hint())
         if frame is None:
             return False
         matrix_world = self._matrix_world(frame)
@@ -114,6 +121,9 @@ class AttachmentApply:
             "tri_vidx": tuple(int(v) for v in getattr(self.child_scp, "attach_parent_tri_vidx", (-1, -1, -1))),
             "tri_weights": tuple(float(v) for v in getattr(self.child_scp, "attach_parent_tri_weights", (1.0, 0.0, 0.0))),
         }
+
+    def _parent_tangent_hint(self):
+        return as_vec3(getattr(self.child_scp, "attach_parent_tangent_hint_local", (1.0, 0.0, 0.0)), (1.0, 0.0, 0.0))
 
     def _matrix_world(self, frame):
         follow = as_bool(getattr(self.child_scp, "attach_follow_rotation", True), default=True)
