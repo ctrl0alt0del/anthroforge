@@ -219,9 +219,7 @@ def _on_load_post(_dummy):
     root, current = _root_and_current(scene)
     if root is None:
         return
-    _sync_load_scps(scene, root)
-    if current[0] != "NONE":
-        _sync_load_post(scene, root, current)
+    _hydrate_load_state(root, scene, current)
 
 
 def _root_and_current(scene):
@@ -229,27 +227,8 @@ def _root_and_current(scene):
     return root, ("NONE", "") if root is None else resolve_active_entity(root)
 
 
-def _all_scp_ids(root):
-    return {str(scp.id or "") for scp in root.af_scp_system.scps if str(scp.id or "")}
-
-
-def _load_gate_meta():
-    return {"source": "load_post", "event_type": "LOAD"}
-
-
-def _sync_load_scps(scene, root):
-    from .sync import register_sync
-    register_sync().sync_root_to_scene(
-        root=root,
-        scene=scene,
-        attachment_parent_ids=_all_scp_ids(root),
-        attachment_gate_meta=_load_gate_meta(),
-    )
-
-
-def _sync_load_post(scene, root, current):
-    from .sync_runner import sync_from_dirty_hints
-    sync_from_dirty_hints(root=root, scene=scene, dirty_hints=_hints_for_switch(("NONE", ""), current), source="load_post", event_type="SELECTION")
+def _hydrate_load_state(root, scene, current):
+    _sync_active_scp_state(root, scene, current)
 
 
 def register_control_runtime():
