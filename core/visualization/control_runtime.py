@@ -2,7 +2,7 @@ import bpy
 from bpy.app.handlers import persistent
 
 from ..deps.controls import classify_control_object, is_control_object
-from ..deps.dirty_hints import dirty_hints_for
+from ..deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 from ..scp_runtime.common import is_bound_scp_obj
 from ..utils import get_af_root
 
@@ -229,17 +229,27 @@ def _root_and_current(scene):
 
 def _hydrate_load_state(root, scene, current):
     _sync_active_scp_state(root, scene, current)
-    _hydrate_mirror_runtime(root, scene)
+    _hydrate_runtime_state(root, scene)
     _ensure_runtime_handlers()
 
 
-def _hydrate_mirror_runtime(root, scene):
-    from ..scp_runtime.common import scp_prop_map
-    from ..scp_runtime.mirror_roles import apply_scp_mirror_roles
-    from ..scp_runtime.mirror_scene import sync_mirrors
-    from .sync import register_sync
-    apply_scp_mirror_roles(root)
-    sync_mirrors(register_sync(), root, scene, scp_prop_map(root))
+def _prime_evaluated_depsgraph():
+    try:
+        bpy.context.evaluated_depsgraph_get()
+    except Exception:
+        return
+
+
+def _hydrate_runtime_state(root, scene):
+    from .sync_runner import sync_from_dirty_hints
+    _prime_evaluated_depsgraph()
+    sync_from_dirty_hints(
+        root=root,
+        scene=scene,
+        dirty_hints=empty_dirty_hints(),
+        source="load",
+        event_type="LOAD",
+    )
 
 
 def _ensure_runtime_handlers():
