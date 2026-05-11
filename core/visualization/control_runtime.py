@@ -229,6 +229,25 @@ def _root_and_current(scene):
 
 def _hydrate_load_state(root, scene, current):
     _sync_active_scp_state(root, scene, current)
+    _hydrate_mirror_runtime(root, scene)
+    _ensure_runtime_handlers()
+
+
+def _hydrate_mirror_runtime(root, scene):
+    from ..scp_runtime.common import scp_prop_map
+    from ..scp_runtime.mirror_roles import apply_scp_mirror_roles
+    from ..scp_runtime.mirror_scene import sync_mirrors
+    from .sync import register_sync
+    apply_scp_mirror_roles(root)
+    sync_mirrors(register_sync(), root, scene, scp_prop_map(root))
+
+
+def _ensure_runtime_handlers():
+    from .sync import register_sync
+    from .delete_reconcile import register_delete_reconcile
+    register_sync()
+    register_delete_reconcile()
+    register_control_runtime()
 
 
 def register_control_runtime():
