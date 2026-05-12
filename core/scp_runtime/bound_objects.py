@@ -101,7 +101,7 @@ def ensure_bound_object(root, scp, obj):
 
 
 def _parent_keep_world(obj, parent):
-    if obj is None or parent is None or obj == parent:
+    if obj is None or parent is None or obj == parent or getattr(obj, "parent", None) == parent:
         return
     world = obj.matrix_world.copy()
     obj.parent = parent
