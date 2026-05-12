@@ -34,6 +34,7 @@ from .operators.muscle_tools import (
     AF_OT_SelectMuscleInflationCtrl,
 )
 from .operators.blob_tools import AF_OT_SelectBlobControl
+from .operators.import_package import AF_OT_ImportPackage
 from .operators.shortcuts import AF_OT_AddDataShortcut, AF_OT_DeleteDataShortcut
 from .operators.scp_objects import (
     AF_OT_AddSCPBoundObject,
@@ -136,6 +137,7 @@ classes = (
     AF_OT_SelectBlobControl,
     AF_PT_BlobCreatePanel,
     AF_PT_BlobEditPanel,
+    AF_OT_ImportPackage,
     AF_DataShortcut_Property,
     AF_DataShortcut_System_Property,
     AF_OT_AddDataShortcut,

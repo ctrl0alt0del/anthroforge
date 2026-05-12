@@ -12,6 +12,7 @@ class AF_PT_MainPanel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         root = get_af_root(context.scene)
+        layout.operator("af.import_package", icon="IMPORT")
 
         if root is None:
             layout.label(text="No AF_ROOT in scene", icon="ERROR")
