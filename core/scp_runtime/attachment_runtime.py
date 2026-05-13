@@ -215,33 +215,36 @@ def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, par
 
 
 def _apply_attachment_targets(root, scene, scp_by_id, target_scp_ids, active_parent_ids):
-    depsgraph = bpy.context.evaluated_depsgraph_get()
     surface_cache = _new_surface_cache()
     changed = set()
     targets = None if target_scp_ids is None else {as_id(v) for v in set(target_scp_ids)}
     for sid in children_depth_order(scp_by_id):
-        changed |= _apply_child(root, scene, scp_by_id, sid, targets, active_parent_ids, depsgraph, surface_cache)
+        changed |= _apply_child(root, scene, scp_by_id, sid, targets, active_parent_ids, surface_cache)
     return changed
 
 
-def _apply_child(root, scene, scp_by_id, sid, targets, active_parent_ids, depsgraph, surface_cache):
+def _apply_child(root, scene, scp_by_id, sid, targets, active_parent_ids, surface_cache):
     child_scp = scp_by_id.get(sid)
     parent_id = as_id(getattr(child_scp, "parent_id", ""))
-    if child_scp is None or parent_id not in active_parent_ids or not _allowed_target(sid, parent_id, targets):
+    _ = targets
+    if child_scp is None or parent_id not in active_parent_ids:
         return set()
-    changed = _apply_child_runtime(root, scene, sid, child_scp, parent_id, depsgraph, surface_cache)
+    changed = _apply_child_runtime(root, scene, sid, child_scp, parent_id, surface_cache)
     if changed:
-        active_parent_ids.add(sid)
+        _refresh_child_chain(active_parent_ids, sid, surface_cache)
     return {sid} if changed else set()
 
 
-def _allowed_target(sid, parent_id, targets):
-    return targets is None or sid in targets or parent_id in targets
+def _refresh_child_chain(active_parent_ids, sid, surface_cache):
+    active_parent_ids.add(sid)
+    bpy.context.view_layer.update()
+    surface_cache.clear()
 
 
-def _apply_child_runtime(root, scene, sid, child_scp, parent_id, depsgraph, surface_cache):
+def _apply_child_runtime(root, scene, sid, child_scp, parent_id, surface_cache):
     child_obj = find_transform_scp_obj(scene, root.name, sid)
     parent_obj = find_geometry_mesh_scp_obj(scene, root.name, parent_id)
+    depsgraph = bpy.context.evaluated_depsgraph_get()
     if child_obj is None or parent_obj is None or not _is_initialized(child_scp):
         return False
     return AttachmentApply(child_scp, child_obj, parent_obj, depsgraph, surface_cache).run()

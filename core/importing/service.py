@@ -8,7 +8,7 @@ import bpy
 from ..utils import ensure_af_root
 from .merge import apply_snapshot
 from .model import PackageSnapshot
-from .stage import append_stage_root, remove_stage_root, remove_unused_stage_objects
+from .stage import append_stage_root, expand_stage_keep, link_stage_keep, remove_stage_root, remove_unused_stage_objects
 
 
 def _module_name():
@@ -49,6 +49,8 @@ def _stage_snapshot(filepath, snapshot):
 
 
 def _cleanup_stage(stage, keep):
+    keep = expand_stage_keep(stage, keep)
+    link_stage_keep(keep)
     remove_stage_root(stage)
     remove_unused_stage_objects(stage, keep)
 

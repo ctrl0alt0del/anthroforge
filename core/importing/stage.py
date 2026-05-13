@@ -82,3 +82,37 @@ def remove_unused_stage_objects(stage, keep):
     for obj in stage.objects:
         if _alive(obj) and obj.as_pointer() not in keep_ids:
             _remove_object(obj)
+
+
+def _driver_targets(anim):
+    for fc in getattr(anim, "drivers", ()):
+        for var in fc.driver.variables:
+            for target in var.targets:
+                yield target.id if isinstance(target.id, bpy.types.Object) else None
+
+
+def _driver_refs(obj):
+    for owner in (obj, getattr(obj, "data", None)):
+        for target in _driver_targets(getattr(owner, "animation_data", None)):
+            if target is not None:
+                yield target
+
+
+def expand_stage_keep(stage, keep):
+    stage_ids = {obj.as_pointer() for obj in stage.objects if _alive(obj)}
+    keep_map = {obj.as_pointer(): obj for obj in keep if _alive(obj)}
+    queue = list(keep_map.values())
+    while queue:
+        for target in _driver_refs(queue.pop()):
+            if not _alive(target) or target.as_pointer() not in stage_ids or target.as_pointer() in keep_map:
+                continue
+            keep_map[target.as_pointer()] = target
+            queue.append(target)
+    return list(keep_map.values())
+
+
+def link_stage_keep(keep, collection=None):
+    target = collection or bpy.context.scene.collection
+    for obj in keep:
+        if _alive(obj) and not obj.users_collection:
+            target.objects.link(obj)

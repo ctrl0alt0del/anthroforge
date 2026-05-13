@@ -24,6 +24,13 @@ def sync_root_to_scene(sync, root=None, scene=None, target_scp_ids=None, attachm
     _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta)
 
 
+def _refresh_view_layer():
+    try:
+        bpy.context.view_layer.update()
+    except Exception:
+        return
+
+
 def _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta):
     sync._syncing = True
     try:
@@ -32,7 +39,9 @@ def _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_ids, att
         sync_parent_links(root)
         normalize_active_index(root)
         scp_by_id = scp_prop_map(root)
+        _refresh_view_layer()
         apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids, attachment_parent_ids, attachment_gate_meta)
+        _refresh_view_layer()
         sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=target_scp_ids)
     finally:
         sync._syncing = False

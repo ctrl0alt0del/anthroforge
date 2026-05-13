@@ -124,4 +124,3 @@ class ImportResult:
     shortcut_count: int = 0
     warnings: list[str] = field(default_factory=list)
     kept_objects: list[object] = field(default_factory=list, repr=False)
-
