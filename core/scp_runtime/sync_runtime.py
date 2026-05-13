@@ -60,8 +60,8 @@ def _sync_from_depsgraph(sync, root, scene, depsgraph):
     changed_ids, transform_ids, geometry_ids = _depsgraph_change_sets(root, depsgraph)
     if not changed_ids:
         return
-    from ..visualization.sync_runner import sync_from_dirty_hints
-    sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("SCP", changed_ids), source="depsgraph", event_type="SCP_UPDATE", payload=_payload(transform_ids, geometry_ids))
+    from ..visualization.sync_runner import schedule_sync_from_dirty_hints
+    schedule_sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("SCP", changed_ids), source="depsgraph", event_type="SCP_UPDATE", payload=_payload(transform_ids, geometry_ids))
 
 
 def _depsgraph_change_sets(root, depsgraph):

@@ -143,8 +143,8 @@ def _merge_hints(target, source):
 
 
 def _sync_from_hints(root, scene, hints):
-    from .sync_runner import sync_from_dirty_hints
-    sync_from_dirty_hints(
+    from .sync_runner import schedule_sync_from_dirty_hints
+    schedule_sync_from_dirty_hints(
         root=root,
         scene=scene,
         dirty_hints=hints,
