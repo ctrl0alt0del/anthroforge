@@ -28,9 +28,21 @@ def _fallback_normal(tangent_vec, normal_vec):
     return _normalized(axis - tangent_vec * axis.dot(tangent_vec), (0.0, 0.0, 1.0))
 
 
+def _plane_project(vector, normal):
+    return Vector(vector) - Vector(normal) * Vector(vector).dot(Vector(normal))
+
+
 def project_tangent_hint(tangent_hint, normal, fallback):
-    hint = Vector(tangent_hint) - Vector(normal) * Vector(tangent_hint).dot(Vector(normal))
-    return _normalized(hint, fallback)
+    hint = _plane_project(tangent_hint, normal)
+    return _normalized(hint, _projected_fallback(normal, fallback))
+
+
+def _projected_fallback(normal, fallback):
+    tangent = _plane_project(fallback, normal)
+    if tangent.length > _EPS:
+        return tangent
+    axis = Vector((1.0, 0.0, 0.0)) if abs(Vector(normal).dot(Vector((1.0, 0.0, 0.0)))) <= 0.99 else Vector((0.0, 1.0, 0.0))
+    return _plane_project(axis, normal)
 
 
 def _cache_key(mesh_obj):
@@ -186,14 +198,24 @@ def _frame_from_tri(parent_obj, verts, tri, weights, tangent_hint):
 
 def _frame_axes(parent_obj, a, b, c, tangent_hint):
     normal = (b - a).cross(c - a)
-    world = parent_obj.matrix_world.to_3x3()
-    normal = world @ Vector((0.0, 0.0, 1.0)) if normal.length <= _EPS else normal
-    tangent = _frame_tangent(world, normal, tangent_hint, b - a)
+    rotation = parent_obj.matrix_world.to_quaternion().to_matrix()
+    normal = rotation @ Vector((0.0, 0.0, 1.0)) if normal.length <= _EPS else normal
+    tangent = _frame_tangent(rotation, normal, tangent_hint, b - a)
     return tangent, normal
 
 
-def _frame_tangent(world, normal, tangent_hint, fallback):
+def _frame_tangent(rotation, normal, tangent_hint, fallback):
     if tangent_hint is not None:
-        return project_tangent_hint(world @ Vector(tangent_hint), normal, fallback)
+        return _hint_tangent(rotation, normal, tangent_hint)
     tangent = Vector(fallback)
-    return world @ Vector((1.0, 0.0, 0.0)) if tangent.length <= _EPS else tangent
+    return rotation @ Vector((1.0, 0.0, 0.0)) if tangent.length <= _EPS else tangent
+
+
+def _hint_tangent(rotation, normal, tangent_hint):
+    # Reapplying scale here makes flat faces twist, so stored hints use rotation only.
+    return project_tangent_hint(rotation @ Vector(tangent_hint), normal, _hint_fallback(rotation, normal))
+
+
+def _hint_fallback(rotation, normal):
+    tangent = _plane_project(rotation @ Vector((1.0, 0.0, 0.0)), normal)
+    return tangent if tangent.length > _EPS else _plane_project(rotation @ Vector((0.0, 1.0, 0.0)), normal)

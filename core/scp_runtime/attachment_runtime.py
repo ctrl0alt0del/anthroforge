@@ -41,6 +41,7 @@ class AttachmentCapture:
     def _parent_tangent_hint_local(self, parent_param):
         frame = frame_from_parent_param(self.parent_geometry_obj, parent_param, self.depsgraph, cache=self.surface_cache)
         world_inv = self.parent_geometry_obj.matrix_world.to_quaternion().to_matrix().inverted()
+        # Store the hint in rotation space so later parent scale cannot twist it.
         return world_inv @ frame["tangent_world"] if frame else Vector((1.0, 0.0, 0.0))
 
     def _offset_local(self, child_anchor_world, frame):
