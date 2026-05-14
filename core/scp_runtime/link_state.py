@@ -7,6 +7,8 @@ _FIELDS = (
     "attach_parent_tri_weights",
     "attach_parent_offset_local",
     "attach_parent_tangent_hint_local",
+    "attach_parent_flow_tri_vidx",
+    "attach_parent_flow_tri_weights",
     "attach_child_origin_local",
     "attach_child_tangent_local",
     "attach_child_normal_local",

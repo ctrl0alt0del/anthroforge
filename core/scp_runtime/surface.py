@@ -3,6 +3,15 @@ from mathutils.bvhtree import BVHTree
 
 from .common import _EPS
 
+_AXIS_VECTORS = {
+    "POS_X": Vector((1.0, 0.0, 0.0)),
+    "NEG_X": Vector((-1.0, 0.0, 0.0)),
+    "POS_Y": Vector((0.0, 1.0, 0.0)),
+    "NEG_Y": Vector((0.0, -1.0, 0.0)),
+    "POS_Z": Vector((0.0, 0.0, 1.0)),
+    "NEG_Z": Vector((0.0, 0.0, -1.0)),
+}
+
 
 def _normalized(vector, fallback):
     value = Vector(vector)
@@ -43,6 +52,30 @@ def _projected_fallback(normal, fallback):
         return tangent
     axis = Vector((1.0, 0.0, 0.0)) if abs(Vector(normal).dot(Vector((1.0, 0.0, 0.0)))) <= 0.99 else Vector((0.0, 1.0, 0.0))
     return _plane_project(axis, normal)
+
+
+def resolve_tangent_strategy(parent_obj, strategy):
+    mode = str(strategy or "STABLE_SURFACE")
+    return "DEFORMATION_FLOW" if mode == "AUTO" and _curve_modifier(parent_obj) else mode
+
+
+def flow_hint_world(parent_obj):
+    return _rotation(parent_obj) @ _flow_axis_local(parent_obj)
+
+
+def _rotation(parent_obj):
+    return Matrix.Identity(3) if parent_obj is None else parent_obj.matrix_world.to_quaternion().to_matrix()
+
+
+def _flow_axis_local(parent_obj):
+    modifier = _curve_modifier(parent_obj)
+    axis = "POS_X" if modifier is None else str(modifier.deform_axis or "POS_X")
+    return _AXIS_VECTORS.get(axis, _AXIS_VECTORS["POS_X"]).copy()
+
+
+def _curve_modifier(parent_obj):
+    modifiers = () if parent_obj is None else parent_obj.modifiers
+    return next((mod for mod in modifiers if mod.type == "CURVE" and mod.show_viewport and getattr(mod, "object", None)), None)
 
 
 def _cache_key(mesh_obj):
@@ -172,43 +205,73 @@ def _child_anchor_candidate(child_anchor_world, parent_surface):
     return {"child_anchor_world": child_anchor_world, "parent_param": param, "d2": hit["d2"]}
 
 
-def frame_from_parent_param(parent_obj, param, depsgraph, cache=None, tangent_hint=None):
+def frame_from_parent_param(parent_obj, param, depsgraph, cache=None, tangent_hint=None, tangent_strategy="STABLE_SURFACE", flow_param=None):
     surface = build_mesh_surface_data(parent_obj, depsgraph, cache=cache)
     if not surface:
         return None
-    return _frame_from_surface(parent_obj, surface["verts_world"], param, tangent_hint)
+    return _frame_from_surface(parent_obj, surface["verts_world"], param, tangent_hint, tangent_strategy, flow_param)
 
 
-def _frame_from_surface(parent_obj, verts, param, tangent_hint):
+def _frame_from_surface(parent_obj, verts, param, tangent_hint, tangent_strategy, flow_param):
     tri = tuple(param.get("tri_vidx", (-1, -1, -1)))
     weights = tuple(param.get("tri_weights", (1.0, 0.0, 0.0)))
-    return None if len(tri) != 3 or len(weights) != 3 else _frame_from_tri(parent_obj, verts, tri, weights, tangent_hint)
+    args = parent_obj, verts, tri, weights, tangent_hint, tangent_strategy, flow_param
+    return None if len(tri) != 3 or len(weights) != 3 else _frame_from_tri(*args)
 
 
-def _frame_from_tri(parent_obj, verts, tri, weights, tangent_hint):
-    i0, i1, i2 = (int(tri[0]), int(tri[1]), int(tri[2]))
-    if min(i0, i1, i2) < 0 or max(i0, i1, i2) >= len(verts):
+def _frame_from_tri(parent_obj, verts, tri, weights, tangent_hint, tangent_strategy, flow_param):
+    abc = _tri_points(verts, tri)
+    if abc is None:
         return None
-    a, b, c = verts[i0], verts[i1], verts[i2]
-    point = (a * float(weights[0])) + (b * float(weights[1])) + (c * float(weights[2]))
-    tangent, normal = _frame_axes(parent_obj, a, b, c, tangent_hint)
+    point = _weighted_point(abc, weights)
+    normal = _frame_normal(parent_obj, *abc)
+    flow_point = _param_point(verts, flow_param)
+    tangent = _frame_tangent(parent_obj, point, normal, tangent_strategy, tangent_hint, flow_point, abc[1] - abc[0])
     basis, tangent, normal = basis_from_tangent_normal(tangent, normal)
     return {"point_world": point, "basis_world": basis, "tangent_world": tangent, "normal_world": normal}
 
 
-def _frame_axes(parent_obj, a, b, c, tangent_hint):
+def _tri_points(verts, tri):
+    i0, i1, i2 = (int(tri[0]), int(tri[1]), int(tri[2]))
+    if min(i0, i1, i2) < 0 or max(i0, i1, i2) >= len(verts):
+        return None
+    return verts[i0], verts[i1], verts[i2]
+
+
+def _weighted_point(abc, weights):
+    return sum((point * float(weight) for point, weight in zip(abc, weights)), Vector((0.0, 0.0, 0.0)))
+
+
+def _param_point(verts, param):
+    if not isinstance(param, dict):
+        return None
+    abc = _tri_points(verts, tuple(param.get("tri_vidx", (-1, -1, -1))))
+    weights = tuple(param.get("tri_weights", (1.0, 0.0, 0.0)))
+    return None if abc is None or len(weights) != 3 else _weighted_point(abc, weights)
+
+
+def _frame_normal(parent_obj, a, b, c):
     normal = (b - a).cross(c - a)
-    rotation = parent_obj.matrix_world.to_quaternion().to_matrix()
-    normal = rotation @ Vector((0.0, 0.0, 1.0)) if normal.length <= _EPS else normal
-    tangent = _frame_tangent(rotation, normal, tangent_hint, b - a)
-    return tangent, normal
+    return _rotation(parent_obj) @ Vector((0.0, 0.0, 1.0)) if normal.length <= _EPS else normal
 
 
-def _frame_tangent(rotation, normal, tangent_hint, fallback):
+def _frame_tangent(parent_obj, point, normal, tangent_strategy, tangent_hint, flow_point, fallback):
+    if tangent_strategy == "DEFORMATION_FLOW":
+        tangent = _flow_tangent(point, normal, flow_point, fallback)
+        if tangent is not None:
+            return tangent
     if tangent_hint is not None:
-        return _hint_tangent(rotation, normal, tangent_hint)
+        return _hint_tangent(_rotation(parent_obj), normal, tangent_hint)
     tangent = Vector(fallback)
-    return rotation @ Vector((1.0, 0.0, 0.0)) if tangent.length <= _EPS else tangent
+    return _rotation(parent_obj) @ Vector((1.0, 0.0, 0.0)) if tangent.length <= _EPS else tangent
+
+
+def _flow_tangent(point, normal, flow_point, fallback):
+    # Use the captured secondary surface point so curved deformation can rotate safely.
+    if flow_point is None:
+        return None
+    delta = Vector(flow_point) - Vector(point)
+    return None if delta.length <= _EPS else project_tangent_hint(delta, normal, fallback)
 
 
 def _hint_tangent(rotation, normal, tangent_hint):

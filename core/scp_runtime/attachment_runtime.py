@@ -4,7 +4,8 @@ from mathutils import Matrix, Vector
 from .common import as_bool, as_id, as_vec3, find_geometry_mesh_scp_obj, find_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix
 from .common import set_prop_raw, vec3_close, is_matrix_close, matrix_flat16
 from .child_anchor import capture_child_anchor
-from .surface import basis_from_tangent_normal, frame_from_parent_param
+from .surface import basis_from_tangent_normal, flow_hint_world, frame_from_parent_param, nearest_parent_param_from_world
+from .surface import project_tangent_hint, resolve_tangent_strategy
 from .tree import children_depth_order
 
 
@@ -16,6 +17,17 @@ def _child_basis_local(child_scp):
 
 def _new_surface_cache():
     return {}
+
+
+def _resolved_tangent_strategy(child_scp, parent_obj):
+    raw = getattr(child_scp, "attach_tangent_strategy", "AUTO")
+    return resolve_tangent_strategy(parent_obj, raw)
+
+
+def _stored_flow_param(child_scp):
+    tri = tuple(int(v) for v in getattr(child_scp, "attach_parent_flow_tri_vidx", (-1, -1, -1)))
+    weights = tuple(float(v) for v in getattr(child_scp, "attach_parent_flow_tri_weights", (1.0, 0.0, 0.0)))
+    return None if min(tri) < 0 else {"tri_vidx": tri, "tri_weights": weights}
 
 
 class AttachmentCapture:
@@ -31,18 +43,53 @@ class AttachmentCapture:
         candidate = capture_child_anchor(self.child_scp, self.child_geometry_obj, self.parent_geometry_obj, self.depsgraph, origin_obj=self.child_transform_obj, surface_cache=self.surface_cache)
         if candidate is None:
             return False
+        strategy = self._tangent_strategy()
         tangent_hint = self._parent_tangent_hint_local(candidate["parent_param"])
-        frame = frame_from_parent_param(self.parent_geometry_obj, candidate["parent_param"], self.depsgraph, cache=self.surface_cache, tangent_hint=tangent_hint)
+        flow_param = self._parent_flow_param(candidate["parent_param"], strategy, tangent_hint)
+        frame = self._parent_frame(candidate["parent_param"], strategy, tangent_hint, flow_param)
         if frame is None:
             return False
         child_frame = self._child_frame(candidate["child_anchor_world"], frame)
-        return self._write_capture(candidate["parent_param"], self._offset_local(candidate["child_anchor_world"], frame), tangent_hint, *child_frame)
+        offset = self._offset_local(candidate["child_anchor_world"], frame)
+        return self._write_capture(candidate["parent_param"], flow_param, offset, tangent_hint, *child_frame)
+
+    def _tangent_strategy(self):
+        return _resolved_tangent_strategy(self.child_scp, self.parent_geometry_obj)
 
     def _parent_tangent_hint_local(self, parent_param):
-        frame = frame_from_parent_param(self.parent_geometry_obj, parent_param, self.depsgraph, cache=self.surface_cache)
+        frame = self._parent_frame(parent_param, "STABLE_SURFACE", None, None)
         world_inv = self.parent_geometry_obj.matrix_world.to_quaternion().to_matrix().inverted()
         # Store the hint in rotation space so later parent scale cannot twist it.
         return world_inv @ frame["tangent_world"] if frame else Vector((1.0, 0.0, 0.0))
+
+    def _parent_flow_param(self, parent_param, strategy, tangent_hint):
+        if strategy != "DEFORMATION_FLOW":
+            return None
+        frame = self._parent_frame(parent_param, "STABLE_SURFACE", tangent_hint, None)
+        return None if frame is None else self._probe_flow_param(parent_param, frame)
+
+    def _parent_frame(self, parent_param, strategy, tangent_hint, flow_param):
+        return frame_from_parent_param(self.parent_geometry_obj, parent_param, self.depsgraph, cache=self.surface_cache, tangent_hint=tangent_hint, tangent_strategy=strategy, flow_param=flow_param)
+
+    def _probe_flow_param(self, parent_param, frame):
+        # Flow mode tracks a second parent surface sample instead of a live triangle edge.
+        tangent = project_tangent_hint(flow_hint_world(self.parent_geometry_obj), frame["normal_world"], frame["tangent_world"])
+        point = frame["point_world"]
+        for distance in self._probe_distances():
+            param = nearest_parent_param_from_world(self.parent_geometry_obj, point + (tangent * distance), self.depsgraph, cache=self.surface_cache)
+            if self._is_distinct_param(parent_param, param):
+                return param
+        return None
+
+    def _probe_distances(self):
+        size = max((float(value) for value in self.parent_geometry_obj.dimensions), default=1.0)
+        return tuple(size * factor for factor in (0.02, 0.05, 0.1))
+
+    def _is_distinct_param(self, parent_param, flow_param):
+        if flow_param is None:
+            return False
+        same_tri = tuple(flow_param["tri_vidx"]) == tuple(parent_param["tri_vidx"])
+        return not (same_tri and vec3_close(flow_param["tri_weights"], parent_param["tri_weights"], eps=1.0e-4))
 
     def _offset_local(self, child_anchor_world, frame):
         return frame["basis_world"].inverted() @ (child_anchor_world - frame["point_world"])
@@ -54,16 +101,23 @@ class AttachmentCapture:
         normal = rotation_inv @ frame["normal_world"]
         return origin, tangent, normal
 
-    def _write_capture(self, param, parent_offset, parent_tangent, child_origin, child_tangent, child_normal):
+    def _write_capture(self, param, flow_param, parent_offset, parent_tangent, child_origin, child_tangent, child_normal):
         changed = False
         changed |= self._write_field("attach_parent_tri_vidx", tuple(int(v) for v in param["tri_vidx"]))
         changed |= self._write_field("attach_parent_tri_weights", tuple(float(v) for v in param["tri_weights"]), eps=1.0e-7)
         changed |= self._write_vec("attach_parent_offset_local", parent_offset)
         changed |= self._write_vec("attach_parent_tangent_hint_local", parent_tangent)
+        changed |= self._write_flow(flow_param)
         changed |= self._write_vec("attach_child_origin_local", child_origin)
         changed |= self._write_vec("attach_child_tangent_local", child_tangent)
         changed |= self._write_vec("attach_child_normal_local", child_normal)
         return self._mark_initialized() or changed
+
+    def _write_flow(self, param):
+        tri = (-1, -1, -1) if param is None else tuple(int(v) for v in param["tri_vidx"])
+        weights = (1.0, 0.0, 0.0) if param is None else tuple(float(v) for v in param["tri_weights"])
+        changed = self._write_field("attach_parent_flow_tri_vidx", tri)
+        return self._write_field("attach_parent_flow_tri_weights", weights, eps=1.0e-7) or changed
 
     def _write_field(self, key, value, eps=None):
         current = getattr(self.child_scp, key, None)
@@ -107,7 +161,7 @@ class AttachmentApply:
         self.surface_cache = surface_cache or {}
 
     def run(self):
-        frame = frame_from_parent_param(self.parent_geometry_obj, self._parent_param(), self.depsgraph, cache=self.surface_cache, tangent_hint=self._parent_tangent_hint())
+        frame = self._parent_frame(self._tangent_strategy())
         if frame is None:
             return False
         matrix_world = self._matrix_world(frame)
@@ -116,6 +170,12 @@ class AttachmentApply:
         self.child_obj.matrix_world = matrix_world
         mark_applied_matrix(self.child_obj)
         return True
+
+    def _tangent_strategy(self):
+        return _resolved_tangent_strategy(self.child_scp, self.parent_geometry_obj)
+
+    def _parent_frame(self, strategy):
+        return frame_from_parent_param(self.parent_geometry_obj, self._parent_param(), self.depsgraph, cache=self.surface_cache, tangent_hint=self._parent_tangent_hint(), tangent_strategy=strategy, flow_param=_stored_flow_param(self.child_scp))
 
     def _parent_param(self):
         return {

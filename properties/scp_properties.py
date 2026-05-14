@@ -25,6 +25,10 @@ def _on_child_anchor_mode_update(self, context):
     _dispatch_attachment_recapture(context, getattr(self, "id", ""))
 
 
+def _on_attach_strategy_update(self, context):
+    _on_child_anchor_mode_update(self, context)
+
+
 def _dispatch_attachment_recapture(context, scp_id):
     if not scp_id:
         return
@@ -73,11 +77,23 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
     )
 
     attach_follow_rotation: bpy.props.BoolProperty(name="Follow Parent Rotation", default=True, update=_on_scp_prop_update)
+    attach_tangent_strategy: bpy.props.EnumProperty(
+        name="Rotation Strategy",
+        items=[
+            ("AUTO", "Auto", "Use deformation flow when the parent exposes a flow direction"),
+            ("STABLE_SURFACE", "Stable Surface", "Keep rotation stable against triangle drift"),
+            ("DEFORMATION_FLOW", "Deformation Flow", "Follow the stored parent surface flow"),
+        ],
+        default="AUTO",
+        update=_on_attach_strategy_update,
+    )
     attach_initialized: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
     attach_parent_tri_vidx: bpy.props.IntVectorProperty(name="Attach Parent Triangle Vertex Indices", size=3, default=(-1, -1, -1), options={"HIDDEN"})
     attach_parent_tri_weights: bpy.props.FloatVectorProperty(name="Attach Parent Triangle Barycentric", size=3, default=(1.0, 0.0, 0.0), options={"HIDDEN"})
     attach_parent_offset_local: bpy.props.FloatVectorProperty(name="Attach Parent Offset Local", size=3, default=(0.0, 0.0, 0.0), options={"HIDDEN"})
     attach_parent_tangent_hint_local: bpy.props.FloatVectorProperty(name="Attach Parent Tangent Hint Local", size=3, default=(1.0, 0.0, 0.0), options={"HIDDEN"})
+    attach_parent_flow_tri_vidx: bpy.props.IntVectorProperty(name="Attach Parent Flow Triangle Vertex Indices", size=3, default=(-1, -1, -1), options={"HIDDEN"})
+    attach_parent_flow_tri_weights: bpy.props.FloatVectorProperty(name="Attach Parent Flow Triangle Barycentric", size=3, default=(1.0, 0.0, 0.0), options={"HIDDEN"})
     attach_child_origin_local: bpy.props.FloatVectorProperty(name="Attach Child Origin Local", size=3, default=(0.0, 0.0, 0.0), options={"HIDDEN"})
     attach_child_tangent_local: bpy.props.FloatVectorProperty(name="Attach Child Tangent Local", size=3, default=(1.0, 0.0, 0.0), options={"HIDDEN"})
     attach_child_normal_local: bpy.props.FloatVectorProperty(name="Attach Child Normal Local", size=3, default=(0.0, 0.0, 1.0), options={"HIDDEN"})

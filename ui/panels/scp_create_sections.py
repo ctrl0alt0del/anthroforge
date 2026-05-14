@@ -38,6 +38,7 @@ def draw_attachment_settings(layout, scp):
         return
     layout.prop(scp, "attach_child_anchor_mode", text="Child Anchor")
     layout.prop(scp, "attach_follow_rotation", text="Follow Rotation")
+    layout.prop(scp, "attach_tangent_strategy", text="Rotation Strategy")
 
 
 def draw_mirror_box(layout, scp):
