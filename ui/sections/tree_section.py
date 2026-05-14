@@ -34,10 +34,13 @@ def _draw_expand_toggle(row, scene, scp_id, has_children, collapsed):
         row.label(text="", icon="DOT")
 
 
-def _draw_select_and_delete(row, scp, selected_ids):
+def _draw_row_actions(row, scp, selected_ids, depth):
     label = scp.name if scp.name else scp.id
     op = row.operator("af.select_scp_in_tree", text=label, emboss=True, depress=(scp.id in selected_ids))
     op.scp_id = scp.id
+    if depth > 0:
+        promote_op = row.operator("af.promote_scp_in_tree", text="", icon="TRIA_UP", emboss=False)
+        promote_op.scp_id = scp.id
     copy_op = row.operator("af.copy_scp_in_tree", text="", icon="DUPLICATE", emboss=False)
     copy_op.scp_id = scp.id
     delete_op = row.operator("af.delete_scp_in_tree", text="", icon="TRASH", emboss=False)
@@ -59,7 +62,7 @@ def _draw_node(layout, scene, scp, children_map, depth, active_id, selected_ids,
     row = layout.row(align=True)
     _draw_indent(row, depth)
     _draw_expand_toggle(row, scene, scp.id, has_children, collapsed)
-    _draw_select_and_delete(row, scp, selected_ids)
+    _draw_row_actions(row, scp, selected_ids, depth)
     if has_children and not collapsed:
         _draw_children(layout, scene, children, children_map, depth, active_id, selected_ids, visited)
 

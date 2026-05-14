@@ -1,9 +1,10 @@
 import bpy
 from ..core.utils import get_af_root
 from ..core.deps.dirty_hints import empty_dirty_hints
+from ..core.scp_runtime.actions import execute_reparent_scp
 from ..core.scp_runtime.copy import copy_scp_subtree
 from ..core.scp_runtime.delete import delete_scp
-from ..core.scp_runtime.common import find_primary_scp_obj
+from ..core.scp_runtime.common import as_id, find_primary_scp_obj, find_scp_by_id
 from ..core.scp_runtime.lookup import activate_scp
 from ..core.scp_runtime.object_colors import enable_object_color_view
 from ..core.scp_runtime.tree import children_map
@@ -94,6 +95,21 @@ class AF_OT_DeleteSCPInTree(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class AF_OT_PromoteSCPInTree(bpy.types.Operator):
+    bl_idname = "af.promote_scp_in_tree"
+    bl_label = "Promote SCP In Tree"
+    bl_options = {"REGISTER", "UNDO"}
+
+    scp_id: bpy.props.StringProperty()
+
+    def execute(self, context):
+        root = get_af_root(context.scene)
+        target_id = _promote_target_id(root, self.scp_id)
+        if root is None or target_id is None:
+            return {"CANCELLED"}
+        return execute_reparent_scp(self, context, self.scp_id, target_id)
+
+
 class AF_OT_CopySCPInTree(bpy.types.Operator):
     bl_idname = "af.copy_scp_in_tree"
     bl_label = "Copy SCP In Tree"
@@ -147,6 +163,16 @@ def _has_children(root, scp_id):
         return False
     kids = children_map({str(s.id): s for s in root.af_scp_system.scps})
     return bool(kids.get(str(scp_id), []))
+
+
+def _parent_id(root, scp_id):
+    scp = None if root is None else find_scp_by_id(root, scp_id)
+    return "" if scp is None else as_id(getattr(scp, "parent_id", ""))
+
+
+def _promote_target_id(root, scp_id):
+    parent_id = _parent_id(root, scp_id)
+    return None if not parent_id else _parent_id(root, parent_id)
 
 
 def _select_copied_scp(context, root, scp_id):

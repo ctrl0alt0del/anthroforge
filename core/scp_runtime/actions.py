@@ -3,7 +3,7 @@ from ..utils import get_af_root
 from ..visualization.sync_runner import sync_from_dirty_hints
 from .attachment_runtime import capture_attachment_from_link
 from .bound_objects import set_geometry_object, set_transform_object
-from .common import find_geometry_mesh_scp_obj, find_transform_scp_obj, is_transform_scp_obj, scp_for_object
+from .common import find_geometry_mesh_scp_obj, find_scp_by_id, find_transform_scp_obj, is_transform_scp_obj, scp_for_object
 from .link_state import restore_link_state, snapshot_link_state
 from .lookup import activate_scp, effective_parent_obj, set_parent_relation, would_create_parent_cycle
 from .object_colors import enable_object_color_view
@@ -95,7 +95,17 @@ def execute_set_scp_parent(operator, context):
     child_obj, child_scp = _active_child(operator, context, root)
     if child_obj is None or child_scp is None:
         return {"CANCELLED"}
-    return _apply_parent_change(operator, context, root, child_obj, child_scp)
+    return _apply_parent_target_change(operator, context, root, child_obj, child_scp, getattr(context.scene, "af_scp_parent_obj", None))
+
+
+def execute_reparent_scp(operator, context, child_scp_id, parent_scp_id=""):
+    root = get_af_root(context.scene)
+    child_obj, child_scp = _child_by_id(operator, context, root, child_scp_id)
+    parent_obj = _parent_by_id(operator, context, root, parent_scp_id)
+    bad_parent = str(parent_scp_id or "") and parent_obj is None
+    if child_obj is None or child_scp is None or bad_parent:
+        return {"CANCELLED"}
+    return _apply_parent_target_change(operator, context, root, child_obj, child_scp, parent_obj)
 
 
 def _active_child(operator, context, root):
@@ -115,8 +125,25 @@ def _report_error_obj(operator, message):
     return None, None
 
 
-def _apply_parent_change(operator, context, root, child_obj, child_scp):
-    parent_obj = getattr(context.scene, "af_scp_parent_obj", None)
+def _child_by_id(operator, context, root, scp_id):
+    child_scp = None if root is None else find_scp_by_id(root, scp_id)
+    child_obj = None if child_scp is None else find_transform_scp_obj(context.scene, root.name, child_scp.id)
+    if child_scp is None or child_obj is None:
+        return _report_error_obj(operator, "Target SCP not found.")
+    return child_obj, child_scp
+
+
+def _parent_by_id(operator, context, root, parent_scp_id):
+    pid = str(parent_scp_id or "")
+    if not pid:
+        return None
+    parent_obj = None if root is None else find_transform_scp_obj(context.scene, root.name, pid)
+    if parent_obj is None and operator is not None:
+        operator.report({"ERROR"}, "Target parent SCP has no transform object.")
+    return parent_obj
+
+
+def _apply_parent_target_change(operator, context, root, child_obj, child_scp, parent_obj):
     if _invalid_parent(operator, root, child_scp.id, parent_obj):
         return {"CANCELLED"}
     if parent_obj is None:
