@@ -3,8 +3,8 @@ from mathutils import Matrix, Vector
 
 from .common import as_bool, as_id, as_vec3, find_geometry_mesh_scp_obj, find_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix
 from .common import set_prop_raw, vec3_close, is_matrix_close, matrix_flat16
-from .child_anchor import capture_child_anchor
-from .surface import basis_from_tangent_normal, flow_hint_world, frame_from_parent_param, nearest_parent_param_from_world
+from .child_anchor import anchor_mode, capture_child_anchor
+from .surface import basis_from_tangent_normal, build_face_centers, build_vertex_points, flow_hint_world, frame_from_parent_param, nearest_parent_param_from_world
 from .surface import project_tangent_hint, resolve_tangent_strategy
 from .tree import children_depth_order
 
@@ -30,6 +30,56 @@ def _stored_flow_param(child_scp):
     return None if min(tri) < 0 else {"tri_vidx": tri, "tri_weights": weights}
 
 
+def _stored_child_anchor_local(child_scp):
+    return as_vec3(getattr(child_scp, "attach_child_origin_local", (0.0, 0.0, 0.0)), (0.0, 0.0, 0.0))
+
+
+def _child_anchor_index(child_scp):
+    return int(getattr(child_scp, "attach_child_anchor_index", -1))
+
+
+def _point_at(points, index):
+    return None if points is None or index < 0 or index >= len(points) else points[index].copy()
+
+
+def _child_anchor_points(child_scp, child_geometry_obj, depsgraph, surface_cache):
+    mode = anchor_mode(child_scp)
+    if child_geometry_obj is None or mode == "OBJECT_ORIGIN":
+        return None
+    builder = build_face_centers if mode == "FACE_CENTER" else build_vertex_points
+    return builder(child_geometry_obj, depsgraph, cache=surface_cache)
+
+
+def _nearest_point_index(points, target):
+    best_index, best_d2 = -1, None
+    for index, point in enumerate(points or ()):
+        d2 = (Vector(point) - Vector(target)).length_squared
+        best_index, best_d2 = (index, d2) if best_d2 is None or d2 < best_d2 else (best_index, best_d2)
+    return best_index
+
+
+def _resolved_child_anchor_index(child_scp, child_obj, points):
+    index = _child_anchor_index(child_scp)
+    if points is None or 0 <= index < len(points):
+        return index
+    index = _nearest_point_index(points, child_obj.matrix_world @ _stored_child_anchor_local(child_scp))
+    set_prop_raw(child_scp, "attach_child_anchor_index", index) if index >= 0 else None
+    return index
+
+
+# Child anchors must come from evaluated child geometry so shared drivers do not get applied twice.
+def _live_child_anchor_world(child_scp, child_obj, child_geometry_obj, depsgraph, surface_cache):
+    if anchor_mode(child_scp) == "OBJECT_ORIGIN":
+        return child_obj.matrix_world.to_translation().copy()
+    points = _child_anchor_points(child_scp, child_geometry_obj, depsgraph, surface_cache)
+    return _point_at(points, _resolved_child_anchor_index(child_scp, child_obj, points))
+
+
+def _live_child_anchor_local(child_scp, child_obj, child_geometry_obj, depsgraph, surface_cache):
+    anchor = _live_child_anchor_world(child_scp, child_obj, child_geometry_obj, depsgraph, surface_cache)
+    return _stored_child_anchor_local(child_scp) if anchor is None else child_obj.matrix_world.inverted() @ anchor
+
+
 class AttachmentCapture:
     def __init__(self, child_scp, child_transform_obj, child_geometry_obj, parent_geometry_obj, depsgraph, surface_cache=None):
         self.child_scp = child_scp
@@ -51,7 +101,7 @@ class AttachmentCapture:
             return False
         child_frame = self._child_frame(candidate["child_anchor_world"], frame)
         offset = self._offset_local(candidate["child_anchor_world"], frame)
-        return self._write_capture(candidate["parent_param"], flow_param, offset, tangent_hint, *child_frame)
+        return self._write_capture(candidate["parent_param"], flow_param, candidate["child_anchor_index"], offset, tangent_hint, *child_frame)
 
     def _tangent_strategy(self):
         return _resolved_tangent_strategy(self.child_scp, self.parent_geometry_obj)
@@ -101,13 +151,14 @@ class AttachmentCapture:
         normal = rotation_inv @ frame["normal_world"]
         return origin, tangent, normal
 
-    def _write_capture(self, param, flow_param, parent_offset, parent_tangent, child_origin, child_tangent, child_normal):
+    def _write_capture(self, param, flow_param, child_anchor_index, parent_offset, parent_tangent, child_origin, child_tangent, child_normal):
         changed = False
         changed |= self._write_field("attach_parent_tri_vidx", tuple(int(v) for v in param["tri_vidx"]))
         changed |= self._write_field("attach_parent_tri_weights", tuple(float(v) for v in param["tri_weights"]), eps=1.0e-7)
         changed |= self._write_vec("attach_parent_offset_local", parent_offset)
         changed |= self._write_vec("attach_parent_tangent_hint_local", parent_tangent)
         changed |= self._write_flow(flow_param)
+        changed |= self._write_scalar("attach_child_anchor_index", int(child_anchor_index))
         changed |= self._write_vec("attach_child_origin_local", child_origin)
         changed |= self._write_vec("attach_child_tangent_local", child_tangent)
         changed |= self._write_vec("attach_child_normal_local", child_normal)
@@ -123,6 +174,12 @@ class AttachmentCapture:
         current = getattr(self.child_scp, key, None)
         same = vec3_close(current, value, eps=eps) if eps is not None else tuple(current) == tuple(value)
         if same:
+            return False
+        set_prop_raw(self.child_scp, key, value)
+        return True
+
+    def _write_scalar(self, key, value):
+        if getattr(self.child_scp, key, None) == value:
             return False
         set_prop_raw(self.child_scp, key, value)
         return True
@@ -153,9 +210,10 @@ def recapture_attachment_for_scp(root, scene, sid):
 
 
 class AttachmentApply:
-    def __init__(self, child_scp, child_obj, parent_geometry_obj, depsgraph, surface_cache=None):
+    def __init__(self, child_scp, child_obj, child_geometry_obj, parent_geometry_obj, depsgraph, surface_cache=None):
         self.child_scp = child_scp
         self.child_obj = child_obj
+        self.child_geometry_obj = child_geometry_obj
         self.parent_geometry_obj = parent_geometry_obj
         self.depsgraph = depsgraph
         self.surface_cache = surface_cache or {}
@@ -189,7 +247,8 @@ class AttachmentApply:
     def _matrix_world(self, frame):
         follow = as_bool(getattr(self.child_scp, "attach_follow_rotation", True), default=True)
         rotation = self._rotation_world(frame, follow)
-        position = frame["point_world"] + self._parent_offset_world(frame) - (rotation @ self._scaled_child_anchor())
+        anchor = _live_child_anchor_local(self.child_scp, self.child_obj, self.child_geometry_obj, self.depsgraph, self.surface_cache)
+        position = frame["point_world"] + self._parent_offset_world(frame) - (rotation @ self._scaled_child_anchor(anchor))
         return self._compose_matrix(position, rotation, follow)
 
     def _parent_offset_world(self, frame):
@@ -201,8 +260,7 @@ class AttachmentApply:
             return self.child_obj.matrix_world.to_quaternion().to_matrix()
         return (frame["basis_world"] @ _child_basis_local(self.child_scp).inverted()).normalized()
 
-    def _scaled_child_anchor(self):
-        origin = as_vec3(getattr(self.child_scp, "attach_child_origin_local", (0.0, 0.0, 0.0)), (0.0, 0.0, 0.0))
+    def _scaled_child_anchor(self, origin):
         scale = self.child_obj.matrix_world.to_scale()
         return Vector((float(origin.x) * float(scale.x), float(origin.y) * float(scale.y), float(origin.z) * float(scale.z)))
 
@@ -304,11 +362,12 @@ def _refresh_child_chain(active_parent_ids, sid, surface_cache):
 
 def _apply_child_runtime(root, scene, sid, child_scp, parent_id, surface_cache):
     child_obj = find_transform_scp_obj(scene, root.name, sid)
+    child_geometry = find_geometry_mesh_scp_obj(scene, root.name, sid)
     parent_obj = find_geometry_mesh_scp_obj(scene, root.name, parent_id)
     depsgraph = bpy.context.evaluated_depsgraph_get()
-    if child_obj is None or parent_obj is None or not _is_initialized(child_scp):
+    if child_obj is None or child_geometry is None or parent_obj is None or not _is_initialized(child_scp):
         return False
-    return AttachmentApply(child_scp, child_obj, parent_obj, depsgraph, surface_cache).run()
+    return AttachmentApply(child_scp, child_obj, child_geometry, parent_obj, depsgraph, surface_cache).run()
 
 
 def _is_initialized(child_scp):

@@ -191,18 +191,18 @@ def closest_child_vertex_to_parent(child_obj, parent_obj, depsgraph, cache=None)
 
 def _closest_child_points_to_parent(points, parent_surface):
     best = None
-    for point in points or ():
-        candidate = _child_anchor_candidate(point, parent_surface)
+    for index, point in enumerate(points or ()):
+        candidate = _child_anchor_candidate(point, parent_surface, index)
         best = candidate if candidate and (best is None or candidate["d2"] < best["d2"]) else best
     return best
 
 
-def _child_anchor_candidate(child_anchor_world, parent_surface):
+def _child_anchor_candidate(child_anchor_world, parent_surface, child_index=-1):
     hit = _nearest_triangle_hit(parent_surface, child_anchor_world)
     param = None if hit is None else _param_from_hit(hit)
     if param is None:
         return None
-    return {"child_anchor_world": child_anchor_world, "parent_param": param, "d2": hit["d2"]}
+    return {"child_anchor_world": child_anchor_world, "parent_param": param, "child_index": int(child_index), "d2": hit["d2"]}
 
 
 def frame_from_parent_param(parent_obj, param, depsgraph, cache=None, tangent_hint=None, tangent_strategy="STABLE_SURFACE", flow_param=None):
