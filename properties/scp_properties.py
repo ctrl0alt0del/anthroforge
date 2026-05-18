@@ -19,14 +19,14 @@ def _on_scp_prop_update(self, context):
     _sync_scene(context, getattr(self, "id", ""))
 
 
-def _on_child_anchor_mode_update(self, context):
+def _on_attachment_capture_update(self, context):
     if not getattr(self, "parent_id", ""):
         return
     _dispatch_attachment_recapture(context, getattr(self, "id", ""))
 
 
 def _on_attach_strategy_update(self, context):
-    _on_child_anchor_mode_update(self, context)
+    _on_attachment_capture_update(self, context)
 
 
 def _dispatch_attachment_recapture(context, scp_id):
@@ -65,6 +65,15 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
     )
     color_initialized: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
     parent_id: bpy.props.StringProperty(name="Parent ID", default="", update=_on_scp_prop_update)
+    attach_parent_anchor_mode: bpy.props.EnumProperty(
+        name="Parent Anchor",
+        items=[
+            ("SURFACE_NEAREST", "Surface Nearest", "Anchor against the nearest point on the parent surface"),
+            ("OBJECT_ORIGIN", "Object Origin", "Anchor against the parent object origin"),
+        ],
+        default="SURFACE_NEAREST",
+        update=_on_attachment_capture_update,
+    )
     attach_child_anchor_mode: bpy.props.EnumProperty(
         name="Child Anchor",
         items=[
@@ -73,7 +82,7 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
             ("OBJECT_ORIGIN", "Object Origin", "Use the child object origin"),
         ],
         default="FACE_CENTER",
-        update=_on_child_anchor_mode_update,
+        update=_on_attachment_capture_update,
     )
 
     attach_follow_rotation: bpy.props.BoolProperty(name="Follow Parent Rotation", default=True, update=_on_scp_prop_update)

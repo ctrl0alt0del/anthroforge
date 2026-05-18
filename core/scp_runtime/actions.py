@@ -79,10 +79,10 @@ def _set_parent_with_capture(operator, context, child_scp, child_obj, parent_obj
     root_name = get_af_root(context.scene).name
     child_geo = find_geometry_mesh_scp_obj(context.scene, root_name, child_scp.id)
     parent_geo = find_geometry_mesh_scp_obj(context.scene, root_name, parent_obj.get("af_scp_id"))
-    if child_geo and parent_geo and capture_attachment_from_link(child_scp, child_obj, child_geo, parent_geo):
+    if capture_attachment_from_link(child_scp, child_obj, child_geo, parent_obj, parent_geo):
         return True
     restore_link_state(child_scp, snapshot)
-    operator.report({"ERROR"}, "Failed to capture attachment from child face center.")
+    operator.report({"ERROR"}, "Failed to capture attachment.")
     return False
 
 

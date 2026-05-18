@@ -1,6 +1,7 @@
 ﻿from .common import set_prop_raw
 
 _ATTACH_DEFAULTS = (
+    ("attach_parent_anchor_mode", "SURFACE_NEAREST"),
     ("attach_child_anchor_mode", "FACE_CENTER"),
     ("attach_follow_rotation", True),
     ("attach_tangent_strategy", "AUTO"),
