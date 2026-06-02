@@ -2,6 +2,7 @@ import bpy
 import bmesh
 from mathutils import Vector
 
+from ..deps.control_lifecycle import mark_dynamic_control_object
 from ..vcp.blob import BlobVCPRuntime
 from ..scp_runtime.common import find_geometry_scp_obj
 
@@ -57,6 +58,7 @@ def create_blob_proxy(vis_col, root, blob_id):
 def create_blob_control(vis_col, root, blob_id):
     ctrl = bpy.data.objects.new(f"AF_{blob_id}_CTRL", None)
     mark_blob_control(ctrl, root, blob_id, apply_visual_defaults=True)
+    mark_dynamic_control_object(ctrl)
     vis_col.objects.link(ctrl)
     return ctrl
 
@@ -106,9 +108,9 @@ def _find_muscle_surface(scene, root_name, muscle_id, surface):
             and not o.get("af_muscle_mirror_proxy")
             and o.get("af_root_name") == root_name
             and o.get("af_muscle_id") == muscle_id
+            and o.get("af_muscle_surface") == surface
         ):
-            if o.get("af_muscle_surface") == surface:
-                return o
+            return o
     return None
 
 

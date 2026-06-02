@@ -1,3 +1,6 @@
+from ..deps.control_lifecycle import clear_control_lifecycle, mark_persistent_control_object
+
+
 def mark_scp_control_object(obj, root, scp_id):
     if obj is None or root is None:
         return None
@@ -7,6 +10,7 @@ def mark_scp_control_object(obj, root, scp_id):
     obj["af_scp_control"] = True
     obj["af_root_name"] = str(getattr(root, "name", "") or "")
     obj["af_scp_id"] = sid
+    mark_persistent_control_object(obj)
     return obj
 
 
@@ -42,3 +46,4 @@ def clear_scp_control_marks(obj):
     ):
         if key in obj:
             del obj[key]
+    clear_control_lifecycle(obj)

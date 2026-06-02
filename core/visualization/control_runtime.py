@@ -2,6 +2,7 @@ import bpy
 from bpy.app.handlers import persistent
 
 from ..deps.controls import classify_control_object, is_control_object
+from ..deps.control_lifecycle import should_remove_control_object_on_load, should_remove_control_object_on_save
 from ..deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 from ..scp_runtime.common import is_bound_scp_obj
 from ..utils import get_af_root
@@ -100,9 +101,11 @@ def active_entity_id(root, entity_type):
     return ""
 
 
-def _remove_transient_controls():
-    for obj in list(bpy.data.objects):
+def _remove_transient_controls(should_remove_fn):
+    for obj in bpy.data.objects:
         if not is_control_object(obj):
+            continue
+        if not should_remove_fn(obj):
             continue
         data = getattr(obj, "data", None)
         bpy.data.objects.remove(obj, do_unlink=True)
@@ -207,12 +210,12 @@ _CONTROL_RUNTIME = None
 
 @persistent
 def _on_save_pre(_dummy):
-    _remove_transient_controls()
+    _remove_transient_controls(should_remove_control_object_on_save)
 
 
 @persistent
 def _on_load_post(_dummy):
-    _remove_transient_controls()
+    _remove_transient_controls(should_remove_control_object_on_load)
     if _CONTROL_RUNTIME is not None:
         _CONTROL_RUNTIME.reset()
     scene = getattr(bpy.context, "scene", None)

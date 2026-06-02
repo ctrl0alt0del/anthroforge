@@ -1,6 +1,8 @@
 import bpy
 from mathutils.bvhtree import BVHTree
 
+from ..deps.control_lifecycle import mark_dynamic_control_object
+
 
 def get_vis_collection(scene, collection_name):
     col = scene.collection.children.get(collection_name)
@@ -56,6 +58,7 @@ def create_muscle_proxy(vis_col, root, muscle_id, surface_type):
 def create_inflation_ctrl(vis_col, root, muscle_id):
     obj = bpy.data.objects.new(f"AF_{muscle_id}_INFL_MAX", None)
     mark_inflation_ctrl(obj, root, muscle_id, apply_visual_defaults=True)
+    mark_dynamic_control_object(obj)
     vis_col.objects.link(obj)
     return obj
 

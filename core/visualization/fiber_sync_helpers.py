@@ -3,6 +3,7 @@ import json
 from mathutils import Vector
 from bpy_extras import view3d_utils
 
+from ..deps.control_lifecycle import mark_dynamic_control_object
 from ..attachment_codec import parse_fiber_attach_param
 from ..scp_runtime.common import find_geometry_scp_obj
 
@@ -70,6 +71,7 @@ def find_touch_handle(vis_col, root_name, fiber_id, touch_index):
 def create_endpoint_handle(vis_col, root, fiber_id, endpoint):
     obj = bpy.data.objects.new(f"AF_{fiber_id}_{endpoint}", None)
     mark_endpoint_handle(obj, root, fiber_id, endpoint, apply_visual_defaults=True)
+    mark_dynamic_control_object(obj)
     vis_col.objects.link(obj)
     return obj
 
@@ -77,6 +79,7 @@ def create_endpoint_handle(vis_col, root, fiber_id, endpoint):
 def create_touch_handle(vis_col, root, fiber_id, touch_index):
     obj = bpy.data.objects.new(f"AF_{fiber_id}_T{touch_index}", None)
     mark_touch_handle(obj, root, fiber_id, touch_index, apply_visual_defaults=True)
+    mark_dynamic_control_object(obj)
     vis_col.objects.link(obj)
     return obj
 
