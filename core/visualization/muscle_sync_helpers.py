@@ -31,6 +31,13 @@ def find_inflation_ctrl(vis_col, root_name, muscle_id):
             and obj.get("af_muscle_id") == muscle_id
         ):
             return obj
+    for obj in bpy.data.objects:
+        if (
+            obj.get("af_muscle_inflation_ctrl")
+            and obj.get("af_root_name") == root_name
+            and obj.get("af_muscle_id") == muscle_id
+        ):
+            return obj
     return None
 
 
@@ -48,14 +55,22 @@ def create_muscle_proxy(vis_col, root, muscle_id, surface_type):
 
 def create_inflation_ctrl(vis_col, root, muscle_id):
     obj = bpy.data.objects.new(f"AF_{muscle_id}_INFL_MAX", None)
-    obj.empty_display_type = "SPHERE"
-    obj.empty_display_size = 0.04
-    obj.show_in_front = True
-    obj.hide_render = True
+    mark_inflation_ctrl(obj, root, muscle_id, apply_visual_defaults=True)
+    vis_col.objects.link(obj)
+    return obj
+
+
+def mark_inflation_ctrl(obj, root, muscle_id, apply_visual_defaults=False):
+    if obj is None:
+        return None
+    if bool(apply_visual_defaults):
+        obj.empty_display_type = "SPHERE"
+        obj.empty_display_size = 0.04
+        obj.show_in_front = True
+        obj.hide_render = True
     obj["af_muscle_inflation_ctrl"] = True
     obj["af_root_name"] = root.name
     obj["af_muscle_id"] = muscle_id
-    vis_col.objects.link(obj)
     return obj
 
 

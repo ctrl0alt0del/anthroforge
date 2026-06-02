@@ -36,6 +36,14 @@ def find_endpoint_handle(vis_col, root_name, fiber_id, endpoint):
             and obj.get("af_fiber_endpoint") == endpoint
         ):
             return obj
+    for obj in bpy.data.objects:
+        if (
+            obj.get("af_fiber_endpoint_handle")
+            and obj.get("af_root_name") == root_name
+            and obj.get("af_fiber_id") == fiber_id
+            and obj.get("af_fiber_endpoint") == endpoint
+        ):
+            return obj
     return None
 
 
@@ -48,34 +56,58 @@ def find_touch_handle(vis_col, root_name, fiber_id, touch_index):
             and int(obj.get("af_fiber_touch_index", -1)) == int(touch_index)
         ):
             return obj
+    for obj in bpy.data.objects:
+        if (
+            obj.get("af_fiber_touch_handle")
+            and obj.get("af_root_name") == root_name
+            and obj.get("af_fiber_id") == fiber_id
+            and int(obj.get("af_fiber_touch_index", -1)) == int(touch_index)
+        ):
+            return obj
     return None
 
 
 def create_endpoint_handle(vis_col, root, fiber_id, endpoint):
     obj = bpy.data.objects.new(f"AF_{fiber_id}_{endpoint}", None)
-    obj.empty_display_type = "SPHERE"
-    obj.empty_display_size = 0.035
-    obj.show_in_front = True
-    obj.hide_render = True
-    obj["af_fiber_endpoint_handle"] = True
-    obj["af_root_name"] = root.name
-    obj["af_fiber_id"] = fiber_id
-    obj["af_fiber_endpoint"] = endpoint
+    mark_endpoint_handle(obj, root, fiber_id, endpoint, apply_visual_defaults=True)
     vis_col.objects.link(obj)
     return obj
 
 
 def create_touch_handle(vis_col, root, fiber_id, touch_index):
     obj = bpy.data.objects.new(f"AF_{fiber_id}_T{touch_index}", None)
-    obj.empty_display_type = "CUBE"
-    obj.empty_display_size = 0.03
-    obj.show_in_front = True
-    obj.hide_render = True
+    mark_touch_handle(obj, root, fiber_id, touch_index, apply_visual_defaults=True)
+    vis_col.objects.link(obj)
+    return obj
+
+
+def mark_endpoint_handle(obj, root, fiber_id, endpoint, apply_visual_defaults=False):
+    if obj is None:
+        return None
+    if bool(apply_visual_defaults):
+        obj.empty_display_type = "SPHERE"
+        obj.empty_display_size = 0.035
+        obj.show_in_front = True
+        obj.hide_render = True
+    obj["af_fiber_endpoint_handle"] = True
+    obj["af_root_name"] = root.name
+    obj["af_fiber_id"] = fiber_id
+    obj["af_fiber_endpoint"] = endpoint
+    return obj
+
+
+def mark_touch_handle(obj, root, fiber_id, touch_index, apply_visual_defaults=False):
+    if obj is None:
+        return None
+    if bool(apply_visual_defaults):
+        obj.empty_display_type = "CUBE"
+        obj.empty_display_size = 0.03
+        obj.show_in_front = True
+        obj.hide_render = True
     obj["af_fiber_touch_handle"] = True
     obj["af_root_name"] = root.name
     obj["af_fiber_id"] = fiber_id
     obj["af_fiber_touch_index"] = int(touch_index)
-    vis_col.objects.link(obj)
     return obj
 
 

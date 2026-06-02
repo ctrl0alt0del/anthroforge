@@ -8,7 +8,7 @@ from ..selection import get_active_scp
 _SPEC_RE = re.compile(r"^([A-Za-z_]\w*)(?:\[(\d+)\])?$")
 _FULL_OBJECT_RE = re.compile(r"^bpy\.data\.objects\[(['\"])(.+?)\1\](.+)$")
 _ACTIVE_KINDS = {"active_scp_prop", "active_scp_object"}
-_FIXED_KINDS = {"scp_prop", "scp_object"}
+_FIXED_KINDS = {"scp_prop", "scp_object", "object_rna"}
 _RAW_KIND = "object_rna"
 
 

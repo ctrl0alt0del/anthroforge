@@ -37,6 +37,10 @@ from .operators.muscle_tools import (
 from .operators.blob_tools import AF_OT_SelectBlobControl
 from .operators.import_package import AF_OT_ImportPackage
 from .operators.shortcuts import AF_OT_AddDataShortcut, AF_OT_DeleteDataShortcut
+from .operators.control_objects import (
+    AFOTMarkSelectedSCPControlObject,
+    AFOTToggleControlObjectShortcutAxis,
+)
 from .operators.scp_objects import (
     AF_OT_AddSCPBoundObject,
     AF_OT_CreateEmptySCP,
@@ -57,6 +61,7 @@ from .ui.panels.vcp_edit_panel import AF_PT_VCPEditPanel
 from .ui.panels.blob_create_panel import AF_PT_BlobCreatePanel
 from .ui.panels.blob_edit_panel import AF_PT_BlobEditPanel
 from .ui.panels.shortcut_panel import AF_PT_ShortcutPanel
+from .ui.panels.control_objects_panel import AFPTControlObjectsPanel
 
 from .properties.scp_properties import (
     AF_SCP_BoundObject_Property,
@@ -146,7 +151,10 @@ classes = (
     AF_DataShortcut_System_Property,
     AF_OT_AddDataShortcut,
     AF_OT_DeleteDataShortcut,
+    AFOTMarkSelectedSCPControlObject,
+    AFOTToggleControlObjectShortcutAxis,
     AF_PT_ShortcutPanel,
+    AFPTControlObjectsPanel,
 )
 
 

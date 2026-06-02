@@ -12,6 +12,7 @@ class ControlBinding:
 
 
 CONTROL_FLAG_KEYS = (
+    "af_scp_control",
     "af_curve_point_handle",
     "af_parallelepiped_vert_handle",
     "af_fiber_endpoint_handle",
@@ -65,6 +66,16 @@ def classify_control_object(obj):
     root_name = _as_id(getattr(obj, "get", lambda *_: None)("af_root_name"))
     if not root_name:
         return None
+
+    if obj.get("af_scp_control"):
+        scp_id = _as_id(obj.get("af_scp_id"))
+        if scp_id:
+            return {
+                "control_type": "SCP_CONTROL_OBJECT",
+                "payload": {"root_name": root_name, "object_name": str(obj.name), "scp_id": scp_id},
+                "dirty_hints": {"SCP": {scp_id}},
+                "binding": ControlBinding(kind="DEFORMER_CONTROL", space="WORLD", target_path=f"SCP/{scp_id}/external_control"),
+            }
 
     if obj.get("af_curve_point_handle"):
         scp_id = _as_id(obj.get("af_scp_id"))

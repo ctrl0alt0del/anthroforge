@@ -21,6 +21,12 @@ def _poll_any_obj(self, obj):
     return obj is not None
 
 
+def _poll_scp_obj(self, obj):
+    scene = getattr(bpy.context, "scene", None)
+    root = get_af_root(scene)
+    return bool(root and obj and obj.get("af_root_name") == root.name and obj.get("af_scp_id") and obj.get("af_scp_bound"))
+
+
 def _register_scene_core_props():
     bpy.types.Scene.af_selection_sync_lock = bpy.props.BoolProperty(default=False)
 
@@ -28,6 +34,7 @@ def _register_scene_core_props():
 def _register_scene_pointer_props():
     bpy.types.Scene.af_scp_parent_obj = bpy.props.PointerProperty(name="SCP Parent", type=bpy.types.Object, poll=_poll_parent_proxy)
     bpy.types.Scene.af_scp_object_picker = bpy.props.PointerProperty(name="SCP Object", type=bpy.types.Object, poll=_poll_any_obj)
+    bpy.types.Scene.af_control_scp_obj = bpy.props.PointerProperty(name="Control SCP", type=bpy.types.Object, poll=_poll_scp_obj)
     bpy.types.Scene.af_new_fiber_origin_obj = bpy.props.PointerProperty(name="Fiber Origin", type=bpy.types.Object, poll=_poll_geometry_scp_mesh)
     bpy.types.Scene.af_new_fiber_insertion_obj = bpy.props.PointerProperty(name="Fiber Insertion", type=bpy.types.Object, poll=_poll_geometry_scp_mesh)
     bpy.types.Scene.af_new_blob_target_obj = bpy.props.PointerProperty(name="Blob Target", type=bpy.types.Object, poll=_poll_any_obj)
@@ -61,5 +68,5 @@ def _delete_scene_prop(name):
 
 
 def unregister_scene_props():
-    for name in ("af_shortcut_view_mode", "af_new_shortcut_path", "af_new_shortcut_name", "af_vcp_tree_collapsed_json", "af_tree_collapsed_json", "af_new_blob_target_obj", "af_new_fiber_insertion_obj", "af_new_fiber_origin_obj", "af_scp_object_picker", "af_scp_parent_obj", "af_selection_sync_lock"):
+    for name in ("af_shortcut_view_mode", "af_new_shortcut_path", "af_new_shortcut_name", "af_vcp_tree_collapsed_json", "af_tree_collapsed_json", "af_new_blob_target_obj", "af_new_fiber_insertion_obj", "af_new_fiber_origin_obj", "af_control_scp_obj", "af_scp_object_picker", "af_scp_parent_obj", "af_selection_sync_lock"):
         _delete_scene_prop(name)

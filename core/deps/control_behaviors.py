@@ -19,6 +19,9 @@ def _obj_in_scene(scene, name):
 def _apply_scp_control(root, scene, intent):
     if not isinstance(intent, ControlIntent):
         return {}
+    if str(getattr(intent, "control_type", "") or "") == "SCP_CONTROL_OBJECT":
+        sid = str(intent.payload.get("scp_id") or "")
+        return {"SCP": {sid}} if sid else {}
     obj = _obj_in_scene(scene, intent.payload.get("object_name"))
     if obj is None:
         return {}
@@ -73,7 +76,7 @@ def _apply_blob_control(root, scene, intent):
 
 def apply_control_intent(root, scene, intent):
     ctype = str(getattr(intent, "control_type", "") or "")
-    if ctype in ("SCP_CURVE_POINT", "SCP_PARALLELEPIPED_VERTEX"):
+    if ctype in ("SCP_CONTROL_OBJECT", "SCP_CURVE_POINT", "SCP_PARALLELEPIPED_VERTEX"):
         return _apply_scp_control(root, scene, intent)
     if ctype in ("FIBER_ENDPOINT", "FIBER_TOUCH"):
         return _apply_fiber_control(root, scene, intent)

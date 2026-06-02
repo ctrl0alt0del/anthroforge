@@ -34,6 +34,13 @@ def find_blob_control(vis_col, root_name, blob_id):
             and obj.get("af_blob_id") == blob_id
         ):
             return obj
+    for obj in bpy.data.objects:
+        if (
+            obj.get("af_blob_control_gizmo")
+            and obj.get("af_root_name") == root_name
+            and obj.get("af_blob_id") == blob_id
+        ):
+            return obj
     return None
 
 
@@ -49,14 +56,22 @@ def create_blob_proxy(vis_col, root, blob_id):
 
 def create_blob_control(vis_col, root, blob_id):
     ctrl = bpy.data.objects.new(f"AF_{blob_id}_CTRL", None)
-    ctrl.empty_display_type = "SPHERE"
-    ctrl.empty_display_size = 0.04
-    ctrl.show_in_front = True
-    ctrl.hide_render = True
+    mark_blob_control(ctrl, root, blob_id, apply_visual_defaults=True)
+    vis_col.objects.link(ctrl)
+    return ctrl
+
+
+def mark_blob_control(ctrl, root, blob_id, apply_visual_defaults=False):
+    if ctrl is None:
+        return None
+    if bool(apply_visual_defaults):
+        ctrl.empty_display_type = "SPHERE"
+        ctrl.empty_display_size = 0.04
+        ctrl.show_in_front = True
+        ctrl.hide_render = True
     ctrl["af_blob_control_gizmo"] = True
     ctrl["af_root_name"] = root.name
     ctrl["af_blob_id"] = blob_id
-    vis_col.objects.link(ctrl)
     return ctrl
 
 
