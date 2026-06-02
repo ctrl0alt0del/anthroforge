@@ -46,6 +46,11 @@ class AF_SCP_BoundObject_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     label: bpy.props.StringProperty(name="Label", default="")
     object_ref: bpy.props.PointerProperty(name="Object", type=bpy.types.Object)
+    native_parenting_enabled: bpy.props.BoolProperty(
+        name="Native Parenting",
+        description="When enabled, this object is parented to the SCP transform object in Blender parenting",
+        default=True,
+    )
 
 
 class AF_SCP_Property(bpy.types.PropertyGroup):

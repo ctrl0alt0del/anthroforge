@@ -1,3 +1,5 @@
+import bpy
+
 from ..id_utils import next_prefixed_id
 from .common import as_id, set_prop_raw
 from .object_colors import apply_object_color, ensure_scp_color
@@ -5,6 +7,10 @@ from .object_colors import apply_object_color, ensure_scp_color
 
 def _entry_obj(entry):
     return None if entry is None else getattr(entry, "object_ref", None)
+
+
+def _entry_native_parenting(entry):
+    return bool(getattr(entry, "native_parenting_enabled", True))
 
 
 def _same_object(entry, obj):
@@ -87,6 +93,7 @@ def _new_bound_entry(scp, obj):
     entry.id = next_prefixed_id(scp.bound_objects, "OBJ")
     entry.object_ref = obj
     entry.label = str(obj.name)
+    entry.native_parenting_enabled = True
     return entry
 
 
@@ -109,10 +116,68 @@ def _parent_keep_world(obj, parent):
     obj.matrix_world = world
 
 
+def _clear_parent_keep_world(obj, parent):
+    if obj is None or parent is None or getattr(obj, "parent", None) != parent:
+        return
+    world = obj.matrix_world.copy()
+    obj.parent = None
+    obj.matrix_world = world
+
+
 def _sync_parenting(scp):
     parent = getattr(scp, "transform_object_ref", None)
-    for _entry, obj in iter_bound_objects(scp):
-        _parent_keep_world(obj, parent) if parent and obj != parent else None
+    for entry, obj in iter_bound_objects(scp):
+        if not parent or obj == parent:
+            continue
+        if _entry_native_parenting(entry):
+            _parent_keep_world(obj, parent)
+        else:
+            _clear_parent_keep_world(obj, parent)
+
+
+def _root_host_collection(root):
+    cols = tuple(getattr(root, "users_collection", ()) or ())
+    if cols:
+        return cols[0]
+    scene = getattr(bpy.context, "scene", None)
+    return None if scene is None else scene.collection
+
+
+def _unlinked_collection_name(root, scp):
+    root_name = str(getattr(root, "name", "AF_ROOT") or "AF_ROOT")
+    scp_name = str(getattr(scp, "name", "") or "").strip()
+    scp_id = as_id(getattr(scp, "id", ""))
+    scp_token = scp_id or scp_name or "SCP"
+    return f"{root_name}_{scp_token}_UNLINKED"
+
+
+def _ensure_unlinked_collection(root, scp):
+    name = _unlinked_collection_name(root, scp)
+    col = bpy.data.collections.get(name)
+    if col is None:
+        col = bpy.data.collections.new(name)
+    host = _root_host_collection(root)
+    if host is not None and host.children.get(col.name) is None:
+        host.children.link(col)
+    return col
+
+
+def _move_object_to_collection(obj, target):
+    if obj is None or target is None:
+        return
+    if target.objects.get(obj.name) is None:
+        target.objects.link(obj)
+    for col in tuple(getattr(obj, "users_collection", ()) or ()):  # preserve a single clear home collection
+        if col != target:
+            try:
+                col.objects.unlink(obj)
+            except Exception:
+                pass
+
+
+def _route_bound_object_collection(root, scp, obj, native_parenting_enabled):
+    target = _root_host_collection(root) if bool(native_parenting_enabled) else _ensure_unlinked_collection(root, scp)
+    _move_object_to_collection(obj, target)
 
 
 def _sync_color(root, scp):
@@ -164,6 +229,22 @@ def remove_bound_object(root, scp, bound_id):
         return False
     _remove_object_from_scp(scp, obj)
     sync_scp_roles(root, scp)
+    return True
+
+
+def set_bound_native_parenting(root, scp, bound_id, enabled):
+    entry = find_bound_entry_by_id(scp, bound_id)
+    obj = _entry_obj(entry)
+    if entry is None or obj is None:
+        return False
+    if obj == getattr(scp, "transform_object_ref", None):
+        return False
+    value = bool(enabled)
+    if _entry_native_parenting(entry) == value:
+        return True
+    set_prop_raw(entry, "native_parenting_enabled", value)
+    sync_scp_roles(root, scp)
+    _route_bound_object_collection(root, scp, obj, value)
     return True
 
 

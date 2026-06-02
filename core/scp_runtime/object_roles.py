@@ -1,7 +1,7 @@
 import bpy
 
 from ..id_utils import next_prefixed_id
-from .bound_objects import ensure_bound_object, remove_bound_object, set_geometry_object, set_transform_object
+from .bound_objects import ensure_bound_object, remove_bound_object, set_bound_native_parenting, set_geometry_object, set_transform_object
 from .common import scp_for_object
 from .defaults import initialize_scp_entry
 from .object_colors import ensure_scp_color
@@ -55,3 +55,7 @@ def set_scp_geometry_object(root, scp, obj):
 
 def remove_scp_bound_object(root, scp, bound_id):
     return remove_bound_object(root, scp, bound_id)
+
+
+def set_scp_bound_native_parenting(root, scp, bound_id, enabled):
+    return set_bound_native_parenting(root, scp, bound_id, enabled)

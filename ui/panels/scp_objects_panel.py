@@ -31,6 +31,14 @@ def _draw_bound_row(box, scp, entry):
     row = box.row(align=True)
     row.label(text="" if obj is None else obj.name)
     row.label(text=_role_text(scp, entry))
+    if obj is not None and obj != getattr(scp, "transform_object_ref", None):
+        enabled = bool(getattr(entry, "native_parenting_enabled", True))
+        op = row.operator(
+            "af.toggle_scp_bound_native_parenting",
+            text="",
+            icon="LINKED" if enabled else "UNLINKED",
+        )
+        op.bound_id = entry.id
     if obj != getattr(scp, "transform_object_ref", None):
         op = row.operator("af.remove_scp_bound_object", text="", icon="X")
         op.bound_id = entry.id

@@ -1,7 +1,7 @@
 import bpy
 
 from ..core.deps.dirty_hints import dirty_hints_for
-from ..core.scp_runtime.object_roles import active_scp_from_context, add_bound_object_to_scp, create_scp, create_transform_empty, remove_scp_bound_object, set_scp_geometry_object, set_scp_transform_object
+from ..core.scp_runtime.object_roles import active_scp_from_context, add_bound_object_to_scp, create_scp, create_transform_empty, remove_scp_bound_object, set_scp_bound_native_parenting, set_scp_geometry_object, set_scp_transform_object
 from ..core.scp_runtime.object_colors import enable_object_color_view
 from ..core.scp_runtime.lookup import activate_scp
 from ..core.utils import get_af_root
@@ -154,5 +154,31 @@ class AF_OT_RemoveSCPBoundObject(bpy.types.Operator):
             return _report_error(self, "Select an SCP and a bound object.")
         if not remove_scp_bound_object(root, scp, self.bound_id):
             return _report_error(self, "Transform object cannot be removed.")
+        _sync_scp(context, scp.id)
+        return {"FINISHED"}
+
+
+class AF_OT_ToggleSCPBoundNativeParenting(bpy.types.Operator):
+    bl_idname = "af.toggle_scp_bound_native_parenting"
+    bl_label = "Toggle SCP Bound Native Parenting"
+    bl_options = {"REGISTER", "UNDO"}
+
+    bound_id: bpy.props.StringProperty(default="")
+
+    def execute(self, context):
+        root, scp = _active_scp(context)
+        if root is None or scp is None or not self.bound_id:
+            return _report_error(self, "Select an SCP and a bound object.")
+        entry = next((e for e in scp.bound_objects if str(getattr(e, "id", "")) == str(self.bound_id)), None)
+        if entry is None:
+            return _report_error(self, "Bound object was not found.")
+        obj = getattr(entry, "object_ref", None)
+        if obj is None:
+            return _report_error(self, "Bound object reference is missing.")
+        if obj == getattr(scp, "transform_object_ref", None):
+            return _report_error(self, "Transform object must keep native parenting.")
+        enabled = not bool(getattr(entry, "native_parenting_enabled", True))
+        if not set_scp_bound_native_parenting(root, scp, self.bound_id, enabled):
+            return _report_error(self, "Could not update native parenting setting.")
         _sync_scp(context, scp.id)
         return {"FINISHED"}
