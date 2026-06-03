@@ -2,7 +2,7 @@ import bpy
 
 from ...core.deps.controls import is_control_object
 from ...core.utils import get_af_root
-from ...operators.control_objects import has_axis_shortcut
+from ...core.visualization.control_object_shortcuts import has_axis_shortcut
 
 
 def _active_object(context):
