@@ -39,6 +39,7 @@ from .operators.import_package import AF_OT_ImportPackage
 from .operators.shortcuts import AF_OT_AddDataShortcut, AF_OT_DeleteDataShortcut
 from .operators.control_objects import (
     AFOTMarkSelectedSCPControlObject,
+    AFOTToggleControlObjectApplyParent,
     AFOTToggleControlObjectShortcutAxis,
 )
 from .operators.scp_objects import (
@@ -152,6 +153,7 @@ classes = (
     AF_OT_AddDataShortcut,
     AF_OT_DeleteDataShortcut,
     AFOTMarkSelectedSCPControlObject,
+    AFOTToggleControlObjectApplyParent,
     AFOTToggleControlObjectShortcutAxis,
     AF_PT_ShortcutPanel,
     AFPTControlObjectsPanel,

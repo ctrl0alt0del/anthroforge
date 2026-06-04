@@ -2,6 +2,7 @@ import bpy
 
 from ...core.deps.controls import is_control_object
 from ...core.utils import get_af_root
+from ...core.visualization.control_object_service import control_apply_parent_state
 from ...core.visualization.control_object_shortcuts import has_axis_shortcut
 
 
@@ -19,6 +20,8 @@ def _draw_checkbox_row(layout, axis, checked):
 def _draw_shortcut_checkbox_mode(layout, root, obj):
     box = layout.box()
     box.label(text=f"Control Object: {obj.name}", icon="CON_OBJECTSOLVER")
+    parent_icon = "CHECKBOX_HLT" if control_apply_parent_state(root, bpy.context) else "CHECKBOX_DEHLT"
+    box.operator("af.toggle_control_object_apply_parent", text="Apply Parent", icon=parent_icon)
     box.label(text="Position Components")
     for axis in ("X", "Y", "Z"):
         _draw_checkbox_row(box, axis, has_axis_shortcut(root, obj, axis))
