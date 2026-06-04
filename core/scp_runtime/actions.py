@@ -3,7 +3,7 @@ from ..utils import get_af_root
 from ..visualization.sync_runner import sync_from_dirty_hints
 from .attachment_runtime import capture_attachment_from_link
 from .bound_objects import set_geometry_object, set_transform_object
-from .common import find_geometry_mesh_scp_obj, find_scp_by_id, find_transform_scp_obj, is_transform_scp_obj, scp_for_object
+from .common import find_geometry_mesh_scp_obj, find_scp_by_id, find_transform_scp_obj, is_transform_scp_obj, scp_for_object, set_prop_raw
 from .link_state import restore_link_state, snapshot_link_state
 from .lookup import activate_scp, effective_parent_obj, set_parent_relation, would_create_parent_cycle
 from .object_colors import enable_object_color_view
@@ -75,10 +75,12 @@ def _would_reject_parent(operator, root, child_id, parent_obj):
 
 def _set_parent_with_capture(operator, context, child_scp, child_obj, parent_obj):
     snapshot = snapshot_link_state(child_scp)
-    set_parent_relation(child_obj, child_scp, parent_obj)
     root_name = get_af_root(context.scene).name
     child_geo = find_geometry_mesh_scp_obj(context.scene, root_name, child_scp.id)
     parent_geo = find_geometry_mesh_scp_obj(context.scene, root_name, parent_obj.get("af_scp_id"))
+    if child_geo is None and getattr(child_scp, "attach_child_anchor_mode", "FACE_CENTER") != "OBJECT_ORIGIN":
+        set_prop_raw(child_scp, "attach_child_anchor_mode", "OBJECT_ORIGIN")
+    set_parent_relation(child_obj, child_scp, parent_obj)
     if capture_attachment_from_link(child_scp, child_obj, child_geo, parent_obj, parent_geo):
         return True
     restore_link_state(child_scp, snapshot)

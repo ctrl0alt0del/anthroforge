@@ -55,12 +55,38 @@ class AF_OT_CreateEmptySCP(bpy.types.Operator):
     bl_label = "Create Empty SCP"
     bl_options = {"REGISTER", "UNDO"}
 
+    def _reusable_empty(self, context):
+        candidates = []
+        active = context.active_object
+        if active is not None:
+            candidates.append(active)
+        for obj in context.selected_objects:
+            if obj not in candidates:
+                candidates.append(obj)
+        for obj in candidates:
+            if obj is None or obj.type != "EMPTY":
+                continue
+            if obj.get("af_scp_mirror") or obj.get("af_scp_bound"):
+                continue
+            return obj
+        return None
+
+    def _reuse_selected_empty(self, context, root, scp):
+        obj = self._reusable_empty(context)
+        if obj is None:
+            return None
+        if not set_scp_transform_object(root, scp, obj):
+            return None
+        return obj
+
     def execute(self, context):
         root = get_af_root(context.scene)
         if root is None:
             return _report_error(self, "No AF_ROOT found in scene.")
         scp = create_scp(root)
-        obj = create_transform_empty(context, scp)
+        obj = self._reuse_selected_empty(context, root, scp)
+        if obj is None:
+            obj = create_transform_empty(context, scp)
         set_scp_transform_object(root, scp, obj)
         enable_object_color_view(context)
         activate_scp(root, scp.id)
