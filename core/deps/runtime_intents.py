@@ -3,6 +3,12 @@ import bpy
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+try:
+    from ...app.context import addon_context
+    from ...app.runtime_intents import dispatch_runtime_intent as dispatch_app_runtime_intent
+except ImportError:
+    from app.context import addon_context
+    from app.runtime_intents import dispatch_runtime_intent as dispatch_app_runtime_intent
 from ..utils import get_af_root
 from .dirty_hints import dirty_hints_for, empty_dirty_hints
 
@@ -51,18 +57,31 @@ def pop_runtime_intents(root):
 
 
 def dispatch_runtime_intent(root=None, scene=None, intent_type="", entity_type="", entity_id="", payload=None, dirty_hints=None, source="manual", event_type="UPDATE"):
-    root, scene = _resolve_root_scene(root, scene)
-    if root is None:
-        return
-    if not enqueue_runtime_intent(root, intent_type, entity_type, entity_id, payload, source, event_type):
-        return
-    _run_sync(root, scene, _seed_dirty_hints(dirty_hints, entity_type, entity_id), source, event_type)
+    dispatch_app_runtime_intent(
+        addon_context(root=root, scene=scene),
+        enqueue_runtime_intent,
+        _sync_fn(),
+        dirty_hints_for,
+        empty_dirty_hints,
+        intent_type=intent_type,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        payload=payload,
+        dirty_hints=dirty_hints,
+        source=source,
+        event_type=event_type,
+    )
 
 
 def _resolve_root_scene(root, scene):
     scene = scene or bpy.context.scene
     root = root or get_af_root(scene)
     return root, scene
+
+
+def _sync_fn():
+    from ..visualization.sync_runner import sync_from_dirty_hints
+    return sync_from_dirty_hints
 
 
 def _run_sync(root, scene, dirty_hints, source, event_type):

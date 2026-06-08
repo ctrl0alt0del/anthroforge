@@ -1,18 +1,12 @@
 ﻿import bpy
 
 from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
-from ..core.deps.runtime_intents import dispatch_runtime_intent
-from ..core.utils import get_af_root
+from ..app.runtime_api import dispatch_intent_context, sync_context
 
 
 def _sync_scene(context, scp_id=None, source="property", event_type="UPDATE"):
-    scene = context.scene if context else None
-    root = get_af_root(scene)
-    if root is None:
-        return
-    from ..core.visualization.sync_runner import sync_from_dirty_hints
     hints = dirty_hints_for("SCP", {scp_id}) if scp_id else empty_dirty_hints()
-    sync_from_dirty_hints(root=root, scene=scene, dirty_hints=hints, source=source, event_type=event_type)
+    sync_context(context, dirty_hints=hints, source=source, event_type=event_type)
 
 
 def _on_scp_prop_update(self, context):
@@ -32,8 +26,8 @@ def _on_attach_strategy_update(self, context):
 def _dispatch_attachment_recapture(context, scp_id):
     if not scp_id:
         return
-    dispatch_runtime_intent(
-        scene=context.scene if context else None,
+    dispatch_intent_context(
+        context,
         intent_type="SCP/RECAPTURE_ATTACHMENT",
         entity_type="SCP",
         entity_id=str(scp_id or ""),

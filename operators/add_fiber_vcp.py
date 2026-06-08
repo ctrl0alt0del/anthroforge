@@ -1,13 +1,13 @@
 import bpy
 from mathutils import Vector
 
+from ..app.runtime_api import sync_scene
 from ..core.utils import get_af_root
 from ..core.attachment_codec import encode_fiber_mesh_anchor
 from ..core.scp_runtime.common import find_geometry_mesh_scp_obj
 from ..core.id_utils import next_prefixed_id
 from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.visualization.fiber_sync_helpers import nearest_parent_mesh_vertex_local_point
-from ..core.visualization.sync_runner import sync_from_dirty_hints
 
 
 def _cancel(operator, message):
@@ -75,6 +75,6 @@ class AF_OT_AddFiberVCP(bpy.types.Operator):
             return _cancel(self, "Select valid SCP geometry endpoints.")
         f = self._new_fiber(root, *resolved)
         root.af_vcp_system.active_vcp_type, root.af_vcp_system.active_vcp_id = "FIBER", f.id
-        sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=dirty_hints_for("FIBER", {f.id}))
+        sync_scene(root=root, scene=context.scene, dirty_hints=dirty_hints_for("FIBER", {f.id}))
         self.report({"INFO"}, f"Added {f.id}")
         return {"FINISHED"}

@@ -1,6 +1,10 @@
 import bpy
 from bpy.app.handlers import persistent
 
+try:
+    from ...app.runtime_api import sync_scene
+except ImportError:
+    from app.runtime_api import sync_scene
 from ..deps.controls import classify_control_object, is_control_object
 from ..deps.control_lifecycle import should_remove_control_object_on_load, should_remove_control_object_on_save
 from ..deps.dirty_hints import dirty_hints_for, empty_dirty_hints
@@ -146,14 +150,7 @@ def _merge_hints(target, source):
 
 
 def _sync_from_hints(root, scene, hints):
-    from .sync_runner import schedule_sync_from_dirty_hints
-    schedule_sync_from_dirty_hints(
-        root=root,
-        scene=scene,
-        dirty_hints=hints,
-        source="depsgraph",
-        event_type="SELECTION",
-    )
+    sync_scene(root=root, scene=scene, dirty_hints=hints, source="depsgraph", event_type="SELECTION")
 
 
 class ControlRuntimeOrchestrator:
@@ -244,15 +241,8 @@ def _prime_evaluated_depsgraph():
 
 
 def _hydrate_runtime_state(root, scene):
-    from .sync_runner import sync_from_dirty_hints
     _prime_evaluated_depsgraph()
-    sync_from_dirty_hints(
-        root=root,
-        scene=scene,
-        dirty_hints=empty_dirty_hints(),
-        source="load",
-        event_type="LOAD",
-    )
+    sync_scene(root=root, scene=scene, dirty_hints=empty_dirty_hints(), source="load", event_type="LOAD")
 
 
 def _ensure_runtime_handlers():

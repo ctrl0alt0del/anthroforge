@@ -1,7 +1,8 @@
 import bpy
+
+from ..app.runtime_api import sync_scene
 from ..core.deps.dirty_hints import empty_dirty_hints
 from ..core.utils import create_af_root
-from ..core.visualization.sync_runner import sync_from_dirty_hints
 class AF_OT_CreateRoot(bpy.types.Operator):
     bl_idname = "af.create_root"
     bl_label = "Create AnthroForge Root"
@@ -13,5 +14,5 @@ class AF_OT_CreateRoot(bpy.types.Operator):
           return {'CANCELLED'}
       root = create_af_root(context.scene)
       self.report({'INFO'}, "AnthroForge Root created.")
-      sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=empty_dirty_hints())
+      sync_scene(root=root, scene=context.scene, dirty_hints=empty_dirty_hints())
       return {'FINISHED'}

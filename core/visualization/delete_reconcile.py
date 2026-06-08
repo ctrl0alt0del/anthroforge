@@ -1,6 +1,10 @@
 import bpy
 from bpy.app.handlers import persistent
 
+try:
+    from ...app.runtime_api import sync_scene
+except ImportError:
+    from app.runtime_api import sync_scene
 from ..deps.dirty_hints import empty_dirty_hints
 from ..scp_runtime.bound_objects import sync_all_scp_roles
 from ..utils import get_af_root
@@ -214,8 +218,7 @@ class DeleteReconcileRuntime:
 def _run_delete_sync(runtime, scene, root):
     runtime._syncing = True
     try:
-        from .sync_runner import sync_from_dirty_hints
-        sync_from_dirty_hints(root=root, scene=scene, dirty_hints=empty_dirty_hints(), source="depsgraph", event_type="DELETE")
+        sync_scene(root=root, scene=scene, dirty_hints=empty_dirty_hints(), source="depsgraph", event_type="DELETE")
     finally:
         runtime._syncing = False
 

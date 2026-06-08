@@ -1,12 +1,12 @@
 import bpy
 
+from ..app.runtime_api import sync_context
 from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.scp_runtime.object_roles import active_scp_from_context, add_bound_object_to_scp, create_scp, create_transform_empty, remove_scp_bound_object, set_scp_bound_native_parenting, set_scp_geometry_object, set_scp_transform_object
 from ..core.scp_runtime.object_colors import enable_object_color_view
 from ..core.scp_runtime.lookup import activate_scp
 from ..core.utils import get_af_root
 from ..core.visualization.control_runtime import notify_selection_changed
-from ..core.visualization.sync_runner import sync_from_dirty_hints
 
 
 def _active_scp(context):
@@ -20,7 +20,7 @@ def _picker_obj(scene):
 
 
 def _sync_scp(context, scp_id, event_type="UPDATE"):
-    sync_from_dirty_hints(root=get_af_root(context.scene), scene=context.scene, dirty_hints=dirty_hints_for("SCP", {scp_id}), source="operator", event_type=event_type)
+    sync_context(context, dirty_hints=dirty_hints_for("SCP", {scp_id}), source="operator", event_type=event_type)
 
 
 def _report_error(operator, message):

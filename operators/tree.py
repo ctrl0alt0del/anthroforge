@@ -1,4 +1,5 @@
 import bpy
+from ..app.runtime_api import sync_scene
 from ..core.utils import get_af_root
 from ..core.deps.dirty_hints import empty_dirty_hints
 from ..core.scp_runtime.actions import execute_reparent_scp
@@ -10,7 +11,6 @@ from ..core.scp_runtime.object_colors import enable_object_color_view
 from ..core.scp_runtime.tree import children_map
 from ..ui.tree_state import toggle_collapsed, toggle_vcp_collapsed
 from ..core.deps.dirty_hints import dirty_hints_for
-from ..core.visualization.sync_runner import sync_from_dirty_hints
 from ..core.visualization.control_runtime import notify_selection_changed
 
 
@@ -90,7 +90,7 @@ class AF_OT_DeleteSCPInTree(bpy.types.Operator):
             return {"CANCELLED"}
         if not delete_scp(root, context.scene, self.scp_id):
             return {"CANCELLED"}
-        sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=empty_dirty_hints(), source="operator", event_type="DELETE")
+        sync_scene(root=root, scene=context.scene, dirty_hints=empty_dirty_hints(), source="operator", event_type="DELETE")
         notify_selection_changed(context.scene, force=True)
         return {"FINISHED"}
 
@@ -144,7 +144,7 @@ class AF_OT_CopySCPInTree(bpy.types.Operator):
         if root is None or not new_id:
             return {"CANCELLED"}
         _select_copied_scp(context, root, new_id)
-        sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=empty_dirty_hints(), source="operator", event_type="MARK")
+        sync_scene(root=root, scene=context.scene, dirty_hints=empty_dirty_hints(), source="operator", event_type="MARK")
         notify_selection_changed(context.scene, force=True)
         return {"FINISHED"}
 
@@ -241,7 +241,7 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
 
     def _sync_selected_vcp(self, context, root):
         notify_selection_changed(context.scene)
-        sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=dirty_hints_for(self.node_type, {self.node_id}), bake=False)
+        sync_scene(root=root, scene=context.scene, dirty_hints=dirty_hints_for(self.node_type, {self.node_id}), bake=False)
 
     def execute(self, context):
         root = get_af_root(context.scene)

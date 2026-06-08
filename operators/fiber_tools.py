@@ -2,13 +2,13 @@ import bpy
 import time
 from mathutils import Vector
 
+from ..app.runtime_api import sync_scene
 from ..core.utils import get_af_root
 from ..core.attachment_codec import encode_fiber_mesh_anchor
 from ..core.scp_runtime.common import find_geometry_mesh_scp_obj, is_bound_scp_obj
 from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.visualization.fiber_sync import register_fiber_sync
 from ..core.visualization.fiber_sync_helpers import nearest_parent_mesh_vertex_local_point
-from ..core.visualization.sync_runner import sync_from_dirty_hints
 
 
 def _cancel(operator, message):
@@ -74,12 +74,7 @@ class AF_OT_RecomputeFiber(bpy.types.Operator):
 
     def _run_bake_passes(self, root, scene, fiber, max_passes):
         for _ in range(max_passes):
-            sync_from_dirty_hints(
-                root=root,
-                scene=scene,
-                dirty_hints=dirty_hints_for("FIBER", {fiber.id}),
-                bake=True,
-            )
+            sync_scene(root=root, scene=scene, dirty_hints=dirty_hints_for("FIBER", {fiber.id}), bake=True)
             if not fiber.not_converged:
                 return True
         return False
@@ -177,7 +172,7 @@ class AF_OT_AddFiberTouchPoint(bpy.types.Operator):
         tp.attach_param = p
         self._mark_interactive_preferred(fiber)
         register_fiber_sync().clear_solver_cache(fiber.id)
-        sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=dirty_hints_for("FIBER", {fiber.id}), bake=False)
+        sync_scene(root=root, scene=context.scene, dirty_hints=dirty_hints_for("FIBER", {fiber.id}), bake=False)
         return {"FINISHED"}
 
 
@@ -215,10 +210,5 @@ class AF_OT_RemoveFiberTouchPoint(bpy.types.Operator):
 
         sync = register_fiber_sync()
         sync.clear_solver_cache(fiber.id)
-        sync_from_dirty_hints(
-            root=root,
-            scene=context.scene,
-            dirty_hints=dirty_hints_for("FIBER", {fiber.id}),
-            bake=False,
-        )
+        sync_scene(root=root, scene=context.scene, dirty_hints=dirty_hints_for("FIBER", {fiber.id}), bake=False)
         return {"FINISHED"}

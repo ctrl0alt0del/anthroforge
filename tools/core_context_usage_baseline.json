@@ -15,6 +15,5 @@
   "core/visualization/fiber_sync_runtime.py::bpy.context": 2,
   "core/visualization/muscle_sync.py::bpy.context": 1,
   "core/visualization/muscle_sync_helpers.py::bpy.context": 1,
-  "core/visualization/sync_runner.py::bpy.context": 1,
   "core/visualization/vcp_mirror_runtime.py::bpy.context": 1
 }

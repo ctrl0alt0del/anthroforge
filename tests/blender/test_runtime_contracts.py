@@ -13,6 +13,8 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 import bpy
 
 from _helpers import BlenderTestCase, empty_object, root, scp_with_object
+from app.context import AddonContext
+from app.runtime_requests import RuntimeRequest
 from core.deps.drivers import DependencyDriver
 from core.visualization.scp_control_helpers import mark_scp_control_object
 from core.visualization import control_runtime, delete_reconcile, sync_runner
@@ -99,6 +101,16 @@ class RuntimeContractTests(BlenderTestCase):
         self.assertEqual(meta["payload"]["scp_apply_parent_ids"], ["S1"])
         self.assertEqual(meta["payload"]["non_source_ids_by_type"]["SCP"], ["S2"])
 
+    def test_schedule_sync_queues_explicit_context_and_request_objects(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        root_obj = root()
+        sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"SCP": {"S1"}}, source="depsgraph", event_type="DELETE", payload={"scp_recapture_ids": ["S1"]})
+        ctx, request = sync_runner._PENDING[0]
+        self.assertEqual((isinstance(ctx, AddonContext), isinstance(request, RuntimeRequest)), (True, True))
+        self.assertEqual((ctx.root, ctx.scene, request.source, request.event_type), (root_obj, bpy.context.scene, "depsgraph", "DELETE"))
+        self.assertEqual(request.payload["scp_recapture_ids"], ["S1"])
+
     def test_source_start_nodes_exclude_non_source_payload_ids(self):
         starts = {("SCP", "S1"), ("SCP", "S2"), ("FIBER", "F1")}
         meta = {"payload": {"non_source_ids_by_type": {"SCP": ["S2"]}}}
@@ -117,6 +129,14 @@ class RuntimeContractTests(BlenderTestCase):
         queued = runtime_intents.pop_runtime_intents(root_obj)
         self.assertEqual((queued[0].intent_type, queued[0].entity_id), ("SCP/RECAPTURE_ATTACHMENT", "S1"))
         self.assertEqual(sync.call_args.kwargs["dirty_hints"]["SCP"], {"S1"})
+
+    def test_dispatch_runtime_intent_resolves_root_from_scene_context(self):
+        root_obj = root()
+        runtime_intents.pop_runtime_intents(root_obj)
+        with patch("core.visualization.sync_runner.sync_from_dirty_hints") as sync:
+            runtime_intents.dispatch_runtime_intent(scene=bpy.context.scene, intent_type="SCP/RECAPTURE_ATTACHMENT", entity_type="SCP", entity_id="S1", source="property")
+        queued = runtime_intents.pop_runtime_intents(root_obj)
+        self.assertEqual((queued[0].intent_type, sync.call_args.kwargs["root"]), ("SCP/RECAPTURE_ATTACHMENT", root_obj))
 
     def test_apply_runtime_intent_recapture_returns_scp_impact(self):
         intent = runtime_intents.RuntimeIntent(intent_type="SCP/RECAPTURE_ATTACHMENT", entity_type="SCP", entity_id="S1")
