@@ -37,14 +37,21 @@ def _sync_touch_handle(sync, vis_col, root, scene, runtime_registry, fiber, inde
 
 def _cleanup_stale_handles(vis_col, root_name, live_endpoint_keys, live_touch_keys):
     for obj in list(vis_col.objects):
-        if obj.get("af_fiber_endpoint_handle") and obj.get("af_root_name") == root_name:
-            key = (obj.get("af_fiber_id"), obj.get("af_fiber_endpoint"))
+        if _safe_get(obj, "af_fiber_endpoint_handle") and _safe_get(obj, "af_root_name") == root_name:
+            key = (_safe_get(obj, "af_fiber_id"), _safe_get(obj, "af_fiber_endpoint"))
             if key not in live_endpoint_keys:
                 bpy.data.objects.remove(obj, do_unlink=True)
-        if obj.get("af_fiber_touch_handle") and obj.get("af_root_name") == root_name:
-            key = (obj.get("af_fiber_id"), int(obj.get("af_fiber_touch_index", -1)))
+        if _safe_get(obj, "af_fiber_touch_handle") and _safe_get(obj, "af_root_name") == root_name:
+            key = (_safe_get(obj, "af_fiber_id"), int(_safe_get(obj, "af_fiber_touch_index", -1)))
             if key not in live_touch_keys:
                 bpy.data.objects.remove(obj, do_unlink=True)
+
+
+def _safe_get(obj, key, default=None):
+    try:
+        return obj.get(key, default)
+    except ReferenceError:
+        return default
 
 
 def _active_fiber_id(root):

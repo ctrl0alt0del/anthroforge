@@ -72,11 +72,11 @@ def _update_blob_meta(sync, root, vcp, bp, obj, result):
 
 def _cleanup_stale_blob_objects(sync, vis_col, root_name, all_blob_ids):
     for o in list(vis_col.objects):
-        if o.get("af_root_name") != root_name:
+        if _safe_get(o, "af_root_name") != root_name:
             continue
-        if o.get("af_blob_proxy") and o.get("af_blob_id") not in all_blob_ids:
+        if _safe_get(o, "af_blob_proxy") and _safe_get(o, "af_blob_id") not in all_blob_ids:
             sync._remove_proxy(o)
-        if o.get("af_blob_control_gizmo") and o.get("af_blob_id") not in all_blob_ids:
+        if _safe_get(o, "af_blob_control_gizmo") and _safe_get(o, "af_blob_id") not in all_blob_ids:
             sync._remove_ctrl(o)
 
 
@@ -111,9 +111,9 @@ def sync_root_to_scene(sync, root=None, scene=None, target_blob_ids=None):
 
         _cleanup_stale_blob_objects(sync, vis_col, root.name, all_blob_ids)
         for o in list(vis_col.objects):
-            if not o.get("af_blob_control_gizmo") or o.get("af_root_name") != root.name:
+            if not _safe_get(o, "af_blob_control_gizmo") or _safe_get(o, "af_root_name") != root.name:
                 continue
-            if active_blob_id and o.get("af_blob_id") == active_blob_id:
+            if active_blob_id and _safe_get(o, "af_blob_id") == active_blob_id:
                 continue
             sync._remove_ctrl(o)
     finally:
@@ -173,6 +173,13 @@ def apply_blob_control_update(sync, root, scene, obj):
         return None
     b.control_point_world = (new_loc.x, new_loc.y, new_loc.z)
     return bid
+
+
+def _safe_get(obj, key, default=None):
+    try:
+        return obj.get(key, default)
+    except ReferenceError:
+        return default
 
 
 def on_depsgraph_update(sync, scene, depsgraph):

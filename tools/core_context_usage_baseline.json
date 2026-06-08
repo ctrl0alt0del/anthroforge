@@ -1,0 +1,20 @@
+{
+  "core/deps/control_behaviors.py::bpy.context": 2,
+  "core/deps/runtime_intents.py::bpy.context": 1,
+  "core/importing/extract.py::bpy.context": 1,
+  "core/importing/stage.py::bpy.context": 1,
+  "core/scp_runtime/attachment_runtime.py::bpy.context": 5,
+  "core/scp_runtime/bound_objects.py::bpy.context": 1,
+  "core/scp_runtime/object_roles.py::bpy.context": 1,
+  "core/scp_runtime/sync_runtime.py::bpy.context": 2,
+  "core/utils.py::bpy.context": 1,
+  "core/vcp/fiber_solver.py::bpy.context": 1,
+  "core/visualization/blob_sync_runtime.py::bpy.context": 1,
+  "core/visualization/control_runtime.py::bpy.context": 3,
+  "core/visualization/fiber_sync_helpers.py::bpy.context": 4,
+  "core/visualization/fiber_sync_runtime.py::bpy.context": 2,
+  "core/visualization/muscle_sync.py::bpy.context": 1,
+  "core/visualization/muscle_sync_helpers.py::bpy.context": 1,
+  "core/visualization/sync_runner.py::bpy.context": 1,
+  "core/visualization/vcp_mirror_runtime.py::bpy.context": 1
+}

@@ -21,7 +21,7 @@ def _snapshot_expr(outpath):
 
 
 def _snapshot_cmd(filepath, outpath):
-    return [bpy.app.binary_path, "-b", filepath, "--python-expr", _snapshot_expr(outpath)]
+    return [bpy.app.binary_path, "-b", filepath, "--addons", _module_name(), "--python-exit-code", "1", "--python-expr", _snapshot_expr(outpath)]
 
 
 def _run_snapshot_dump(filepath, outpath):
