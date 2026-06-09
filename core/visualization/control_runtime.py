@@ -9,24 +9,24 @@ from ..deps.controls import classify_control_object, is_control_object
 from ..deps.control_lifecycle import should_remove_control_object_on_load, should_remove_control_object_on_save
 from ..deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 from ..scp_runtime.common import is_bound_scp_obj
-from ..utils import get_af_root
+from ..utils import depsgraph_for_scene, get_af_root, view_layer_for_scene
 
 
 ENTITY_TYPES = ("SCP", "FIBER", "MUSCLE", "BLOB")
 
 
-def _active_object():
+def _active_object(scene, active_object=None):
+    if active_object is not None:
+        return active_object
     try:
-        ctx = bpy.context
-        if ctx is None or ctx.view_layer is None:
-            return None
-        return ctx.view_layer.objects.active
+        layer = view_layer_for_scene(scene)
+        return None if layer is None else layer.objects.active
     except Exception:
         return None
 
 
-def _entity_from_active_object(root):
-    obj = _active_object()
+def _entity_from_active_object(root, scene, active_object=None):
+    obj = _active_object(scene, active_object)
     if obj is None or obj.get("af_root_name") != root.name:
         return "NONE", ""
     if is_bound_scp_obj(obj, root.name):
@@ -90,16 +90,16 @@ def _active_vcp_entity(root):
     return (vtype, vid) if vtype in ENTITY_TYPES[1:] and vid else None
 
 
-def resolve_active_entity(root):
-    direct = _entity_from_active_object(root)
+def resolve_active_entity(root, scene=None, active_object=None):
+    direct = _entity_from_active_object(root, scene, active_object)
     if direct[0] != "NONE":
         return direct
     return _active_scp_entity(root) or _active_vcp_entity(root) or ("NONE", "")
 
 
-def active_entity_id(root, entity_type):
+def active_entity_id(root, entity_type, scene=None, active_object=None):
     et = str(entity_type or "").upper()
-    cur_type, cur_id = resolve_active_entity(root)
+    cur_type, cur_id = resolve_active_entity(root, scene, active_object)
     if cur_type == et and cur_id:
         return cur_id
     return ""
@@ -173,10 +173,10 @@ class ControlRuntimeOrchestrator:
             return
         self.sync_now(scene, force=False)
 
-    def sync_now(self, scene, force=False):
+    def sync_now(self, scene, force=False, active_object=None):
         if self._syncing:
             return
-        state = self._sync_state(scene, force)
+        state = self._sync_state(scene, force, active_object)
         if state is None:
             return
         prev, current = state
@@ -189,8 +189,8 @@ class ControlRuntimeOrchestrator:
     def _clear_last_active(self):
         self._last_active = ("NONE", "")
 
-    def _sync_state(self, scene, force):
-        root, current = _root_and_current(scene)
+    def _sync_state(self, scene, force, active_object=None):
+        root, current = _root_and_current(scene, active_object)
         if root is None:
             self._clear_last_active()
             return None
@@ -215,16 +215,23 @@ def _on_load_post(_dummy):
     _remove_transient_controls(should_remove_control_object_on_load)
     if _CONTROL_RUNTIME is not None:
         _CONTROL_RUNTIME.reset()
-    scene = getattr(bpy.context, "scene", None)
+    scene = _load_scene()
     root, current = _root_and_current(scene)
     if root is None:
         return
     _hydrate_load_state(root, scene, current)
 
 
-def _root_and_current(scene):
+def _root_and_current(scene, active_object=None):
     root = get_af_root(scene)
-    return root, ("NONE", "") if root is None else resolve_active_entity(root)
+    return root, ("NONE", "") if root is None else resolve_active_entity(root, scene, active_object)
+
+
+def _load_scene():
+    for scene in bpy.data.scenes:
+        if get_af_root(scene) is not None:
+            return scene
+    return bpy.data.scenes[0] if bpy.data.scenes else None
 
 
 def _hydrate_load_state(root, scene, current):
@@ -233,15 +240,12 @@ def _hydrate_load_state(root, scene, current):
     _ensure_runtime_handlers()
 
 
-def _prime_evaluated_depsgraph():
-    try:
-        bpy.context.evaluated_depsgraph_get()
-    except Exception:
-        return
+def _prime_evaluated_depsgraph(scene):
+    depsgraph_for_scene(scene)
 
 
 def _hydrate_runtime_state(root, scene):
-    _prime_evaluated_depsgraph()
+    _prime_evaluated_depsgraph(scene)
     sync_scene(root=root, scene=scene, dirty_hints=empty_dirty_hints(), source="load", event_type="LOAD")
 
 
@@ -266,9 +270,9 @@ def register_control_runtime():
     return _CONTROL_RUNTIME
 
 
-def notify_selection_changed(scene, force=False):
+def notify_selection_changed(scene, force=False, active_object=None):
     runtime = register_control_runtime()
-    runtime.sync_now(scene, force=bool(force))
+    runtime.sync_now(scene, force=bool(force), active_object=active_object)
 
 
 def unregister_control_runtime():

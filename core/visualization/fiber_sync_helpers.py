@@ -277,29 +277,40 @@ def nearest_parent_mesh_vertex_local_point(parent_proxy, moved_world):
     return best_local
 
 
-def get_active_view3d_region():
-    wm = bpy.context.window_manager
-    for win in wm.windows:
-        screen = win.screen
-        for area in screen.areas:
-            if area.type != "VIEW_3D":
-                continue
-            rv3d = None
-            for sp in area.spaces:
-                if sp.type == "VIEW_3D":
-                    rv3d = sp.region_3d
-                    break
-            if rv3d is None:
-                continue
-            region = next((r for r in area.regions if r.type == "WINDOW"), None)
-            if region is None:
-                continue
+def _first_window_manager():
+    managers = tuple(getattr(bpy.data, "window_managers", ()) or ())
+    return managers[0] if managers else None
+
+
+def _iter_view3d_areas(window_manager):
+    for win in getattr(window_manager, "windows", ()):
+        for area in getattr(getattr(win, "screen", None), "areas", ()):
+            if area.type == "VIEW_3D":
+                yield area
+
+
+def _view3d_region(area):
+    return next((r for r in area.regions if r.type == "WINDOW"), None)
+
+
+def _view3d_space(area):
+    return next((sp.region_3d for sp in area.spaces if sp.type == "VIEW_3D"), None)
+
+
+def get_active_view3d_region(window_manager=None):
+    wm = window_manager or _first_window_manager()
+    if wm is None:
+        return None, None
+    for area in _iter_view3d_areas(wm):
+        region = _view3d_region(area)
+        rv3d = _view3d_space(area)
+        if region is not None and rv3d is not None:
             return region, rv3d
     return None, None
 
 
-def world_units_per_pixel(world_loc):
-    region, rv3d = get_active_view3d_region()
+def world_units_per_pixel(world_loc, window_manager=None):
+    region, rv3d = get_active_view3d_region(window_manager)
     if region is None or rv3d is None:
         return None
     p2d = view3d_utils.location_3d_to_region_2d(region, rv3d, world_loc)

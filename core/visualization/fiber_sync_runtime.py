@@ -15,24 +15,24 @@ def _iter_endpoints(fiber):
     )
 
 
-def _sync_endpoint_handle(sync, vis_col, root, scene, runtime_registry, fiber, endpoint, parent_id, raw):
+def _sync_endpoint_handle(sync, vis_col, root, scene, runtime_registry, fiber, endpoint, parent_id, raw, window_manager=None):
     h = sync._find_endpoint_handle(vis_col, root.name, fiber.id, endpoint)
     if h is None:
         h = sync._create_endpoint_handle(vis_col, root, fiber.id, endpoint)
     w = sync._endpoint_world(root, scene, runtime_registry, parent_id, raw)
     if w is not None:
         h.location = w
-        sync._set_helper_screen_size(h, px=14.0)
+        sync._set_helper_screen_size(h, px=14.0, window_manager=window_manager)
 
 
-def _sync_touch_handle(sync, vis_col, root, scene, runtime_registry, fiber, index, touch):
+def _sync_touch_handle(sync, vis_col, root, scene, runtime_registry, fiber, index, touch, window_manager=None):
     h = sync._find_touch_handle(vis_col, root.name, fiber.id, index)
     if h is None:
         h = sync._create_touch_handle(vis_col, root, fiber.id, index)
     w = sync._endpoint_world(root, scene, runtime_registry, touch.parent_id, touch.attach_param)
     if w is not None:
         h.location = w
-        sync._set_helper_screen_size(h, px=12.0)
+        sync._set_helper_screen_size(h, px=12.0, window_manager=window_manager)
 
 
 def _cleanup_stale_handles(vis_col, root_name, live_endpoint_keys, live_touch_keys):
@@ -58,7 +58,7 @@ def _active_fiber_id(root):
     return active_entity_id(root, "FIBER")
 
 
-def sync_handles(sync, root, scene, vis_col, runtime_registry):
+def sync_handles(sync, root, scene, vis_col, runtime_registry, window_manager=None):
     live_endpoint_keys = set()
     live_touch_keys = set()
     active_fiber_id = _active_fiber_id(root)
@@ -68,11 +68,11 @@ def sync_handles(sync, root, scene, vis_col, runtime_registry):
             continue
         for endpoint, pid, raw in _iter_endpoints(fiber):
             live_endpoint_keys.add((fiber.id, endpoint))
-            _sync_endpoint_handle(sync, vis_col, root, scene, runtime_registry, fiber, endpoint, pid, raw)
+            _sync_endpoint_handle(sync, vis_col, root, scene, runtime_registry, fiber, endpoint, pid, raw, window_manager)
 
         for i, tp in enumerate(fiber.mid_touches):
             live_touch_keys.add((fiber.id, i))
-            _sync_touch_handle(sync, vis_col, root, scene, runtime_registry, fiber, i, tp)
+            _sync_touch_handle(sync, vis_col, root, scene, runtime_registry, fiber, i, tp, window_manager)
     _cleanup_stale_handles(vis_col, root.name, live_endpoint_keys, live_touch_keys)
 
 
@@ -121,7 +121,7 @@ def _sync_inputs(root, scene):
     return root, scene, depsgraph
 
 
-def sync_root_to_scene(sync, root=None, scene=None, bake=False, target_fiber_ids=None):
+def sync_root_to_scene(sync, root=None, scene=None, bake=False, target_fiber_ids=None, window_manager=None):
     if sync._syncing:
         return
     root, scene, depsgraph = _sync_inputs(root, scene)
@@ -140,7 +140,7 @@ def sync_root_to_scene(sync, root=None, scene=None, bake=False, target_fiber_ids
 
         _cleanup_stale_fiber_proxies(vis_col, root.name, {f.id for f in root.af_vcp_system.fibers})
 
-        sync._sync_handles(root, scene, vis_col, {})
+        sync._sync_handles(root, scene, vis_col, {}, window_manager=window_manager)
         sync._apply_selection_highlight(root, scene)
     finally:
         sync._syncing = False

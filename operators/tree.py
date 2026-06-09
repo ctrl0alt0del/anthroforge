@@ -73,7 +73,7 @@ class AF_OT_SelectSCPInTree(bpy.types.Operator):
             return {"CANCELLED"}
         self._select_only(context, target_obj)
         self._set_active_scp_index(context.scene, root, target_index)
-        notify_selection_changed(context.scene)
+        notify_selection_changed(context.scene, active_object=context.active_object)
         return {"FINISHED"}
 
 
@@ -91,7 +91,7 @@ class AF_OT_DeleteSCPInTree(bpy.types.Operator):
         if not delete_scp(root, context.scene, self.scp_id):
             return {"CANCELLED"}
         sync_scene(root=root, scene=context.scene, dirty_hints=empty_dirty_hints(), source="operator", event_type="DELETE")
-        notify_selection_changed(context.scene, force=True)
+        notify_selection_changed(context.scene, force=True, active_object=context.active_object)
         return {"FINISHED"}
 
 
@@ -145,7 +145,7 @@ class AF_OT_CopySCPInTree(bpy.types.Operator):
             return {"CANCELLED"}
         _select_copied_scp(context, root, new_id)
         sync_scene(root=root, scene=context.scene, dirty_hints=empty_dirty_hints(), source="operator", event_type="MARK")
-        notify_selection_changed(context.scene, force=True)
+        notify_selection_changed(context.scene, force=True, active_object=context.active_object)
         return {"FINISHED"}
 
 
@@ -240,7 +240,7 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
         context.view_layer.objects.active = obj
 
     def _sync_selected_vcp(self, context, root):
-        notify_selection_changed(context.scene)
+        notify_selection_changed(context.scene, active_object=context.active_object)
         sync_scene(root=root, scene=context.scene, dirty_hints=dirty_hints_for(self.node_type, {self.node_id}), bake=False)
 
     def execute(self, context):

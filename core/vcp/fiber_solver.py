@@ -1,9 +1,9 @@
-import bpy
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
 from ..attachment_codec import parse_fiber_attach_param
 from ..scp_runtime.common import find_geometry_scp_obj, iter_geometry_mesh_scp_objects
+from ..utils import depsgraph_for_scene, scene_for_id
 
 
 class FiberSolver:
@@ -226,28 +226,39 @@ class FiberSolver:
     def _get_scp_proxy(self, root, scene, scp_id):
         return find_geometry_scp_obj(scene, root.name, scp_id)
 
+    def _shape_param(self, payload):
+        try:
+            return max(0.0, min(1.0, float(payload)))
+        except Exception:
+            return 0.0
+
+    def _open_shape_param_mesh(self, parent_obj):
+        depsgraph = depsgraph_for_scene(scene_for_id(parent_obj))
+        if depsgraph is None:
+            return None, None
+        obj_eval = parent_obj.evaluated_get(depsgraph)
+        return obj_eval, obj_eval.to_mesh()
+
+    def _clear_shape_param_mesh(self, obj_eval, mesh_eval):
+        if obj_eval is not None and mesh_eval is not None:
+            obj_eval.to_mesh_clear()
+        return None
+
+    def _shape_param_vertex(self, mesh_eval, payload):
+        if len(mesh_eval.vertices) == 1:
+            return mesh_eval.vertices[0].co.copy()
+        idx = int(round(payload * float(len(mesh_eval.vertices) - 1)))
+        idx = max(0, min(len(mesh_eval.vertices) - 1, idx))
+        return mesh_eval.vertices[idx].co.copy()
+
     def _mesh_local_point_from_shape_param(self, parent_obj, payload):
         if parent_obj is None or parent_obj.type != "MESH" or parent_obj.data is None:
             return None
-        try:
-            p = max(0.0, min(1.0, float(payload)))
-        except Exception:
-            p = 0.0
-
-        depsgraph = bpy.context.evaluated_depsgraph_get()
-        obj_eval = parent_obj.evaluated_get(depsgraph)
-        mesh_eval = obj_eval.to_mesh()
+        obj_eval, mesh_eval = self._open_shape_param_mesh(parent_obj)
         if mesh_eval is None or len(mesh_eval.vertices) == 0:
-            if mesh_eval is not None:
-                obj_eval.to_mesh_clear()
-            return None
-
+            return self._clear_shape_param_mesh(obj_eval, mesh_eval)
         try:
-            if len(mesh_eval.vertices) == 1:
-                return mesh_eval.vertices[0].co.copy()
-            idx = int(round(p * float(len(mesh_eval.vertices) - 1)))
-            idx = max(0, min(len(mesh_eval.vertices) - 1, idx))
-            return mesh_eval.vertices[idx].co.copy()
+            return self._shape_param_vertex(mesh_eval, self._shape_param(payload))
         finally:
             obj_eval.to_mesh_clear()
 

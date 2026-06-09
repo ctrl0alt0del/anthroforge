@@ -1,5 +1,1 @@
-{
-  "core/vcp/fiber_solver.py::bpy.context": 1,
-  "core/visualization/control_runtime.py::bpy.context": 3,
-  "core/visualization/fiber_sync_helpers.py::bpy.context": 1
-}
+{}

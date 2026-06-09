@@ -90,24 +90,24 @@ class FiberSceneSync:
     def _nearest_parent_mesh_vertex_local_point(self, parent_proxy, moved_world):
         return nearest_parent_mesh_vertex_local_point(parent_proxy, moved_world)
 
-    def _world_units_per_pixel(self, world_loc):
-        return world_units_per_pixel(world_loc)
+    def _world_units_per_pixel(self, world_loc, window_manager=None):
+        return world_units_per_pixel(world_loc, window_manager)
 
-    def _set_helper_screen_size(self, obj, px=14.0, min_size=0.005, max_size=0.25):
-        wupp = self._world_units_per_pixel(obj.location)
+    def _set_helper_screen_size(self, obj, px=14.0, min_size=0.005, max_size=0.25, window_manager=None):
+        wupp = self._world_units_per_pixel(obj.location, window_manager)
         if wupp is None:
             return
         obj.empty_display_size = max(min_size, min(max_size, px * wupp))
 
-    def _sync_handles(self, root, scene, vis_col, runtime_registry):
-        return _sync_handles_runtime(self, root, scene, vis_col, runtime_registry)
+    def _sync_handles(self, root, scene, vis_col, runtime_registry, window_manager=None):
+        return _sync_handles_runtime(self, root, scene, vis_col, runtime_registry, window_manager=window_manager)
 
     def _apply_selection_highlight(self, root, scene):
         return _apply_selection_highlight_runtime(self, root, scene)
 
-    def sync_root_to_scene(self, root=None, scene=None, bake=False, target_fiber_ids=None):
+    def sync_root_to_scene(self, root=None, scene=None, bake=False, target_fiber_ids=None, window_manager=None):
         return _sync_root_to_scene_runtime(
-            self, root=root, scene=scene, bake=bake, target_fiber_ids=target_fiber_ids
+            self, root=root, scene=scene, bake=bake, target_fiber_ids=target_fiber_ids, window_manager=window_manager
         )
 
     def on_depsgraph_update(self, scene, depsgraph):

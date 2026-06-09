@@ -46,7 +46,7 @@ def _discard_obj(obj):
 def _finish_transform_replace(context, scp, obj):
     _select_only(context, obj)
     _sync_scp(context, scp.id)
-    notify_selection_changed(context.scene, force=True)
+    notify_selection_changed(context.scene, force=True, active_object=context.active_object)
     return {"FINISHED"}
 
 
@@ -92,7 +92,7 @@ class AF_OT_CreateEmptySCP(bpy.types.Operator):
         activate_scp(root, scp.id)
         _select_only(context, obj)
         _sync_scp(context, scp.id, event_type="MARK")
-        notify_selection_changed(context.scene, force=True)
+        notify_selection_changed(context.scene, force=True, active_object=context.active_object)
         return {"FINISHED"}
 
 
