@@ -3,6 +3,7 @@ from collections import OrderedDict
 import bpy
 
 from .controls import ControlIntent
+from ..utils import depsgraph_for_scene
 from ..visualization.sync import register_sync
 from ..visualization.fiber_sync import register_fiber_sync
 from ..visualization.muscle_sync import register_muscle_sync
@@ -21,8 +22,8 @@ def _obj_in_scene(scene, name):
     return scene.objects.get(str(name))
 
 
-def _depsgraph():
-    return bpy.context.evaluated_depsgraph_get()
+def _depsgraph(scene):
+    return depsgraph_for_scene(scene)
 
 
 def _impact(entity_type, entity_id):
@@ -32,7 +33,7 @@ def _impact(entity_type, entity_id):
 def _shape_sync_parts(sync):
     if not hasattr(sync, "collection_name") or not hasattr(sync, "_shape_sync_extensions"):
         return None, None
-    return bpy.data.collections.get(sync.collection_name), _depsgraph()
+    return bpy.data.collections.get(sync.collection_name), None
 
 
 def _shape_extension_impacts(sync, root, scene, obj, binding, vis_col, depsgraph):
@@ -48,7 +49,8 @@ def _shape_extension_impacts(sync, root, scene, obj, binding, vis_col, depsgraph
 def _apply_scp_shape(root, scene, intent, obj):
     sync = register_sync()
     vis_col, depsgraph = _shape_sync_parts(sync)
-    if obj is None or vis_col is None:
+    depsgraph = _depsgraph(scene)
+    if obj is None or vis_col is None or depsgraph is None:
         return {}
     return _shape_extension_impacts(sync, root, scene, obj, intent.payload.get("binding"), vis_col, depsgraph)
 
@@ -66,7 +68,7 @@ def _apply_fiber_control(root, scene, intent):
     obj = _obj_in_scene(scene, intent.payload.get("object_name"))
     if obj is None:
         return {}
-    changed = apply_fiber_control_update(register_fiber_sync(), root, scene, obj, _depsgraph())
+    changed = apply_fiber_control_update(register_fiber_sync(), root, scene, obj, _depsgraph(scene))
     return _impact("FIBER", changed)
 
 

@@ -32,12 +32,14 @@ def _target_collection(context):
     layer = None if view_layer is None else getattr(view_layer, "active_layer_collection", None)
     if layer is not None:
         return layer.collection
-    return scene.collection if scene is not None else bpy.context.scene.collection
+    return None if scene is None else scene.collection
 
 
 def create_transform_empty(context, scp):
     obj = bpy.data.objects.new(f"{scp.id}_XFORM", None)
-    _target_collection(context).objects.link(obj)
+    collection = _target_collection(context)
+    if collection is not None:
+        collection.objects.link(obj)
     return obj
 
 

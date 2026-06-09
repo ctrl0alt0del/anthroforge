@@ -3,7 +3,7 @@ import bpy
 from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..deps.conflict_resolver import resolve_conflict
-from ..utils import get_af_root
+from ..utils import depsgraph_for_scene, get_af_root, scene_for_id
 from ..attachment_codec import encode_fiber_mesh_anchor
 from .control_runtime import active_entity_id
 
@@ -114,19 +114,23 @@ def _cleanup_stale_fiber_proxies(vis_col, root_name, live_ids):
             bpy.data.objects.remove(obj, do_unlink=True)
 
 
+def _sync_inputs(root, scene):
+    scene = scene or scene_for_id(root)
+    root = root or get_af_root(scene)
+    depsgraph = depsgraph_for_scene(scene)
+    return root, scene, depsgraph
+
+
 def sync_root_to_scene(sync, root=None, scene=None, bake=False, target_fiber_ids=None):
     if sync._syncing:
         return
-    scene = scene or bpy.context.scene
-    root = root or get_af_root(scene)
-    if root is None or not hasattr(root, "af_vcp_system"):
+    root, scene, depsgraph = _sync_inputs(root, scene)
+    if root is None or depsgraph is None or not hasattr(root, "af_vcp_system"):
         return
 
     sync._syncing = True
     try:
         vis_col = sync._get_vis_collection(scene)
-        depsgraph = bpy.context.evaluated_depsgraph_get()
-
         fibers_to_sync = _fibers_to_sync(root, target_fiber_ids)
 
         live_ids = set()

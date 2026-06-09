@@ -2,6 +2,7 @@ import bpy
 from mathutils.bvhtree import BVHTree
 
 from ..deps.control_lifecycle import mark_dynamic_control_object
+from ..utils import depsgraph_for_scene, scene_for_id
 
 
 def get_vis_collection(scene, collection_name):
@@ -118,12 +119,18 @@ def remove_ctrl_obj(obj):
         bpy.data.objects.remove(obj, do_unlink=True)
 
 
+def _surface_bvh(mesh_obj):
+    depsgraph = depsgraph_for_scene(scene_for_id(mesh_obj))
+    if depsgraph is None:
+        return None
+    return BVHTree.FromObject(mesh_obj, depsgraph)
+
+
 def nearest_on_mesh_surface(mesh_obj, world_point):
     if mesh_obj is None or mesh_obj.type != "MESH":
         return None
     try:
-        depsgraph = bpy.context.evaluated_depsgraph_get()
-        bvh = BVHTree.FromObject(mesh_obj, depsgraph)
+        bvh = _surface_bvh(mesh_obj)
     except Exception:
         bvh = None
     if bvh is None:

@@ -111,8 +111,10 @@ def expand_stage_keep(stage, keep):
     return list(keep_map.values())
 
 
-def link_stage_keep(keep, collection=None):
-    target = collection or bpy.context.scene.collection
+def link_stage_keep(keep, collection=None, scene=None):
+    target = collection or (None if scene is None else scene.collection)
+    if target is None:
+        return
     for obj in keep:
         if _alive(obj) and not obj.users_collection:
             target.objects.link(obj)

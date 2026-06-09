@@ -1,6 +1,7 @@
 import bpy
 from mathutils import Matrix, Vector
 
+from ..utils import depsgraph_for_scene, scene_for_id, update_scene_view_layer
 from .common import as_bool, as_id, as_vec3, find_geometry_mesh_scp_obj, find_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix
 from .common import set_prop_raw, vec3_close, is_matrix_close, matrix_flat16
 from .child_anchor import anchor_mode as child_anchor_mode, capture_child_anchor
@@ -220,12 +221,16 @@ class AttachmentCapture:
 
 
 def capture_attachment_from_link(child_scp, child_transform_obj, child_geometry_obj, parent_transform_obj, parent_geometry_obj, depsgraph=None):
-    depsgraph = depsgraph or bpy.context.evaluated_depsgraph_get()
+    depsgraph = depsgraph or depsgraph_for_scene(_attachment_scene(child_transform_obj, child_geometry_obj, parent_transform_obj, parent_geometry_obj))
+    if depsgraph is None:
+        return False
     return AttachmentCapture(child_scp, child_transform_obj, child_geometry_obj, parent_transform_obj, parent_geometry_obj, depsgraph, _new_surface_cache()).run()
 
 
 def recapture_attachment_for_scp(root, scene, sid):
-    depsgraph = bpy.context.evaluated_depsgraph_get()
+    depsgraph = depsgraph_for_scene(scene)
+    if depsgraph is None:
+        return False
     scp_by_id = {as_id(s.id): s for s in root.af_scp_system.scps}
     return _authoring_capture_one(scp_by_id, scene, root.name, sid, depsgraph, _new_surface_cache())
 
@@ -295,7 +300,9 @@ def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", recaptu
     direct_ids = _direct_capture_ids(dirty_scp_ids, recapture_ids)
     if not direct_ids:
         return set()
-    depsgraph = bpy.context.evaluated_depsgraph_get()
+    depsgraph = depsgraph_for_scene(scene)
+    if depsgraph is None:
+        return set()
     surface_cache = _new_surface_cache()
     scp_by_id = {as_id(s.id): s for s in root.af_scp_system.scps}
     direct_ids -= _blocked_capture_ids(scp_by_id, direct_ids, apply_parent_ids)
@@ -364,6 +371,14 @@ def _run_capture(args, depsgraph, surface_cache):
     return AttachmentCapture(*args, depsgraph, surface_cache).run()
 
 
+def _attachment_scene(*objs):
+    for obj in objs:
+        scene = scene_for_id(obj)
+        if scene is not None:
+            return scene
+    return None
+
+
 def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, parent_ids=None, gate_meta=None):
     _ = sync
     _ = gate_meta
@@ -390,13 +405,13 @@ def _apply_child(root, scene, scp_by_id, sid, targets, active_parent_ids, surfac
         return set()
     changed = _apply_child_runtime(root, scene, sid, child_scp, parent_id, surface_cache)
     if changed:
-        _refresh_child_chain(active_parent_ids, sid, surface_cache)
+        _refresh_child_chain(scene, active_parent_ids, sid, surface_cache)
     return {sid} if changed else set()
 
 
-def _refresh_child_chain(active_parent_ids, sid, surface_cache):
+def _refresh_child_chain(scene, active_parent_ids, sid, surface_cache):
     active_parent_ids.add(sid)
-    bpy.context.view_layer.update()
+    update_scene_view_layer(scene)
     surface_cache.clear()
 
 
@@ -405,7 +420,9 @@ def _apply_child_runtime(root, scene, sid, child_scp, parent_id, surface_cache):
     child_geometry = find_geometry_mesh_scp_obj(scene, root.name, sid)
     parent_transform = find_transform_scp_obj(scene, root.name, parent_id)
     parent_geometry = find_geometry_mesh_scp_obj(scene, root.name, parent_id)
-    depsgraph = bpy.context.evaluated_depsgraph_get()
+    depsgraph = depsgraph_for_scene(scene)
+    if depsgraph is None:
+        return False
     if not _is_initialized(child_scp):
         return False
     if _missing_attachment_objects(child_scp, child_obj, child_geometry, parent_transform, parent_geometry):

@@ -114,8 +114,13 @@ def root_snapshot(root):
 
 
 def write_snapshot_json(filepath):
-    root = get_af_root(bpy.context.scene)
+    root = get_af_root(_snapshot_scene())
     if root is None:
         raise RuntimeError("No AnthroForge root found in source file.")
     with open(filepath, "w", encoding="utf-8") as handle:
         json.dump(asdict(root_snapshot(root)), handle, indent=2)
+
+
+def _snapshot_scene():
+    scenes = tuple(bpy.data.scenes)
+    return None if not scenes else scenes[0]

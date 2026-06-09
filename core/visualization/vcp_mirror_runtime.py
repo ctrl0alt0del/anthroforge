@@ -1,6 +1,6 @@
 import bpy
 
-from ..utils import get_af_root
+from ..utils import get_af_root, scene_for_id
 from .mirror_objects import create_mirror_from_source, ensure_obj_type, remove_obj, copy_data
 from .mirror_rules import mirror_world_matrix
 
@@ -24,7 +24,7 @@ def _as_origin(value):
 
 
 def _resolve_inputs(root, scene):
-    scene = scene or bpy.context.scene
+    scene = scene or scene_for_id(root)
     root = root or get_af_root(scene)
     if root is None or scene is None or not hasattr(root, "af_vcp_system"):
         return None, None

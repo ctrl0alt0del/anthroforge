@@ -1,5 +1,3 @@
-import bpy
-
 from collections import defaultdict
 from dataclasses import dataclass, field
 
@@ -9,7 +7,6 @@ try:
 except ImportError:
     from app.context import addon_context
     from app.runtime_intents import dispatch_runtime_intent as dispatch_app_runtime_intent
-from ..utils import get_af_root
 from .dirty_hints import dirty_hints_for, empty_dirty_hints
 
 
@@ -71,12 +68,6 @@ def dispatch_runtime_intent(root=None, scene=None, intent_type="", entity_type="
         source=source,
         event_type=event_type,
     )
-
-
-def _resolve_root_scene(root, scene):
-    scene = scene or bpy.context.scene
-    root = root or get_af_root(scene)
-    return root, scene
 
 
 def _sync_fn():

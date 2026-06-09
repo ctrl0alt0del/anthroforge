@@ -1,6 +1,7 @@
 import bpy
 
 from ..id_utils import next_prefixed_id
+from ..utils import scene_for_id
 from .common import as_id, set_prop_raw
 from .object_colors import apply_object_color, ensure_scp_color
 
@@ -139,7 +140,7 @@ def _root_host_collection(root):
     cols = tuple(getattr(root, "users_collection", ()) or ())
     if cols:
         return cols[0]
-    scene = getattr(bpy.context, "scene", None)
+    scene = scene_for_id(root)
     return None if scene is None else scene.collection
 
 

@@ -5,6 +5,7 @@ from bpy_extras import view3d_utils
 
 from ..deps.control_lifecycle import mark_dynamic_control_object
 from ..attachment_codec import parse_fiber_attach_param
+from ..utils import depsgraph_for_scene, scene_for_id
 from ..scp_runtime.common import find_geometry_scp_obj
 
 
@@ -167,6 +168,20 @@ def get_scp_proxy(scene, root_name, scp_id):
     return find_geometry_scp_obj(scene, root_name, scp_id)
 
 
+def _depsgraph_for_obj(obj):
+    return depsgraph_for_scene(scene_for_id(obj))
+
+
+def _open_eval_mesh(obj):
+    depsgraph = _depsgraph_for_obj(obj)
+    obj_eval = None if depsgraph is None else obj.evaluated_get(depsgraph)
+    mesh_eval = None if obj_eval is None else obj_eval.to_mesh()
+    if mesh_eval is None or len(mesh_eval.vertices) == 0:
+        None if obj_eval is None else obj_eval.to_mesh_clear()
+        return None, None
+    return obj_eval, mesh_eval
+
+
 def _mesh_local_point_from_shape_param(parent_obj, payload):
     if parent_obj is None or parent_obj.type != "MESH" or parent_obj.data is None:
         return None
@@ -176,12 +191,8 @@ def _mesh_local_point_from_shape_param(parent_obj, payload):
     except Exception:
         p = 0.0
 
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    obj_eval = parent_obj.evaluated_get(depsgraph)
-    mesh_eval = obj_eval.to_mesh()
-    if mesh_eval is None or len(mesh_eval.vertices) == 0:
-        if mesh_eval is not None:
-            obj_eval.to_mesh_clear()
+    obj_eval, mesh_eval = _open_eval_mesh(parent_obj)
+    if mesh_eval is None:
         return None
     try:
         if len(mesh_eval.vertices) == 1:
@@ -220,12 +231,8 @@ def nearest_param(parent_scp, parent_proxy, moved_world):
     if parent_proxy is None or parent_proxy.type != "MESH" or parent_proxy.data is None:
         return 0.0
 
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    obj_eval = parent_proxy.evaluated_get(depsgraph)
-    mesh_eval = obj_eval.to_mesh()
-    if mesh_eval is None or len(mesh_eval.vertices) == 0:
-        if mesh_eval is not None:
-            obj_eval.to_mesh_clear()
+    obj_eval, mesh_eval = _open_eval_mesh(parent_proxy)
+    if mesh_eval is None:
         return 0.0
 
     mw = parent_proxy.matrix_world
@@ -251,12 +258,8 @@ def nearest_parent_mesh_vertex_local_point(parent_proxy, moved_world):
     if parent_proxy is None or parent_proxy.type != "MESH" or parent_proxy.data is None:
         return None
 
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    obj_eval = parent_proxy.evaluated_get(depsgraph)
-    mesh_eval = obj_eval.to_mesh()
-    if mesh_eval is None or len(mesh_eval.vertices) == 0:
-        if mesh_eval is not None:
-            obj_eval.to_mesh_clear()
+    obj_eval, mesh_eval = _open_eval_mesh(parent_proxy)
+    if mesh_eval is None:
         return None
 
     mw = parent_proxy.matrix_world

@@ -1,7 +1,7 @@
 ﻿import bpy
 
 from ..deps.dirty_hints import dirty_hints_for
-from ..utils import get_af_root
+from ..utils import get_af_root, scene_for_id, update_scene_view_layer
 from .attachment_runtime import apply_scp_attachments
 from .bound_objects import sync_all_scp_roles
 from .common import as_id, is_bound_scp_obj, payload_id_set, scp_prop_map
@@ -10,7 +10,7 @@ from .mirror_scene import sync_mirrors
 
 
 def _resolve_sync_inputs(root, scene):
-    scene = scene or bpy.context.scene
+    scene = scene or scene_for_id(root)
     root = root or get_af_root(scene)
     return (None, None) if root is None or scene is None else (root, scene)
 
@@ -24,11 +24,8 @@ def sync_root_to_scene(sync, root=None, scene=None, target_scp_ids=None, attachm
     _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta)
 
 
-def _refresh_view_layer():
-    try:
-        bpy.context.view_layer.update()
-    except Exception:
-        return
+def _refresh_view_layer(scene):
+    update_scene_view_layer(scene)
 
 
 def _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta):
@@ -39,9 +36,9 @@ def _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_ids, att
         sync_parent_links(root)
         normalize_active_index(root)
         scp_by_id = scp_prop_map(root)
-        _refresh_view_layer()
+        _refresh_view_layer(scene)
         apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids, attachment_parent_ids, attachment_gate_meta)
-        _refresh_view_layer()
+        _refresh_view_layer(scene)
         sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=target_scp_ids)
     finally:
         sync._syncing = False

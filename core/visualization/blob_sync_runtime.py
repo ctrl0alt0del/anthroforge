@@ -4,13 +4,13 @@ from mathutils import Vector
 from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..deps.conflict_resolver import resolve_conflict
-from ..utils import get_af_root
+from ..utils import get_af_root, scene_for_id
 from .blob_sync_helpers import target_object_for_blob
 from .control_runtime import active_entity_id
 
 
 def _resolve_root_scene(root, scene):
-    scene = scene or bpy.context.scene
+    scene = scene or scene_for_id(root)
     root = root or get_af_root(scene)
     if root is None or not hasattr(root, "af_vcp_system"):
         return None, None

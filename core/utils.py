@@ -2,7 +2,6 @@ import bpy
 
 
 def get_af_root(scene=None):
-    scene = scene or getattr(bpy.context, "scene", None)
     if scene is None:
         return None
 
@@ -10,6 +9,29 @@ def get_af_root(scene=None):
         if obj.get("anthroforge_root"):
             return obj
     return None
+
+
+def scene_for_id(owner):
+    scenes = tuple(getattr(owner, "users_scene", ()) or ())
+    return scenes[0] if scenes else None
+
+
+def view_layer_for_scene(scene):
+    layers = tuple(getattr(scene, "view_layers", ()) or ())
+    return None if scene is None or not layers else layers[0]
+
+
+def depsgraph_for_scene(scene):
+    layer = view_layer_for_scene(scene)
+    update_scene_view_layer(scene)
+    return None if layer is None else getattr(layer, "depsgraph", None)
+
+
+def update_scene_view_layer(scene):
+    try:
+        None if scene is None else view_layer_for_scene(scene).update()
+    except Exception:
+        return
 
 
 def create_af_root(scene):

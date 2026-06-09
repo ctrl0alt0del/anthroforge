@@ -48,9 +48,9 @@ def _stage_snapshot(filepath, snapshot):
     return stage
 
 
-def _cleanup_stage(stage, keep):
+def _cleanup_stage(stage, keep, scene):
     keep = expand_stage_keep(stage, keep)
-    link_stage_keep(keep)
+    link_stage_keep(keep, scene=scene)
     remove_stage_root(stage)
     remove_unused_stage_objects(stage, keep)
 
@@ -64,4 +64,4 @@ def import_package_from_blend(filepath, context):
         result = apply_snapshot(snapshot, stage.root, root, context)
         return result
     finally:
-        _cleanup_stage(stage, getattr(result, "kept_objects", ()))
+        _cleanup_stage(stage, getattr(result, "kept_objects", ()), context.scene)
