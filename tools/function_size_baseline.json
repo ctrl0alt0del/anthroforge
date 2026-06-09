@@ -4,8 +4,6 @@
   "core/deps/adapters.py::_add_blob_entities": 16,
   "core/deps/adapters.py::_add_fiber_entities": 18,
   "core/deps/adapters.py::_add_muscle_entities": 16,
-  "core/deps/control_behaviors.py::_apply_scp_control": 27,
-  "core/deps/controls.py::classify_control_object": 73,
   "core/deps/modifier_intent_apply.py::_apply_mirror_source_state": 40,
   "core/deps/modifier_intents.py::pop_scp_modifier_intents": 18,
   "core/deps/modifiers.py::geometry_fingerprint": 28,

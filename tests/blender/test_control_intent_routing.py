@@ -11,7 +11,7 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 import bpy
 
 from _helpers import BlenderTestCase, empty_object, root
-from core.deps.control_behaviors import apply_control_intent
+from core.deps.control_behaviors import apply_control_intent, register_control_handler
 from core.deps.controls import ControlIntent
 
 
@@ -63,3 +63,12 @@ class ControlIntentRoutingTests(BlenderTestCase):
         with patch("core.deps.control_behaviors.apply_blob_control_update", return_value="B1"):
             blob_out = apply_control_intent(root_obj, bpy.context.scene, ControlIntent("BLOB_CONTROL", {"object_name": blob.name}))
         self.assertEqual((out, blob_out), ({"MUSCLE": {"M1"}}, {"BLOB": {"B1"}}))
+
+    def test_registered_handler_extends_control_routing(self):
+        register_control_handler("CUSTOM_CONTROL", _custom_handler, replace=True)
+        out = apply_control_intent(root(), bpy.context.scene, ControlIntent("CUSTOM_CONTROL", {"scp_id": "S9"}))
+        self.assertEqual(out, {"SCP": {"S9"}})
+
+
+def _custom_handler(_root, _scene, intent):
+    return {"SCP": {str(intent.payload.get("scp_id") or "")}}

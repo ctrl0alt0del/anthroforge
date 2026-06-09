@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from dataclasses import dataclass
 
 from .runtime_intents import enqueue_runtime_intent
@@ -11,21 +12,22 @@ class ControlBinding:
     metadata: dict | None = None
 
 
-CONTROL_FLAG_KEYS = (
-    "af_scp_control",
-    "af_curve_point_handle",
-    "af_parallelepiped_vert_handle",
-    "af_fiber_endpoint_handle",
-    "af_fiber_touch_handle",
-    "af_muscle_inflation_ctrl",
-    "af_blob_control_gizmo",
-)
+@dataclass(frozen=True)
+class ControlDescriptor:
+    flag_key: str
+    control_type: str
+    build_info: object
+
+
+CONTROL_FLAG_KEYS = ()
+_CONTROL_DESCRIPTORS = OrderedDict()
 
 
 class ControlIntent:
     def __init__(self, control_type, payload):
         self.control_type = str(control_type or "")
         self.payload = dict(payload or {})
+
 
 def _control_entity_id(payload):
     return str(dict(payload or {}).get("object_name", "") or "")
@@ -43,96 +45,156 @@ def enqueue_control_intent(root, control_type, payload):
     )
 
 
-def _as_id(v):
-    return str(v or "").strip()
+def _as_id(value):
+    return str(value or "").strip()
+
+
+def _as_index(obj, key):
+    try:
+        return int(obj.get(key, -1))
+    except Exception:
+        return -1
+
+
+def _binding(kind, space, target_path):
+    return ControlBinding(kind=kind, space=space, target_path=target_path)
+
+
+def _info(control_type, entity_type, entity_id, root_name, obj_name, payload, binding):
+    return {
+        "control_type": control_type,
+        "payload": {"root_name": root_name, "object_name": obj_name, **dict(payload or {})},
+        "dirty_hints": {entity_type: {entity_id}},
+        "binding": binding,
+    }
+
+
+def _refresh_flag_keys():
+    global CONTROL_FLAG_KEYS
+    CONTROL_FLAG_KEYS = tuple(desc.flag_key for desc in _CONTROL_DESCRIPTORS.values())
+
+
+def register_control_descriptor(descriptor, replace=False):
+    key = str(getattr(descriptor, "control_type", "") or "").strip()
+    if not key:
+        raise ValueError("descriptor.control_type is required")
+    if key in _CONTROL_DESCRIPTORS and not replace:
+        raise ValueError(f"control descriptor already registered: {key}")
+    _CONTROL_DESCRIPTORS[key] = descriptor
+    _refresh_flag_keys()
+
+
+def _descriptor(flag_key, control_type, build_info):
+    return ControlDescriptor(str(flag_key or ""), str(control_type or ""), build_info)
+
+
+def _scp_control_info(obj, root_name):
+    sid = _as_id(obj.get("af_scp_id"))
+    if not sid:
+        return None
+    bind = _binding("DEFORMER_CONTROL", "WORLD", f"SCP/{sid}/external_control")
+    return _info("SCP_CONTROL_OBJECT", "SCP", sid, root_name, str(obj.name), {"scp_id": sid}, bind)
+
+
+def _curve_point_info(obj, root_name):
+    sid, idx = _as_id(obj.get("af_scp_id")), _as_index(obj, "af_curve_point_index")
+    if not sid or idx < 0:
+        return None
+    bind = _binding("GEOMETRY_SAMPLE", "FINAL", f"SCP/{sid}/curve_points/{idx}")
+    return _info("SCP_CURVE_POINT", "SCP", sid, root_name, str(obj.name), {"scp_id": sid, "point_index": idx}, bind)
+
+
+def _parallelepiped_info(obj, root_name):
+    sid, idx = _as_id(obj.get("af_scp_id")), _as_index(obj, "af_parallelepiped_vert_index")
+    if not sid or idx < 0:
+        return None
+    bind = _binding("GEOMETRY_SAMPLE", "FINAL", f"SCP/{sid}/parallelepiped_points/{idx}")
+    return _info("SCP_PARALLELEPIPED_VERTEX", "SCP", sid, root_name, str(obj.name), {"scp_id": sid, "vert_index": idx}, bind)
+
+
+def _fiber_endpoint_info(obj, root_name):
+    fid, endpoint = _as_id(obj.get("af_fiber_id")), _as_id(obj.get("af_fiber_endpoint"))
+    if not fid or endpoint not in ("A", "B"):
+        return None
+    bind = _binding("GEOMETRY_SAMPLE", "FINAL", f"FIBER/{fid}/endpoint/{endpoint}")
+    return _info("FIBER_ENDPOINT", "FIBER", fid, root_name, str(obj.name), {"fiber_id": fid, "endpoint": endpoint}, bind)
+
+
+def _fiber_touch_info(obj, root_name):
+    fid, idx = _as_id(obj.get("af_fiber_id")), _as_index(obj, "af_fiber_touch_index")
+    if not fid or idx < 0:
+        return None
+    bind = _binding("GEOMETRY_SAMPLE", "FINAL", f"FIBER/{fid}/touch/{idx}")
+    return _info("FIBER_TOUCH", "FIBER", fid, root_name, str(obj.name), {"fiber_id": fid, "touch_index": idx}, bind)
+
+
+def _muscle_inflation_info(obj, root_name):
+    mid = _as_id(obj.get("af_muscle_id"))
+    if not mid:
+        return None
+    bind = _binding("GEOMETRY_SAMPLE", "FINAL", f"MUSCLE/{mid}/inflation_ctrl")
+    return _info("MUSCLE_INFLATION", "MUSCLE", mid, root_name, str(obj.name), {"muscle_id": mid}, bind)
+
+
+def _blob_control_info(obj, root_name):
+    bid = _as_id(obj.get("af_blob_id"))
+    if not bid:
+        return None
+    bind = _binding("GEOMETRY_SAMPLE", "FINAL", f"BLOB/{bid}/control_point")
+    return _info("BLOB_CONTROL", "BLOB", bid, root_name, str(obj.name), {"blob_id": bid}, bind)
+
+
+def _builtin_descriptors():
+    data = (
+        ("af_scp_control", "SCP_CONTROL_OBJECT", _scp_control_info),
+        ("af_curve_point_handle", "SCP_CURVE_POINT", _curve_point_info),
+        ("af_parallelepiped_vert_handle", "SCP_PARALLELEPIPED_VERTEX", _parallelepiped_info),
+        ("af_fiber_endpoint_handle", "FIBER_ENDPOINT", _fiber_endpoint_info),
+        ("af_fiber_touch_handle", "FIBER_TOUCH", _fiber_touch_info),
+        ("af_muscle_inflation_ctrl", "MUSCLE_INFLATION", _muscle_inflation_info),
+        ("af_blob_control_gizmo", "BLOB_CONTROL", _blob_control_info),
+    )
+    return tuple(_descriptor(*item) for item in data)
+
+
+def register_builtin_control_descriptors():
+    for descriptor in _builtin_descriptors():
+        register_control_descriptor(descriptor, replace=True)
 
 
 def is_control_object(obj):
     if obj is None:
         return False
-    for k in CONTROL_FLAG_KEYS:
+    for key in CONTROL_FLAG_KEYS:
         try:
-            if obj.get(k):
+            if obj.get(key):
                 return True
         except Exception:
             continue
     return False
 
 
+def _root_name(obj):
+    getter = getattr(obj, "get", lambda *_args: None)
+    return _as_id(getter("af_root_name"))
+
+
+def _matching_descriptor(obj):
+    for descriptor in _CONTROL_DESCRIPTORS.values():
+        try:
+            if obj.get(descriptor.flag_key):
+                return descriptor
+        except Exception:
+            continue
+    return None
+
+
 def classify_control_object(obj):
     if obj is None:
         return None
+    root_name = _root_name(obj)
+    descriptor = _matching_descriptor(obj) if root_name else None
+    return None if descriptor is None else descriptor.build_info(obj, root_name)
 
-    root_name = _as_id(getattr(obj, "get", lambda *_: None)("af_root_name"))
-    if not root_name:
-        return None
 
-    if obj.get("af_scp_control"):
-        scp_id = _as_id(obj.get("af_scp_id"))
-        if scp_id:
-            return {
-                "control_type": "SCP_CONTROL_OBJECT",
-                "payload": {"root_name": root_name, "object_name": str(obj.name), "scp_id": scp_id},
-                "dirty_hints": {"SCP": {scp_id}},
-                "binding": ControlBinding(kind="DEFORMER_CONTROL", space="WORLD", target_path=f"SCP/{scp_id}/external_control"),
-            }
-
-    if obj.get("af_curve_point_handle"):
-        scp_id = _as_id(obj.get("af_scp_id"))
-        idx = int(obj.get("af_curve_point_index", -1))
-        if scp_id and idx >= 0:
-            return {
-                "control_type": "SCP_CURVE_POINT",
-                "payload": {"root_name": root_name, "object_name": str(obj.name), "scp_id": scp_id, "point_index": idx},
-                "dirty_hints": {"SCP": {scp_id}},
-                "binding": ControlBinding(kind="GEOMETRY_SAMPLE", space="FINAL", target_path=f"SCP/{scp_id}/curve_points/{idx}"),
-            }
-    if obj.get("af_parallelepiped_vert_handle"):
-        scp_id = _as_id(obj.get("af_scp_id"))
-        idx = int(obj.get("af_parallelepiped_vert_index", -1))
-        if scp_id and idx >= 0:
-            return {
-                "control_type": "SCP_PARALLELEPIPED_VERTEX",
-                "payload": {"root_name": root_name, "object_name": str(obj.name), "scp_id": scp_id, "vert_index": idx},
-                "dirty_hints": {"SCP": {scp_id}},
-                "binding": ControlBinding(kind="GEOMETRY_SAMPLE", space="FINAL", target_path=f"SCP/{scp_id}/parallelepiped_points/{idx}"),
-            }
-    if obj.get("af_fiber_endpoint_handle"):
-        fid = _as_id(obj.get("af_fiber_id"))
-        endpoint = _as_id(obj.get("af_fiber_endpoint"))
-        if fid and endpoint in ("A", "B"):
-            return {
-                "control_type": "FIBER_ENDPOINT",
-                "payload": {"root_name": root_name, "object_name": str(obj.name), "fiber_id": fid, "endpoint": endpoint},
-                "dirty_hints": {"FIBER": {fid}},
-                "binding": ControlBinding(kind="GEOMETRY_SAMPLE", space="FINAL", target_path=f"FIBER/{fid}/endpoint/{endpoint}"),
-            }
-    if obj.get("af_fiber_touch_handle"):
-        fid = _as_id(obj.get("af_fiber_id"))
-        idx = int(obj.get("af_fiber_touch_index", -1))
-        if fid and idx >= 0:
-            return {
-                "control_type": "FIBER_TOUCH",
-                "payload": {"root_name": root_name, "object_name": str(obj.name), "fiber_id": fid, "touch_index": idx},
-                "dirty_hints": {"FIBER": {fid}},
-                "binding": ControlBinding(kind="GEOMETRY_SAMPLE", space="FINAL", target_path=f"FIBER/{fid}/touch/{idx}"),
-            }
-    if obj.get("af_muscle_inflation_ctrl"):
-        mid = _as_id(obj.get("af_muscle_id"))
-        if mid:
-            return {
-                "control_type": "MUSCLE_INFLATION",
-                "payload": {"root_name": root_name, "object_name": str(obj.name), "muscle_id": mid},
-                "dirty_hints": {"MUSCLE": {mid}},
-                "binding": ControlBinding(kind="GEOMETRY_SAMPLE", space="FINAL", target_path=f"MUSCLE/{mid}/inflation_ctrl"),
-            }
-    if obj.get("af_blob_control_gizmo"):
-        bid = _as_id(obj.get("af_blob_id"))
-        if bid:
-            return {
-                "control_type": "BLOB_CONTROL",
-                "payload": {"root_name": root_name, "object_name": str(obj.name), "blob_id": bid},
-                "dirty_hints": {"BLOB": {bid}},
-                "binding": ControlBinding(kind="GEOMETRY_SAMPLE", space="FINAL", target_path=f"BLOB/{bid}/control_point"),
-            }
-    return None
+register_builtin_control_descriptors()

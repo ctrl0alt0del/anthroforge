@@ -68,7 +68,7 @@ def _resolved_child_anchor_index(child_scp, child_obj, points):
     return index
 
 
-# Child anchors must come from evaluated child geometry so shared drivers do not get applied twice.
+# Capture reads the evaluated child geometry, but apply must consume the stored local anchor.
 def _live_child_anchor_world(child_scp, child_obj, child_geometry_obj, depsgraph, surface_cache):
     if child_anchor_mode(child_scp) == "OBJECT_ORIGIN":
         return child_obj.matrix_world.to_translation().copy()
@@ -79,6 +79,10 @@ def _live_child_anchor_world(child_scp, child_obj, child_geometry_obj, depsgraph
 def _live_child_anchor_local(child_scp, child_obj, child_geometry_obj, depsgraph, surface_cache):
     anchor = _live_child_anchor_world(child_scp, child_obj, child_geometry_obj, depsgraph, surface_cache)
     return _stored_child_anchor_local(child_scp) if anchor is None else child_obj.matrix_world.inverted() @ anchor
+
+
+def _applied_child_anchor_local(child_scp):
+    return _stored_child_anchor_local(child_scp)
 
 
 class AttachmentCapture:
@@ -260,7 +264,7 @@ class AttachmentApply:
     def _matrix_world(self, frame):
         follow = as_bool(getattr(self.child_scp, "attach_follow_rotation", True), default=True)
         rotation = self._rotation_world(frame, follow)
-        anchor = _live_child_anchor_local(self.child_scp, self.child_obj, self.child_geometry_obj, self.depsgraph, self.surface_cache)
+        anchor = _applied_child_anchor_local(self.child_scp)
         position = frame["point_world"] + self._parent_offset_world(frame) - (rotation @ self._scaled_child_anchor(anchor))
         return self._compose_matrix(position, rotation, follow)
 

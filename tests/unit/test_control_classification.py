@@ -32,7 +32,10 @@ def _load_controls():
     return module
 
 
-classify_control_object = _load_controls().classify_control_object
+controls = _load_controls()
+classify_control_object = controls.classify_control_object
+ControlDescriptor = controls.ControlDescriptor
+register_control_descriptor = controls.register_control_descriptor
 
 
 class FakeObject(dict):
@@ -49,6 +52,12 @@ class ControlClassificationTests(unittest.TestCase):
                 info = classify_control_object(FakeObject("ctrl", af_root_name="ROOT", **props))
                 self.assertEqual((info["control_type"], info["dirty_hints"][etype]), (kind, {eid}))
 
+    def test_registered_descriptor_extends_classification(self):
+        descriptor = ControlDescriptor("af_custom_ctrl", "CUSTOM_CONTROL", _custom_control_info)
+        register_control_descriptor(descriptor, replace=True)
+        info = classify_control_object(FakeObject("ctrl", af_root_name="ROOT", af_custom_ctrl=True))
+        self.assertEqual((info["control_type"], info["dirty_hints"]["SCP"]), ("CUSTOM_CONTROL", {"SX"}))
+
 
 def _control_cases():
     return [
@@ -60,3 +69,12 @@ def _control_cases():
         ({"af_muscle_inflation_ctrl": True, "af_muscle_id": "M1"}, "MUSCLE_INFLATION", "MUSCLE", "M1"),
         ({"af_blob_control_gizmo": True, "af_blob_id": "B1"}, "BLOB_CONTROL", "BLOB", "B1"),
     ]
+
+
+def _custom_control_info(obj, root_name):
+    return {
+        "control_type": "CUSTOM_CONTROL",
+        "payload": {"root_name": root_name, "object_name": obj.name, "scp_id": "SX"},
+        "dirty_hints": {"SCP": {"SX"}},
+        "binding": None,
+    }
