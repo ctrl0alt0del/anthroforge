@@ -2,7 +2,7 @@ from mathutils import Matrix, Vector
 
 from ..visualization.mirror_objects import clone_native_object, remap_object_cluster_parents, remap_object_cluster_refs, remove_obj
 from .bound_objects import iter_bound_objects
-from .common import as_axis, as_id
+from .common import as_axis, as_id, is_bound_scp_obj
 from .runtime_state import mirror_effective_axis, mirror_source_id, mirror_status
 
 
@@ -21,6 +21,66 @@ def _bound_pairs(scp):
     return tuple(iter_bound_objects(scp))
 
 
+def _ref_sources():
+    return (_modifier_pointer_refs,)
+
+
+def _ref_filters():
+    return (_hook_scp_filter,)
+
+
+def _modifier_pointer_refs(source_obj, clone_obj):
+    refs = []
+    for modifier in getattr(clone_obj, "modifiers", ()):
+        refs.extend(_owner_pointer_refs(source_obj, clone_obj, modifier))
+    return tuple(refs)
+
+
+def _owner_pointer_refs(source_obj, clone_obj, owner):
+    refs = []
+    for prop in getattr(owner.bl_rna, "properties", ()):
+        ref = _pointer_ref(source_obj, clone_obj, owner, prop)
+        refs.append(ref) if ref else None
+    return refs
+
+
+def _pointer_ref(source_obj, clone_obj, owner, prop):
+    key = prop.identifier
+    if key == "rna_type" or prop.is_readonly or prop.type != "POINTER":
+        return None
+    value = getattr(owner, key, None)
+    return None if value is None else {"source_obj": source_obj, "clone_obj": clone_obj, "owner": owner, "key": key, "value": value}
+
+
+def _cluster_refs(clones):
+    refs = []
+    for source_obj, clone_obj in clones.items():
+        for refs_from_source in _ref_sources():
+            refs.extend(refs_from_source(source_obj, clone_obj))
+    return tuple(refs)
+
+
+def _is_external_cluster_ref(ref, cluster_objs):
+    return ref["value"] not in cluster_objs
+
+
+def _is_source_bound_ref(obj, root_name):
+    return bool(is_bound_scp_obj(obj, root_name) and obj.get("af_scp_bound_id"))
+
+
+def _hook_scp_filter(ref, root_name):
+    owner = ref["owner"]
+    return bool(getattr(owner, "type", "") == "HOOK" and ref["key"] == "object" and _is_source_bound_ref(ref["value"], root_name))
+
+
+def _is_filtered_ref(ref, root_name):
+    return any(check(ref, root_name) for check in _ref_filters())
+
+
+def _is_remappable_ref(ref, root_name, cluster_objs):
+    return _is_external_cluster_ref(ref, cluster_objs) and _is_filtered_ref(ref, root_name)
+
+
 class MirrorSceneSync:
     def __init__(self, sync, root, scene, scp_by_id, target_scp_ids=None):
         self.sync = sync
@@ -30,12 +90,14 @@ class MirrorSceneSync:
         self.target_ids = None if target_scp_ids is None else {as_id(v) for v in set(target_scp_ids)}
         self.affected_ids = set() if self.target_ids is None else set(self.target_ids)
         self.desired_ids = set()
+        self.clones_by_sid = {}
         self.mirror_col = sync._get_mirror_collection(scene)
 
     def run(self):
         for sid, scp in self.scp_by_id.items():
             self._sync_target(sid, scp)
         self._remove_stale()
+        self._remap_external_refs()
 
     def _sync_target(self, sid, scp):
         if not self._should_sync_target(sid, scp) or not _bound_pairs(scp):
@@ -56,6 +118,7 @@ class MirrorSceneSync:
         remap_object_cluster_refs(clones)
         remap_object_cluster_parents(clones)
         self._apply_cluster_mirror(scp, clones)
+        self.clones_by_sid[sid] = clones
 
     def _clone_bound_cluster(self, sid, scp):
         clones = {}
@@ -110,10 +173,38 @@ class MirrorSceneSync:
             if not self._should_keep_existing(obj):
                 remove_obj(obj)
 
+    def _remap_external_refs(self):
+        for clones in self.clones_by_sid.values():
+            self._remap_cluster_refs(clones)
+
+    def _remap_cluster_refs(self, clones):
+        cluster_objs = set(clones.values())
+        for ref in _cluster_refs(clones):
+            self._remap_external_ref(ref, cluster_objs)
+
+    def _remap_external_ref(self, ref, cluster_objs):
+        if not _is_remappable_ref(ref, self.root.name, cluster_objs):
+            return
+        mirror = self._find_mirror_target(ref["value"])
+        setattr(ref["owner"], ref["key"], mirror) if mirror else None
+
     def _should_keep_existing(self, obj):
         sid = as_id(obj.get("af_source_scp_id"))
         ours = obj.get("af_scp_mirror") and obj.get("af_root_name") == self.root.name
         return bool(not ours or sid in self.desired_ids or (self.target_ids and sid not in self.affected_ids))
+
+    def _find_mirror_target(self, obj):
+        sid = as_id(obj.get("af_scp_id"))
+        bid = as_id(obj.get("af_scp_bound_id"))
+        return None if not sid or not bid else self._find_mirror_bound_obj(sid, bid)
+
+    def _find_mirror_bound_obj(self, sid, bid):
+        return next((obj for obj in self.scene.objects if self._is_mirror_bound_obj(obj, sid, bid)), None)
+
+    def _is_mirror_bound_obj(self, obj, sid, bid):
+        same_root = obj.get("af_root_name") == self.root.name
+        same_scp = as_id(obj.get("af_source_scp_id")) == sid
+        return bool(obj.get("af_scp_mirror") and same_root and same_scp and as_id(obj.get("af_source_bound_id")) == bid)
 
 
 def sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=None):

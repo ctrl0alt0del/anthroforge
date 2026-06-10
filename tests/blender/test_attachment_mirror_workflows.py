@@ -56,6 +56,13 @@ def _curve_object(name):
     return obj
 
 
+def _hooked_curve_scp(root_obj, name, parent_id, hook_obj):
+    scp = scp_with_object(root_obj, name, _curve_object(name), with_geometry=False)
+    scp.parent_id = parent_id
+    scp.transform_object_ref.modifiers.new("Hook", "HOOK").object = hook_obj
+    return scp
+
+
 class AttachmentMirrorWorkflowTests(BlenderTestCase):
     def test_surface_attachment_capture_tracks_parent_mesh_motion(self):
         root_obj, parent, child = _surface_setup()
@@ -204,3 +211,19 @@ class AttachmentMirrorWorkflowTests(BlenderTestCase):
         sync_mirrors(sync, root_obj, bpy.context.scene, scp_prop_map(root_obj), {target_a.id})
         self.assertIsNone(bpy.data.objects.get(clone_a_name))
         self.assertIsNotNone(bpy.data.objects.get(clone_b_name))
+
+    def test_mirror_sync_remaps_shared_external_hook_targets(self):
+        root_obj = root()
+        sternum = scp_with_object(root_obj, "Sternum", empty_object("Sternum"), with_geometry=False)
+        sternum.mirror_enabled = True
+        hook = scp_with_object(root_obj, "Hook", empty_object("Hook"), with_geometry=False)
+        hook.parent_id = sternum.id
+        clavicle_a = _hooked_curve_scp(root_obj, "ClavicleA", sternum.id, hook.transform_object_ref)
+        clavicle_b = _hooked_curve_scp(root_obj, "ClavicleB", sternum.id, hook.transform_object_ref)
+        apply_scp_mirror_roles(root_obj)
+        sync_mirrors(register_sync(), root_obj, bpy.context.scene, scp_prop_map(root_obj))
+        hook_clone = find_flagged("af_scp_mirror", hook.id, "af_source_scp_id")
+        clone_a = find_flagged("af_scp_mirror", clavicle_a.id, "af_source_scp_id")
+        clone_b = find_flagged("af_scp_mirror", clavicle_b.id, "af_source_scp_id")
+        refs = tuple(obj.modifiers["Hook"].object for obj in (clone_a, clone_b))
+        self.assertEqual((hook_clone is not None, refs), (True, (hook_clone, hook_clone)))
