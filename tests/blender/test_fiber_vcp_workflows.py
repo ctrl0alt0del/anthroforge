@@ -47,6 +47,13 @@ def _sync_active_fiber(root_obj, fiber):
 
 
 class FiberVcpWorkflowTests(BlenderTestCase):
+    def test_add_fiber_operator_selects_proxy_and_shows_endpoint_handles(self):
+        root_obj, fiber, origin, insert = _fiber_setup()
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        count = sum(bool(obj.get("af_fiber_endpoint_handle") and obj.get("af_fiber_id") == fiber.id) for obj in bpy.context.scene.objects)
+        self.assertEqual((fiber.a_parent_id, fiber.b_parent_id, proxy is not None), (origin.id, insert.id, True))
+        self.assertEqual((bpy.context.active_object, count), (proxy, 2))
+
     def test_add_fiber_operator_creates_proxy_and_endpoint_handles(self):
         root_obj, fiber, origin, insert = _fiber_setup()
         _sync_active_fiber(root_obj, fiber)

@@ -158,7 +158,7 @@ class MuscleSceneSync:
             base_obj,
             infl_obj,
             base_points,
-            ensure_control=(self._active_muscle_id(root) == muscle.id),
+            ensure_control=(self._active_muscle_id(root, scene) == muscle.id),
         )
 
     def _apply_muscle_surface(self, vis_col, root, vcp, muscle, base_obj, infl_obj, base_points, ensure_control):
@@ -176,8 +176,8 @@ class MuscleSceneSync:
         self._update_mesh(infl_obj, list(base_verts) if infl_verts is None else infl_verts, faces_final)
         self._set_muscle_active_materials(vcp, muscle.id, base_obj, infl_obj)
 
-    def _active_muscle_id(self, root):
-        return active_entity_id(root, "MUSCLE")
+    def _active_muscle_id(self, root, scene=None, active_object=None):
+        return active_entity_id(root, "MUSCLE", scene, active_object)
 
     def _cleanup_inactive_muscle_controls(self, vis_col, root_name, active_muscle_id):
         for obj in list(vis_col.objects):
@@ -211,7 +211,7 @@ class MuscleSceneSync:
             vis_col = self._get_vis_collection(scene)
             vcp = root.af_vcp_system
             all_muscle_ids, muscle_ids_to_sync = self._muscle_ids_to_sync(vcp, target_muscle_ids)
-            active_muscle_id = self._active_muscle_id(root)
+            active_muscle_id = self._active_muscle_id(root, scene)
 
             for muscle in vcp.muscles:
                 if muscle.id not in muscle_ids_to_sync:

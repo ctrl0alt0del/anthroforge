@@ -22,8 +22,7 @@ def create_muscle_vcp(context, name="", closed_v=False):
     fiber_ids, fibers_by_id = payload[0], payload[1]
     _assign_fibers(root.af_vcp_system, muscle, fiber_ids, fibers_by_id)
     _activate(root.af_vcp_system, "MUSCLE", muscle.id)
-    _sync_entity(root, context.scene, "MUSCLE", {muscle.id})
-    _select_if_found(context, _find_ctrl(context.scene, root.name, muscle.id))
+    _sync_and_select_ctrl(context, root, muscle.id)
     return success(f"Created {muscle.id} from {len(fiber_ids)} fibers", value=muscle)
 
 
@@ -144,6 +143,22 @@ def _select_if_found(context, obj):
 def _find_ctrl(scene, root_name, muscle_id):
     vis_col = _vis_collection()(scene)
     return _find_inflation_ctrl()(vis_col, root_name, muscle_id)
+
+
+def _find_proxy(scene, root_name, muscle_id):
+    for obj in getattr(scene, "objects", ()):
+        valid = obj.get("af_muscle_proxy") and obj.get("af_root_name") == root_name
+        if valid and obj.get("af_muscle_id") == muscle_id and obj.get("af_muscle_surface") == "BASE":
+            return obj
+    return None
+
+
+def _sync_and_select_ctrl(context, root, muscle_id):
+    _sync_entity(root, context.scene, "MUSCLE", {muscle_id})
+    proxy = _find_proxy(context.scene, root.name, muscle_id)
+    _select_if_found(context, proxy)
+    _sync_entity(root, context.scene, "MUSCLE", {muscle_id}) if proxy is not None else None
+    _select_if_found(context, _find_ctrl(context.scene, root.name, muscle_id))
 
 
 def _sync_scene():

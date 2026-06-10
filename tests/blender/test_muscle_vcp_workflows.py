@@ -38,6 +38,15 @@ def _clear_selection():
 
 
 class MuscleVcpWorkflowTests(BlenderTestCase):
+    def test_add_muscle_operator_selects_inflation_control(self):
+        root_obj, first, second = _muscle_setup()
+        select_only(first)
+        second.select_set(True)
+        self.assertEqual(bpy.ops.af.add_muscle_vcp(), {"FINISHED"})
+        muscle = root_obj.af_vcp_system.muscles[0]
+        ctrl = find_flagged("af_muscle_inflation_ctrl", muscle.id, "af_muscle_id")
+        self.assertEqual((ctrl is not None, bpy.context.active_object), (True, ctrl))
+
     def test_add_muscle_from_selected_fibers_creates_surfaces_and_control(self):
         root_obj, first, second = _muscle_setup()
         select_only(first)
@@ -128,3 +137,17 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         ctrl = ctrl or sync._create_inflation_ctrl(sync._get_vis_collection(bpy.context.scene), root_obj, muscle.id)
         bpy.data.objects.remove(ctrl, do_unlink=True)
         self.assertIsNone(apply_muscle_control_update(sync, root_obj, bpy.context.scene, ctrl))
+
+    def test_select_max_inflation_point_recreates_missing_control(self):
+        root_obj, first, second = _muscle_setup()
+        select_only(first)
+        second.select_set(True)
+        bpy.ops.af.add_muscle_vcp()
+        muscle = root_obj.af_vcp_system.muscles[0]
+        ctrl = find_flagged("af_muscle_inflation_ctrl", muscle.id, "af_muscle_id")
+        if ctrl is not None:
+            bpy.data.objects.remove(ctrl, do_unlink=True)
+        _clear_selection()
+        self.assertEqual(bpy.ops.af.select_muscle_inflation_ctrl(), {"FINISHED"})
+        ctrl = find_flagged("af_muscle_inflation_ctrl", muscle.id, "af_muscle_id")
+        self.assertEqual((ctrl is not None, bpy.context.active_object), (True, ctrl))

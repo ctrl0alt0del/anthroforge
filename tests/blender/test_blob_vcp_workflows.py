@@ -46,6 +46,18 @@ def _clear_selection():
 
 
 class BlobVcpWorkflowTests(BlenderTestCase):
+    def test_proxy_selection_keeps_blob_control_visible(self):
+        root_obj = root()
+        scp = scp_with_object(root_obj, "Bone", mesh_object("Bone"))
+        _add_blob(scp.geometry_object_ref)
+        blob = root_obj.af_vcp_system.blobs[0]
+        proxy = find_flagged("af_blob_proxy", blob.id, "af_blob_id")
+        root_obj.af_vcp_system.active_vcp_type, root_obj.af_vcp_system.active_vcp_id = "NONE", ""
+        _clear_selection()
+        select_only(proxy)
+        register_blob_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        self.assertIsNotNone(find_flagged("af_blob_control_gizmo", blob.id, "af_blob_id"))
+
     def test_blob_target_inference_handles_muscle_scp_and_object_targets(self):
         root_obj = root()
         scp = scp_with_object(root_obj, "Bone", mesh_object("Bone"))

@@ -24,6 +24,9 @@ def create_fiber_vcp(context):
     fiber = _new_fiber(root, *resolved)
     _activate(root.af_vcp_system, "FIBER", fiber.id)
     _sync_entity(root, context.scene, "FIBER", {fiber.id})
+    proxy = _find_proxy(context.scene, root.name, fiber.id)
+    _select_if_found(context, proxy)
+    _sync_selection(context.scene, proxy)
     return success(f"Added {fiber.id}", value=fiber)
 
 
@@ -87,9 +90,24 @@ def _activate(vcp, kind, entity_id):
     vcp.active_vcp_type, vcp.active_vcp_id = str(kind or ""), str(entity_id or "")
 
 
+def _select_if_found(context, obj):
+    if obj is None:
+        return
+    for item in getattr(context, "selected_objects", ()):
+        item.select_set(False)
+    obj.select_set(True)
+    context.view_layer.objects.active = obj
+
+
 def _sync_entity(root, scene, kind, entity_ids):
     hints = _dirty_hints_for()(kind, entity_ids)
     _sync_scene()(root=root, scene=scene, dirty_hints=hints)
+
+
+def _sync_selection(scene, active_object):
+    if active_object is None:
+        return
+    _notify_selection_changed()(scene, force=True, active_object=active_object)
 
 
 def _sync_scene():
@@ -116,6 +134,13 @@ def _find_geometry_mesh_scp_obj():
     return find_geometry_mesh_scp_obj
 
 
+def _find_proxy(scene, root_name, fiber_id):
+    for obj in getattr(scene, "objects", ()):
+        if obj.get("af_fiber_proxy") and obj.get("af_root_name") == root_name and obj.get("af_fiber_id") == fiber_id:
+            return obj
+    return None
+
+
 def _nearest_parent_vertex():
     try:
         from ...core.visualization.fiber_sync_helpers import nearest_parent_mesh_vertex_local_point
@@ -130,3 +155,11 @@ def _encode_fiber_anchor():
     except ImportError:
         from core.attachment_codec import encode_fiber_mesh_anchor
     return encode_fiber_mesh_anchor
+
+
+def _notify_selection_changed():
+    try:
+        from ...core.visualization.control_runtime import notify_selection_changed
+    except ImportError:
+        from core.visualization.control_runtime import notify_selection_changed
+    return notify_selection_changed

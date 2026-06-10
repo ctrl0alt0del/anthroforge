@@ -45,8 +45,8 @@ def _ensure_blob_ctrl(sync, vis_col, root, bp, obj):
     return ctrl
 
 
-def _active_blob_id(root):
-    return active_entity_id(root, "BLOB")
+def _active_blob_id(root, scene=None, active_object=None):
+    return active_entity_id(root, "BLOB", scene, active_object)
 
 
 def _sync_blob_geometry(sync, scene, root, bp, obj, control_world):
@@ -93,7 +93,7 @@ def sync_root_to_scene(sync, root=None, scene=None, target_blob_ids=None):
     try:
         vis_col = sync._get_vis_collection(scene)
         vcp = root.af_vcp_system
-        active_blob_id = _active_blob_id(root)
+        active_blob_id = _active_blob_id(root, scene)
 
         all_blob_ids, blob_ids_to_sync = _blob_ids_to_sync(vcp, target_blob_ids)
 

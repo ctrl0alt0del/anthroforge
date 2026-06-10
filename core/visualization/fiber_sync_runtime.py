@@ -54,14 +54,14 @@ def _safe_get(obj, key, default=None):
         return default
 
 
-def _active_fiber_id(root):
-    return active_entity_id(root, "FIBER")
+def _active_fiber_id(root, scene=None, active_object=None):
+    return active_entity_id(root, "FIBER", scene, active_object)
 
 
 def sync_handles(sync, root, scene, vis_col, runtime_registry, window_manager=None):
     live_endpoint_keys = set()
     live_touch_keys = set()
-    active_fiber_id = _active_fiber_id(root)
+    active_fiber_id = _active_fiber_id(root, scene)
 
     for fiber in root.af_vcp_system.fibers:
         if not active_fiber_id or fiber.id != active_fiber_id:
