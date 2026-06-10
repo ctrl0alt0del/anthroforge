@@ -1,47 +1,40 @@
 import bpy
 
-from ...core.deps.controls import is_control_object
-from ...core.utils import get_af_root
-from ...core.visualization.control_object_service import control_apply_parent_state
-from ...core.visualization.control_object_shortcuts import has_axis_shortcut
+from ...app.queries.control_objects import control_panel_state
+from ...app.queries.root import has_root
 
 
-def _active_object(context):
-    return getattr(context, "active_object", None)
-
-
-def _draw_checkbox_row(layout, axis, checked):
-    icon = "CHECKBOX_HLT" if checked else "CHECKBOX_DEHLT"
+def _draw_checkbox_row(layout, axis_state):
+    icon = "CHECKBOX_HLT" if axis_state.checked else "CHECKBOX_DEHLT"
     row = layout.row(align=True)
-    op = row.operator("af.toggle_control_object_shortcut_axis", text=f"Position {axis}", icon=icon)
-    op.axis = axis
+    op = row.operator("af.toggle_control_object_shortcut_axis", text=f"Position {axis_state.axis}", icon=icon)
+    op.axis = axis_state.axis
 
 
-def _draw_shortcut_checkbox_mode(layout, root, obj):
+def _draw_shortcut_checkbox_mode(layout, state):
     box = layout.box()
-    box.label(text=f"Control Object: {obj.name}", icon="CON_OBJECTSOLVER")
-    parent_icon = "CHECKBOX_HLT" if control_apply_parent_state(root, bpy.context) else "CHECKBOX_DEHLT"
+    box.label(text=f"Control Object: {state.obj.name}", icon="CON_OBJECTSOLVER")
+    parent_icon = "CHECKBOX_HLT" if state.apply_parent else "CHECKBOX_DEHLT"
     box.operator("af.toggle_control_object_apply_parent", text="Apply Parent", icon=parent_icon)
     box.label(text="Position Components")
-    for axis in ("X", "Y", "Z"):
-        _draw_checkbox_row(box, axis, has_axis_shortcut(root, obj, axis))
+    for axis_state in state.axis_states:
+        _draw_checkbox_row(box, axis_state)
 
 
-def _draw_mark_mode(layout, context, obj):
+def _draw_mark_mode(layout, context, state):
     box = layout.box()
     box.label(text="Mark Control Object", icon="OUTLINER_OB_EMPTY")
-    if obj is None:
+    if state.obj is None:
         box.label(text="Select an object first.", icon="INFO")
         return
 
     box.prop(context.scene, "af_control_scp_obj", text="SCP")
-    picked = getattr(context.scene, "af_control_scp_obj", None)
-    if picked is None:
+    if state.picked is None:
         box.label(text="Pick an SCP object first.", icon="ERROR")
         return
 
-    box.label(text=f"Selected Object: {obj.name}")
-    box.label(text=f"Target SCP: {picked.name}")
+    box.label(text=f"Selected Object: {state.obj.name}")
+    box.label(text=f"Target SCP: {state.picked.name}")
     box.operator("af.mark_selected_scp_control_object", icon="ADD")
 
 
@@ -55,12 +48,11 @@ class AFPTControlObjectsPanel(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        return get_af_root(context.scene) is not None
+        return has_root(context)
 
     def draw(self, context):
-        root = get_af_root(context.scene)
-        obj = _active_object(context)
-        if obj is not None and is_control_object(obj):
-            _draw_shortcut_checkbox_mode(self.layout, root, obj)
+        state = control_panel_state(context)
+        if state.is_control:
+            _draw_shortcut_checkbox_mode(self.layout, state)
             return
-        _draw_mark_mode(self.layout, context, obj)
+        _draw_mark_mode(self.layout, context, state)

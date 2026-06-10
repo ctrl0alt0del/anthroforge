@@ -1,6 +1,8 @@
 import json
 from mathutils import Vector
 
+from ..vcp.runtime_state import muscle_inflation_ctrl_world, set_muscle_inflation_ctrl_world
+
 
 def collect_fiber_points(root, scene, fiber_props):
     from .fiber_sync import register_fiber_sync
@@ -56,20 +58,20 @@ def ensure_inflation_ctrl(
 
 
 def _ensure_initial_ctrl_world(muscle, base_points):
-    if Vector(muscle.inflation_ctrl_world).length_squared != 0.0:
+    if Vector(muscle_inflation_ctrl_world(muscle)).length_squared != 0.0:
         return
     rows = len(base_points)
     cols = len(base_points[0]) if rows > 0 else 0
     if rows <= 0 or cols <= 0:
         return
     p = base_points[rows // 2][cols // 2]
-    muscle.inflation_ctrl_world = (p.x, p.y, p.z)
+    set_muscle_inflation_ctrl_world(muscle, (p.x, p.y, p.z))
 
 
 def _snap_ctrl_to_surface(muscle, base_obj, nearest_on_mesh_surface_fn):
-    target = Vector(muscle.inflation_ctrl_world)
+    target = Vector(muscle_inflation_ctrl_world(muscle))
     snapped, _n = nearest_on_mesh_surface_fn(base_obj, target)
     if snapped is None:
         return target
-    muscle.inflation_ctrl_world = (snapped.x, snapped.y, snapped.z)
+    set_muscle_inflation_ctrl_world(muscle, (snapped.x, snapped.y, snapped.z))
     return snapped

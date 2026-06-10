@@ -17,6 +17,7 @@ from anthroforge.core.scp_runtime.common import scp_prop_map
 from anthroforge.core.scp_runtime.actions import execute_reparent_scp
 from anthroforge.core.scp_runtime.attachment_runtime import _resolved_tangent_strategy, apply_scp_attachments, capture_attachment_from_link, capture_dirty_scp_attachments
 from anthroforge.core.scp_runtime.mirror_roles import apply_scp_mirror_roles
+from anthroforge.core.scp_runtime.runtime_state import attach_child_anchor_index, attach_child_origin_local
 from anthroforge.core.scp_runtime.mirror_scene import sync_mirrors
 from anthroforge.core.visualization.sync import register_sync
 
@@ -148,11 +149,11 @@ class AttachmentMirrorWorkflowTests(BlenderTestCase):
 
     def test_attachment_property_update_recaptures_child_anchor(self):
         _root_obj, parent, child = _surface_setup()
-        self.assertGreaterEqual(child.attach_child_anchor_index, 0)
+        self.assertGreaterEqual(attach_child_anchor_index(child), 0)
         child.parent_id = parent.id
         child.attach_child_anchor_mode = "OBJECT_ORIGIN"
-        self.assertEqual(child.attach_child_anchor_index, -1)
-        self.assertEqual(tuple(round(v, 4) for v in child.attach_child_origin_local), (0.0, 0.0, 0.0))
+        self.assertEqual(attach_child_anchor_index(child), -1)
+        self.assertEqual(tuple(round(v, 4) for v in attach_child_origin_local(child)), (0.0, 0.0, 0.0))
 
     def test_sync_runtime_payload_marks_recapture_and_apply_ids(self):
         payload = sync_runtime._payload({"S1"}, {"S1", "S2"})

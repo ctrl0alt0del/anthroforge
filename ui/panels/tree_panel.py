@@ -1,32 +1,8 @@
 import bpy
-from ...core.utils import get_af_root
-from ..context import get_active_scp
+from ...app.queries.root import has_root
+from ...app.queries.tree import tree_panel_state
 from ..sections.tree_section import draw_tree_section
 from ..sections.vcp_tree_section import draw_vcp_tree_section
-
-
-def _selected_scp_ids(context, root):
-    out = set()
-    for obj in context.selected_objects:
-        if obj.get("af_scp_bound") and not obj.get("af_scp_mirror") and obj.get("af_root_name") == root.name and obj.get("af_scp_id"):
-            out.add(obj.get("af_scp_id"))
-    return out
-
-
-def _selected_vcp_ids(context, root):
-    sel_fibers = set()
-    sel_muscles = set()
-    sel_blobs = set()
-    for obj in context.selected_objects:
-        if obj.get("af_root_name") != root.name:
-            continue
-        if obj.get("af_fiber_proxy") and obj.get("af_fiber_id"):
-            sel_fibers.add(obj.get("af_fiber_id"))
-        if obj.get("af_muscle_proxy") and obj.get("af_muscle_id"):
-            sel_muscles.add(obj.get("af_muscle_id"))
-        if obj.get("af_blob_proxy") and obj.get("af_blob_id"):
-            sel_blobs.add(obj.get("af_blob_id"))
-    return sel_fibers, sel_muscles, sel_blobs
 
 
 def _draw_vcp_box(box, scene, root, selected_fibers, selected_muscles, selected_blobs):
@@ -49,16 +25,11 @@ class AF_PT_TreePanel(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        return get_af_root(context.scene) is not None
+        return has_root(context)
 
     def draw(self, context):
-        scene = context.scene
-        root = get_af_root(scene)
-        active = get_active_scp(root, context)
-        active_id = active.id if active else ""
-        selected_scp = _selected_scp_ids(context, root)
-        selected_fibers, selected_muscles, selected_blobs = _selected_vcp_ids(context, root)
+        state = tree_panel_state(context)
         box = self.layout.box()
         box.label(text="SCPs")
-        draw_tree_section(box, scene, root, active_id, selected_scp)
-        _draw_vcp_box(box, scene, root, selected_fibers, selected_muscles, selected_blobs)
+        draw_tree_section(box, state.scene, state.root, state.active_scp_id, state.selection.scp_ids)
+        _draw_vcp_box(box, state.scene, state.root, state.selection.fiber_ids, state.selection.muscle_ids, state.selection.blob_ids)

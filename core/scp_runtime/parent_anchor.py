@@ -1,6 +1,7 @@
 from mathutils import Vector
 
 from .common import as_id
+from .runtime_state import attach_parent_param
 from .surface import basis_from_tangent_normal, frame_from_parent_param, nearest_parent_param_from_world
 
 _MODES = {"SURFACE_NEAREST", "OBJECT_ORIGIN"}
@@ -46,9 +47,7 @@ def stored_parent_binding(child_scp):
 
 
 def _stored_param(child_scp):
-    tri = tuple(int(v) for v in getattr(child_scp, "attach_parent_tri_vidx", (-1, -1, -1)))
-    weights = tuple(float(v) for v in getattr(child_scp, "attach_parent_tri_weights", (1.0, 0.0, 0.0)))
-    return {"tri_vidx": tri, "tri_weights": weights}
+    return attach_parent_param(child_scp) or {"tri_vidx": (-1, -1, -1), "tri_weights": (1.0, 0.0, 0.0)}
 
 
 def resolve_parent_frame(binding, parent_transform_obj, parent_geometry_obj, depsgraph, surface_cache, tangent_hint=None, tangent_strategy="STABLE_SURFACE", flow_param=None):

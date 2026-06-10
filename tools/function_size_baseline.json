@@ -48,17 +48,8 @@
   "core/visualization/vcp_mirror_runtime.py::_sync_fiber_mirrors": 36,
   "core/visualization/vcp_mirror_runtime.py::_sync_muscle_mirrors": 46,
   "core/visualization/vcp_mirror_runtime.py::sync_vcp_mirrors": 26,
-  "operators/add_blob_vcp.py::AF_OT_AddBlobVCP.execute": 17,
-  "operators/add_muscle_vcp.py::AF_OT_AddMuscleVCP.execute": 22,
-  "operators/blob_tools.py::AF_OT_SelectBlobControl.execute": 16,
-  "operators/fiber_tools.py::AF_OT_ClearFiberWarmStart.execute": 24,
-  "operators/fiber_tools.py::AF_OT_RecomputeFiber.execute": 18,
-  "operators/fiber_tools.py::AF_OT_RemoveFiberTouchPoint.execute": 22,
-  "operators/muscle_tools.py::AF_OT_SelectMuscleInflationCtrl.execute": 16,
   "operators/scp_objects.py::AF_OT_ToggleSCPBoundNativeParenting.execute": 16,
   "tools/check_deformer_state_roundtrip.py::main": 24,
-  "ui/panels/blob_edit_panel.py::AF_PT_BlobEditPanel.draw": 16,
-  "ui/panels/fiber_edit_panel.py::AF_PT_FiberEditPanel.draw": 17,
   "ui/sections/vcp_tree_section.py::_draw_fiber_row": 21,
   "ui/sections/vcp_tree_section.py::_draw_muscle_node": 22
 }

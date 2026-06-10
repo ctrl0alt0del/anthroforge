@@ -21,5 +21,5 @@ def scalar_dict(prop, skip=()):
 
 def apply_scalar_dict(prop, values):
     for key, value in dict(values or {}).items():
-        setattr(prop, key, value)
-
+        if hasattr(prop, key):
+            setattr(prop, key, value)

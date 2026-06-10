@@ -1,4 +1,5 @@
-﻿from .common import as_id, scp_prop_map, set_prop_raw
+from .common import as_id, scp_prop_map, set_prop_raw
+from .runtime_state import reset_attachment_runtime
 
 
 def has_parent_cycle(start_id, scp_by_id):
@@ -58,7 +59,7 @@ def _clear_parent_ids(root, invalid_ids):
     for scp in root.af_scp_system.scps:
         if as_id(getattr(scp, "id", "")) in invalid_ids:
             set_prop_raw(scp, "parent_id", "")
-            set_prop_raw(scp, "attach_initialized", False)
+            reset_attachment_runtime(scp)
 
 
 def sanitize_parent_links(root, scp_by_id):

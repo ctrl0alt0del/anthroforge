@@ -1,14 +1,14 @@
 import bpy
 
-from ..core.deps.controls import is_control_object
-from ..core.utils import get_af_root
-from ..core.visualization.control_object_service import (
-    control_apply_parent_state,
-    mark_selected_scp_control,
-    selected_object,
-    set_selected_control_parent_applied,
-    toggle_selected_control_axis_shortcut,
+from ..app.queries.control_objects import active_object
+from ..app.queries.root import has_root
+from ..app.use_cases.control_objects import (
+    can_edit_control_objects,
+    mark_selected_control,
+    toggle_control_axis,
+    toggle_control_parent,
 )
+from ..core.control_flags import is_control_object
 
 
 class AFOTMarkSelectedSCPControlObject(bpy.types.Operator):
@@ -18,15 +18,12 @@ class AFOTMarkSelectedSCPControlObject(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        scene = getattr(context, "scene", None)
-        root = get_af_root(scene)
-        return root is not None and selected_object(context) is not None
+        return can_edit_control_objects(context)
 
     def execute(self, context):
-        root = get_af_root(context.scene)
-        if root is None:
+        if not has_root(context):
             return {"CANCELLED"}
-        ok, error = mark_selected_scp_control(root, context)
+        ok, error = mark_selected_control(context)
         if not ok:
             self.report({"ERROR"}, error)
             return {"CANCELLED"}
@@ -46,16 +43,13 @@ class AFOTToggleControlObjectShortcutAxis(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        scene = getattr(context, "scene", None)
-        root = get_af_root(scene)
-        return root is not None and selected_object(context) is not None
+        return can_edit_control_objects(context)
 
     def execute(self, context):
-        root = get_af_root(context.scene)
         axis = str(self.axis or "")
-        if root is None:
+        if not has_root(context):
             return {"CANCELLED"}
-        ok, error = toggle_selected_control_axis_shortcut(root, context, axis)
+        ok, error = toggle_control_axis(context, axis)
         if not ok:
             self.report({"ERROR"}, error)
             return {"CANCELLED"}
@@ -69,17 +63,12 @@ class AFOTToggleControlObjectApplyParent(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        scene = getattr(context, "scene", None)
-        root = get_af_root(scene)
-        obj = selected_object(context)
-        return root is not None and obj is not None and is_control_object(obj)
+        return can_edit_control_objects(context) and is_control_object(active_object(context))
 
     def execute(self, context):
-        root = get_af_root(context.scene)
-        if root is None:
+        if not has_root(context):
             return {"CANCELLED"}
-        enabled = not control_apply_parent_state(root, context)
-        ok, error = set_selected_control_parent_applied(root, context, enabled)
+        ok, error = toggle_control_parent(context)
         if not ok:
             self.report({"ERROR"}, error)
             return {"CANCELLED"}

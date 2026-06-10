@@ -1,6 +1,10 @@
 from collections import OrderedDict
 from dataclasses import dataclass
 
+try:
+    from ..control_flags import is_control_object, set_control_flag_keys
+except ImportError:
+    from core.control_flags import is_control_object, set_control_flag_keys
 from .runtime_intents import enqueue_runtime_intent
 
 
@@ -19,7 +23,6 @@ class ControlDescriptor:
     build_info: object
 
 
-CONTROL_FLAG_KEYS = ()
 _CONTROL_DESCRIPTORS = OrderedDict()
 
 
@@ -70,8 +73,7 @@ def _info(control_type, entity_type, entity_id, root_name, obj_name, payload, bi
 
 
 def _refresh_flag_keys():
-    global CONTROL_FLAG_KEYS
-    CONTROL_FLAG_KEYS = tuple(desc.flag_key for desc in _CONTROL_DESCRIPTORS.values())
+    set_control_flag_keys(tuple(desc.flag_key for desc in _CONTROL_DESCRIPTORS.values()))
 
 
 def register_control_descriptor(descriptor, replace=False):
@@ -160,18 +162,6 @@ def _builtin_descriptors():
 def register_builtin_control_descriptors():
     for descriptor in _builtin_descriptors():
         register_control_descriptor(descriptor, replace=True)
-
-
-def is_control_object(obj):
-    if obj is None:
-        return False
-    for key in CONTROL_FLAG_KEYS:
-        try:
-            if obj.get(key):
-                return True
-        except Exception:
-            continue
-    return False
 
 
 def _root_name(obj):

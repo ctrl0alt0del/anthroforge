@@ -10,6 +10,7 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 import bpy
 
 from _helpers import BlenderTestCase, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
+from core.vcp.runtime_state import muscle_inflation_ctrl_world
 from core.visualization.muscle_sync import apply_muscle_control_update, register_muscle_sync
 from core.visualization.muscle_sync_helpers import mark_inflation_ctrl
 
@@ -113,4 +114,17 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         ctrl = mark_inflation_ctrl(empty_object("InflationCtrl"), root_obj, muscle.id)
         ctrl.location.z += 5.0
         self.assertEqual(apply_muscle_control_update(sync, root_obj, bpy.context.scene, ctrl), muscle.id)
-        self.assertEqual(tuple(round(v, 4) for v in muscle.inflation_ctrl_world), tuple(round(v, 4) for v in ctrl.location))
+        self.assertEqual(tuple(round(v, 4) for v in muscle_inflation_ctrl_world(muscle)), tuple(round(v, 4) for v in ctrl.location))
+
+    def test_removed_inflation_control_is_ignored(self):
+        root_obj, first, second = _muscle_setup()
+        select_only(first)
+        second.select_set(True)
+        bpy.ops.af.add_muscle_vcp()
+        sync = register_muscle_sync()
+        sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        muscle = root_obj.af_vcp_system.muscles[0]
+        ctrl = find_flagged("af_muscle_inflation_ctrl", muscle.id, "af_muscle_id")
+        ctrl = ctrl or sync._create_inflation_ctrl(sync._get_vis_collection(bpy.context.scene), root_obj, muscle.id)
+        bpy.data.objects.remove(ctrl, do_unlink=True)
+        self.assertIsNone(apply_muscle_control_update(sync, root_obj, bpy.context.scene, ctrl))

@@ -1,6 +1,8 @@
 from math import exp
 from mathutils import Vector
 
+from ..vcp.runtime_state import muscle_inflation_ctrl_world
+
 
 def falloff_weight(t, falloff_type):
     x = max(0.0, min(1.0, t))
@@ -115,7 +117,7 @@ def _inflation_setup(base_points, muscle, params):
     m, n = _grid_shape(base_points)
     if m == 0 or n == 0:
         return None
-    ctrl = Vector(muscle.inflation_ctrl_world)
+    ctrl = Vector(muscle_inflation_ctrl_world(muscle))
     normals = compute_vertex_normals(base_points)
     ci, cj = _closest_ctrl_index(base_points, ctrl)
     n0 = _safe_normal(normals[ci][cj])

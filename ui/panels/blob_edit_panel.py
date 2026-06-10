@@ -1,18 +1,7 @@
 import bpy
-from ...core.utils import get_af_root
-from ..context import get_active_af_entity
-
-
-def _find_blob_proxy(scene, root_name, blob_id):
-    for obj in scene.objects:
-        if (
-            obj.get("af_blob_proxy")
-            and obj.get("af_root_name") == root_name
-            and obj.get("af_blob_id") == blob_id
-            and not obj.get("af_blob_mirror_proxy")
-        ):
-            return obj
-    return None
+from ...app.queries.root import root_for_context
+from ...app.queries.vcp import active_blob_from_context, blob_proxy_for_context, has_active_entity
+from ...core.vcp.runtime_state import blob_solve_converged, blob_solve_iterations, blob_solve_max_disp
 
 
 class AF_PT_BlobEditPanel(bpy.types.Panel):
@@ -25,14 +14,7 @@ class AF_PT_BlobEditPanel(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        root = get_af_root(context.scene)
-        if root is None:
-            return False
-        kind, _entity_id = get_active_af_entity(root, context)
-        return kind == "BLOB"
-
-    def _active_blob(self, vcp):
-        return next((b for b in vcp.blobs if b.id == vcp.active_vcp_id), None)
+        return root_for_context(context) is not None and has_active_entity(context, "BLOB")
 
     def _draw_identity(self, layout, blob):
         row = layout.row()
@@ -45,10 +27,10 @@ class AF_PT_BlobEditPanel(bpy.types.Panel):
         geo.label(text="Geometry")
         geo.prop(blob, "resolution", text="Resolution")
 
-    def _draw_transform(self, layout, scene, root_name, blob):
+    def _draw_transform(self, layout, context, blob):
         tfm = layout.box()
         tfm.label(text="Proxy Transform")
-        proxy = _find_blob_proxy(scene, root_name, blob.id)
+        proxy = blob_proxy_for_context(context, blob)
         if proxy is None:
             tfm.label(text="Proxy not found")
             return
@@ -86,24 +68,20 @@ class AF_PT_BlobEditPanel(bpy.types.Panel):
     def _draw_solver_debug(self, layout, blob):
         dbg = layout.box()
         dbg.label(text="Solver")
-        dbg.label(text=f"Converged: {blob.last_solve_converged}")
-        dbg.label(text=f"Max Disp: {blob.last_solve_max_disp:.6f}")
-        dbg.label(text=f"Iterations Used: {blob.last_solve_iterations}")
+        dbg.label(text=f"Converged: {blob_solve_converged(blob)}")
+        dbg.label(text=f"Max Disp: {blob_solve_max_disp(blob):.6f}")
+        dbg.label(text=f"Iterations Used: {blob_solve_iterations(blob)}")
 
     def draw(self, context):
         layout = self.layout
-        scene = context.scene
-        root = get_af_root(scene)
-        v = root.af_vcp_system
-
-        blob = self._active_blob(v)
+        blob = active_blob_from_context(context)
         if blob is None:
             layout.label(text="Blob not found")
             return
 
         self._draw_identity(layout, blob)
         self._draw_geometry(layout, blob)
-        self._draw_transform(layout, scene, root.name, blob)
+        self._draw_transform(layout, context, blob)
         self._draw_control(layout, blob)
         self._draw_gravity(layout, blob)
         self._draw_attachment(layout, blob)

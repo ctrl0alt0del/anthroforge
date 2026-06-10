@@ -4,6 +4,7 @@ from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..deps.conflict_resolver import resolve_conflict
 from ..utils import get_af_root, scene_for_id
+from ..vcp.runtime_state import muscle_inflation_ctrl_world, set_muscle_inflation_ctrl_world
 from ..vcp.muscle_surface import (
     build_surface_data,
     validate_anchor_structure,
@@ -226,45 +227,69 @@ class MuscleSceneSync:
     def _is_relevant_inflation_update(self, root, vis_col, obj):
         if not isinstance(obj, bpy.types.Object):
             return False
-        if not obj.get("af_muscle_inflation_ctrl"):
+        if not self._ctrl_prop(obj, "af_muscle_inflation_ctrl"):
             return False
-        if obj.get("af_root_name") != root.name:
+        if self._ctrl_prop(obj, "af_root_name") != root.name:
             return False
         return vis_col.objects.get(obj.name) is not None
 
     def _find_muscle(self, root, muscle_id):
         return next((m for m in root.af_vcp_system.muscles if m.id == muscle_id), None)
 
-    def _process_inflation_ctrl_update(self, root, vis_col, obj, changed_muscle_ids):
-        muscle_id = obj.get("af_muscle_id")
+    def _ctrl_prop(self, obj, key):
+        try:
+            return obj.get(key)
+        except ReferenceError:
+            return None
+
+    def _ctrl_location(self, obj):
+        try:
+            return obj.location.copy()
+        except ReferenceError:
+            return None
+
+    def _set_ctrl_location(self, obj, value):
+        try:
+            obj.location = value
+        except ReferenceError:
+            return False
+        return True
+
+    def _inflation_target(self, root, vis_col, obj):
+        muscle_id = self._ctrl_prop(obj, "af_muscle_id")
         muscle = self._find_muscle(root, muscle_id)
         if muscle is None:
-            return False
+            return None, None, None
         base_obj = self._find_muscle_proxy(vis_col, root.name, muscle_id, "BASE")
+        return muscle_id, muscle, base_obj
+
+    def _snapped_ctrl_location(self, base_obj, obj):
+        target = self._ctrl_location(obj)
+        if target is None:
+            return None
+        snapped, _n = self._nearest_on_mesh_surface(base_obj, target)
+        if snapped is None or not self._set_ctrl_location(obj, snapped):
+            return None
+        return snapped
+
+    def _resolved_ctrl_world(self, muscle_id, muscle, incoming):
+        resolved = resolve_conflict(entity_type="MUSCLE", entity_id=str(muscle_id or ""), aspect="inflation.ctrl_world", source="blender_control", current=muscle_inflation_ctrl_world(muscle), incoming=incoming, payload={"control": "inflation"})
+        try:
+            return float(resolved[0]), float(resolved[1]), float(resolved[2])
+        except Exception:
+            return incoming
+
+    def _process_inflation_ctrl_update(self, root, vis_col, obj, changed_muscle_ids):
+        muscle_id, muscle, base_obj = self._inflation_target(root, vis_col, obj)
         if base_obj is None:
             return False
-        snapped, _n = self._nearest_on_mesh_surface(base_obj, obj.location.copy())
+        snapped = self._snapped_ctrl_location(base_obj, obj)
         if snapped is None:
             return False
-        obj.location = snapped
-        incoming = (snapped.x, snapped.y, snapped.z)
-        current = tuple(muscle.inflation_ctrl_world)
-        resolved = resolve_conflict(
-            entity_type="MUSCLE",
-            entity_id=str(muscle_id or ""),
-            aspect="inflation.ctrl_world",
-            source="blender_control",
-            current=current,
-            incoming=incoming,
-            payload={"control": "inflation"},
-        )
-        try:
-            new_loc = (float(resolved[0]), float(resolved[1]), float(resolved[2]))
-        except Exception:
-            new_loc = incoming
-        if tuple(muscle.inflation_ctrl_world) == tuple(new_loc):
+        new_loc = self._resolved_ctrl_world(muscle_id, muscle, (snapped.x, snapped.y, snapped.z))
+        if muscle_inflation_ctrl_world(muscle) == tuple(new_loc):
             return False
-        muscle.inflation_ctrl_world = tuple(new_loc)
+        set_muscle_inflation_ctrl_world(muscle, tuple(new_loc))
         changed_muscle_ids.add(muscle_id)
         return True
 

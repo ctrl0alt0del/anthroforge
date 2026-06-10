@@ -3,6 +3,7 @@ from mathutils import Matrix, Vector
 from ..visualization.mirror_objects import clone_native_object, remap_object_cluster_parents, remap_object_cluster_refs, remove_obj
 from .bound_objects import iter_bound_objects
 from .common import as_axis, as_id
+from .runtime_state import mirror_effective_axis, mirror_source_id, mirror_status
 
 
 def _axis_to_scale(axis):
@@ -43,8 +44,8 @@ class MirrorSceneSync:
         self.desired_ids.add(sid)
 
     def _should_sync_target(self, sid, scp):
-        source_id = as_id(getattr(scp, "mirror_source_id", ""))
-        status_ok = as_id(getattr(scp, "mirror_status", "NONE")).upper() == "TARGET"
+        source_id = mirror_source_id(scp)
+        status_ok = mirror_status(scp) == "TARGET"
         in_scope = not self.target_ids or sid in self.target_ids or source_id in self.target_ids
         self.affected_ids.add(sid) if status_ok and in_scope else None
         return bool(status_ok and in_scope and source_id in self.scp_by_id)
@@ -87,13 +88,13 @@ class MirrorSceneSync:
             clone.matrix_world = _mirror_matrix(axis=axis, origin=origin) @ source_obj.matrix_world
 
     def _mirror_rule(self, scp):
-        source_scp = self.scp_by_id[as_id(getattr(scp, "mirror_source_id", ""))]
+        source_scp = self.scp_by_id[mirror_source_id(scp)]
         axis = self._mirror_axis(scp, source_scp)
         origin = tuple(getattr(source_scp, "mirror_origin", (0.0, 0.0, 0.0)))
         return axis, origin
 
     def _mirror_axis(self, scp, source_scp):
-        axis = as_axis(getattr(scp, "mirror_effective_axis", "X"))
+        axis = mirror_effective_axis(scp)
         return axis if axis in {"X", "Y", "Z"} else as_axis(getattr(source_scp, "mirror_axis", "X"))
 
     def _remove_target_cluster(self, sid):

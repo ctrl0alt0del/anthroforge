@@ -1,6 +1,6 @@
 import bpy
-from ...core.utils import get_af_root
-from ..context import get_active_af_entity
+from ...app.queries.root import root_for_context
+from ...app.queries.vcp import active_muscle_from_context, has_active_entity
 
 
 class AF_PT_VCPEditPanel(bpy.types.Panel):
@@ -13,14 +13,7 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        root = get_af_root(context.scene)
-        if root is None:
-            return False
-        kind, _entity_id = get_active_af_entity(root, context)
-        return kind == "MUSCLE"
-
-    def _active_muscle(self, vcp):
-        return next((m for m in vcp.muscles if m.id == vcp.active_vcp_id), None)
+        return root_for_context(context) is not None and has_active_entity(context, "MUSCLE")
 
     def _draw_identity(self, layout, muscle):
         row = layout.row()
@@ -56,10 +49,7 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        root = get_af_root(context.scene)
-        v = root.af_vcp_system
-
-        muscle = self._active_muscle(v)
+        muscle = active_muscle_from_context(context)
         if muscle is None:
             layout.label(text="Muscle not found")
             return

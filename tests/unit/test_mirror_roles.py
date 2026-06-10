@@ -15,19 +15,19 @@ ensure_import_path()
 install_fake_modules()
 
 from core.scp_runtime.mirror_roles import apply_scp_mirror_roles
+from core.scp_runtime.runtime_state import mirror_effective_axis, mirror_source_id, mirror_status, reset_mirror_runtime
 
 
 def scp(sid, parent_id="", enabled=False, inherit=True, axis="X"):
-    return SimpleNamespace(
+    item = SimpleNamespace(
         id=sid,
         parent_id=parent_id,
         mirror_enabled=enabled,
         mirror_inherit_parent=inherit,
         mirror_axis=axis,
-        mirror_status="NONE",
-        mirror_source_id="",
-        mirror_effective_axis="X",
     )
+    reset_mirror_runtime(item)
+    return item
 
 
 class MirrorRoleTests(unittest.TestCase):
@@ -35,8 +35,8 @@ class MirrorRoleTests(unittest.TestCase):
         root = SimpleNamespace(af_scp_system=SimpleNamespace(scps=[scp("S1", enabled=True, axis="Y"), scp("S2", "S1"), scp("S3", "S2", inherit=False)]))
         changed = apply_scp_mirror_roles(root)
         items = {item.id: item for item in root.af_scp_system.scps}
-        self.assertEqual(items["S1"].mirror_status, "SOURCE")
-        self.assertEqual(items["S2"].mirror_source_id, "S1")
-        self.assertEqual(items["S2"].mirror_effective_axis, "Y")
-        self.assertEqual(items["S3"].mirror_status, "NONE")
+        self.assertEqual(mirror_status(items["S1"]), "SOURCE")
+        self.assertEqual(mirror_source_id(items["S2"]), "S1")
+        self.assertEqual(mirror_effective_axis(items["S2"]), "Y")
+        self.assertEqual(mirror_status(items["S3"]), "NONE")
         self.assertIn("S2", changed)

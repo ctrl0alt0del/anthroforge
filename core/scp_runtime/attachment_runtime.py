@@ -1,19 +1,21 @@
-import bpy
 from mathutils import Matrix, Vector
 
 from ..utils import depsgraph_for_scene, scene_for_id, update_scene_view_layer
 from .common import as_bool, as_id, as_vec3, find_geometry_mesh_scp_obj, find_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix
-from .common import set_prop_raw, vec3_close, is_matrix_close, matrix_flat16
+from .common import vec3_close, is_matrix_close, matrix_flat16
 from .child_anchor import anchor_mode as child_anchor_mode, capture_child_anchor
 from .parent_anchor import anchor_mode as parent_anchor_mode, is_surface_binding, resolve_parent_frame, stored_parent_binding
+from .runtime_state import attach_child_anchor_index, attach_child_normal_local, attach_child_origin_local, attach_child_tangent_local
+from .runtime_state import attach_flow_param, attach_initialized, attach_parent_offset_local, attach_parent_tangent_hint_local
+from .runtime_state import read_attachment_runtime, set_attach_child_anchor_index, set_attach_initialized, write_attachment_runtime
 from .surface import basis_from_tangent_normal, build_face_centers, build_vertex_points, flow_hint_world, nearest_parent_param_from_world
 from .surface import project_tangent_hint, resolve_tangent_strategy
 from .tree import children_depth_order
 
 
 def _child_basis_local(child_scp):
-    tangent = as_vec3(getattr(child_scp, "attach_child_tangent_local", (1.0, 0.0, 0.0)), (1.0, 0.0, 0.0))
-    normal = as_vec3(getattr(child_scp, "attach_child_normal_local", (0.0, 0.0, 1.0)), (0.0, 0.0, 1.0))
+    tangent = as_vec3(attach_child_tangent_local(child_scp), (1.0, 0.0, 0.0))
+    normal = as_vec3(attach_child_normal_local(child_scp), (0.0, 0.0, 1.0))
     return basis_from_tangent_normal(tangent, normal)[0]
 
 
@@ -27,17 +29,15 @@ def _resolved_tangent_strategy(child_scp, parent_obj):
 
 
 def _stored_flow_param(child_scp):
-    tri = tuple(int(v) for v in getattr(child_scp, "attach_parent_flow_tri_vidx", (-1, -1, -1)))
-    weights = tuple(float(v) for v in getattr(child_scp, "attach_parent_flow_tri_weights", (1.0, 0.0, 0.0)))
-    return None if min(tri) < 0 else {"tri_vidx": tri, "tri_weights": weights}
+    return attach_flow_param(child_scp)
 
 
 def _stored_child_anchor_local(child_scp):
-    return as_vec3(getattr(child_scp, "attach_child_origin_local", (0.0, 0.0, 0.0)), (0.0, 0.0, 0.0))
+    return as_vec3(attach_child_origin_local(child_scp), (0.0, 0.0, 0.0))
 
 
 def _child_anchor_index(child_scp):
-    return int(getattr(child_scp, "attach_child_anchor_index", -1))
+    return attach_child_anchor_index(child_scp)
 
 
 def _point_at(points, index):
@@ -65,7 +65,7 @@ def _resolved_child_anchor_index(child_scp, child_obj, points):
     if points is None or 0 <= index < len(points):
         return index
     index = _nearest_point_index(points, child_obj.matrix_world @ _stored_child_anchor_local(child_scp))
-    set_prop_raw(child_scp, "attach_child_anchor_index", index) if index >= 0 else None
+    set_attach_child_anchor_index(child_scp, index) if index >= 0 else None
     return index
 
 
@@ -193,30 +193,30 @@ class AttachmentCapture:
         return self._write_field("attach_parent_flow_tri_weights", weights, eps=1.0e-7) or changed
 
     def _write_field(self, key, value, eps=None):
-        current = getattr(self.child_scp, key, None)
+        current = read_attachment_runtime(self.child_scp, key)
         same = vec3_close(current, value, eps=eps) if eps is not None else tuple(current) == tuple(value)
         if same:
             return False
-        set_prop_raw(self.child_scp, key, value)
+        write_attachment_runtime(self.child_scp, key, value)
         return True
 
     def _write_scalar(self, key, value):
-        if getattr(self.child_scp, key, None) == value:
+        if read_attachment_runtime(self.child_scp, key) == value:
             return False
-        set_prop_raw(self.child_scp, key, value)
+        write_attachment_runtime(self.child_scp, key, value)
         return True
 
     def _write_vec(self, key, value):
-        current = as_vec3(getattr(self.child_scp, key, (0.0, 0.0, 0.0)), (0.0, 0.0, 0.0))
+        current = as_vec3(read_attachment_runtime(self.child_scp, key), (0.0, 0.0, 0.0))
         if (current - value).length <= 1.0e-7:
             return False
-        set_prop_raw(self.child_scp, key, (float(value.x), float(value.y), float(value.z)))
+        write_attachment_runtime(self.child_scp, key, (float(value.x), float(value.y), float(value.z)))
         return True
 
     def _mark_initialized(self):
-        if as_bool(getattr(self.child_scp, "attach_initialized", False), default=False):
+        if attach_initialized(self.child_scp):
             return False
-        set_prop_raw(self.child_scp, "attach_initialized", True)
+        set_attach_initialized(self.child_scp, True)
         return True
 
 
@@ -233,6 +233,22 @@ def recapture_attachment_for_scp(root, scene, sid):
         return False
     scp_by_id = {as_id(s.id): s for s in root.af_scp_system.scps}
     return _authoring_capture_one(scp_by_id, scene, root.name, sid, depsgraph, _new_surface_cache())
+
+
+def capture_authored_scp_attachments(root, scene, target_scp_ids=None):
+    depsgraph = depsgraph_for_scene(scene)
+    if root is None or depsgraph is None:
+        return set()
+    scp_by_id = {as_id(s.id): s for s in root.af_scp_system.scps}
+    wanted = _authoring_attachment_ids(scp_by_id, target_scp_ids)
+    cache = _new_surface_cache()
+    return {sid for sid in sorted(wanted) if _authoring_capture_one(scp_by_id, scene, root.name, sid, depsgraph, cache)}
+
+
+def _authoring_attachment_ids(scp_by_id, target_scp_ids):
+    ids = {sid for sid, scp in scp_by_id.items() if as_id(getattr(scp, "parent_id", ""))}
+    targets = {as_id(v) for v in set(target_scp_ids or ()) if as_id(v)}
+    return ids if not targets else ids & targets
 
 
 class AttachmentApply:
@@ -264,7 +280,7 @@ class AttachmentApply:
         return resolve_parent_frame(binding, self.parent_transform_obj, self.parent_geometry_obj, self.depsgraph, self.surface_cache, tangent_hint=self._parent_tangent_hint(), tangent_strategy=strategy, flow_param=_stored_flow_param(self.child_scp))
 
     def _parent_tangent_hint(self):
-        return as_vec3(getattr(self.child_scp, "attach_parent_tangent_hint_local", (1.0, 0.0, 0.0)), (1.0, 0.0, 0.0))
+        return as_vec3(attach_parent_tangent_hint_local(self.child_scp), (1.0, 0.0, 0.0))
 
     def _matrix_world(self, frame):
         follow = as_bool(getattr(self.child_scp, "attach_follow_rotation", True), default=True)
@@ -274,7 +290,7 @@ class AttachmentApply:
         return self._compose_matrix(position, rotation, follow)
 
     def _parent_offset_world(self, frame):
-        offset = as_vec3(getattr(self.child_scp, "attach_parent_offset_local", (0.0, 0.0, 0.0)), (0.0, 0.0, 0.0))
+        offset = as_vec3(attach_parent_offset_local(self.child_scp), (0.0, 0.0, 0.0))
         return frame["basis_world"] @ offset
 
     def _rotation_world(self, frame, follow_rotation):
@@ -431,4 +447,4 @@ def _apply_child_runtime(root, scene, sid, child_scp, parent_id, surface_cache):
 
 
 def _is_initialized(child_scp):
-    return as_bool(getattr(child_scp, "attach_initialized", False), default=False)
+    return as_bool(attach_initialized(child_scp), default=False)

@@ -1,29 +1,12 @@
 from .common import set_prop_raw
-
-_FIELDS = (
-    "parent_id",
-    "attach_initialized",
-    "attach_parent_tri_vidx",
-    "attach_parent_tri_weights",
-    "attach_parent_offset_local",
-    "attach_parent_tangent_hint_local",
-    "attach_parent_flow_tri_vidx",
-    "attach_parent_flow_tri_weights",
-    "attach_child_anchor_index",
-    "attach_child_origin_local",
-    "attach_child_tangent_local",
-    "attach_child_normal_local",
-)
+from .runtime_state import restore_attachment_runtime, snapshot_attachment_runtime
 
 
 def snapshot_link_state(scp):
-    return {field: _snapshot_value(getattr(scp, field, None)) for field in _FIELDS}
-
-
-def _snapshot_value(value):
-    return tuple(value) if isinstance(value, (list, tuple)) else value
+    return {"parent_id": getattr(scp, "parent_id", ""), "attachment_runtime": snapshot_attachment_runtime(scp)}
 
 
 def restore_link_state(scp, snapshot):
-    for field, value in snapshot.items():
-        set_prop_raw(scp, field, value)
+    state = dict(snapshot or {})
+    set_prop_raw(scp, "parent_id", state.get("parent_id", ""))
+    restore_attachment_runtime(scp, state.get("attachment_runtime", {}))

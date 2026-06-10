@@ -1,8 +1,12 @@
 import bpy
 
-from ..app.runtime_api import sync_scene
-from ..core.utils import get_af_root
-from ..core.deps.dirty_hints import dirty_hints_for
+from ..app.use_cases.muscle_tools import flip_muscle_normals, select_muscle_inflation_ctrl
+
+
+def _finish(operator, result):
+    if result.message:
+        operator.report({result.level}, result.message)
+    return {"FINISHED"} if result.ok else {"CANCELLED"}
 
 
 class AF_OT_FlipMuscleNormals(bpy.types.Operator):
@@ -13,20 +17,7 @@ class AF_OT_FlipMuscleNormals(bpy.types.Operator):
     muscle_id: bpy.props.StringProperty(default="")
 
     def execute(self, context):
-        root = get_af_root(context.scene)
-        if root is None:
-            return {"CANCELLED"}
-
-        vcp = root.af_vcp_system
-        mid = self.muscle_id or vcp.active_vcp_id
-        m = next((x for x in vcp.muscles if x.id == mid), None)
-        if m is None:
-            self.report({"ERROR"}, "Muscle not found.")
-            return {"CANCELLED"}
-
-        m.flip_normals = not m.flip_normals
-        sync_scene(root=root, scene=context.scene, dirty_hints=dirty_hints_for("MUSCLE", {m.id}))
-        return {"FINISHED"}
+        return _finish(self, flip_muscle_normals(context, self.muscle_id))
 
 
 class AF_OT_SelectMuscleInflationCtrl(bpy.types.Operator):
@@ -36,38 +27,5 @@ class AF_OT_SelectMuscleInflationCtrl(bpy.types.Operator):
 
     muscle_id: bpy.props.StringProperty(default="")
 
-    def _resolve_muscle(self, root):
-        vcp = root.af_vcp_system
-        mid = self.muscle_id or vcp.active_vcp_id
-        return vcp, next((x for x in vcp.muscles if x.id == mid), None)
-
-    def _find_ctrl(self, context, root_name, muscle_id):
-        for obj in context.scene.objects:
-            if obj.get("af_muscle_inflation_ctrl") and obj.get("af_root_name") == root_name:
-                if obj.get("af_muscle_id") == muscle_id:
-                    return obj
-        return None
-
-    def _select_only(self, context, obj):
-        for o in context.selected_objects:
-            o.select_set(False)
-        obj.select_set(True)
-        context.view_layer.objects.active = obj
-
     def execute(self, context):
-        root = get_af_root(context.scene)
-        if root is None:
-            return {"CANCELLED"}
-        vcp, m = self._resolve_muscle(root)
-        if m is None:
-            self.report({"ERROR"}, "Muscle not found.")
-            return {"CANCELLED"}
-        sync_scene(root=root, scene=context.scene, dirty_hints=dirty_hints_for("MUSCLE", {m.id}))
-        ctrl = self._find_ctrl(context, root.name, m.id)
-        if ctrl is None:
-            self.report({"ERROR"}, "Inflation control not found.")
-            return {"CANCELLED"}
-        self._select_only(context, ctrl)
-        vcp.active_vcp_type = "MUSCLE"
-        vcp.active_vcp_id = m.id
-        return {"FINISHED"}
+        return _finish(self, select_muscle_inflation_ctrl(context, self.muscle_id))

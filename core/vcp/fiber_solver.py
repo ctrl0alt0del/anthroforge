@@ -4,6 +4,7 @@ from mathutils.bvhtree import BVHTree
 from ..attachment_codec import parse_fiber_attach_param
 from ..scp_runtime.common import find_geometry_scp_obj, iter_geometry_mesh_scp_objects
 from ..utils import depsgraph_for_scene, scene_for_id
+from .runtime_state import set_fiber_eps_disp, set_fiber_eps_pen, set_fiber_not_converged
 
 
 class FiberSolver:
@@ -115,9 +116,9 @@ class FiberSolver:
         return {}
 
     def _mark_failed(self, fiber_prop):
-        fiber_prop.not_converged = True
-        fiber_prop.last_eps_disp = 0.0
-        fiber_prop.last_eps_pen = 0.0
+        set_fiber_not_converged(fiber_prop, True)
+        set_fiber_eps_disp(fiber_prop, 0.0)
+        set_fiber_eps_pen(fiber_prop, 0.0)
 
     def _build_initialized_nodes(self, fiber_prop, a_world, b_world, guide_worlds, params):
         nodes_init, pin_targets = self._build_chain_with_anchors(a_world, b_world, guide_worlds, params["node_count"])
@@ -137,9 +138,9 @@ class FiberSolver:
         return converged, max_disp, max_pen
 
     def _store_status(self, fiber_prop, converged, max_disp, max_pen):
-        fiber_prop.not_converged = not converged
-        fiber_prop.last_eps_disp = float(max_disp)
-        fiber_prop.last_eps_pen = float(max_pen)
+        set_fiber_not_converged(fiber_prop, not converged)
+        set_fiber_eps_disp(fiber_prop, float(max_disp))
+        set_fiber_eps_pen(fiber_prop, float(max_pen))
 
     def _guide_worlds(self, root, scene, runtime_registry, fiber_prop):
         out = []

@@ -12,10 +12,17 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 
 import bpy
 
-from _helpers import BlenderTestCase, empty_object, root, scp_with_object
+from _helpers import BlenderTestCase, add_shortcut, empty_object, fiber, mesh_object, root, scp_with_object, temp_blend_path
 from app.context import AddonContext
 from app.runtime_requests import RuntimeRequest
 from core.deps.drivers import DependencyDriver
+from core.id_utils import next_prefixed_id
+from core.scp_runtime.attachment_runtime import apply_scp_attachments
+from core.scp_runtime.common import scp_prop_map
+from core.scp_runtime.lookup import set_parent_relation
+from core.scp_runtime.runtime_state import attach_initialized, mirror_effective_axis, mirror_source_id, mirror_status
+from core.utils import get_af_root
+from core.vcp.runtime_state import fiber_recompute_ms, fiber_recompute_status, set_fiber_recompute_ms, set_fiber_recompute_status
 from core.visualization.scp_control_helpers import mark_scp_control_object
 from core.visualization import control_runtime, delete_reconcile, sync_runner
 from core.deps import drivers, gates, runtime, runtime_intent_behaviors, runtime_intents
@@ -35,6 +42,85 @@ def _reset_sync_runner():
     sync_runner._RUNNING = False
     sync_runner._TIMER_ARMED = False
     sync_runner._PENDING.clear()
+
+
+def _save_load_fixture():
+    root_obj = root()
+    parent = scp_with_object(root_obj, "Parent", mesh_object("Parent"))
+    child = scp_with_object(root_obj, "Child", mesh_object("Child", (1.0, 0.0, 0.0)))
+    set_parent_relation(child.transform_object_ref, child, parent.transform_object_ref)
+    _configure_scp(parent, child)
+    fib, muscle, blob = _configure_vcps(root_obj, parent.id, child.id)
+    add_shortcut(root_obj, "Child X", "SCP", child.id, "location[0]")
+    return temp_blend_path(), (parent.id, child.id, fib.id, muscle.id, blob.id)
+
+
+def _configure_scp(parent, child):
+    parent.mirror_enabled, parent.mirror_axis = True, "Y"
+    parent.mirror_origin = (1.0, 2.0, 3.0)
+    child.attach_parent_anchor_mode, child.attach_child_anchor_mode = "OBJECT_ORIGIN", "OBJECT_ORIGIN"
+    child.attach_follow_rotation, child.attach_tangent_strategy = False, "STABLE_SURFACE"
+
+
+def _configure_vcps(root_obj, parent_id, child_id):
+    fib = fiber(root_obj, parent_id, child_id)
+    fib.a_attach_param, fib.b_attach_param = "A", "B"
+    fib.node_count, fib.thickness = 24, 0.02
+    fib.mid_touches.add().parent_id, fib.mid_touches[0].attach_param = parent_id, "T1"
+    set_fiber_recompute_status(fib, "CONVERGED")
+    set_fiber_recompute_ms(fib, 12.3)
+    muscle = _new_muscle(root_obj, fib.id)
+    muscle.closed_v, muscle.flip_normals = True, True
+    blob = _new_blob(root_obj, muscle.id)
+    blob.shape, blob.radius = "ELLIPSOID", 0.5
+    return fib, muscle, blob
+
+
+def _new_muscle(root_obj, fiber_id):
+    item = root_obj.af_vcp_system.muscles.add()
+    item.id = next_prefixed_id(root_obj.af_vcp_system.muscles, "MUSCLE")
+    item.name = item.id
+    item.closed_v = True
+    item.fiber_refs.add().fiber_id = fiber_id
+    return item
+
+
+def _new_blob(root_obj, muscle_id):
+    item = root_obj.af_vcp_system.blobs.add()
+    item.id = next_prefixed_id(root_obj.af_vcp_system.blobs, "BLOB")
+    item.name = item.id
+    item.attach_target_type, item.attach_target_id = "MUSCLE", muscle_id
+    item.radius = 0.5
+    return item
+
+
+def _saved_authoring(root_obj, ids):
+    parent_id, child_id, fiber_id, muscle_id, blob_id = ids
+    parent = next(item for item in root_obj.af_scp_system.scps if item.id == parent_id)
+    child = next(item for item in root_obj.af_scp_system.scps if item.id == child_id)
+    fiber_prop = next(item for item in root_obj.af_vcp_system.fibers if item.id == fiber_id)
+    muscle = next(item for item in root_obj.af_vcp_system.muscles if item.id == muscle_id)
+    blob = next(item for item in root_obj.af_vcp_system.blobs if item.id == blob_id)
+    return parent, child, fiber_prop, muscle, blob
+
+
+def _assert_saved_authoring(ids):
+    root_obj = get_af_root(bpy.context.scene)
+    assert root_obj is not None
+    parent, child, fib, muscle, blob = _saved_authoring(root_obj, ids)
+    assert child.parent_id == parent.id and parent.mirror_enabled and parent.mirror_axis == "Y"
+    assert attach_initialized(child)
+    assert mirror_status(parent) == "SOURCE"
+    assert (mirror_status(child), mirror_source_id(child), mirror_effective_axis(child)) == ("TARGET", parent.id, "Y")
+    assert tuple(round(v, 4) for v in parent.mirror_origin) == (1.0, 2.0, 3.0)
+    assert (child.attach_follow_rotation, child.attach_tangent_strategy) == (False, "STABLE_SURFACE")
+    assert (fib.a_parent_id, fib.b_parent_id, fib.mid_touches[0].parent_id) == (parent.id, child.id, parent.id)
+    assert round(fib.thickness, 4) == 0.02
+    assert (fiber_recompute_status(fib), fiber_recompute_ms(fib)) == ("UNKNOWN", 0.0)
+    assert (muscle.fiber_refs[0].fiber_id, muscle.closed_v, muscle.flip_normals) == (fib.id, True, True)
+    assert (blob.attach_target_type, blob.attach_target_id, root_obj.af_shortcut_system.shortcuts[0].owner_id) == ("MUSCLE", muscle.id, child.id)
+    assert round(blob.radius, 4) == 0.5
+    return root_obj, parent, child
 
 
 class RecorderDriver(DependencyDriver):
@@ -86,6 +172,16 @@ class RuntimeContractTests(BlenderTestCase):
         self.assertEqual((bpy.data.objects.get(temp_name), bpy.data.objects.get(keep_name) is not None), (None, True))
         self.assertEqual(control_runtime._CONTROL_RUNTIME._last_active, ("NONE", ""))
         self.assertEqual((hydrate.call_count, delete_reconcile._DELETE_RECONCILE._owners), (1, {}))
+
+    def test_save_reload_preserves_authored_relationships(self):
+        path, ids = _save_load_fixture()
+        self.addCleanup(lambda: Path(path).unlink(missing_ok=True))
+        bpy.ops.wm.save_as_mainfile(filepath=path)
+        bpy.ops.wm.open_mainfile(filepath=path, load_ui=False)
+        root_obj, parent, child = _assert_saved_authoring(ids)
+        parent.transform_object_ref.location.x = 2.0
+        apply_scp_attachments(None, root_obj, bpy.context.scene, scp_prop_map(root_obj), parent_ids={parent.id})
+        self.assertEqual(tuple(round(v, 4) for v in child.transform_object_ref.location), (3.0, 0.0, 0.0))
 
     def test_schedule_sync_preserves_event_metadata(self):
         self.addCleanup(_reset_sync_runner)

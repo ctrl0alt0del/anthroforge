@@ -1,7 +1,7 @@
 import bpy
 
-from ...core.selection import get_active_scp
-from ...core.utils import get_af_root
+from ...app.queries.create import create_panel_state
+from ...app.queries.root import has_root
 from .scp_create_sections import draw_active_object_box, draw_create_buttons, draw_mirror_box, draw_parent_box
 from .scp_objects_panel import draw_scp_object_section
 
@@ -25,10 +25,10 @@ class AF_PT_CreatePanel(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        return get_af_root(context.scene) is not None
+        return has_root(context)
 
     def draw(self, context):
-        root = get_af_root(context.scene)
+        state = create_panel_state(context)
         draw_active_object_box(self.layout, context.active_object)
         draw_create_buttons(self.layout)
-        _draw_active_scp_sections(self.layout, context.scene, get_active_scp(root, context))
+        _draw_active_scp_sections(self.layout, state.scene, state.active_scp)

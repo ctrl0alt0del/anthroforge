@@ -5,6 +5,7 @@ from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..deps.conflict_resolver import resolve_conflict
 from ..utils import get_af_root, scene_for_id
+from ..vcp.runtime_state import set_blob_solve_converged, set_blob_solve_iterations, set_blob_solve_max_disp
 from .blob_sync_helpers import target_object_for_blob
 from .control_runtime import active_entity_id
 
@@ -63,9 +64,9 @@ def _update_blob_meta(sync, root, vcp, bp, obj, result):
     obj["af_blob_proxy"] = True
     obj["af_root_name"] = root.name
     obj["af_blob_id"] = bp.id
-    bp.last_solve_converged = bool(result.converged)
-    bp.last_solve_max_disp = float(result.max_disp)
-    bp.last_solve_iterations = int(result.iterations_used)
+    set_blob_solve_converged(bp, bool(result.converged))
+    set_blob_solve_max_disp(bp, float(result.max_disp))
+    set_blob_solve_iterations(bp, int(result.iterations_used))
     active = (vcp.active_vcp_type == "BLOB" and vcp.active_vcp_id == bp.id)
     sync._ensure_blob_material(obj, active=active)
 

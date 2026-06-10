@@ -1,66 +1,7 @@
 import bpy
 
-from ..core.id_utils import next_prefixed_id
-from ..core.shortcuts.owners import current_shortcut_owner
-from ..core.shortcuts import normalize_shortcut_path, resolve_shortcut
-from ..core.utils import get_af_root
-
-
-def _draft_name(scene):
-    return str(getattr(scene, "af_new_shortcut_name", "") or "").strip()
-
-
-def _draft_path(scene):
-    return str(getattr(scene, "af_new_shortcut_path", "") or "").strip()
-
-
-def _clear_shortcut_draft(scene):
-    scene.af_new_shortcut_name = ""
-    scene.af_new_shortcut_path = ""
-
-
-def _shortcut_index(root, shortcut_id):
-    for index, item in enumerate(root.af_shortcut_system.shortcuts):
-        if str(getattr(item, "id", "") or "") == str(shortcut_id or ""):
-            return index
-    return -1
-
-
-def _add_shortcut(root, name, data_path, owner_type, owner_id):
-    item = root.af_shortcut_system.shortcuts.add()
-    item.id = next_prefixed_id(root.af_shortcut_system.shortcuts, "SHORTCUT")
-    item.name = name
-    item.owner_type = owner_type
-    item.owner_id = owner_id
-    item.data_path = data_path
-
-
-def _validated_shortcut_owner(operator, root, context):
-    owner = current_shortcut_owner(root, context)
-    if owner[0] != "NONE":
-        return owner
-    operator.report({"ERROR"}, "Select an SCP or VCP first.")
-    return "NONE", ""
-
-
-def _validated_shortcut_path(operator, root, context):
-    data_path = normalize_shortcut_path(root, context, _draft_path(context.scene))
-    if data_path:
-        return data_path
-    operator.report({"ERROR"}, "Paste a full Blender data path that points to an object bound to the active SCP.")
-    return ""
-
-
-def _resolved_shortcut_owner(root, context, data_path):
-    return resolve_shortcut(root, context, data_path).owner
-
-
-def _validated_shortcut_name(operator, scene):
-    name = _draft_name(scene)
-    if name:
-        return name
-    operator.report({"ERROR"}, "Enter a shortcut name.")
-    return ""
+from ..app.queries.root import has_root
+from ..app.use_cases.shortcuts import add_shortcut_from_context, delete_shortcut_from_context
 
 
 class AF_OT_AddDataShortcut(bpy.types.Operator):
@@ -69,19 +10,12 @@ class AF_OT_AddDataShortcut(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-        root = get_af_root(context.scene)
-        if root is None:
+        if not has_root(context):
             return {"CANCELLED"}
-        name = _validated_shortcut_name(self, context.scene)
-        data_path = _validated_shortcut_path(self, root, context)
-        owner_type, owner_id = _validated_shortcut_owner(self, root, context)
-        if not name or not data_path or owner_type == "NONE":
+        ok, error = add_shortcut_from_context(context)
+        if not ok:
+            self.report({"ERROR"}, error)
             return {"CANCELLED"}
-        if _resolved_shortcut_owner(root, context, data_path) is None:
-            self.report({"ERROR"}, "Shortcut path could not be resolved.")
-            return {"CANCELLED"}
-        _add_shortcut(root, name, data_path, owner_type, owner_id)
-        _clear_shortcut_draft(context.scene)
         return {"FINISHED"}
 
 
@@ -93,11 +27,6 @@ class AF_OT_DeleteDataShortcut(bpy.types.Operator):
     shortcut_id: bpy.props.StringProperty(default="")
 
     def execute(self, context):
-        root = get_af_root(context.scene)
-        if root is None:
+        if not has_root(context):
             return {"CANCELLED"}
-        index = _shortcut_index(root, self.shortcut_id)
-        if index < 0:
-            return {"CANCELLED"}
-        root.af_shortcut_system.shortcuts.remove(index)
-        return {"FINISHED"}
+        return {"FINISHED"} if delete_shortcut_from_context(context, self.shortcut_id) else {"CANCELLED"}

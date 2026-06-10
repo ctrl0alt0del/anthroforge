@@ -1,17 +1,23 @@
 import bpy
 from ..app.runtime_api import sync_scene
+from ..app.use_cases.scp_parenting import reparent_scp
+from ..app.use_cases.tree_state import toggle_scp_tree_node, toggle_vcp_tree_node
 from ..core.utils import get_af_root
 from ..core.deps.dirty_hints import empty_dirty_hints
-from ..core.scp_runtime.actions import execute_reparent_scp
 from ..core.scp_runtime.copy import copy_scp_subtree
 from ..core.scp_runtime.delete import delete_scp
 from ..core.scp_runtime.common import as_id, find_primary_scp_obj, find_scp_by_id
 from ..core.scp_runtime.lookup import activate_scp
 from ..core.scp_runtime.object_colors import enable_object_color_view
 from ..core.scp_runtime.tree import children_map
-from ..ui.tree_state import toggle_collapsed, toggle_vcp_collapsed
 from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.visualization.control_runtime import notify_selection_changed
+
+
+def _finish(operator, result):
+    if result.message:
+        operator.report({result.level}, result.message)
+    return {"FINISHED"} if result.ok else {"CANCELLED"}
 
 
 class AF_OT_ToggleSCPCollapse(bpy.types.Operator):
@@ -21,9 +27,8 @@ class AF_OT_ToggleSCPCollapse(bpy.types.Operator):
     scp_id: bpy.props.StringProperty()
 
     def execute(self, context):
-        if not self.scp_id:
+        if not toggle_scp_tree_node(context.scene, self.scp_id):
             return {"CANCELLED"}
-        toggle_collapsed(context.scene, self.scp_id)
         return {"FINISHED"}
 
 
@@ -107,7 +112,7 @@ class AF_OT_PromoteSCPInTree(bpy.types.Operator):
         target_id = _promote_target_id(root, self.scp_id)
         if root is None or target_id is None:
             return {"CANCELLED"}
-        return execute_reparent_scp(self, context, self.scp_id, target_id)
+        return _finish(self, reparent_scp(context, self.scp_id, target_id))
 
 
 class AF_OT_CopySCPInTree(bpy.types.Operator):
@@ -193,9 +198,8 @@ class AF_OT_ToggleVCPCollapse(bpy.types.Operator):
     node_key: bpy.props.StringProperty()
 
     def execute(self, context):
-        if not self.node_key:
+        if not toggle_vcp_tree_node(context.scene, self.node_key):
             return {"CANCELLED"}
-        toggle_vcp_collapsed(context.scene, self.node_key)
         return {"FINISHED"}
 
 

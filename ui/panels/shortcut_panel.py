@@ -1,8 +1,7 @@
 import bpy
 
-from ...core.shortcuts.owners import current_shortcut_owner, matches_shortcut_owner
-from ...core.shortcuts import resolve_shortcut
-from ...core.utils import get_af_root
+from ...app.queries.root import has_root
+from ...app.queries.shortcuts import shortcut_panel_state
 
 
 def _draw_delete_button(row, shortcut):
@@ -29,34 +28,24 @@ def _draw_valid_shortcut(box, shortcut, target):
     _draw_delete_button(row, shortcut)
 
 
-def _draw_shortcut_row(layout, root, context, shortcut):
-    target = resolve_shortcut(root, context, shortcut.data_path)
+def _draw_shortcut_row(layout, row_state):
     box = layout.box()
-    if target.owner is None:
-        _draw_invalid_shortcut(box, shortcut, target.error)
+    if row_state.target.owner is None:
+        _draw_invalid_shortcut(box, row_state.shortcut, row_state.target.error)
         return
-    _draw_valid_shortcut(box, shortcut, target)
+    _draw_valid_shortcut(box, row_state.shortcut, row_state.target)
 
 
 def _draw_shortcut_mode(layout, scene):
     layout.row(align=True).prop(scene, "af_shortcut_view_mode", expand=True)
 
 
-def _visible_shortcuts(root, context):
-    items = tuple(root.af_shortcut_system.shortcuts)
-    if getattr(context.scene, "af_shortcut_view_mode", "SELECTED") == "ALL":
-        return items
-    kind, owner_id = current_shortcut_owner(root, context)
-    return [item for item in items if matches_shortcut_owner(item, kind, owner_id)]
-
-
-def _draw_shortcut_list(layout, root, context):
-    shortcuts = _visible_shortcuts(root, context)
-    if not shortcuts:
+def _draw_shortcut_list(layout, state):
+    if not state.rows:
         layout.label(text="No shortcuts")
         return
-    for shortcut in shortcuts:
-        _draw_shortcut_row(layout, root, context, shortcut)
+    for row_state in state.rows:
+        _draw_shortcut_row(layout, row_state)
 
 
 def _draw_shortcut_form(layout, scene):
@@ -77,10 +66,10 @@ class AF_PT_ShortcutPanel(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        return get_af_root(context.scene) is not None
+        return has_root(context)
 
     def draw(self, context):
-        root = get_af_root(context.scene)
+        state = shortcut_panel_state(context)
         _draw_shortcut_mode(self.layout, context.scene)
         _draw_shortcut_form(self.layout, context.scene)
-        _draw_shortcut_list(self.layout, root, context)
+        _draw_shortcut_list(self.layout, state)

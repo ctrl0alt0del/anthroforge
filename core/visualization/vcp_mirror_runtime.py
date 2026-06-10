@@ -1,5 +1,6 @@
 import bpy
 
+from ..scp_runtime.runtime_state import mirror_effective_axis, mirror_source_id, mirror_status
 from ..utils import get_af_root, scene_for_id
 from .mirror_objects import create_mirror_from_source, ensure_obj_type, remove_obj, copy_data
 from .mirror_rules import mirror_world_matrix
@@ -54,11 +55,11 @@ def _source_id_for_scp(scp_id, scp_by_id):
     scp = scp_by_id.get(sid)
     if scp is None:
         return ""
-    status = _as_id(getattr(scp, "mirror_status", "NONE")).upper()
+    status = mirror_status(scp)
     if status == "SOURCE":
         return sid
     if status == "TARGET":
-        return _as_id(getattr(scp, "mirror_source_id", ""))
+        return mirror_source_id(scp)
     return ""
 
 
@@ -69,10 +70,10 @@ def _source_rule(source_id, scp_by_id):
     scp = scp_by_id.get(sid)
     if scp is None:
         return None
-    status = _as_id(getattr(scp, "mirror_status", "NONE")).upper()
+    status = mirror_status(scp)
     if status != "SOURCE":
         return None
-    axis = _as_axis(getattr(scp, "mirror_effective_axis", getattr(scp, "mirror_axis", "X")))
+    axis = _as_axis(mirror_effective_axis(scp) or getattr(scp, "mirror_axis", "X"))
     origin = _as_origin(getattr(scp, "mirror_origin", (0.0, 0.0, 0.0)))
     return axis, origin
 

@@ -1,5 +1,5 @@
 import bpy
-from ...core.utils import get_af_root
+from ...app.queries.root import has_root
 
 
 class AF_PT_FiberCreatePanel(bpy.types.Panel):
@@ -12,7 +12,7 @@ class AF_PT_FiberCreatePanel(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        return get_af_root(context.scene) is not None
+        return has_root(context)
 
     def draw(self, context):
         layout = self.layout

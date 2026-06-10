@@ -9,7 +9,9 @@ from ..deps.controls import classify_control_object, is_control_object
 from ..deps.control_lifecycle import should_remove_control_object_on_load, should_remove_control_object_on_save
 from ..deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 from ..scp_runtime.common import is_bound_scp_obj
+from ..scp_runtime.runtime_state import reset_scp_runtime_state
 from ..utils import depsgraph_for_scene, get_af_root, view_layer_for_scene
+from ..vcp.runtime_state import reset_vcp_runtime_state
 
 
 ENTITY_TYPES = ("SCP", "FIBER", "MUSCLE", "BLOB")
@@ -245,6 +247,8 @@ def _prime_evaluated_depsgraph(scene):
 
 
 def _hydrate_runtime_state(root, scene):
+    reset_scp_runtime_state(root)
+    reset_vcp_runtime_state(root)
     _prime_evaluated_depsgraph(scene)
     sync_scene(root=root, scene=scene, dirty_hints=empty_dirty_hints(), source="load", event_type="LOAD")
 

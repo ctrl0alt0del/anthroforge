@@ -1,0 +1,68 @@
+from dataclasses import dataclass, field
+
+from .root import root_for_context, scene_from_context
+from .scp import active_scp_id
+
+
+@dataclass(frozen=True)
+class TreeSelection:
+    scp_ids: frozenset = field(default_factory=frozenset)
+    fiber_ids: frozenset = field(default_factory=frozenset)
+    muscle_ids: frozenset = field(default_factory=frozenset)
+    blob_ids: frozenset = field(default_factory=frozenset)
+
+
+@dataclass(frozen=True)
+class TreePanelState:
+    scene: object = None
+    root: object = None
+    active_scp_id: str = ""
+    selection: TreeSelection = field(default_factory=TreeSelection)
+
+
+def _selected_objects(context):
+    return tuple(() if context is None else getattr(context, "selected_objects", ()) or ())
+
+
+def _matches_root(obj, root):
+    return obj.get("af_root_name") == root.name
+
+
+def selected_scp_ids(context, root):
+    out = set()
+    for obj in _selected_objects(context):
+        if obj.get("af_scp_bound") and not obj.get("af_scp_mirror") and _matches_root(obj, root) and obj.get("af_scp_id"):
+            out.add(obj.get("af_scp_id"))
+    return out
+
+
+def _collect_selected_id(obj, root, flag, id_key, out):
+    if _matches_root(obj, root) and obj.get(flag) and obj.get(id_key):
+        out.add(obj.get(id_key))
+
+
+def selected_vcp_ids(context, root):
+    fibers, muscles, blobs = set(), set(), set()
+    for obj in _selected_objects(context):
+        _collect_selected_id(obj, root, "af_fiber_proxy", "af_fiber_id", fibers)
+        _collect_selected_id(obj, root, "af_muscle_proxy", "af_muscle_id", muscles)
+        _collect_selected_id(obj, root, "af_blob_proxy", "af_blob_id", blobs)
+    return fibers, muscles, blobs
+
+
+def _tree_selection(context, root):
+    fibers, muscles, blobs = selected_vcp_ids(context, root)
+    return TreeSelection(
+        scp_ids=frozenset(selected_scp_ids(context, root)),
+        fiber_ids=frozenset(fibers),
+        muscle_ids=frozenset(muscles),
+        blob_ids=frozenset(blobs),
+    )
+
+
+def tree_panel_state(context):
+    scene = scene_from_context(context)
+    root = root_for_context(context)
+    if root is None:
+        return TreePanelState(scene=scene)
+    return TreePanelState(scene=scene, root=root, active_scp_id=active_scp_id(context), selection=_tree_selection(context, root))

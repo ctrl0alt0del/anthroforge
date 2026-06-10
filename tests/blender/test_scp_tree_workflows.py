@@ -14,6 +14,7 @@ from core.id_utils import next_prefixed_id
 from core.scp_runtime.copy import copy_scp_subtree
 from core.scp_runtime.lookup import set_parent_relation
 from core.scp_runtime.object_roles import add_bound_object_to_scp
+from core.scp_runtime.runtime_state import attach_initialized, set_attach_initialized
 from core.scp_runtime.tree import sanitize_parent_links
 from core.scp_runtime.actions import execute_reparent_scp
 from core.scp_runtime.common import find_scp_by_id
@@ -81,7 +82,7 @@ class ScpTreeWorkflowTests(BlenderTestCase):
         self.assertEqual(bpy.ops.af.add_scp(), {"FINISHED"})
         child = next(item for item in root_obj.af_scp_system.scps if item.id != parent.id)
         self.assertEqual((child.parent_id, child.transform_object_ref, child.geometry_object_ref), (parent.id, loose, loose))
-        self.assertTrue(child.attach_initialized)
+        self.assertTrue(attach_initialized(child))
 
     def test_reparent_cycle_is_rejected_and_invalid_parent_is_sanitized(self):
         root_obj = root()
@@ -91,7 +92,8 @@ class ScpTreeWorkflowTests(BlenderTestCase):
         set_parent_relation(b.transform_object_ref, b, a.transform_object_ref)
         set_parent_relation(c.transform_object_ref, c, b.transform_object_ref)
         self.assertEqual(execute_reparent_scp(DummyOperator(), bpy.context, a.id, c.id), {"CANCELLED"})
-        c.parent_id, c.attach_initialized = "MISSING", True
+        c.parent_id = "MISSING"
+        set_attach_initialized(c, True)
         sanitize_parent_links(root_obj, {item.id: item for item in root_obj.af_scp_system.scps})
         self.assertEqual((a.parent_id, c.parent_id), ("", ""))
 

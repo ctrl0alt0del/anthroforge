@@ -1,4 +1,6 @@
-﻿from .common import as_axis, as_id, scp_prop_map, set_prop_raw
+from .common import as_axis, as_id, scp_prop_map
+from .runtime_state import mirror_effective_axis, mirror_source_id, mirror_status
+from .runtime_state import set_mirror_effective_axis, set_mirror_source_id, set_mirror_status
 from .tree import children_map, root_ids, sanitize_parent_links
 
 STATUS_NONE = "NONE"
@@ -70,11 +72,19 @@ class MirrorRoleResolver:
         return changed
 
     def _write_field(self, scp, sid, key, value):
-        if getattr(scp, key, None) == value:
+        if _mirror_value(scp, key) == value:
             return set()
-        set_prop_raw(scp, key, value)
+        _set_mirror_value(scp, key, value)
         return {sid}
 
 
 def apply_scp_mirror_roles(root):
     return MirrorRoleResolver(root).apply()
+
+
+def _mirror_value(scp, key):
+    return {"mirror_status": mirror_status, "mirror_source_id": mirror_source_id, "mirror_effective_axis": mirror_effective_axis}[key](scp)
+
+
+def _set_mirror_value(scp, key, value):
+    {"mirror_status": set_mirror_status, "mirror_source_id": set_mirror_source_id, "mirror_effective_axis": set_mirror_effective_axis}[key](scp, value)

@@ -78,13 +78,6 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
         default=1.5, min=0.1, max=8.0, update=_on_muscle_prop_update
     )
 
-    inflation_ctrl_world: bpy.props.FloatVectorProperty(
-        name="Inflation Ctrl World",
-        size=3,
-        subtype="TRANSLATION",
-        default=(0.0, 0.0, 0.0),
-    )
-
     flip_normals: bpy.props.BoolProperty(
         name="Flip Normals",
         default=False,
@@ -122,19 +115,6 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     stretch_stiffness: bpy.props.FloatProperty(name="Shorten Strength", default=0.9, min=0.0, max=1.0)
 
     thickness: bpy.props.FloatProperty(name="Thickness", default=0.01, min=0.0)
-    not_converged: bpy.props.BoolProperty(name="Not Converged", default=False)
-    last_recompute_ms: bpy.props.FloatProperty(name="Last Recompute (ms)", default=0.0)
-    last_recompute_status: bpy.props.EnumProperty(
-        name="Last Recompute Status",
-        items=(
-            ("UNKNOWN", "Unknown", ""),
-            ("CONVERGED", "Converged", ""),
-            ("NOT_CONVERGED", "Not Converged", ""),
-        ),
-        default="UNKNOWN",
-    )
-    last_eps_disp: bpy.props.FloatProperty(name="Last Disp Eps", default=0.0)
-    last_eps_pen: bpy.props.FloatProperty(name="Last Pen Eps", default=0.0)
 
 
 class AF_BlobVCP_Property(bpy.types.PropertyGroup):
@@ -182,10 +162,6 @@ class AF_BlobVCP_Property(bpy.types.PropertyGroup):
 
     stiffness: bpy.props.FloatProperty(name="Stiffness", default=0.25, min=0.0, max=1.0, update=_on_blob_prop_update)
     iterations: bpy.props.IntProperty(name="Iterations", default=20, min=1, max=200, update=_on_blob_prop_update)
-
-    last_solve_converged: bpy.props.BoolProperty(name="Converged", default=False)
-    last_solve_max_disp: bpy.props.FloatProperty(name="Max Disp", default=0.0)
-    last_solve_iterations: bpy.props.IntProperty(name="Iterations Used", default=0)
 
 
 class AF_VCP_System_Property(bpy.types.PropertyGroup):

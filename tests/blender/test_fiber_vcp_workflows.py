@@ -11,6 +11,14 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 import bpy
 
 from _helpers import BlenderTestCase, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
+from anthroforge.core.vcp.runtime_state import (
+    fiber_recompute_ms,
+    fiber_recompute_status,
+    set_fiber_eps_disp,
+    set_fiber_eps_pen,
+    set_fiber_recompute_ms,
+    set_fiber_recompute_status,
+)
 from anthroforge.core.visualization import fiber_sync_runtime as fiber_runtime
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
 from anthroforge.core.visualization.fiber_sync_helpers import mark_endpoint_handle, mark_touch_handle
@@ -51,18 +59,20 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         root_obj, fiber, origin, _insert = _fiber_setup()
         select_only(origin.geometry_object_ref)
         self.assertEqual(bpy.ops.af.add_fiber_touch_point(), {"FINISHED"})
-        fiber.last_recompute_status, fiber.last_recompute_ms = "CONVERGED", 9.0
-        fiber.last_eps_disp, fiber.last_eps_pen = 3.0, 4.0
+        set_fiber_recompute_status(fiber, "CONVERGED")
+        set_fiber_recompute_ms(fiber, 9.0)
+        set_fiber_eps_disp(fiber, 3.0)
+        set_fiber_eps_pen(fiber, 4.0)
         bpy.ops.af.clear_fiber_warm_start()
-        self.assertEqual((fiber.last_recompute_status, fiber.last_recompute_ms), ("UNKNOWN", 0.0))
+        self.assertEqual((fiber_recompute_status(fiber), fiber_recompute_ms(fiber)), ("UNKNOWN", 0.0))
         bpy.ops.af.remove_fiber_touch_point(touch_index=0)
         self.assertEqual(len(fiber.mid_touches), 0)
 
     def test_recompute_fiber_sets_status_and_elapsed_time(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup()
         bpy.ops.af.recompute_fiber()
-        self.assertIn(fiber.last_recompute_status, {"CONVERGED", "NOT_CONVERGED"})
-        self.assertGreaterEqual(fiber.last_recompute_ms, 0.0)
+        self.assertIn(fiber_recompute_status(fiber), {"CONVERGED", "NOT_CONVERGED"})
+        self.assertGreaterEqual(fiber_recompute_ms(fiber), 0.0)
 
     def test_endpoint_handle_update_uses_conflict_resolution(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()

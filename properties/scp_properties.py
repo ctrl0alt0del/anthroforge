@@ -95,18 +95,6 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         default="AUTO",
         update=_on_attach_strategy_update,
     )
-    attach_initialized: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
-    attach_parent_tri_vidx: bpy.props.IntVectorProperty(name="Attach Parent Triangle Vertex Indices", size=3, default=(-1, -1, -1), options={"HIDDEN"})
-    attach_parent_tri_weights: bpy.props.FloatVectorProperty(name="Attach Parent Triangle Barycentric", size=3, default=(1.0, 0.0, 0.0), options={"HIDDEN"})
-    attach_parent_offset_local: bpy.props.FloatVectorProperty(name="Attach Parent Offset Local", size=3, default=(0.0, 0.0, 0.0), options={"HIDDEN"})
-    attach_parent_tangent_hint_local: bpy.props.FloatVectorProperty(name="Attach Parent Tangent Hint Local", size=3, default=(1.0, 0.0, 0.0), options={"HIDDEN"})
-    attach_parent_flow_tri_vidx: bpy.props.IntVectorProperty(name="Attach Parent Flow Triangle Vertex Indices", size=3, default=(-1, -1, -1), options={"HIDDEN"})
-    attach_parent_flow_tri_weights: bpy.props.FloatVectorProperty(name="Attach Parent Flow Triangle Barycentric", size=3, default=(1.0, 0.0, 0.0), options={"HIDDEN"})
-    attach_child_anchor_index: bpy.props.IntProperty(name="Attach Child Anchor Index", default=-1, options={"HIDDEN"})
-    attach_child_origin_local: bpy.props.FloatVectorProperty(name="Attach Child Origin Local", size=3, default=(0.0, 0.0, 0.0), options={"HIDDEN"})
-    attach_child_tangent_local: bpy.props.FloatVectorProperty(name="Attach Child Tangent Local", size=3, default=(1.0, 0.0, 0.0), options={"HIDDEN"})
-    attach_child_normal_local: bpy.props.FloatVectorProperty(name="Attach Child Normal Local", size=3, default=(0.0, 0.0, 1.0), options={"HIDDEN"})
-
     mirror_enabled: bpy.props.BoolProperty(name="Mirror Children", default=False, update=_on_scp_prop_update)
     mirror_inherit_parent: bpy.props.BoolProperty(name="Inherit Parent Mirror", default=True, update=_on_scp_prop_update)
     mirror_axis: bpy.props.EnumProperty(
@@ -116,25 +104,6 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         update=_on_scp_prop_update,
     )
     mirror_origin: bpy.props.FloatVectorProperty(name="Mirror Origin", size=3, subtype="TRANSLATION", default=(0.0, 0.0, 0.0), update=_on_scp_prop_update)
-    mirror_status: bpy.props.EnumProperty(
-        name="Mirror Status",
-        items=[
-            ("NONE", "None", ""),
-            ("SOURCE", "Source", ""),
-            ("TARGET", "Target", ""),
-        ],
-        default="NONE",
-        options={"HIDDEN"},
-    )
-    mirror_source_id: bpy.props.StringProperty(name="Mirror Source ID", default="", options={"HIDDEN"})
-    mirror_effective_axis: bpy.props.EnumProperty(
-        name="Mirror Effective Axis",
-        items=[("X", "X", ""), ("Y", "Y", ""), ("Z", "Z", "")],
-        default="X",
-        options={"HIDDEN"},
-    )
-
-
 class AF_SCP_System_Property(bpy.types.PropertyGroup):
     scps: bpy.props.CollectionProperty(type=AF_SCP_Property)
     active_scp_index: bpy.props.IntProperty(default=-1)

@@ -3,7 +3,7 @@ from .drivers import DependencyDriver
 from .runtime_intents import pop_runtime_intents
 from .runtime_intent_behaviors import apply_runtime_intent
 from .mirror_roles import apply_scp_mirror_roles
-from ..visualization.scp_attachment_runtime import capture_dirty_scp_attachments
+from ..visualization.scp_attachment_runtime import capture_authored_scp_attachments, capture_dirty_scp_attachments
 from ..visualization.sync import register_sync
 from ..visualization.fiber_sync import register_fiber_sync
 from ..visualization.muscle_sync import register_muscle_sync
@@ -30,6 +30,8 @@ def _meta_payload(meta):
 
 
 def _scp_attachment_changes(ctx, scp_dirty):
+    if _full_attachment_capture(ctx):
+        return capture_authored_scp_attachments(ctx.root, ctx.scene)
     meta = dict(ctx.gate_meta or {})
     return capture_dirty_scp_attachments(
         root=ctx.root,
@@ -46,8 +48,20 @@ def _scp_parent_ids(meta):
     return _payload_id_set(payload, "scp_apply_parent_ids")
 
 
+def _all_scp_parent_ids(root):
+    return {str(getattr(scp, "parent_id", "") or "") for scp in root.af_scp_system.scps if str(getattr(scp, "parent_id", "") or "")}
+
+
+def _full_attachment_capture(ctx):
+    meta = dict(ctx.gate_meta or {})
+    source = str(meta.get("source", "") or "").lower()
+    event = str(meta.get("event_type", "") or "").upper()
+    return bool(ctx.is_full and (source == "load" or event in {"LOAD", "IMPORT"}))
+
+
 def _sync_scp_scene(root, scene, ids, is_full, meta):
-    kwargs = {"root": root, "scene": scene, "attachment_parent_ids": _scp_parent_ids(meta), "attachment_gate_meta": meta}
+    parent_ids = _scp_parent_ids(meta) or (_all_scp_parent_ids(root) if is_full else set())
+    kwargs = {"root": root, "scene": scene, "attachment_parent_ids": parent_ids, "attachment_gate_meta": meta}
     if is_full:
         register_sync().sync_root_to_scene(**kwargs)
     elif ids:

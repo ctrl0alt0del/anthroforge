@@ -1,14 +1,8 @@
 import bpy
-from ...core.utils import get_af_root
-from ..context import get_active_af_entity
-
-def _scp_label(root, scp_id):
-    if not scp_id:
-        return "-"
-    for scp in root.af_scp_system.scps:
-        if scp.id == scp_id:
-            return scp.name if getattr(scp, "name", "") else scp.id
-    return f"{scp_id} (missing)"
+from ...app.queries.root import root_for_context
+from ...app.queries.scp import scp_label
+from ...app.queries.vcp import active_fiber_from_context, has_active_entity
+from ...core.vcp.runtime_state import fiber_eps_disp, fiber_eps_pen, fiber_recompute_ms, fiber_recompute_status
 
 
 class AF_PT_FiberEditPanel(bpy.types.Panel):
@@ -21,21 +15,13 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        root_is_valid = get_af_root(context.scene) is not None
-        has_fiber_selected = get_active_af_entity(get_af_root(context.scene), context)[0] == "FIBER"
-        return root_is_valid and has_fiber_selected
-
-    def _active_fiber(self, vcp):
-        for f in vcp.fibers:
-            if f.id == vcp.active_vcp_id:
-                return f
-        return None
+        return root_for_context(context) is not None and has_active_entity(context, "FIBER")
 
     def _draw_endpoints(self, layout, root, fiber):
         endpoints_box = layout.box()
         endpoints_box.label(text="Endpoints")
-        endpoints_box.label(text=f"Origin: {_scp_label(root, fiber.a_parent_id)}")
-        endpoints_box.label(text=f"Insertion: {_scp_label(root, fiber.b_parent_id)}")
+        endpoints_box.label(text=f"Origin: {scp_label(root, fiber.a_parent_id)}")
+        endpoints_box.label(text=f"Insertion: {scp_label(root, fiber.b_parent_id)}")
 
     def _draw_solver(self, layout, fiber):
         solver_box = layout.box()
@@ -61,23 +47,23 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         op.fiber_id = fiber.id
         for i, tp in enumerate(fiber.mid_touches):
             row = touch_box.row(align=True)
-            row.label(text=f"{i + 1}. {_scp_label(root, tp.parent_id)}")
+            row.label(text=f"{i + 1}. {scp_label(root, tp.parent_id)}")
             op = row.operator("af.remove_fiber_touch_point", text="", icon="X")
             op.fiber_id = fiber.id
             op.touch_index = i
 
     def _draw_status(self, layout, fiber):
         status_box = layout.box()
-        status = fiber.last_recompute_status
+        status = fiber_recompute_status(fiber)
         if status == "CONVERGED":
             status_box.label(text="Status: Converged", icon="CHECKMARK")
         elif status == "NOT_CONVERGED":
             status_box.label(text="Status: Not Converged", icon="ERROR")
-            status_box.label(text=f"Residual disp: {fiber.last_eps_disp:.6f}")
-            status_box.label(text=f"Residual pen: {fiber.last_eps_pen:.6f}")
+            status_box.label(text=f"Residual disp: {fiber_eps_disp(fiber):.6f}")
+            status_box.label(text=f"Residual pen: {fiber_eps_pen(fiber):.6f}")
         else:
             status_box.label(text="Status: Unknown", icon="QUESTION")
-        status_box.label(text=f"Recompute: {fiber.last_recompute_ms:.2f} ms")
+        status_box.label(text=f"Recompute: {fiber_recompute_ms(fiber):.2f} ms")
 
     def _draw_display(self, layout, fiber):
         display_box = layout.box()
@@ -88,15 +74,8 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        root = get_af_root(context.scene)
-        vcp = root.af_vcp_system
-
-        kind, active_id = get_active_af_entity(root, context)
-        if kind != "FIBER" or not active_id:
-            layout.label(text="Select a Fiber")
-            return
-
-        fiber = self._active_fiber(vcp)
+        root = root_for_context(context)
+        fiber = active_fiber_from_context(context)
         if fiber is None:
             layout.label(text="Fiber not found")
             return
