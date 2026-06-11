@@ -15,6 +15,9 @@ class ShortcutTarget:
     owner: object = None
     prop_name: str = ""
     index: int = -1
+    value_type: str = ""
+    array_length: int = 0
+    enum_items: tuple = ()
     error: str = ""
 
 
@@ -96,7 +99,7 @@ def _custom_target(owner, prop_name):
     if value is None:
         return _invalid("Property was not found on the bound target.")
     key, index = _custom_prop_parts(prop_name)
-    return ShortcutTarget(owner=owner, prop_name=key, index=index, error=_custom_index_error(value, index))
+    return ShortcutTarget(owner=owner, prop_name=key, index=index, value_type=_custom_value_type(value), array_length=_custom_array_length(value), error=_custom_index_error(value, index))
 
 
 def _missing_owner_error(kind):
@@ -123,12 +126,39 @@ def _resolve_prop(kind, owner, prop_spec):
         return _invalid("Property was not found on the bound target.")
     if getattr(prop_rna, "type", "") in {"POINTER", "COLLECTION"}:
         return _invalid("Only direct value properties are supported.")
-    return ShortcutTarget(owner=final_owner, prop_name=prop_name, index=index, error=_index_error(prop_rna, index))
+    return ShortcutTarget(owner=final_owner, prop_name=prop_name, index=index, value_type=_rna_value_type(prop_rna), array_length=int(getattr(prop_rna, "array_length", 0) or 0), enum_items=_enum_items(prop_rna), error=_index_error(prop_rna, index))
 
 
 def _owner_and_leaf(owner, prop_spec):
     owner_path, leaf = _split_owner_prop(prop_spec)
     return _resolved_owner(owner, owner_path), str(leaf or "")
+
+
+def _custom_value_type(value):
+    if isinstance(value, bool):
+        return "BOOL"
+    if isinstance(value, int):
+        return "INT"
+    if isinstance(value, float):
+        return "FLOAT"
+    if isinstance(value, str):
+        return "STRING"
+    return _custom_value_type((list(value or [0.0]) or [0.0])[0])
+
+
+def _custom_array_length(value):
+    sized = hasattr(value, "__len__") and not isinstance(value, (str, bytes))
+    return len(value) if sized else 0
+
+
+def _rna_value_type(prop_rna):
+    kinds = {"BOOLEAN": "BOOL", "INT": "INT", "FLOAT": "FLOAT", "STRING": "STRING", "ENUM": "ENUM"}
+    return kinds.get(str(getattr(prop_rna, "type", "") or "").upper(), "")
+
+
+def _enum_items(prop_rna):
+    items = getattr(prop_rna, "enum_items", ()) or ()
+    return tuple((str(item.identifier), str(item.name), str(item.description)) for item in items)
 
 
 def resolve_shortcut(root, context, raw):

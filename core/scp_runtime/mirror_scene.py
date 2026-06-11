@@ -51,12 +51,9 @@ def _hook_mod(obj):
 
 
 def _curve_hook_dist(obj, target):
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    obj_eval = obj.evaluated_get(depsgraph)
-    mesh = obj_eval.to_mesh()
-    pts = [] if mesh is None else [obj_eval.matrix_world @ v.co for v in mesh.vertices]
-    obj_eval.to_mesh_clear() if mesh is not None else None
-    return None if not pts else min((point - target).length for point in (pts[0], pts[-1]))
+    _ = obj
+    _ = target
+    return None
 
 
 def _trace_tuple(vec):

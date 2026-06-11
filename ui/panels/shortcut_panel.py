@@ -2,18 +2,21 @@ import bpy
 
 from ...app.queries.root import has_root
 from ...app.queries.shortcuts import shortcut_panel_state
-
-
 def _draw_delete_button(row, shortcut):
     op = row.operator("af.delete_data_shortcut", text="", icon="X")
     op.shortcut_id = shortcut.id
 
 
-def _draw_shortcut_value(row, target, shortcut):
-    kwargs = {"text": shortcut.name}
-    if target.index >= 0:
-        kwargs["index"] = target.index
-    row.prop(target.owner, target.prop_name, **kwargs)
+def _draw_override_button(row, row_state):
+    if not row_state.show_override:
+        return
+    op = row.operator("af.edit_shortcut_override", text="", icon="KEY_HLT" if row_state.has_override else "KEY_DEHLT")
+    op.shortcut_id = row_state.shortcut.id
+    op.target_scp_id = row_state.selected_scp_id
+
+
+def _draw_shortcut_value(layout, row_state):
+    return _draw_array_value(layout, row_state) if _whole_array(row_state.target) else _draw_inline_value(layout.row(align=True), row_state)
 
 
 def _draw_invalid_shortcut(box, shortcut, error):
@@ -22,10 +25,41 @@ def _draw_invalid_shortcut(box, shortcut, error):
     _draw_delete_button(row, shortcut)
 
 
-def _draw_valid_shortcut(box, shortcut, target):
-    row = box.row(align=True)
-    _draw_shortcut_value(row, target, shortcut)
-    _draw_delete_button(row, shortcut)
+def _draw_valid_shortcut(box, row_state):
+    _draw_shortcut_value(box, row_state)
+
+
+def _draw_inline_value(row, row_state, index=None, actions=True):
+    prop_name = _prop_name(row_state.target, index)
+    kwargs = {"text": _row_label(row_state.shortcut.name, index)}
+    if index is not None or (index is None and row_state.target.array_length and row_state.target.index >= 0):
+        kwargs["index"] = row_state.target.index if index is None else int(index)
+    row.prop(row_state.shortcut, prop_name, **kwargs)
+    _draw_row_actions(row, row_state) if actions else None
+
+
+def _draw_array_value(layout, row_state):
+    for index in range(int(row_state.target.array_length or 0)):
+        _draw_inline_value(layout.row(align=True), row_state, index=index, actions=index == 0)
+
+
+def _whole_array(target):
+    return int(getattr(target, "array_length", 0) or 0) > 0 and int(getattr(target, "index", -1)) < 0
+
+
+def _prop_name(target, index):
+    if int(getattr(target, "array_length", 0) or 0) > 0 and index is None and int(getattr(target, "index", -1)) < 0:
+        return {"BOOL": "proxy_bool_vec", "INT": "proxy_int_vec", "FLOAT": "proxy_float_vec"}.get(target.value_type, "proxy_float_vec")
+    return {"BOOL": "proxy_bool", "INT": "proxy_int", "FLOAT": "proxy_float", "STRING": "proxy_string", "ENUM": "proxy_enum"}.get(target.value_type, "proxy_string")
+
+
+def _row_label(name, index):
+    return str(name or "") if index is None else f"{name}[{int(index)}]"
+
+
+def _draw_row_actions(row, row_state):
+    _draw_override_button(row, row_state)
+    _draw_delete_button(row, row_state.shortcut)
 
 
 def _draw_shortcut_row(layout, row_state):
@@ -33,7 +67,7 @@ def _draw_shortcut_row(layout, row_state):
     if row_state.target.owner is None:
         _draw_invalid_shortcut(box, row_state.shortcut, row_state.target.error)
         return
-    _draw_valid_shortcut(box, row_state.shortcut, row_state.target)
+    _draw_valid_shortcut(box, row_state)
 
 
 def _draw_shortcut_mode(layout, scene):

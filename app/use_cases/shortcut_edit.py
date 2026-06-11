@@ -1,0 +1,224 @@
+import json
+
+from ..queries.root import root_for_context
+
+try:
+    from ...core.shortcuts import override_modes, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
+    from ...core.shortcuts.owners import selected_scp_id, shortcut_relation
+    from ...core.shortcuts.session_state import begin_override_session, clear_override_session, suppress_next_depsgraph_ids
+    from ...core.scp_runtime.common import find_scp_by_id
+except ImportError:
+    from core.shortcuts import override_modes, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
+    from core.shortcuts.owners import selected_scp_id, shortcut_relation
+    from core.shortcuts.session_state import begin_override_session, clear_override_session, suppress_next_depsgraph_ids
+    from core.scp_runtime.common import find_scp_by_id
+
+
+def apply_shortcut_proxy(context, shortcut):
+    target = resolve_shortcut_target(context, shortcut)
+    return False if target is None else _apply_target(context, root_for_context(context), shortcut, target)
+
+
+def resolve_shortcut_target(context, shortcut):
+    root = root_for_context(context)
+    if root is None or bool(getattr(shortcut, "proxy_sync_lock", False)):
+        return None
+    return resolve_shortcut(root, context, getattr(shortcut, "data_path", ""))
+
+
+def apply_shortcut_value(context, shortcut, value):
+    target = resolve_shortcut_target(context, shortcut)
+    root = root_for_context(context)
+    return False if target is None or root is None else _apply_target_value(context, root, shortcut, target, value)
+
+
+def _apply_target(context, root, shortcut, target):
+    if getattr(target, "owner", None) is None:
+        return False
+    return _apply_target_value(context, root, shortcut, target, proxy_value(shortcut, target))
+
+
+def _apply_target_value(context, root, shortcut, target, value):
+    return _apply_scp_session(context, root, shortcut, target, value) if str(getattr(shortcut, "owner_type", "")) == "SCP" else _write_plain(target, value)
+
+
+def _write_plain(target, value):
+    write_target_value(target, value)
+    return True
+
+
+def _apply_scp_session(context, root, shortcut, target, value):
+    scp_id, relation = _session_target(root, context, shortcut)
+    parent_mode, child_mode = _session_modes(shortcut, scp_id, relation)
+    payload, dirty_ids = _session_sync(shortcut, scp_id, relation, root)
+    begin_override_session(scp_id, parent_mode, child_mode)
+    suppress_next_depsgraph_ids({getattr(shortcut, "owner_id", "")})
+    try:
+        write_target_value(target, value)
+        _sync_context()(context, dirty_hints=_dirty_hints_for()("SCP", dirty_ids), source="shortcut", event_type="UPDATE", payload=payload)
+    finally:
+        clear_override_session()
+    return True
+
+
+def _session_target(root, context, shortcut):
+    scp_id = selected_scp_id(root, context)
+    return scp_id, shortcut_relation(root, shortcut, scp_id)
+
+
+def _session_modes(shortcut, scp_id, relation):
+    return override_modes(shortcut, scp_id) if relation == "ANCESTOR" else ("KEEP", "KEEP")
+
+
+def _session_sync(shortcut, scp_id, relation, root):
+    recapture = _recapture_ids(root, scp_id, relation)
+    payload = {"scp_apply_parent_ids": [str(getattr(shortcut, "owner_id", "") or "")], "scp_recapture_ids": sorted(recapture)}
+    dirty_ids = {str(getattr(shortcut, "owner_id", "") or "")} | recapture
+    return payload, {sid for sid in dirty_ids if sid}
+
+
+def _recapture_ids(root, scp_id, relation):
+    scp = find_scp_by_id(root, scp_id)
+    valid = relation in {"SELF", "ANCESTOR"} and str(getattr(scp, "parent_id", "") or "")
+    return {str(scp_id or "")} if valid else set()
+
+
+def proxy_value(shortcut, target):
+    return _proxy_array_value(shortcut, target) if int(getattr(target, "array_length", 0) or 0) else _proxy_scalar_value(shortcut, target)
+
+
+def _proxy_scalar_value(shortcut, target):
+    names = {"BOOL": "proxy_bool", "INT": "proxy_int", "FLOAT": "proxy_float", "STRING": "proxy_string", "ENUM": "proxy_enum"}
+    return getattr(shortcut, names.get(getattr(target, "value_type", ""), "proxy_string"), "")
+
+
+def _proxy_array_value(shortcut, target):
+    values = _proxy_array(shortcut, getattr(target, "value_type", ""), int(getattr(target, "array_length", 0) or 0))
+    return tuple(values) if int(getattr(target, "index", -1)) < 0 else values[int(target.index)]
+
+
+def _proxy_array(shortcut, value_type, length):
+    source = _proxy_array_source(shortcut, value_type)
+    caster = bool if value_type == "BOOL" else int if value_type == "INT" else float
+    return [caster(source[index]) for index in range(min(length, len(source)))]
+
+
+def _proxy_array_source(shortcut, value_type):
+    names = {"BOOL": "proxy_bool_vec", "INT": "proxy_int_vec", "FLOAT": "proxy_float_vec"}
+    return tuple(getattr(shortcut, names.get(value_type, "proxy_float_vec"), ()))
+
+
+def prime_shortcut_proxy(shortcut, target):
+    if getattr(target, "owner", None) is None:
+        return False
+    _set_proxy(shortcut, "proxy_sync_lock", True)
+    try:
+        _prime_meta(shortcut, target)
+        _prime_value(shortcut, target)
+    finally:
+        _set_proxy(shortcut, "proxy_sync_lock", False)
+    return True
+
+
+def _prime_meta(shortcut, target):
+    _set_proxy(shortcut, "proxy_value_type", getattr(target, "value_type", ""))
+    _set_proxy(shortcut, "proxy_index", int(getattr(target, "index", -1)))
+    _set_proxy(shortcut, "proxy_array_length", int(getattr(target, "array_length", 0) or 0))
+    _set_proxy(shortcut, "proxy_enum_items_json", json.dumps(list(getattr(target, "enum_items", ()) or ())))
+
+
+def _prime_value(shortcut, target):
+    return _prime_array_value(shortcut, target) if int(getattr(target, "array_length", 0) or 0) else _prime_scalar_value(shortcut, target_value(target))
+
+
+def _prime_scalar_value(shortcut, value):
+    if isinstance(value, bool):
+        return _set_proxy(shortcut, "proxy_bool", bool(value))
+    if isinstance(value, int) and not isinstance(value, bool):
+        return _set_proxy(shortcut, "proxy_int", int(value))
+    if isinstance(value, float):
+        return _set_proxy(shortcut, "proxy_float", float(value))
+    return _set_proxy(shortcut, "proxy_enum", _enum_value(shortcut, value)) if _enum_items(shortcut) else _set_proxy(shortcut, "proxy_string", str(value or ""))
+
+
+def _enum_value(shortcut, value):
+    items = [str(item[0]) for item in _enum_items(shortcut)]
+    return str(value or "") if str(value or "") in items else (items[0] if items else "NONE")
+
+
+def _enum_items(shortcut):
+    return tuple(json.loads(str(getattr(shortcut, "proxy_enum_items_json", "[]")) or "[]"))
+
+
+def _prime_array_value(shortcut, target):
+    values = list(raw_target_value(target) or ())
+    return _set_proxy(shortcut, _array_name(getattr(target, "value_type", "")), _array_fill(values, getattr(target, "value_type", ""), _vector_size(shortcut)))
+
+
+def _array_name(value_type):
+    names = {"BOOL": "proxy_bool_vec", "INT": "proxy_int_vec", "FLOAT": "proxy_float_vec"}
+    return names.get(value_type, "proxy_float_vec")
+
+
+def _array_fill(values, value_type, size):
+    caster = bool if value_type == "BOOL" else int if value_type == "INT" else float
+    return tuple(caster(values[index]) if index < len(values) else caster(0) for index in range(size))
+
+
+def _vector_size(shortcut):
+    return len(getattr(shortcut, "proxy_float_vec", ()))
+
+
+def _set_proxy(shortcut, key, value):
+    setattr(shortcut, key, value)
+    return value
+
+
+def shortcut_override_modes(context, shortcut_id, target_scp_id):
+    root = root_for_context(context)
+    shortcut = find_shortcut(root, shortcut_id)
+    return ("KEEP", "KEEP") if shortcut is None else override_modes(shortcut, target_scp_id)
+
+
+def save_shortcut_override(context, shortcut_id, target_scp_id, parent_mode, child_mode):
+    root = root_for_context(context)
+    shortcut = find_shortcut(root, shortcut_id)
+    return bool(shortcut and upsert_override(shortcut, target_scp_id, parent_mode, child_mode))
+
+
+def find_shortcut(root, shortcut_id):
+    items = () if root is None else getattr(getattr(root, "af_shortcut_system", None), "shortcuts", ())
+    return next((item for item in items if str(getattr(item, "id", "")) == str(shortcut_id or "")), None)
+
+
+def _sync_context():
+    try:
+        from ...app.runtime_api import sync_context
+    except ImportError:
+        from app.runtime_api import sync_context
+    return sync_context
+
+
+def _dirty_hints_for():
+    try:
+        from ...core.deps.dirty_hints import dirty_hints_for
+    except ImportError:
+        from core.deps.dirty_hints import dirty_hints_for
+    return dirty_hints_for
+
+
+def live_shortcut_value(context, shortcut):
+    target = resolve_shortcut_target(context, shortcut)
+    return None if target is None else target_value(target)
+
+
+def live_shortcut_array(context, shortcut, size, caster=float):
+    target = resolve_shortcut_target(context, shortcut)
+    values = [] if target is None else list(raw_target_value(target) or ())
+    return tuple(caster(values[i]) if i < len(values) else caster(0) for i in range(int(size or 0)))
+
+
+def live_shortcut_enum_items(context, shortcut):
+    target = resolve_shortcut_target(context, shortcut)
+    items = () if target is None else tuple(getattr(target, "enum_items", ()) or ())
+    return items or (("NONE", "None", ""),)

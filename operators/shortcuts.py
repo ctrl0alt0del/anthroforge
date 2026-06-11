@@ -2,6 +2,17 @@ import bpy
 
 from ..app.queries.root import has_root
 from ..app.use_cases.shortcuts import add_shortcut_from_context, delete_shortcut_from_context
+from ..app.use_cases.shortcut_edit import save_shortcut_override, shortcut_override_modes
+
+
+def _parent_items(_self, _context):
+    from ..core.shortcuts import parent_override_items
+    return parent_override_items()
+
+
+def _child_items(_self, _context):
+    from ..core.shortcuts import child_override_items
+    return child_override_items()
 
 
 class AF_OT_AddDataShortcut(bpy.types.Operator):
@@ -30,3 +41,29 @@ class AF_OT_DeleteDataShortcut(bpy.types.Operator):
         if not has_root(context):
             return {"CANCELLED"}
         return {"FINISHED"} if delete_shortcut_from_context(context, self.shortcut_id) else {"CANCELLED"}
+
+
+class AF_OT_EditShortcutOverride(bpy.types.Operator):
+    bl_idname = "af.edit_shortcut_override"
+    bl_label = "Shortcut Anchor Override"
+    bl_options = {"REGISTER", "UNDO"}
+
+    shortcut_id: bpy.props.StringProperty(default="")
+    target_scp_id: bpy.props.StringProperty(default="")
+    parent_anchor_mode: bpy.props.EnumProperty(name="Parent Anchor", items=_parent_items)
+    child_anchor_mode: bpy.props.EnumProperty(name="Child Anchor", items=_child_items)
+
+    def invoke(self, context, _event):
+        if not has_root(context):
+            return {"CANCELLED"}
+        self.parent_anchor_mode, self.child_anchor_mode = shortcut_override_modes(context, self.shortcut_id, self.target_scp_id)
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, _context):
+        self.layout.prop(self, "parent_anchor_mode")
+        self.layout.prop(self, "child_anchor_mode")
+
+    def execute(self, context):
+        if not has_root(context):
+            return {"CANCELLED"}
+        return {"FINISHED"} if save_shortcut_override(context, self.shortcut_id, self.target_scp_id, self.parent_anchor_mode, self.child_anchor_mode) else {"CANCELLED"}

@@ -1,6 +1,7 @@
 from mathutils import Vector
 
 from .common import as_id
+from ..shortcuts.session_state import active_child_override
 from .parent_anchor import anchor_mode as parent_anchor_mode, capture_parent_binding, parent_origin_world
 from .surface import build_face_centers, build_vertex_points, closest_child_face_center_to_parent, closest_child_vertex_to_parent
 
@@ -16,6 +17,9 @@ def capture_child_anchor(child_scp, child_geometry_obj, parent_transform_obj, pa
 
 
 def anchor_mode(child_scp):
+    override = active_child_override(child_scp)
+    if override in _MODES:
+        return override
     mode = as_id(getattr(child_scp, "attach_child_anchor_mode", "")).upper()
     return mode if mode in _MODES else "FACE_CENTER"
 

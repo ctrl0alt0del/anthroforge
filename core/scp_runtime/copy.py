@@ -1,6 +1,7 @@
 import re
 
 from ..id_utils import next_prefixed_id
+from ..shortcuts import remap_overrides
 from ..shortcuts.owners import remapped_shortcut_owner
 from .bound_objects import clear_scp_tags, iter_bound_objects
 from .common import as_id, find_scp_by_id, scp_prop_map, set_prop_raw
@@ -216,18 +217,19 @@ def _rewritten_path(raw, name_map):
     return f"bpy.data.objects[{repr(name)}]{match.group(2)}"
 
 
-def _add_shortcut(root, shortcut, data_path, owner_type, owner_id):
+def _add_shortcut(root, shortcut, data_path, owner_type, owner_id, scp_map):
     item = root.af_shortcut_system.shortcuts.add()
     item.id = next_prefixed_id(root.af_shortcut_system.shortcuts, "SHORTCUT")
     item.name, item.data_path = str(shortcut.name or item.id), data_path
     item.owner_type, item.owner_id = owner_type, owner_id
+    remap_overrides(item, shortcut, scp_map)
 
 
 def _copy_shortcuts(root, maps):
     for shortcut in tuple(root.af_shortcut_system.shortcuts):
         owner_type, owner_id = remapped_shortcut_owner(shortcut, maps)
         if owner_type != "NONE":
-            _add_shortcut(root, shortcut, _rewritten_path(getattr(shortcut, "data_path", ""), maps["names"]), owner_type, owner_id)
+            _add_shortcut(root, shortcut, _rewritten_path(getattr(shortcut, "data_path", ""), maps["names"]), owner_type, owner_id, maps["scps"])
 
 
 def copy_scp_subtree(root, scene, scp_id, child_ids=None):

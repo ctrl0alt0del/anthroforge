@@ -311,7 +311,8 @@ class AttachmentApply:
 
 
 def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", recapture_ids=None, apply_parent_ids=None):
-    if as_id(source).lower() != "depsgraph":
+    source = as_id(source).lower()
+    if not _capture_source_allows(source):
         return set()
     direct_ids = _direct_capture_ids(dirty_scp_ids, recapture_ids)
     if not direct_ids:
@@ -321,8 +322,12 @@ def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", recaptu
         return set()
     surface_cache = _new_surface_cache()
     scp_by_id = {as_id(s.id): s for s in root.af_scp_system.scps}
-    direct_ids -= _blocked_capture_ids(scp_by_id, direct_ids, apply_parent_ids)
+    direct_ids = _allowed_direct_ids(source, scp_by_id, direct_ids, apply_parent_ids)
     return {sid for sid in sorted(direct_ids) if _capture_one(scp_by_id, scene, root.name, sid, depsgraph, surface_cache)}
+
+
+def _capture_source_allows(source):
+    return str(source or "").lower() in {"depsgraph", "shortcut"}
 
 
 def _direct_capture_ids(dirty_scp_ids, recapture_ids):
@@ -334,6 +339,12 @@ def _direct_capture_ids(dirty_scp_ids, recapture_ids):
 def _blocked_capture_ids(scp_by_id, direct_ids, apply_parent_ids):
     parent_ids = {as_id(value) for value in set(apply_parent_ids or set()) if as_id(value)}
     return {sid for sid in set(direct_ids or set()) if as_id(getattr(scp_by_id.get(sid), "parent_id", "")) in parent_ids}
+
+
+def _allowed_direct_ids(source, scp_by_id, direct_ids, apply_parent_ids):
+    if str(source or "").lower() == "shortcut":
+        return set(direct_ids or set())
+    return set(direct_ids or set()) - _blocked_capture_ids(scp_by_id, direct_ids, apply_parent_ids)
 
 
 def _needs_child_geometry(child_scp):

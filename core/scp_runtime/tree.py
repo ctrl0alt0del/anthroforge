@@ -45,6 +45,14 @@ def root_ids(scp_by_id):
     return roots
 
 
+def ancestor_ids(scp_by_id, sid):
+    out, current = [], as_id(getattr(scp_by_id.get(as_id(sid)), "parent_id", ""))
+    while current and current in scp_by_id and current not in out:
+        out.append(current)
+        current = as_id(getattr(scp_by_id.get(current), "parent_id", ""))
+    return tuple(out)
+
+
 def _invalid_parent_ids(root, scp_by_id):
     invalid = set()
     for scp in root.af_scp_system.scps:

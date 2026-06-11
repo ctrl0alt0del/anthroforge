@@ -4,6 +4,7 @@ import bpy
 
 from ..deps.runtime_trace import trace_line
 from ..deps.dirty_hints import dirty_hints_for
+from ..shortcuts.session_state import consume_suppressed_ids
 from ..utils import get_af_root, scene_for_id, update_scene_view_layer
 from .attachment_runtime import apply_scp_attachments
 from .bound_objects import sync_all_scp_roles
@@ -82,11 +83,17 @@ def on_depsgraph_update(sync, scene, depsgraph):
 
 def _sync_from_depsgraph(sync, root, scene, depsgraph):
     changed_ids, transform_ids, geometry_ids = _depsgraph_change_sets(root, depsgraph)
+    changed_ids, transform_ids, geometry_ids = _filtered_changes(changed_ids, transform_ids, geometry_ids)
     if not changed_ids:
         return
     _sync_trace(f"depsgraph changed={_sorted_ids(changed_ids)} transform={_sorted_ids(transform_ids)} geometry={_sorted_ids(geometry_ids)}")
     from ..visualization.sync_runner import schedule_sync_from_dirty_hints
     schedule_sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("SCP", changed_ids), source="depsgraph", event_type="SCP_UPDATE", payload=_payload(transform_ids, geometry_ids))
+
+
+def _filtered_changes(changed_ids, transform_ids, geometry_ids):
+    keep = consume_suppressed_ids(changed_ids)
+    return keep, set(transform_ids or set()) & keep, set(geometry_ids or set()) & keep
 
 
 def _depsgraph_change_sets(root, depsgraph):

@@ -15,6 +15,7 @@ from .model import (
     PackageSnapshot,
     ScpSnapshot,
     ShortcutSnapshot,
+    ShortcutOverrideSnapshot,
 )
 from .rna import scalar_dict
 
@@ -98,7 +99,11 @@ def _blob_snapshot(root, blob):
 
 
 def _shortcut_snapshot(root, shortcut):
-    return ShortcutSnapshot(str(shortcut.name or ""), str(shortcut.owner_type or "NONE"), str(shortcut.owner_id or ""), _canonical_path(root, shortcut.data_path))
+    return ShortcutSnapshot(str(shortcut.name or ""), str(shortcut.owner_type or "NONE"), str(shortcut.owner_id or ""), _canonical_path(root, shortcut.data_path), _shortcut_overrides(shortcut))
+
+
+def _shortcut_overrides(shortcut):
+    return [ShortcutOverrideSnapshot(str(item.target_scp_id or ""), str(item.parent_anchor_mode or "KEEP"), str(item.child_anchor_mode or "KEEP")) for item in shortcut.overrides if str(item.target_scp_id or "")]
 
 
 def root_snapshot(root):

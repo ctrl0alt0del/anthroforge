@@ -1,6 +1,7 @@
 from mathutils import Vector
 
 from .common import as_id
+from ..shortcuts.session_state import active_parent_override
 from .runtime_state import attach_parent_param
 from .surface import basis_from_tangent_normal, frame_from_parent_param, nearest_parent_param_from_world
 
@@ -8,6 +9,9 @@ _MODES = {"SURFACE_NEAREST", "OBJECT_ORIGIN"}
 
 
 def anchor_mode(child_scp):
+    override = active_parent_override(child_scp)
+    if override in _MODES:
+        return override
     mode = as_id(getattr(child_scp, "attach_parent_anchor_mode", "")).upper()
     return mode if mode in _MODES else "SURFACE_NEAREST"
 

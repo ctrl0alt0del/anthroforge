@@ -84,15 +84,29 @@ class BlobSnapshot:
 
 
 @dataclass
+class ShortcutOverrideSnapshot:
+    target_scp_id: str
+    parent_anchor_mode: str
+    child_anchor_mode: str
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(**dict(data or {}))
+
+
+@dataclass
 class ShortcutSnapshot:
     name: str
     owner_type: str
     owner_id: str
     data_path: str
+    overrides: list[ShortcutOverrideSnapshot] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data):
-        return cls(**dict(data or {}))
+        data = dict(data or {})
+        data["overrides"] = [ShortcutOverrideSnapshot.from_dict(x) for x in data.get("overrides", ())]
+        return cls(**data)
 
 
 @dataclass

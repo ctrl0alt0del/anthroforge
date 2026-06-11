@@ -5,6 +5,7 @@ from ..id_utils import next_prefixed_id
 from ..scp_runtime.bound_objects import find_bound_entry_by_object, sync_all_scp_roles
 from ..scp_runtime.common import set_prop_raw
 from ..scp_runtime.object_roles import add_bound_object_to_scp, create_scp, set_geometry_object, set_transform_object
+from ..shortcuts import upsert_override
 from ..shortcuts.path_codec import make_bound_entity_id, make_shortcut_path, parse_shortcut_path, split_bound_entity_id
 from ..visualization.delete_reconcile import cleanup_scp_dependents
 from ..visualization.sync_runner import sync_from_dirty_hints
@@ -214,6 +215,14 @@ def _add_shortcut(state, snap):
     item.owner_type = str(snap.owner_type or "NONE")
     item.owner_id = _shortcut_owner_id(state, snap.owner_type, snap.owner_id)
     item.data_path = _remap_shortcut_path(state, snap.data_path)
+    _copy_shortcut_overrides(state, item, snap)
+
+
+def _copy_shortcut_overrides(state, item, snap):
+    for override in getattr(snap, "overrides", ()):
+        mapped = _remap(state.scps, getattr(override, "target_scp_id", ""))
+        if mapped:
+            upsert_override(item, mapped, getattr(override, "parent_anchor_mode", "KEEP"), getattr(override, "child_anchor_mode", "KEEP"))
 
 
 def _create_shortcuts(state):

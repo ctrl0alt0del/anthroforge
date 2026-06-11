@@ -55,8 +55,12 @@ def blob(bid):
     return SimpleNamespace(id=bid, name=bid)
 
 
-def shortcut(sid, name, owner_type, owner_id, data_path):
-    return SimpleNamespace(id=sid, name=name, owner_type=owner_type, owner_id=owner_id, data_path=data_path)
+def shortcut(sid, name, owner_type, owner_id, data_path, overrides=()):
+    return SimpleNamespace(id=sid, name=name, owner_type=owner_type, owner_id=owner_id, data_path=data_path, overrides=list(overrides))
+
+
+def override(target_scp_id, parent_mode="KEEP", child_mode="KEEP"):
+    return SimpleNamespace(target_scp_id=target_scp_id, parent_anchor_mode=parent_mode, child_anchor_mode=child_mode)
 
 
 def root(active_scp=0, active_type="NONE", active_id="", scps=(), fibers=(), muscles=(), blobs=(), shortcuts=()):
@@ -83,7 +87,7 @@ def context(scene, active_object=None, selected_objects=()):
 
 class FakeShortcutCollection(list):
     def add(self):
-        item = SimpleNamespace(id="", name="", owner_type="", owner_id="", data_path="")
+        item = SimpleNamespace(id="", name="", owner_type="", owner_id="", data_path="", overrides=[])
         self.append(item)
         return item
 
@@ -159,6 +163,24 @@ class AppQueryTests(unittest.TestCase):
         state = shortcut_panel_state(context(scene(root_obj, obj), active_object=obj))
         self.assertEqual([row.shortcut.id for row in state.rows], ["K1"])
         self.assertIs(state.rows[0].target.owner, obj)
+
+    def test_shortcut_panel_state_marks_ancestor_override_rows(self):
+        obj = FakeObject("bound", af_root_name="ROOT", af_scp_id="C1")
+        obj.rna_type.properties["location"] = SimpleNamespace(type="FLOAT", array_length=3)
+        bpy.data.objects[obj.name] = obj
+        parent = scp("P1")
+        child = SimpleNamespace(id="C1", name="Child", parent_id="P1")
+        rows = [
+            shortcut("K1", "Parent", "SCP", "P1", 'af://object_rna/bound/location[0]', overrides=[override("C1", "OBJECT_ORIGIN")]),
+            shortcut("K2", "Self", "SCP", "C1", 'af://object_rna/bound/location[1]'),
+            shortcut("K3", "Other", "SCP", "S9", 'af://object_rna/bound/location[2]'),
+        ]
+        root_obj = root(active_scp=1, scps=[parent, child], shortcuts=rows)
+        state = shortcut_panel_state(context(scene(root_obj, obj, shortcut_mode="ALL"), active_object=obj))
+        data = {row.shortcut.id: row for row in state.rows}
+        self.assertEqual((data["K1"].owner_relation, data["K1"].show_override, data["K1"].has_override), ("ANCESTOR", True, True))
+        self.assertEqual((data["K2"].owner_relation, data["K2"].show_override), ("SELF", False))
+        self.assertEqual((data["K3"].owner_relation, data["K3"].show_override), ("UNRELATED", False))
 
     def test_create_root_use_case_syncs_only_when_missing(self):
         calls = []

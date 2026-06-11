@@ -36,7 +36,11 @@ from .operators.muscle_tools import (
 )
 from .operators.blob_tools import AF_OT_SelectBlobControl
 from .operators.import_package import AF_OT_ImportPackage
-from .operators.shortcuts import AF_OT_AddDataShortcut, AF_OT_DeleteDataShortcut
+from .operators.shortcuts import (
+    AF_OT_AddDataShortcut,
+    AF_OT_DeleteDataShortcut,
+    AF_OT_EditShortcutOverride,
+)
 from .operators.control_objects import (
     AFOTMarkSelectedSCPControlObject,
     AFOTToggleControlObjectApplyParent,
@@ -78,6 +82,7 @@ from .properties.vcp_properties import (
     AF_VCP_System_Property,
 )
 from .properties.shortcut_properties import (
+    AF_DataShortcutOverride_Property,
     AF_DataShortcut_Property,
     AF_DataShortcut_System_Property,
 )
@@ -148,10 +153,12 @@ classes = (
     AF_PT_BlobCreatePanel,
     AF_PT_BlobEditPanel,
     AF_OT_ImportPackage,
+    AF_DataShortcutOverride_Property,
     AF_DataShortcut_Property,
     AF_DataShortcut_System_Property,
     AF_OT_AddDataShortcut,
     AF_OT_DeleteDataShortcut,
+    AF_OT_EditShortcutOverride,
     AFOTMarkSelectedSCPControlObject,
     AFOTToggleControlObjectApplyParent,
     AFOTToggleControlObjectShortcutAxis,

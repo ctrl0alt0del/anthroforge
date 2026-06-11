@@ -14,6 +14,7 @@ from _helpers import BlenderTestCase, add_shortcut, fiber, find_flagged, mesh_ob
 from anthroforge.core.id_utils import next_prefixed_id
 from anthroforge.core.importing.extract import root_snapshot
 from anthroforge.core.importing.service import import_package_from_blend
+from anthroforge.core.shortcuts import upsert_override
 from anthroforge.core.shortcuts.path_codec import make_bound_entity_id, make_shortcut_path
 from anthroforge.core.scp_runtime.runtime_state import set_mirror_effective_axis, set_mirror_source_id, set_mirror_status
 from anthroforge.core.utils import get_af_root
@@ -51,7 +52,8 @@ def _source_snapshot():
     item.muscle_id = muscle.id
     set_muscle_inflation_ctrl_world(muscle, (7.0, 8.0, 9.0))
     _blob(root_obj, muscle.id)
-    add_shortcut(root_obj, "Right X", "SCP", right.id, f'bpy.data.objects["{right.transform_object_ref.name}"].location[0]')
+    row = add_shortcut(root_obj, "Right X", "SCP", right.id, f'bpy.data.objects["{right.transform_object_ref.name}"].location[0]')
+    upsert_override(row, left.id, "OBJECT_ORIGIN", "KEEP")
     return root_snapshot(root_obj), right
 
 
@@ -80,6 +82,7 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertEqual({fiber_item.a_parent_id, fiber_item.b_parent_id}, {imported["Left"].id, imported["Right"].id})
         self.assertEqual((root_obj.af_vcp_system.muscles[-1].fiber_refs[0].fiber_id, root_obj.af_vcp_system.blobs[-1].attach_target_id), (fiber_item.id, root_obj.af_vcp_system.muscles[-1].id))
         self.assertEqual((root_obj.af_shortcut_system.shortcuts[-1].owner_id, imported["Right"].id in root_obj.af_shortcut_system.shortcuts[-1].data_path), (imported["Right"].id, True))
+        self.assertEqual(root_obj.af_shortcut_system.shortcuts[-1].overrides[0].target_scp_id, imported["Left"].id)
         self.assertIsNotNone(find_flagged("af_fiber_proxy", fiber_item.id, "af_fiber_id"))
         self.assertIsNotNone(find_flagged("af_muscle_proxy", root_obj.af_vcp_system.muscles[-1].id, "af_muscle_id"))
         self.assertIsNotNone(find_flagged("af_blob_proxy", root_obj.af_vcp_system.blobs[-1].id, "af_blob_id"))
