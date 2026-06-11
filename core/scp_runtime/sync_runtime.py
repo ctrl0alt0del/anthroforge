@@ -1,10 +1,13 @@
-﻿import bpy
+import os
 
+import bpy
+
+from ..deps.runtime_trace import trace_line
 from ..deps.dirty_hints import dirty_hints_for
 from ..utils import get_af_root, scene_for_id, update_scene_view_layer
 from .attachment_runtime import apply_scp_attachments
 from .bound_objects import sync_all_scp_roles
-from .common import as_id, is_bound_scp_obj, payload_id_set, scp_prop_map
+from .common import as_id, is_bound_scp_obj, scp_prop_map
 from .marking import detach_native_scp_parent_links, normalize_active_index, sync_parent_links
 from .mirror_scene import sync_mirrors
 
@@ -28,18 +31,42 @@ def _refresh_view_layer(scene):
     update_scene_view_layer(scene)
 
 
+def _trace_flag(name):
+    raw = str(os.environ.get(name, "") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _sync_trace(text):
+    trace_line(text) if _trace_flag("AF_DEPS_TRACE") or _trace_flag("AF_MIRROR_TRACE") else None
+
+
+def _sorted_ids(values):
+    return sorted(set(values or set()))
+
+
+def _trace_sync_start(target_scp_ids, attachment_parent_ids):
+    _sync_trace(f"sync start targets={_sorted_ids(target_scp_ids)} parents={_sorted_ids(attachment_parent_ids)}")
+
+
+def _sync_pass_body(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta):
+    sync_all_scp_roles(root)
+    detach_native_scp_parent_links(root, scene)
+    sync_parent_links(root)
+    normalize_active_index(root)
+    scp_by_id = scp_prop_map(root)
+    _refresh_view_layer(scene)
+    apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids, attachment_parent_ids, attachment_gate_meta)
+    _refresh_view_layer(scene)
+    sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=target_scp_ids)
+    _refresh_view_layer(scene)
+
+
 def _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta):
     sync._syncing = True
+    _trace_sync_start(target_scp_ids, attachment_parent_ids)
     try:
-        sync_all_scp_roles(root)
-        detach_native_scp_parent_links(root, scene)
-        sync_parent_links(root)
-        normalize_active_index(root)
-        scp_by_id = scp_prop_map(root)
-        _refresh_view_layer(scene)
-        apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids, attachment_parent_ids, attachment_gate_meta)
-        _refresh_view_layer(scene)
-        sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=target_scp_ids)
+        _sync_pass_body(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta)
+        _sync_trace("sync end")
     finally:
         sync._syncing = False
 
@@ -57,6 +84,7 @@ def _sync_from_depsgraph(sync, root, scene, depsgraph):
     changed_ids, transform_ids, geometry_ids = _depsgraph_change_sets(root, depsgraph)
     if not changed_ids:
         return
+    _sync_trace(f"depsgraph changed={_sorted_ids(changed_ids)} transform={_sorted_ids(transform_ids)} geometry={_sorted_ids(geometry_ids)}")
     from ..visualization.sync_runner import schedule_sync_from_dirty_hints
     schedule_sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("SCP", changed_ids), source="depsgraph", event_type="SCP_UPDATE", payload=_payload(transform_ids, geometry_ids))
 
@@ -76,7 +104,9 @@ def _collect_update(root, update, changed_ids, transform_ids, geometry_ids):
     is_geometry = bool(getattr(update, "is_updated_geometry", False))
     if not _has_role_update(obj, is_transform, is_geometry):
         return
-    _record_update_ids(obj, changed_ids, transform_ids if _transform_role_changed(obj, is_transform) else None, geometry_ids if _geometry_role_changed(obj, is_transform, is_geometry) else None)
+    t_ids = transform_ids if _transform_role_changed(obj, is_transform) else None
+    g_ids = geometry_ids if _geometry_role_changed(obj, is_transform, is_geometry) else None
+    _record_update_ids(obj, changed_ids, t_ids, g_ids)
 
 
 def _has_role_update(obj, is_transform, is_geometry):

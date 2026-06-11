@@ -1,5 +1,10 @@
+import os
+
+import bpy
 from mathutils import Matrix, Vector
 
+from ..deps.runtime_trace import trace_line
+from ..utils import update_scene_view_layer
 from ..visualization.mirror_objects import clone_native_object, remap_object_cluster_parents, remap_object_cluster_refs, remove_obj
 from .bound_objects import iter_bound_objects
 from .common import as_axis, as_id, is_bound_scp_obj
@@ -21,12 +26,85 @@ def _bound_pairs(scp):
     return tuple(iter_bound_objects(scp))
 
 
+def _mirror_trace_enabled():
+    raw = str(os.environ.get("AF_MIRROR_TRACE", "") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _mirror_trace_names():
+    raw = str(os.environ.get("AF_MIRROR_TRACE_NAMES", "") or "")
+    return {value.strip().lower() for value in raw.split(",") if value.strip()}
+
+
+def _trace_match(obj):
+    names = _mirror_trace_names()
+    return bool(_mirror_trace_enabled() and obj and (not names or str(obj.name).lower() in names))
+
+
+def _curve_target_name(obj):
+    mod = next((m for m in getattr(obj, "modifiers", ()) if m.type == "CURVE" and getattr(m, "object", None)), None)
+    return "" if mod is None else str(mod.object.name)
+
+
+def _hook_mod(obj):
+    return next((m for m in getattr(obj, "modifiers", ()) if m.type == "HOOK" and getattr(m, "object", None)), None)
+
+
+def _curve_hook_dist(obj, target):
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    obj_eval = obj.evaluated_get(depsgraph)
+    mesh = obj_eval.to_mesh()
+    pts = [] if mesh is None else [obj_eval.matrix_world @ v.co for v in mesh.vertices]
+    obj_eval.to_mesh_clear() if mesh is not None else None
+    return None if not pts else min((point - target).length for point in (pts[0], pts[-1]))
+
+
+def _trace_tuple(vec):
+    return tuple(round(float(value), 4) for value in vec)
+
+
+def _trace_obj(stage, obj):
+    if not _trace_match(obj):
+        return
+    hook = _hook_mod(obj)
+    target = None if hook is None else hook.object
+    dist = None if target is None else _curve_hook_dist(obj, target.matrix_world.to_translation().copy())
+    msg = f"mirror {stage} obj={obj.name} parent={'' if obj.parent is None else obj.parent.name} loc={_trace_tuple(obj.location)} scale={_trace_tuple(obj.scale)} curve={_curve_target_name(obj)} hook={'' if target is None else target.name} dist={None if dist is None else round(float(dist), 6)}"
+    trace_line(msg)
+
+
+def _trace_cluster(stage, clones):
+    for source_obj, clone_obj in dict(clones or {}).items():
+        _trace_obj(f"{stage}.src", source_obj)
+        _trace_obj(f"{stage}.mir", clone_obj)
+
+
 def _ref_sources():
     return (_modifier_pointer_refs,)
 
 
 def _ref_filters():
     return (_hook_scp_filter,)
+
+
+def _hook_owners(obj):
+    return tuple(owner for owner in getattr(obj, "modifiers", ()) if getattr(owner, "type", "") == "HOOK")
+
+
+def _bind_state_key(bound_id, owner):
+    return (as_id(bound_id), str(getattr(owner, "name", "")), str(getattr(owner, "type", "")))
+
+
+def _capture_bind_state(bound_id, owner):
+    state = {"matrix_inverse": owner.matrix_inverse.copy()} if getattr(owner, "type", "") == "HOOK" else None
+    return None if state is None else (_bind_state_key(bound_id, owner), state)
+
+
+def _restore_bind_state(owner, state):
+    if not state or "matrix_inverse" not in state:
+        return False
+    owner.matrix_inverse = state["matrix_inverse"].copy()
+    return True
 
 
 def _modifier_pointer_refs(source_obj, clone_obj):
@@ -90,14 +168,18 @@ class MirrorSceneSync:
         self.target_ids = None if target_scp_ids is None else {as_id(v) for v in set(target_scp_ids)}
         self.affected_ids = set() if self.target_ids is None else set(self.target_ids)
         self.desired_ids = set()
+        self.bind_state_by_sid = {}
         self.clones_by_sid = {}
+        self.pending_bind_refs = []
         self.mirror_col = sync._get_mirror_collection(scene)
 
     def run(self):
+        trace_line(f"mirror run targets={sorted(self.target_ids or set())}") if _mirror_trace_enabled() else None
         for sid, scp in self.scp_by_id.items():
             self._sync_target(sid, scp)
         self._remove_stale()
         self._remap_external_refs()
+        self._restore_pending_bind_states()
 
     def _sync_target(self, sid, scp):
         if not self._should_sync_target(sid, scp) or not _bound_pairs(scp):
@@ -113,12 +195,26 @@ class MirrorSceneSync:
         return bool(status_ok and in_scope and source_id in self.scp_by_id)
 
     def _rebuild_target_cluster(self, sid, scp):
+        self.bind_state_by_sid[sid] = self._capture_target_bind_state(sid)
         self._remove_target_cluster(sid)
         clones = self._clone_bound_cluster(sid, scp)
         remap_object_cluster_refs(clones)
         remap_object_cluster_parents(clones)
         self._apply_cluster_mirror(scp, clones)
         self.clones_by_sid[sid] = clones
+        _trace_cluster(f"rebuild[{sid}]", clones)
+
+    def _capture_target_bind_state(self, sid):
+        states = {}
+        for obj in self._target_mirror_objs(sid):
+            bid = as_id(obj.get("af_source_bound_id"))
+            for owner in _hook_owners(obj):
+                item = _capture_bind_state(bid, owner)
+                states[item[0]] = item[1] if item else None
+        return states
+
+    def _target_mirror_objs(self, sid):
+        return tuple(obj for obj in self.scene.objects if self._is_target_mirror(obj, sid))
 
     def _clone_bound_cluster(self, sid, scp):
         clones = {}
@@ -187,6 +283,27 @@ class MirrorSceneSync:
             return
         mirror = self._find_mirror_target(ref["value"])
         setattr(ref["owner"], ref["key"], mirror) if mirror else None
+        self._queue_bind_restore(ref) if mirror else None
+        trace_line(f"mirror remap owner={ref['clone_obj'].name} prop={ref['key']} src={ref['value'].name} mir={'' if mirror is None else mirror.name}") if mirror and _trace_match(ref["clone_obj"]) else None
+
+    def _queue_bind_restore(self, ref):
+        state = self._saved_bind_state(ref)
+        self.pending_bind_refs.append((ref["clone_obj"], ref["owner"], state)) if state else None
+
+    def _saved_bind_state(self, ref):
+        sid = as_id(ref["clone_obj"].get("af_source_scp_id"))
+        bid = as_id(ref["clone_obj"].get("af_source_bound_id"))
+        key = _bind_state_key(bid, ref["owner"])
+        return self.bind_state_by_sid.get(sid, {}).get(key)
+
+    def _restore_pending_bind_states(self):
+        if not self.pending_bind_refs:
+            return
+        update_scene_view_layer(self.scene)
+        for clone_obj, owner, state in tuple(self.pending_bind_refs):
+            trace_line(f"mirror bind owner={clone_obj.name} mod={owner.name}") if _restore_bind_state(owner, state) and _trace_match(clone_obj) else None
+        self.pending_bind_refs.clear()
+        update_scene_view_layer(self.scene)
 
     def _should_keep_existing(self, obj):
         sid = as_id(obj.get("af_source_scp_id"))
