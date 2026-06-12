@@ -46,13 +46,25 @@ def _register_scene_string_props():
 
 
 def _register_scene_shortcut_props():
+    item_type = _wizard_item_type()
     bpy.types.Scene.af_new_shortcut_name = bpy.props.StringProperty(name="Shortcut Name", default="")
     bpy.types.Scene.af_new_shortcut_path = bpy.props.StringProperty(name="Data Path", default="")
+    bpy.types.Scene.af_shortcut_wizard_wildcard_value = bpy.props.StringProperty(name="Wildcard Value", default="", options={"SKIP_SAVE"})
+    bpy.types.Scene.af_shortcut_wizard_items = bpy.props.CollectionProperty(type=item_type, options={"SKIP_SAVE"})
+    bpy.types.Scene.af_shortcut_wizard_active_index = bpy.props.IntProperty(default=-1, options={"SKIP_SAVE"})
     bpy.types.Scene.af_shortcut_view_mode = bpy.props.EnumProperty(
         name="Shortcut View",
         items=(("SELECTED", "Selected", ""), ("ALL", "All", "")),
         default="SELECTED",
     )
+
+
+def _wizard_item_type():
+    try:
+        from ..properties.shortcut_properties import AF_ShortcutWizardItem_Property
+    except ImportError:
+        from properties.shortcut_properties import AF_ShortcutWizardItem_Property
+    return AF_ShortcutWizardItem_Property
 
 
 def register_scene_props():
@@ -68,5 +80,5 @@ def _delete_scene_prop(name):
 
 
 def unregister_scene_props():
-    for name in ("af_shortcut_view_mode", "af_new_shortcut_path", "af_new_shortcut_name", "af_vcp_tree_collapsed_json", "af_tree_collapsed_json", "af_new_blob_target_obj", "af_new_fiber_insertion_obj", "af_new_fiber_origin_obj", "af_control_scp_obj", "af_scp_object_picker", "af_scp_parent_obj", "af_selection_sync_lock"):
+    for name in ("af_shortcut_wizard_active_index", "af_shortcut_wizard_items", "af_shortcut_wizard_wildcard_value", "af_shortcut_view_mode", "af_new_shortcut_path", "af_new_shortcut_name", "af_vcp_tree_collapsed_json", "af_tree_collapsed_json", "af_new_blob_target_obj", "af_new_fiber_insertion_obj", "af_new_fiber_origin_obj", "af_control_scp_obj", "af_scp_object_picker", "af_scp_parent_obj", "af_selection_sync_lock"):
         _delete_scene_prop(name)

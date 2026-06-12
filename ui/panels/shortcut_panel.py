@@ -2,6 +2,17 @@ import bpy
 
 from ...app.queries.root import has_root
 from ...app.queries.shortcuts import shortcut_panel_state
+from ...core.shortcuts.proxy_props import proxy_prop_name
+
+
+class AF_UL_ShortcutWizardItems(bpy.types.UIList):
+    def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, _index=0, _flt_flag=0):
+        row = layout.row(align=True)
+        row.prop(item, "enabled", text="")
+        row.label(text=str(getattr(item, "label", "") or ""))
+        name_row = row.row(align=True)
+        name_row.enabled = bool(getattr(item, "enabled", False))
+        name_row.prop(item, "shortcut_name", text="")
 def _draw_delete_button(row, shortcut):
     op = row.operator("af.delete_data_shortcut", text="", icon="X")
     op.shortcut_id = shortcut.id
@@ -48,9 +59,7 @@ def _whole_array(target):
 
 
 def _prop_name(target, index):
-    if int(getattr(target, "array_length", 0) or 0) > 0 and index is None and int(getattr(target, "index", -1)) < 0:
-        return {"BOOL": "proxy_bool_vec", "INT": "proxy_int_vec", "FLOAT": "proxy_float_vec"}.get(target.value_type, "proxy_float_vec")
-    return {"BOOL": "proxy_bool", "INT": "proxy_int", "FLOAT": "proxy_float", "STRING": "proxy_string", "ENUM": "proxy_enum"}.get(target.value_type, "proxy_string")
+    return proxy_prop_name(target, index=index)
 
 
 def _row_label(name, index):
@@ -87,7 +96,9 @@ def _draw_shortcut_form(layout, scene):
     box.label(text="New Shortcut")
     box.prop(scene, "af_new_shortcut_name", text="Shortcut Name")
     box.prop(scene, "af_new_shortcut_path", text="Data Path")
-    box.operator("af.add_data_shortcut", icon="ADD")
+    row = box.row(align=True)
+    row.operator("af.add_data_shortcut", icon="ADD")
+    row.operator("af.shortcut_wizard", icon="PRESET")
 
 
 class AF_PT_ShortcutPanel(bpy.types.Panel):

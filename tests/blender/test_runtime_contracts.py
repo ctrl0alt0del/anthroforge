@@ -197,6 +197,17 @@ class RuntimeContractTests(BlenderTestCase):
         self.assertEqual(meta["payload"]["scp_apply_parent_ids"], ["S1"])
         self.assertEqual(meta["payload"]["non_source_ids_by_type"]["SCP"], ["S2"])
 
+    def test_schedule_sync_keeps_pending_request_when_runner_busy(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        sync_runner._RUNNING = True
+        with patch.object(sync_runner, "run_dependency_runtime") as run, patch.object(bpy.app.timers, "register") as arm:
+            sync_runner.schedule_sync_from_dirty_hints(root=root(), scene=bpy.context.scene, dirty_hints={"SCP": {"S1"}}, source="depsgraph", payload={"scp_apply_parent_ids": ["S1"]})
+            self.assertEqual((sync_runner._flush_pending(), len(sync_runner._PENDING), run.call_count, arm.call_count), (0.0, 1, 0, 1))
+            sync_runner._RUNNING = False
+            sync_runner._flush_pending()
+        self.assertEqual((len(sync_runner._PENDING), run.call_args.kwargs["gate_meta"]["payload"]["scp_apply_parent_ids"]), (0, ["S1"]))
+
     def test_schedule_sync_queues_explicit_context_and_request_objects(self):
         self.addCleanup(_reset_sync_runner)
         _reset_sync_runner()

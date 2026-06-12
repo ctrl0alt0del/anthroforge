@@ -1,5 +1,6 @@
 import bpy
 
+from ..core.shortcuts.proxy_props import _FLOAT_SCALAR, _FLOAT_VECTOR
 from ..core.shortcuts import child_override_items, parent_override_items
 
 _VEC_SIZE = 32
@@ -122,6 +123,30 @@ class AF_DataShortcut_Property(bpy.types.PropertyGroup):
     proxy_bool_vec: bpy.props.BoolVectorProperty(size=_VEC_SIZE, default=_FALSES, get=_bool_vec_get, set=_bool_vec_set, options={"SKIP_SAVE"})
     proxy_int_vec: bpy.props.IntVectorProperty(size=_VEC_SIZE, default=_ZEROES, get=_int_vec_get, set=_int_vec_set, options={"SKIP_SAVE"})
     proxy_float_vec: bpy.props.FloatVectorProperty(size=_VEC_SIZE, default=_FLOATS, get=_float_vec_get, set=_float_vec_set, options={"SKIP_SAVE"})
+
+
+class AF_ShortcutWizardItem_Property(bpy.types.PropertyGroup):
+    enabled: bpy.props.BoolProperty(default=False, options={"SKIP_SAVE"})
+    label: bpy.props.StringProperty(default="", options={"SKIP_SAVE"})
+    data_path: bpy.props.StringProperty(default="", options={"SKIP_SAVE"})
+    shortcut_id: bpy.props.StringProperty(default="", options={"SKIP_SAVE"})
+    shortcut_name: bpy.props.StringProperty(default="", options={"SKIP_SAVE"})
+
+
+def _add_float_proxy(name, subtype):
+    AF_DataShortcut_Property.__annotations__[name] = bpy.props.FloatProperty(get=_float_get, set=_float_set, subtype=subtype, options={"SKIP_SAVE"})
+
+
+def _add_float_vec_proxy(name, subtype):
+    AF_DataShortcut_Property.__annotations__[name] = bpy.props.FloatVectorProperty(size=_VEC_SIZE, default=_FLOATS, get=_float_vec_get, set=_float_vec_set, subtype=subtype, options={"SKIP_SAVE"})
+
+
+for _subtype in sorted(_FLOAT_SCALAR):
+    _add_float_proxy(f"proxy_float_{_subtype.lower()}", _subtype)
+
+
+for _subtype in sorted(_FLOAT_VECTOR):
+    _add_float_vec_proxy(f"proxy_float_vec_{_subtype.lower()}", _subtype)
 
 
 class AF_DataShortcut_System_Property(bpy.types.PropertyGroup):

@@ -14,6 +14,7 @@ from app.use_cases.shortcut_edit import apply_shortcut_proxy, prime_shortcut_pro
 from core.scp_runtime.lookup import set_parent_relation
 from core.scp_runtime.runtime_state import attach_parent_param
 from core.shortcuts import resolve_shortcut, upsert_override
+from core.shortcuts.proxy_props import proxy_prop_name
 
 
 def _apply_float_shortcut(root_obj, shortcut, value):
@@ -36,6 +37,18 @@ class ShortcutWorkflowTests(BlenderTestCase):
         shortcut_id = root_obj.af_shortcut_system.shortcuts[0].id
         self.assertEqual(bpy.ops.af.delete_data_shortcut(shortcut_id=shortcut_id), {"FINISHED"})
         self.assertEqual(len(root_obj.af_shortcut_system.shortcuts), 0)
+
+    def test_indexed_transform_shortcut_writes_through_scalar_proxy(self):
+        root_obj = root()
+        scp = scp_with_object(root_obj, "Arm", mesh_object("Arm"))
+        select_only(scp.transform_object_ref)
+        shortcut = add_shortcut(root_obj, "Arm X", "SCP", scp.id, f'bpy.data.objects["{scp.transform_object_ref.name}"].location[0]')
+        target = resolve_shortcut(root_obj, bpy.context, shortcut.data_path)
+        self.assertEqual(proxy_prop_name(target), "proxy_float")
+        setattr(shortcut, proxy_prop_name(target), 2.5)
+        bpy.context.view_layer.update()
+        self.assertAlmostEqual(float(scp.transform_object_ref.location[0]), 2.5, places=4)
+        self.assertAlmostEqual(float(getattr(shortcut, "proxy_float")), 2.5, places=4)
 
     def test_shortcut_session_uses_temporary_override_only_during_apply(self):
         root_obj = root()

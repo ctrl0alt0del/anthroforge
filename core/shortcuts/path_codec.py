@@ -57,6 +57,10 @@ def _canonical_path(raw):
     return "" if not kind else make_shortcut_path(kind, prop_spec, entity_id=entity_id)
 
 
+def canonical_shortcut_path(raw):
+    return _canonical_path(raw)
+
+
 def _full_object_match(raw):
     return _FULL_OBJECT_RE.match(str(raw or "").strip())
 

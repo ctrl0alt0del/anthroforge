@@ -17,6 +17,7 @@ class ShortcutTarget:
     index: int = -1
     value_type: str = ""
     array_length: int = 0
+    subtype: str = ""
     enum_items: tuple = ()
     error: str = ""
 
@@ -99,7 +100,7 @@ def _custom_target(owner, prop_name):
     if value is None:
         return _invalid("Property was not found on the bound target.")
     key, index = _custom_prop_parts(prop_name)
-    return ShortcutTarget(owner=owner, prop_name=key, index=index, value_type=_custom_value_type(value), array_length=_custom_array_length(value), error=_custom_index_error(value, index))
+    return ShortcutTarget(owner=owner, prop_name=key, index=index, value_type=_custom_value_type(value), array_length=_custom_array_length(value), subtype=_custom_subtype(owner, key), error=_custom_index_error(value, index))
 
 
 def _missing_owner_error(kind):
@@ -126,7 +127,7 @@ def _resolve_prop(kind, owner, prop_spec):
         return _invalid("Property was not found on the bound target.")
     if getattr(prop_rna, "type", "") in {"POINTER", "COLLECTION"}:
         return _invalid("Only direct value properties are supported.")
-    return ShortcutTarget(owner=final_owner, prop_name=prop_name, index=index, value_type=_rna_value_type(prop_rna), array_length=int(getattr(prop_rna, "array_length", 0) or 0), enum_items=_enum_items(prop_rna), error=_index_error(prop_rna, index))
+    return ShortcutTarget(owner=final_owner, prop_name=prop_name, index=index, value_type=_rna_value_type(prop_rna), array_length=int(getattr(prop_rna, "array_length", 0) or 0), subtype=_rna_subtype(prop_rna), enum_items=_enum_items(prop_rna), error=_index_error(prop_rna, index))
 
 
 def _owner_and_leaf(owner, prop_spec):
@@ -151,14 +152,34 @@ def _custom_array_length(value):
     return len(value) if sized else 0
 
 
+def _custom_subtype(owner, key):
+    data = _custom_ui_data(owner, key[2:-2])
+    return _subtype_name(data.get("subtype", "")) if isinstance(data, dict) else ""
+
+
+def _custom_ui_data(owner, name):
+    try:
+        return owner.id_properties_ui(name).as_dict()
+    except Exception:
+        return {}
+
+
 def _rna_value_type(prop_rna):
     kinds = {"BOOLEAN": "BOOL", "INT": "INT", "FLOAT": "FLOAT", "STRING": "STRING", "ENUM": "ENUM"}
     return kinds.get(str(getattr(prop_rna, "type", "") or "").upper(), "")
 
 
+def _rna_subtype(prop_rna):
+    return _subtype_name(getattr(prop_rna, "subtype", ""))
+
+
 def _enum_items(prop_rna):
     items = getattr(prop_rna, "enum_items", ()) or ()
     return tuple((str(item.identifier), str(item.name), str(item.description)) for item in items)
+
+
+def _subtype_name(value):
+    return str(value or "").upper()
 
 
 def resolve_shortcut(root, context, raw):

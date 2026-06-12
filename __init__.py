@@ -40,6 +40,7 @@ from .operators.shortcuts import (
     AF_OT_AddDataShortcut,
     AF_OT_DeleteDataShortcut,
     AF_OT_EditShortcutOverride,
+    AF_OT_ShortcutWizard,
 )
 from .operators.control_objects import (
     AFOTMarkSelectedSCPControlObject,
@@ -65,7 +66,7 @@ from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
 from .ui.panels.vcp_edit_panel import AF_PT_VCPEditPanel
 from .ui.panels.blob_create_panel import AF_PT_BlobCreatePanel
 from .ui.panels.blob_edit_panel import AF_PT_BlobEditPanel
-from .ui.panels.shortcut_panel import AF_PT_ShortcutPanel
+from .ui.panels.shortcut_panel import AF_PT_ShortcutPanel, AF_UL_ShortcutWizardItems
 from .ui.panels.control_objects_panel import AFPTControlObjectsPanel
 
 from .properties.scp_properties import (
@@ -85,6 +86,7 @@ from .properties.shortcut_properties import (
     AF_DataShortcutOverride_Property,
     AF_DataShortcut_Property,
     AF_DataShortcut_System_Property,
+    AF_ShortcutWizardItem_Property,
 )
 
 from .core.visualization.sync import register_sync, unregister_sync
@@ -155,13 +157,16 @@ classes = (
     AF_OT_ImportPackage,
     AF_DataShortcutOverride_Property,
     AF_DataShortcut_Property,
+    AF_ShortcutWizardItem_Property,
     AF_DataShortcut_System_Property,
     AF_OT_AddDataShortcut,
     AF_OT_DeleteDataShortcut,
     AF_OT_EditShortcutOverride,
+    AF_OT_ShortcutWizard,
     AFOTMarkSelectedSCPControlObject,
     AFOTToggleControlObjectApplyParent,
     AFOTToggleControlObjectShortcutAxis,
+    AF_UL_ShortcutWizardItems,
     AF_PT_ShortcutPanel,
     AFPTControlObjectsPanel,
 )

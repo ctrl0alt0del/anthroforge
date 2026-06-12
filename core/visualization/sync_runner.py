@@ -17,13 +17,13 @@ _TIMER_ARMED = False
 def _run_request(ctx, request):
     global _RUNNING
     if _RUNNING:
-        return
-
+        return False
     _RUNNING = True
     try:
         run_runtime_now(ctx, request, run_dependency_runtime)
     finally:
         _RUNNING = False
+    return True
 
 
 def _scheduler(ctx, request):
@@ -44,14 +44,20 @@ def _next_request():
     return None if not _PENDING else _PENDING.pop(0)
 
 
+def _peek_request():
+    return None if not _PENDING else _PENDING[0]
+
+
 def _flush_pending():
     global _TIMER_ARMED
-    item = _next_request()
+    item = _peek_request()
     if item is None:
         _TIMER_ARMED = False
         return None
     ctx, request = item
-    _run_request(ctx, request)
+    if not _run_request(ctx, request):
+        return 0.0
+    _next_request()
     return 0.0
 
 

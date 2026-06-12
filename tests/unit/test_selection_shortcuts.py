@@ -14,18 +14,23 @@ from _support import ensure_import_path, install_fake_modules
 ensure_import_path()
 bpy = install_fake_modules()
 
+from core.shortcuts.proxy_props import proxy_prop_name
 from core.selection import get_active_af_entity
 from core.shortcuts import normalize_shortcut_path, resolve_shortcut
 
 
 class FakeObject(dict):
-    def __init__(self, name, **props):
+    def __init__(self, name, ui_data=None, **props):
         super().__init__(props)
         self.name = name
+        self._ui_data = dict(ui_data or {})
         self.rna_type = SimpleNamespace(properties={})
 
     def path_resolve(self, _path):
         return self
+
+    def id_properties_ui(self, key):
+        return SimpleNamespace(as_dict=lambda: dict(self._ui_data.get(key, {})))
 
 
 def scp(sid, bound=()):
@@ -58,12 +63,12 @@ class SelectionShortcutTests(unittest.TestCase):
 
     def test_resolve_shortcut_returns_owner_and_index(self):
         obj = FakeObject("bound")
-        obj.rna_type.properties["location"] = SimpleNamespace(type="FLOAT", array_length=3)
+        obj.rna_type.properties["location"] = SimpleNamespace(type="FLOAT", array_length=3, subtype="TRANSLATION")
         bpy.data.objects[obj.name] = obj
         context = SimpleNamespace(active_object=None, scene=SimpleNamespace())
         target = resolve_shortcut(root(scps=[scp("S1")]), context, "af://object_rna/bound/location[1]")
         self.assertIs(target.owner, obj)
-        self.assertEqual((target.prop_name, target.index), ("location", 1))
+        self.assertEqual((target.prop_name, target.index, target.subtype), ("location", 1, "TRANSLATION"))
 
     def test_resolve_custom_property_array_shortcut(self):
         obj = FakeObject("bound", weights=[0.1, 0.2, 0.3])
@@ -78,3 +83,18 @@ class SelectionShortcutTests(unittest.TestCase):
         context = SimpleNamespace(active_object=None, scene=SimpleNamespace())
         target = resolve_shortcut(root(scps=[scp("S1")]), context, 'af://object_rna/bound/["weights"][2]')
         self.assertEqual(target.error, "Array index is out of range.")
+
+    def test_resolve_custom_property_reads_ui_subtype(self):
+        obj = FakeObject("bound", ui_data={"Angle": {"subtype": "ANGLE"}}, Angle=1.0)
+        bpy.data.objects[obj.name] = obj
+        context = SimpleNamespace(active_object=None, scene=SimpleNamespace())
+        target = resolve_shortcut(root(scps=[scp("S1")]), context, 'af://object_rna/bound/["Angle"]')
+        self.assertEqual((target.value_type, target.subtype), ("FLOAT", "ANGLE"))
+
+    def test_proxy_prop_name_uses_subtype_aware_float_proxies(self):
+        scalar = SimpleNamespace(value_type="FLOAT", array_length=0, subtype="ANGLE")
+        vector = SimpleNamespace(value_type="FLOAT", array_length=3, subtype="EULER")
+        indexed = SimpleNamespace(value_type="FLOAT", array_length=3, index=1, subtype="EULER")
+        self.assertEqual(proxy_prop_name(scalar), "proxy_float_angle")
+        self.assertEqual(proxy_prop_name(vector), "proxy_float_vec_euler")
+        self.assertEqual(proxy_prop_name(indexed), "proxy_float_angle")
