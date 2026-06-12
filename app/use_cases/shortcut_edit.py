@@ -50,7 +50,7 @@ def _write_plain(target, value):
 def _apply_scp_session(context, root, shortcut, target, value):
     scp_id, relation = _session_target(root, context, shortcut)
     parent_mode, child_mode = _session_modes(shortcut, scp_id, relation)
-    payload, dirty_ids = _session_sync(shortcut, scp_id, relation, root)
+    payload, dirty_ids = _session_sync(shortcut, scp_id, relation, root, parent_mode, child_mode)
     begin_override_session(scp_id, parent_mode, child_mode)
     suppress_next_depsgraph_ids({getattr(shortcut, "owner_id", "")})
     try:
@@ -70,17 +70,31 @@ def _session_modes(shortcut, scp_id, relation):
     return override_modes(shortcut, scp_id) if relation == "ANCESTOR" else ("KEEP", "KEEP")
 
 
-def _session_sync(shortcut, scp_id, relation, root):
-    recapture = _recapture_ids(root, scp_id, relation)
-    payload = {"scp_apply_parent_ids": [str(getattr(shortcut, "owner_id", "") or "")], "scp_recapture_ids": sorted(recapture)}
-    dirty_ids = {str(getattr(shortcut, "owner_id", "") or "")} | recapture
-    return payload, {sid for sid in dirty_ids if sid}
+def _session_sync(shortcut, scp_id, relation, root, parent_mode, child_mode):
+    recapture = _recapture_ids(root, scp_id, relation, parent_mode, child_mode)
+    return _session_payload(shortcut, recapture), _session_dirty_ids(shortcut, recapture)
 
 
-def _recapture_ids(root, scp_id, relation):
+def _session_payload(shortcut, recapture):
+    owner_id = str(getattr(shortcut, "owner_id", "") or "")
+    return {"scp_apply_parent_ids": [owner_id], "scp_recapture_ids": sorted(recapture)}
+
+
+def _session_dirty_ids(shortcut, recapture):
+    owner_id = str(getattr(shortcut, "owner_id", "") or "")
+    return {sid for sid in ({owner_id} | set(recapture or set())) if sid}
+
+
+def _recapture_ids(root, scp_id, relation, parent_mode, child_mode):
+    if not _needs_session_recapture(parent_mode, child_mode):
+        return set()
     scp = find_scp_by_id(root, scp_id)
     valid = relation in {"SELF", "ANCESTOR"} and str(getattr(scp, "parent_id", "") or "")
     return {str(scp_id or "")} if valid else set()
+
+
+def _needs_session_recapture(parent_mode, child_mode):
+    return str(parent_mode or "KEEP") != "KEEP" or str(child_mode or "KEEP") != "KEEP"
 
 
 def proxy_value(shortcut, target):

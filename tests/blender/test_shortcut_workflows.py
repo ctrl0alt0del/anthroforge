@@ -9,8 +9,9 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 
 import bpy
 
-from _helpers import BlenderTestCase, add_shortcut, mesh_object, root, scp_with_object, select_only
+from _helpers import BlenderTestCase, add_shortcut, empty_object, mesh_object, root, scp_with_object, select_only
 from app.use_cases.shortcut_edit import apply_shortcut_proxy, prime_shortcut_proxy
+from core.scp_runtime.attachment_runtime import capture_attachment_from_link
 from core.scp_runtime.lookup import set_parent_relation
 from core.scp_runtime.runtime_state import attach_parent_param
 from core.shortcuts import resolve_shortcut, upsert_override
@@ -24,6 +25,15 @@ def _apply_float_shortcut(root_obj, shortcut, value):
     shortcut.proxy_float = value
     shortcut.proxy_sync_lock = False
     return apply_shortcut_proxy(bpy.context, shortcut)
+
+
+def _attached_empty_pair(root_obj):
+    parent = scp_with_object(root_obj, "Parent", empty_object("Parent"), with_geometry=False)
+    child = scp_with_object(root_obj, "Child", empty_object("Child", (1.0, 0.0, 0.0)), with_geometry=False)
+    child.attach_parent_anchor_mode = child.attach_child_anchor_mode = "OBJECT_ORIGIN"
+    set_parent_relation(child.transform_object_ref, child, parent.transform_object_ref)
+    capture_attachment_from_link(child, child.transform_object_ref, None, parent.transform_object_ref, None)
+    return parent, child
 
 
 class ShortcutWorkflowTests(BlenderTestCase):
@@ -64,3 +74,13 @@ class ShortcutWorkflowTests(BlenderTestCase):
         bpy.context.view_layer.update()
         self.assertNotEqual(tuple(attach_parent_param(child)["tri_vidx"]), (-1, -1, -1))
         self.assertEqual(tuple(round(float(v), 4) for v in child.transform_object_ref.location), session_loc)
+
+    def test_parent_shortcut_moves_selected_child_without_override(self):
+        root_obj = root()
+        parent, child = _attached_empty_pair(root_obj)
+        shortcut = add_shortcut(root_obj, "Parent X", "SCP", parent.id, f'bpy.data.objects["{parent.transform_object_ref.name}"].location[0]')
+        select_only(child.transform_object_ref)
+        shortcut.proxy_float = 2.0
+        bpy.context.view_layer.update()
+        loc = tuple(round(float(v), 4) for v in child.transform_object_ref.location)
+        self.assertEqual(loc, (3.0, 0.0, 0.0))

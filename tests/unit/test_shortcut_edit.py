@@ -70,6 +70,15 @@ class ShortcutEditTests(unittest.TestCase):
         self.assertEqual(sync.calls, [((ctx,), {"dirty_hints": {"P1", "C1"}, "source": "shortcut", "event_type": "UPDATE", "payload": {"scp_apply_parent_ids": ["P1"], "scp_recapture_ids": ["C1"]}})])
         clear.assert_called_once()
 
+    def test_apply_shortcut_proxy_skips_recapture_without_override(self):
+        root, ctx = SimpleNamespace(), SimpleNamespace()
+        shortcut = SimpleNamespace(proxy_sync_lock=False, owner_type="SCP", owner_id="P1", data_path="PATH", proxy_float=2.5)
+        target = SimpleNamespace(owner=object(), prop_name="location", index=-1, value_type="FLOAT", array_length=0)
+        with patch("app.use_cases.shortcut_edit.root_for_context", return_value=root), patch("app.use_cases.shortcut_edit.resolve_shortcut", return_value=target), patch("app.use_cases.shortcut_edit.selected_scp_id", return_value="C1"), patch("app.use_cases.shortcut_edit.shortcut_relation", return_value="ANCESTOR"), patch("app.use_cases.shortcut_edit.override_modes", return_value=("KEEP", "KEEP")), patch("app.use_cases.shortcut_edit.find_scp_by_id", return_value=SimpleNamespace(parent_id="P1")), patch("app.use_cases.shortcut_edit.write_target_value"), patch("app.use_cases.shortcut_edit.begin_override_session"), patch("app.use_cases.shortcut_edit.suppress_next_depsgraph_ids"), patch("app.use_cases.shortcut_edit.clear_override_session"), patch("app.use_cases.shortcut_edit._dirty_hints_for", return_value=lambda _et, ids: set(ids)), patch("app.use_cases.shortcut_edit._sync_context", return_value=lambda *args, **kwargs: sync(*args, **kwargs)):
+            sync = Recorder()
+            self.assertTrue(edit.apply_shortcut_proxy(ctx, shortcut))
+        self.assertEqual(sync.calls, [((ctx,), {"dirty_hints": {"P1"}, "source": "shortcut", "event_type": "UPDATE", "payload": {"scp_apply_parent_ids": ["P1"], "scp_recapture_ids": []}})])
+
     def test_override_helpers_return_default_and_drop_orphans(self):
         src = SimpleNamespace(overrides=OverrideCollection([override("S1", "OBJECT_ORIGIN"), override("S9", "KEEP", "OBJECT_ORIGIN")]))
         dst = SimpleNamespace(overrides=OverrideCollection())
