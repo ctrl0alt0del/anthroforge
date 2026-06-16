@@ -22,6 +22,64 @@ def _mirror_matrix(axis="X", origin=(0.0, 0.0, 0.0)):
     return Matrix.Translation(origin_vec) @ Matrix.Diagonal((sx, sy, sz, 1.0)) @ Matrix.Translation(-origin_vec)
 
 
+def _axis_index(axis):
+    return {"Y": 1, "Z": 2}.get(as_axis(axis), 0)
+
+
+def _unit_axis(index):
+    return Vector((1.0 if index == 0 else 0.0, 1.0 if index == 1 else 0.0, 1.0 if index == 2 else 0.0))
+
+
+def _target_worlds(clones, axis, origin):
+    mirror = _mirror_matrix(axis=axis, origin=origin)
+    return {clone: mirror @ source.matrix_world for source, clone in clones.items()}
+
+
+def _clone_depth(obj):
+    depth, cur = 0, getattr(obj, "parent", None)
+    while cur is not None:
+        depth, cur = depth + 1, cur.parent
+    return depth
+
+
+def _clone_order(clones):
+    return tuple(sorted(clones.values(), key=_clone_depth))
+
+
+def _local_target(obj, target_world):
+    parent = getattr(obj, "parent", None)
+    return target_world if parent is None else parent.matrix_world.inverted() @ target_world
+
+
+def _signed_trs(target, axis):
+    linear = target.to_3x3()
+    cols = [linear.col[i].copy() for i in range(3)]
+    scale = [col.length or 1.0 for col in cols]
+    basis = [col / scale[i] if scale[i] > 1e-8 else _unit_axis(i) for i, col in enumerate(cols)]
+    if Matrix(basis).transposed().determinant() < 0.0:
+        basis[_axis_index(axis)], scale[_axis_index(axis)] = -basis[_axis_index(axis)], -scale[_axis_index(axis)]
+    return target.to_translation(), Matrix(basis).transposed().to_quaternion(), Vector(scale)
+
+
+def _set_rotation(obj, quat):
+    if obj.rotation_mode == "QUATERNION":
+        obj.rotation_quaternion = quat
+        return
+    if obj.rotation_mode == "AXIS_ANGLE":
+        angle, axis = quat.to_axis_angle()
+        obj.rotation_axis_angle = (angle, axis.x, axis.y, axis.z)
+        return
+    obj.rotation_euler = quat.to_euler(obj.rotation_mode)
+
+
+def _apply_target(obj, target_world, axis):
+    local = _local_target(obj, target_world)
+    loc, quat, scale = _signed_trs(local, axis)
+    obj.matrix_parent_inverse.identity() if obj.parent else None
+    obj.location, obj.scale = loc, scale
+    _set_rotation(obj, quat)
+
+
 def _bound_pairs(scp):
     return tuple(iter_bound_objects(scp))
 
@@ -240,8 +298,10 @@ class MirrorSceneSync:
 
     def _apply_cluster_mirror(self, scp, clones):
         axis, origin = self._mirror_rule(scp)
-        for source_obj, clone in clones.items():
-            clone.matrix_world = _mirror_matrix(axis=axis, origin=origin) @ source_obj.matrix_world
+        targets = _target_worlds(clones, axis, origin)
+        for clone in _clone_order(clones):
+            _apply_target(clone, targets[clone], axis)
+            update_scene_view_layer(self.scene)
 
     def _mirror_rule(self, scp):
         source_scp = self.scp_by_id[mirror_source_id(scp)]

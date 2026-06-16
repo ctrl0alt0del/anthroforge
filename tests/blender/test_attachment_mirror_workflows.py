@@ -19,6 +19,7 @@ from anthroforge.core.scp_runtime.attachment_runtime import _resolved_tangent_st
 from anthroforge.core.scp_runtime.mirror_roles import apply_scp_mirror_roles
 from anthroforge.core.scp_runtime.runtime_state import attach_child_anchor_index, attach_child_origin_local
 from anthroforge.core.scp_runtime.mirror_scene import sync_mirrors
+from anthroforge.core.visualization.mirror_rules import mirror_matrix
 from anthroforge.core.visualization.sync import register_sync
 
 
@@ -54,6 +55,14 @@ def _curve_object(name):
     obj = bpy.data.objects.new(name, curve)
     bpy.context.scene.collection.objects.link(obj)
     return obj
+
+
+def _world_verts(obj):
+    return tuple(obj.matrix_world @ vert.co.copy() for vert in obj.data.vertices)
+
+
+def _max_delta(a, b):
+    return max((((va - vb).length) for va, vb in zip(a, b)), default=0.0)
 
 
 def _hooked_curve_scp(root_obj, name, parent_id, hook_obj):
@@ -211,6 +220,20 @@ class AttachmentMirrorWorkflowTests(BlenderTestCase):
         sync_mirrors(sync, root_obj, bpy.context.scene, scp_prop_map(root_obj), {target_a.id})
         self.assertIsNone(bpy.data.objects.get(clone_a_name))
         self.assertIsNotNone(bpy.data.objects.get(clone_b_name))
+
+    def test_mirror_sync_keeps_reflected_shape_for_rotated_scaled_root(self):
+        root_obj = root()
+        source = scp_with_object(root_obj, "Source", mesh_object("Source"))
+        target = scp_with_object(root_obj, "Target", mesh_object("Target", (2.0, 0.0, 0.0)))
+        obj = source.transform_object_ref
+        obj.location, obj.rotation_euler = (1.7, 0.3, -0.4), (1.24, 0.7052, -2.1069)
+        obj.scale, target.parent_id, source.mirror_enabled = (2.3918, 0.1016, 0.1504), source.id, True
+        source.mirror_axis = "Y"
+        apply_scp_mirror_roles(root_obj)
+        sync_mirrors(register_sync(), root_obj, bpy.context.scene, scp_prop_map(root_obj), {target.id})
+        clone = find_flagged("af_scp_mirror", target.id, "af_source_scp_id")
+        expected = tuple(mirror_matrix("Y") @ vert for vert in _world_verts(obj))
+        self.assertLess(_max_delta(expected, _world_verts(clone)), 1e-4)
 
     def test_mirror_sync_remaps_shared_external_hook_targets(self):
         root_obj = root()
