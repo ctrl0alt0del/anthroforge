@@ -13,6 +13,12 @@ from _helpers import BlenderTestCase, empty_object, mesh_object, root, scp_with_
 from core.scp_runtime.attachment_runtime import apply_scp_attachments, capture_attachment_from_link
 from core.scp_runtime.common import scp_prop_map
 from core.scp_runtime.lookup import set_parent_relation
+from core.scp_runtime.object_roles import set_scp_geometry_object
+from core.scp_runtime.runtime_state import attach_child_origin_local
+
+
+def _world_verts(obj):
+    return [tuple(round(float(v), 4) for v in (obj.matrix_world @ vert.co)) for vert in obj.data.vertices]
 
 
 class AttachmentPipelineTests(BlenderTestCase):
@@ -77,3 +83,40 @@ class AttachmentPipelineTests(BlenderTestCase):
         parent_obj.location.x = 4.0
         changed = apply_scp_attachments(None, root_obj, bpy.context.scene, scp_prop_map(root_obj), parent_ids={parent.id})
         self.assertEqual((changed, tuple(round(v, 4) for v in child_obj.location)), ({child.id}, (3.0, 0.0, 0.0)))
+
+    def test_move_origin_to_attachment_preserves_pose_and_recaptures(self):
+        root_obj = root()
+        parent = scp_with_object(root_obj, "Parent", empty_object("Parent"), with_geometry=False)
+        child = scp_with_object(root_obj, "Child", mesh_object("Child", (2.0, 0.0, 0.0)))
+        child.attach_parent_anchor_mode, child.attach_child_anchor_mode = "OBJECT_ORIGIN", "FACE_CENTER"
+        set_parent_relation(child.transform_object_ref, child, parent.transform_object_ref)
+        self.assertTrue(capture_attachment_from_link(child, child.transform_object_ref, child.geometry_object_ref, parent.transform_object_ref, None))
+        before = _world_verts(child.transform_object_ref)
+        child.transform_object_ref.select_set(True)
+        bpy.context.view_layer.objects.active = child.transform_object_ref
+        self.assertEqual(bpy.ops.af.move_scp_origin_to_attachment(), {"FINISHED"})
+        after = _world_verts(child.transform_object_ref)
+        anchor = tuple(round(float(v), 4) for v in attach_child_origin_local(child))
+        self.assertEqual(before, after)
+        self.assertEqual(anchor, (0.0, 0.0, 0.0))
+        parent.transform_object_ref.location.z = 3.0
+        changed = apply_scp_attachments(None, root_obj, bpy.context.scene, scp_prop_map(root_obj), parent_ids={parent.id})
+        self.assertEqual((changed, round(float(child.transform_object_ref.location.z), 4)), ({child.id}, 3.0))
+
+    def test_move_origin_to_attachment_keeps_separate_geometry_pose(self):
+        root_obj = root()
+        parent = scp_with_object(root_obj, "Parent", empty_object("Parent"), with_geometry=False)
+        child = scp_with_object(root_obj, "Child", empty_object("Child"), with_geometry=False)
+        geo = mesh_object("ChildGeo", (2.0, 0.0, 0.0))
+        set_scp_geometry_object(root_obj, child, geo)
+        child.attach_parent_anchor_mode, child.attach_child_anchor_mode = "OBJECT_ORIGIN", "FACE_CENTER"
+        set_parent_relation(child.transform_object_ref, child, parent.transform_object_ref)
+        self.assertTrue(capture_attachment_from_link(child, child.transform_object_ref, child.geometry_object_ref, parent.transform_object_ref, None))
+        before = _world_verts(child.geometry_object_ref)
+        child.transform_object_ref.select_set(True)
+        bpy.context.view_layer.objects.active = child.transform_object_ref
+        self.assertEqual(bpy.ops.af.move_scp_origin_to_attachment(), {"FINISHED"})
+        after = _world_verts(child.geometry_object_ref)
+        anchor = tuple(round(float(v), 4) for v in attach_child_origin_local(child))
+        self.assertEqual(before, after)
+        self.assertEqual(anchor, (0.0, 0.0, 0.0))

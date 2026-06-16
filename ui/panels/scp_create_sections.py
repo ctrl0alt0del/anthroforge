@@ -42,6 +42,7 @@ def draw_attachment_settings(layout, scp):
     row = layout.row()
     row.enabled = str(getattr(scp, "attach_parent_anchor_mode", "SURFACE_NEAREST")) == "SURFACE_NEAREST"
     row.prop(scp, "attach_tangent_strategy", text="Rotation Strategy")
+    layout.operator("af.move_scp_origin_to_attachment", text="Move Origin To Attachment", icon="PIVOT_CURSOR")
 
 
 def draw_mirror_box(layout, scp):

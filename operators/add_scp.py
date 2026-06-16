@@ -1,5 +1,6 @@
 import bpy
 
+from ..app.use_cases.attachment_origin import move_active_origin_to_attachment
 from ..app.use_cases.scp_parenting import mark_active_mesh_as_scp, set_active_scp_parent
 
 
@@ -25,3 +26,12 @@ class AF_OT_SetSCPParent(bpy.types.Operator):
 
     def execute(self, context):
         return _finish(self, set_active_scp_parent(context))
+
+
+class AF_OT_MoveSCPOriginToAttachment(bpy.types.Operator):
+    bl_idname = "af.move_scp_origin_to_attachment"
+    bl_label = "Move SCP Origin To Attachment"
+    bl_description = "Move the active SCP transform origin to its current attachment point"
+
+    def execute(self, context):
+        return _finish(self, move_active_origin_to_attachment(context))
