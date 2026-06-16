@@ -5,9 +5,11 @@ from mathutils import Matrix, Vector
 
 from ..deps.runtime_trace import trace_line
 from ..utils import update_scene_view_layer
-from ..visualization.mirror_objects import clone_native_object, remap_object_cluster_parents, remap_object_cluster_refs, remove_obj
+from ..visualization.mirror_objects import clone_native_object, remap_object_cluster_refs, remove_obj
 from .bound_objects import iter_bound_objects
+from .mirror_clone_prep import prepare_mirror_clone
 from .common import as_axis, as_id, is_bound_scp_obj
+from .mirror_placement import apply_parent_target, mirror_clone_pairs, mirror_parent_for, mirror_target_worlds
 from .runtime_state import mirror_effective_axis, mirror_source_id, mirror_status
 
 
@@ -28,27 +30,6 @@ def _axis_index(axis):
 
 def _unit_axis(index):
     return Vector((1.0 if index == 0 else 0.0, 1.0 if index == 1 else 0.0, 1.0 if index == 2 else 0.0))
-
-
-def _target_worlds(clones, axis, origin):
-    mirror = _mirror_matrix(axis=axis, origin=origin)
-    return {clone: mirror @ source.matrix_world for source, clone in clones.items()}
-
-
-def _clone_depth(obj):
-    depth, cur = 0, getattr(obj, "parent", None)
-    while cur is not None:
-        depth, cur = depth + 1, cur.parent
-    return depth
-
-
-def _clone_order(clones):
-    return tuple(sorted(clones.values(), key=_clone_depth))
-
-
-def _local_target(obj, target_world):
-    parent = getattr(obj, "parent", None)
-    return target_world if parent is None else parent.matrix_world.inverted() @ target_world
 
 
 def _signed_trs(target, axis):
@@ -72,10 +53,11 @@ def _set_rotation(obj, quat):
     obj.rotation_euler = quat.to_euler(obj.rotation_mode)
 
 
-def _apply_target(obj, target_world, axis):
-    local = _local_target(obj, target_world)
-    loc, quat, scale = _signed_trs(local, axis)
-    obj.matrix_parent_inverse.identity() if obj.parent else None
+def _apply_world_target(obj, target_world, axis):
+    if obj.parent is not None:
+        obj.parent = None
+    obj.matrix_parent_inverse.identity()
+    loc, quat, scale = _signed_trs(target_world, axis)
     obj.location, obj.scale = loc, scale
     _set_rotation(obj, quat)
 
@@ -254,7 +236,6 @@ class MirrorSceneSync:
         self._remove_target_cluster(sid)
         clones = self._clone_bound_cluster(sid, scp)
         remap_object_cluster_refs(clones)
-        remap_object_cluster_parents(clones)
         self._apply_cluster_mirror(scp, clones)
         self.clones_by_sid[sid] = clones
         _trace_cluster(f"rebuild[{sid}]", clones)
@@ -279,6 +260,7 @@ class MirrorSceneSync:
 
     def _clone_bound_object(self, sid, scp, bound_id, obj):
         clone = clone_native_object(self.mirror_col, obj, f"{obj.name}_AF_MIR")
+        prepare_mirror_clone(clone)
         self._tag_mirror_object(clone, sid, bound_id, scp, obj)
         return clone
 
@@ -298,10 +280,18 @@ class MirrorSceneSync:
 
     def _apply_cluster_mirror(self, scp, clones):
         axis, origin = self._mirror_rule(scp)
-        targets = _target_worlds(clones, axis, origin)
-        for clone in _clone_order(clones):
-            _apply_target(clone, targets[clone], axis)
+        mirror = _mirror_matrix(axis=axis, origin=origin)
+        targets = mirror_target_worlds(clones, mirror)
+        for source_obj, clone in mirror_clone_pairs(clones):
+            parent = mirror_parent_for(source_obj, clones, targets[clone])
+            self._apply_clone_target(clone, parent, targets[clone], axis)
             update_scene_view_layer(self.scene)
+
+    def _apply_clone_target(self, clone, parent, target_world, axis):
+        if parent is None:
+            _apply_world_target(clone, target_world, axis)
+            return
+        apply_parent_target(clone, parent, target_world)
 
     def _mirror_rule(self, scp):
         source_scp = self.scp_by_id[mirror_source_id(scp)]

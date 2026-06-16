@@ -11,6 +11,8 @@ import bpy
 from mathutils import Vector
 
 from _helpers import BlenderTestCase, empty_object, find_flagged, mesh_object, root, scp_with_object
+from anthroforge.core.local_transform_props import create_local_transform_props
+from anthroforge.core.scp_runtime.bound_objects import find_bound_entry_by_object, sync_scp_roles
 from anthroforge.core.scp_runtime import sync_runtime
 from anthroforge.core.scp_runtime.lookup import set_parent_relation
 from anthroforge.core.scp_runtime.common import scp_prop_map
@@ -19,6 +21,7 @@ from anthroforge.core.scp_runtime.attachment_runtime import _resolved_tangent_st
 from anthroforge.core.scp_runtime.mirror_roles import apply_scp_mirror_roles
 from anthroforge.core.scp_runtime.runtime_state import attach_child_anchor_index, attach_child_origin_local
 from anthroforge.core.scp_runtime.mirror_scene import sync_mirrors
+from anthroforge.core.scp_runtime.object_roles import add_bound_object_to_scp
 from anthroforge.core.visualization.mirror_rules import mirror_matrix
 from anthroforge.core.visualization.sync import register_sync
 
@@ -63,6 +66,19 @@ def _world_verts(obj):
 
 def _max_delta(a, b):
     return max((((va - vb).length) for va, vb in zip(a, b)), default=0.0)
+
+
+def _matrix_delta(a, b):
+    return max((abs(a[i][j] - b[i][j]) for i in range(4) for j in range(4)), default=0.0)
+
+
+def _find_mirror_bound(scp_id, bound_id):
+    for obj in bpy.context.scene.objects:
+        same_scp = obj.get("af_source_scp_id") == scp_id
+        same_bound = obj.get("af_source_bound_id") == bound_id
+        if obj.get("af_scp_mirror") and same_scp and same_bound:
+            return obj
+    return None
 
 
 def _hooked_curve_scp(root_obj, name, parent_id, hook_obj):
@@ -221,6 +237,30 @@ class AttachmentMirrorWorkflowTests(BlenderTestCase):
         self.assertIsNone(bpy.data.objects.get(clone_a_name))
         self.assertIsNotNone(bpy.data.objects.get(clone_b_name))
 
+    def test_mirror_sync_detaches_sheared_child_helper(self):
+        root_obj = root()
+        source = scp_with_object(root_obj, "Source", empty_object("Source"), with_geometry=False)
+        target = scp_with_object(root_obj, "Target", empty_object("Target"), with_geometry=False)
+        upstream = empty_object("Upstream")
+        helper = empty_object("Helper")
+        target.parent_id, source.mirror_enabled, source.mirror_axis = source.id, True, "Y"
+        self.assertTrue(add_bound_object_to_scp(root_obj, target, helper))
+        sync_scp_roles(root_obj, target)
+        upstream.rotation_euler = (-0.3, 0.2, -1.1)
+        upstream.scale = (0.7, 1.3, 4.2)
+        target.transform_object_ref.parent = upstream
+        target.transform_object_ref.matrix_parent_inverse = upstream.matrix_world.inverted()
+        target.transform_object_ref.rotation_euler = (-0.1654, -0.0014, -1.4889)
+        target.transform_object_ref.scale = (0.4352, 0.4352, 4.1735)
+        helper.location = (1.0339, -0.1605, -0.9385)
+        bpy.context.view_layer.update()
+        apply_scp_mirror_roles(root_obj)
+        sync_mirrors(register_sync(), root_obj, bpy.context.scene, scp_prop_map(root_obj), {target.id})
+        bound_id = find_bound_entry_by_object(target, helper).id
+        clone = _find_mirror_bound(target.id, bound_id)
+        self.assertIsNone(clone.parent)
+        self.assertLess(_matrix_delta(mirror_matrix("Y") @ helper.matrix_world, clone.matrix_world), 1e-4)
+
     def test_mirror_sync_keeps_reflected_shape_for_rotated_scaled_root(self):
         root_obj = root()
         source = scp_with_object(root_obj, "Source", mesh_object("Source"))
@@ -234,6 +274,22 @@ class AttachmentMirrorWorkflowTests(BlenderTestCase):
         clone = find_flagged("af_scp_mirror", target.id, "af_source_scp_id")
         expected = tuple(mirror_matrix("Y") @ vert for vert in _world_verts(obj))
         self.assertLess(_max_delta(expected, _world_verts(clone)), 1e-4)
+
+    def test_mirror_sync_clears_local_transform_drivers_on_hidden_clone(self):
+        root_obj = root()
+        source = scp_with_object(root_obj, "Source", empty_object("Source"), with_geometry=False)
+        target = scp_with_object(root_obj, "Target", empty_object("Target"), with_geometry=False)
+        helper = empty_object("Helper")
+        target.parent_id, source.mirror_enabled, source.mirror_axis = source.id, True, "Y"
+        self.assertTrue(add_bound_object_to_scp(root_obj, target, helper))
+        sync_scp_roles(root_obj, target)
+        target.transform_object_ref.location, target.transform_object_ref.rotation_euler, target.transform_object_ref.scale = (-1.288933, -2.127279, -7.179165), (0.0, 0.0, -1.625514), (0.553584, 0.735199, 0.553584)
+        helper.location, helper.rotation_euler = (1.180263, 0.015051, 0.911106), (0.0, 0.827395, 0.0)
+        self.assertTrue(create_local_transform_props(helper)[0])
+        apply_scp_mirror_roles(root_obj); sync_mirrors(register_sync(), root_obj, bpy.context.scene, scp_prop_map(root_obj), {target.id})
+        bound_id = find_bound_entry_by_object(target, helper).id; clone = _find_mirror_bound(target.id, bound_id)
+        self.assertEqual(len(tuple(getattr(getattr(clone, "animation_data", None), "drivers", ()) or ())), 0)
+        self.assertLess(_matrix_delta(mirror_matrix("Y") @ helper.matrix_world, clone.matrix_world), 1e-4)
 
     def test_mirror_sync_remaps_shared_external_hook_targets(self):
         root_obj = root()

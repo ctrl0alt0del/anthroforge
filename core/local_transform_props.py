@@ -49,6 +49,13 @@ def remove_local_transform_props(obj):
     return True, ""
 
 
+def clear_local_transform_drivers(obj):
+    if not _has_local_drivers(obj):
+        return False
+    _clear_local_drivers(obj)
+    return True
+
+
 def _rebuild_props(obj, require_props):
     error = _rebuild_error(obj, require_props)
     if error:
