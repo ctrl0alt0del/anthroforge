@@ -120,6 +120,19 @@ class ShortcutWorkflowTests(BlenderTestCase):
         self.assertNotEqual(tuple(attach_parent_param(child)["tri_vidx"]), (-1, -1, -1))
         self.assertEqual(tuple(round(float(v), 4) for v in child.transform_object_ref.location), session_loc)
 
+    def test_parent_shortcut_override_applies_without_selecting_child(self):
+        root_obj = root()
+        parent = scp_with_object(root_obj, "Parent", mesh_object("Parent"))
+        child = scp_with_object(root_obj, "Child", mesh_object("Child", (1.0, 0.0, 0.0)))
+        set_parent_relation(child.transform_object_ref, child, parent.transform_object_ref)
+        child.attach_parent_anchor_mode = "OBJECT_ORIGIN"
+        shortcut = add_shortcut(root_obj, "Parent X", "SCP", parent.id, f'bpy.data.objects["{parent.transform_object_ref.name}"].location[0]')
+        upsert_override(shortcut, child.id, "SURFACE_NEAREST", "KEEP")
+        select_only(parent.transform_object_ref)
+        self.assertTrue(_apply_float_shortcut(root_obj, shortcut, 2.0))
+        bpy.context.view_layer.update()
+        self.assertNotEqual(tuple(attach_parent_param(child)["tri_vidx"]), (-1, -1, -1))
+
     def test_parent_shortcut_moves_selected_child_without_override(self):
         root_obj = root()
         parent, child = _attached_empty_pair(root_obj)

@@ -6,15 +6,15 @@ try:
     from ...core.shortcuts import override_values, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
     from ...core.shortcuts.proxy_props import shortcut_prop_name
     from ...core.shortcuts.vector_modes import is_uniform_vector_shortcut
-    from ...core.shortcuts.owners import selected_scp_id, shortcut_relation
-    from ...core.shortcuts.session_state import begin_override_session, clear_override_session, suppress_next_depsgraph_ids
+    from ...core.shortcuts.owners import shortcut_relation
+    from ...core.shortcuts.session_state import begin_override_sessions, clear_override_session, suppress_next_depsgraph_ids
     from ...core.scp_runtime.common import find_scp_by_id
 except ImportError:
     from core.shortcuts import override_values, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
     from core.shortcuts.proxy_props import shortcut_prop_name
     from core.shortcuts.vector_modes import is_uniform_vector_shortcut
-    from core.shortcuts.owners import selected_scp_id, shortcut_relation
-    from core.shortcuts.session_state import begin_override_session, clear_override_session, suppress_next_depsgraph_ids
+    from core.shortcuts.owners import shortcut_relation
+    from core.shortcuts.session_state import begin_override_sessions, clear_override_session, suppress_next_depsgraph_ids
     from core.scp_runtime.common import find_scp_by_id
 
 
@@ -53,11 +53,10 @@ def _write_plain(target, value):
 
 
 def _apply_scp_session(context, root, shortcut, target, value):
-    scp_id, relation = _session_target(root, context, shortcut)
-    values = _session_values(shortcut, scp_id, relation)
-    payload, dirty_ids = _session_sync(shortcut, scp_id, relation, root, values)
-    begin_override_session(scp_id, *values)
-    suppress_next_depsgraph_ids({getattr(shortcut, "owner_id", "")})
+    overrides = _session_overrides(root, shortcut)
+    payload, dirty_ids = _session_sync(shortcut, root, overrides)
+    begin_override_sessions(overrides)
+    suppress_next_depsgraph_ids(_suppressed_ids(shortcut, overrides))
     try:
         write_target_value(target, value)
         _sync_context()(context, dirty_hints=_dirty_hints_for()("SCP", dirty_ids), source="shortcut", event_type="UPDATE", payload=payload)
@@ -66,17 +65,25 @@ def _apply_scp_session(context, root, shortcut, target, value):
     return True
 
 
-def _session_target(root, context, shortcut):
-    scp_id = selected_scp_id(root, context)
-    return scp_id, shortcut_relation(root, shortcut, scp_id)
+def _session_overrides(root, shortcut):
+    return {sid: override_values(shortcut, sid) for sid in _override_target_ids(root, shortcut)}
 
 
-def _session_values(shortcut, scp_id, relation):
-    return override_values(shortcut, scp_id) if relation == "ANCESTOR" else _keep_values()
+def _override_target_ids(root, shortcut):
+    items = getattr(shortcut, "overrides", ())
+    return [sid for sid in (_entry_target_id(item) for item in items) if _valid_override_target(root, shortcut, sid)]
 
 
-def _session_sync(shortcut, scp_id, relation, root, values):
-    recapture = _recapture_ids(root, scp_id, relation, values)
+def _entry_target_id(item):
+    return str(getattr(item, "target_scp_id", "") or "")
+
+
+def _valid_override_target(root, shortcut, scp_id):
+    return find_scp_by_id(root, scp_id) is not None and shortcut_relation(root, shortcut, scp_id) == "ANCESTOR"
+
+
+def _session_sync(shortcut, root, overrides):
+    recapture = _recapture_ids(root, overrides)
     return _session_payload(shortcut, recapture), _session_dirty_ids(shortcut, recapture)
 
 
@@ -90,12 +97,20 @@ def _session_dirty_ids(shortcut, recapture):
     return {sid for sid in ({owner_id} | set(recapture or set())) if sid}
 
 
-def _recapture_ids(root, scp_id, relation, values):
-    if not _needs_session_recapture(values):
-        return set()
+def _recapture_ids(root, overrides):
+    items = dict(overrides or {}).items()
+    return {sid for sid, values in items if _needs_recapture(root, sid, values)}
+
+
+def _needs_recapture(root, scp_id, values):
     scp = find_scp_by_id(root, scp_id)
-    valid = relation in {"SELF", "ANCESTOR"} and str(getattr(scp, "parent_id", "") or "")
-    return {str(scp_id or "")} if valid else set()
+    return _needs_session_recapture(values) and bool(str(getattr(scp, "parent_id", "") or ""))
+
+
+def _suppressed_ids(shortcut, overrides):
+    owner_id = str(getattr(shortcut, "owner_id", "") or "")
+    ids = {owner_id} | set(dict(overrides or {}).keys())
+    return {sid for sid in ids if sid}
 
 
 def _needs_session_recapture(values):
