@@ -10,7 +10,8 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 import bpy
 
 from _helpers import BlenderTestCase, add_shortcut, empty_object, mesh_object, root, scp_with_object, select_only
-from core.scp_runtime.attachment_runtime import capture_attachment_from_link
+from core.scp_runtime.attachment_runtime import apply_scp_attachments, capture_attachment_from_link
+from core.scp_runtime.common import scp_prop_map
 from core.scp_runtime.lookup import set_parent_relation
 from core.scp_runtime.runtime_state import attach_parent_param
 from core.shortcuts import resolve_shortcut, upsert_override
@@ -18,6 +19,7 @@ from core.shortcuts.proxy_props import proxy_prop_name
 
 
 def _apply_float_shortcut(root_obj, shortcut, value):
+    _ = root_obj
     shortcut.proxy_float = value
     return True
 
@@ -75,6 +77,10 @@ def _attached_empty_pair(root_obj):
     return parent, child
 
 
+def _apply_parent(root_obj, parent):
+    return apply_scp_attachments(None, root_obj, bpy.context.scene, scp_prop_map(root_obj), parent_ids={parent.id})
+
+
 class ShortcutWorkflowTests(BlenderTestCase):
     def test_add_and_delete_data_shortcut_operator(self):
         root_obj = root()
@@ -123,6 +129,21 @@ class ShortcutWorkflowTests(BlenderTestCase):
         bpy.context.view_layer.update()
         loc = tuple(round(float(v), 4) for v in child.transform_object_ref.location)
         self.assertEqual(loc, (3.0, 0.0, 0.0))
+
+    def test_parent_shortcut_can_temporarily_override_follow_rotation(self):
+        root_obj = root()
+        parent, child = _attached_empty_pair(root_obj)
+        child.transform_object_ref.rotation_euler.z = 0.4
+        capture_attachment_from_link(child, child.transform_object_ref, None, parent.transform_object_ref, None)
+        shortcut = add_shortcut(root_obj, "Parent Rot", "SCP", parent.id, f'bpy.data.objects["{parent.transform_object_ref.name}"].rotation_euler[2]')
+        upsert_override(shortcut, child.id, "KEEP", "KEEP", "DISABLED", "KEEP")
+        select_only(child.transform_object_ref)
+        shortcut.proxy_float = 1.2
+        bpy.context.view_layer.update()
+        self.assertAlmostEqual(float(child.transform_object_ref.rotation_euler.z), 0.4, places=4)
+        parent.transform_object_ref.rotation_euler.z = 1.4
+        _apply_parent(root_obj, parent)
+        self.assertNotAlmostEqual(float(child.transform_object_ref.rotation_euler.z), 0.4, places=4)
 
     def test_geometry_nodes_shortcut_recomputes_evaluated_geometry(self):
         root_obj = root()

@@ -223,7 +223,7 @@ def _copy_shortcut_overrides(state, item, snap):
     for override in getattr(snap, "overrides", ()):
         mapped = _remap(state.scps, getattr(override, "target_scp_id", ""))
         if mapped:
-            upsert_override(item, mapped, getattr(override, "parent_anchor_mode", "KEEP"), getattr(override, "child_anchor_mode", "KEEP"))
+            upsert_override(item, mapped, getattr(override, "parent_anchor_mode", "KEEP"), getattr(override, "child_anchor_mode", "KEEP"), getattr(override, "follow_rotation_mode", "KEEP"), getattr(override, "rotation_strategy", "KEEP"))
 
 
 def _create_shortcuts(state):

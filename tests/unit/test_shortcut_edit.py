@@ -62,7 +62,7 @@ class ShortcutEditTests(unittest.TestCase):
             with patch("app.use_cases.shortcut_edit.resolve_shortcut", return_value=target):
                 with patch("app.use_cases.shortcut_edit.selected_scp_id", return_value="C1"):
                     with patch("app.use_cases.shortcut_edit.shortcut_relation", return_value="ANCESTOR"):
-                        with patch("app.use_cases.shortcut_edit.override_modes", return_value=("OBJECT_ORIGIN", "OBJECT_ORIGIN")):
+                        with patch("app.use_cases.shortcut_edit.override_values", return_value=("OBJECT_ORIGIN", "OBJECT_ORIGIN", "DISABLED", "KEEP")):
                             with patch("app.use_cases.shortcut_edit.find_scp_by_id", return_value=SimpleNamespace(parent_id="P1")):
                                     with patch("app.use_cases.shortcut_edit.write_target_value") as write:
                                         with patch("app.use_cases.shortcut_edit.begin_override_session") as begin:
@@ -73,27 +73,37 @@ class ShortcutEditTests(unittest.TestCase):
                                                             sync = Recorder()
                                                             self.assertTrue(edit.apply_shortcut_proxy(ctx, shortcut))
         write.assert_called_once_with(target, 4.5)
-        begin.assert_called_once_with("C1", "OBJECT_ORIGIN", "OBJECT_ORIGIN")
+        begin.assert_called_once_with("C1", "OBJECT_ORIGIN", "OBJECT_ORIGIN", "DISABLED", "KEEP")
         suppress.assert_called_once_with({"P1"})
         dirty.assert_called_once_with()
         self.assertEqual(sync.calls, [((ctx,), {"dirty_hints": {"P1", "C1"}, "source": "shortcut", "event_type": "UPDATE", "payload": {"scp_apply_parent_ids": ["P1"], "scp_recapture_ids": ["C1"]}})])
         clear.assert_called_once()
 
-    def test_apply_shortcut_proxy_skips_recapture_without_override(self):
+    def test_apply_shortcut_proxy_skips_recapture_for_follow_rotation_override(self):
         root, ctx = SimpleNamespace(), SimpleNamespace()
         shortcut = SimpleNamespace(proxy_sync_lock=False, owner_type="SCP", owner_id="P1", data_path="PATH", proxy_float=2.5)
         target = SimpleNamespace(owner=object(), prop_name="location", index=-1, value_type="FLOAT", array_length=0)
-        with patch("app.use_cases.shortcut_edit.root_for_context", return_value=root), patch("app.use_cases.shortcut_edit.resolve_shortcut", return_value=target), patch("app.use_cases.shortcut_edit.selected_scp_id", return_value="C1"), patch("app.use_cases.shortcut_edit.shortcut_relation", return_value="ANCESTOR"), patch("app.use_cases.shortcut_edit.override_modes", return_value=("KEEP", "KEEP")), patch("app.use_cases.shortcut_edit.find_scp_by_id", return_value=SimpleNamespace(parent_id="P1")), patch("app.use_cases.shortcut_edit.write_target_value"), patch("app.use_cases.shortcut_edit.begin_override_session"), patch("app.use_cases.shortcut_edit.suppress_next_depsgraph_ids"), patch("app.use_cases.shortcut_edit.clear_override_session"), patch("app.use_cases.shortcut_edit._dirty_hints_for", return_value=lambda _et, ids: set(ids)), patch("app.use_cases.shortcut_edit._sync_context", return_value=lambda *args, **kwargs: sync(*args, **kwargs)):
+        with patch("app.use_cases.shortcut_edit.root_for_context", return_value=root), patch("app.use_cases.shortcut_edit.resolve_shortcut", return_value=target), patch("app.use_cases.shortcut_edit.selected_scp_id", return_value="C1"), patch("app.use_cases.shortcut_edit.shortcut_relation", return_value="ANCESTOR"), patch("app.use_cases.shortcut_edit.override_values", return_value=("KEEP", "KEEP", "DISABLED", "KEEP")), patch("app.use_cases.shortcut_edit.find_scp_by_id", return_value=SimpleNamespace(parent_id="P1")), patch("app.use_cases.shortcut_edit.write_target_value"), patch("app.use_cases.shortcut_edit.begin_override_session") as begin, patch("app.use_cases.shortcut_edit.suppress_next_depsgraph_ids"), patch("app.use_cases.shortcut_edit.clear_override_session"), patch("app.use_cases.shortcut_edit._dirty_hints_for", return_value=lambda _et, ids: set(ids)), patch("app.use_cases.shortcut_edit._sync_context", return_value=lambda *args, **kwargs: sync(*args, **kwargs)):
             sync = Recorder()
             self.assertTrue(edit.apply_shortcut_proxy(ctx, shortcut))
+        begin.assert_called_once_with("C1", "KEEP", "KEEP", "DISABLED", "KEEP")
         self.assertEqual(sync.calls, [((ctx,), {"dirty_hints": {"P1"}, "source": "shortcut", "event_type": "UPDATE", "payload": {"scp_apply_parent_ids": ["P1"], "scp_recapture_ids": []}})])
 
+    def test_apply_shortcut_proxy_recaptures_for_rotation_strategy_override(self):
+        root, ctx = SimpleNamespace(), SimpleNamespace()
+        shortcut = SimpleNamespace(proxy_sync_lock=False, owner_type="SCP", owner_id="P1", data_path="PATH", proxy_float=2.5)
+        target = SimpleNamespace(owner=object(), prop_name="location", index=-1, value_type="FLOAT", array_length=0)
+        with patch("app.use_cases.shortcut_edit.root_for_context", return_value=root), patch("app.use_cases.shortcut_edit.resolve_shortcut", return_value=target), patch("app.use_cases.shortcut_edit.selected_scp_id", return_value="C1"), patch("app.use_cases.shortcut_edit.shortcut_relation", return_value="ANCESTOR"), patch("app.use_cases.shortcut_edit.override_values", return_value=("KEEP", "KEEP", "KEEP", "DEFORMATION_FLOW")), patch("app.use_cases.shortcut_edit.find_scp_by_id", return_value=SimpleNamespace(parent_id="P1")), patch("app.use_cases.shortcut_edit.write_target_value"), patch("app.use_cases.shortcut_edit.begin_override_session"), patch("app.use_cases.shortcut_edit.suppress_next_depsgraph_ids"), patch("app.use_cases.shortcut_edit.clear_override_session"), patch("app.use_cases.shortcut_edit._dirty_hints_for", return_value=lambda _et, ids: set(ids)), patch("app.use_cases.shortcut_edit._sync_context", return_value=lambda *args, **kwargs: sync(*args, **kwargs)):
+            sync = Recorder()
+            self.assertTrue(edit.apply_shortcut_proxy(ctx, shortcut))
+        self.assertEqual(sync.calls, [((ctx,), {"dirty_hints": {"P1", "C1"}, "source": "shortcut", "event_type": "UPDATE", "payload": {"scp_apply_parent_ids": ["P1"], "scp_recapture_ids": ["C1"]}})])
+
     def test_override_helpers_return_default_and_drop_orphans(self):
-        src = SimpleNamespace(overrides=OverrideCollection([override("S1", "OBJECT_ORIGIN"), override("S9", "KEEP", "OBJECT_ORIGIN")]))
+        src = SimpleNamespace(overrides=OverrideCollection([override("S1", "OBJECT_ORIGIN", follow_mode="DISABLED", strategy="DEFORMATION_FLOW"), override("S9", "KEEP", "OBJECT_ORIGIN")]))
         dst = SimpleNamespace(overrides=OverrideCollection())
         self.assertFalse(has_override(SimpleNamespace(overrides=[]), "S1"))
         remap_overrides(dst, src, {"S1": "S2"})
-        self.assertEqual([(item.target_scp_id, item.parent_anchor_mode, item.child_anchor_mode) for item in dst.overrides], [("S2", "OBJECT_ORIGIN", "KEEP")])
+        self.assertEqual([(item.target_scp_id, item.parent_anchor_mode, item.child_anchor_mode, item.follow_rotation_mode, item.rotation_strategy) for item in dst.overrides], [("S2", "OBJECT_ORIGIN", "KEEP", "DISABLED", "DEFORMATION_FLOW")])
 
 
 class OverrideCollection(list):
@@ -106,8 +116,8 @@ class OverrideCollection(list):
         self.pop(index)
 
 
-def override(target_scp_id, parent_mode="KEEP", child_mode="KEEP"):
-    return SimpleNamespace(target_scp_id=target_scp_id, parent_anchor_mode=parent_mode, child_anchor_mode=child_mode)
+def override(target_scp_id, parent_mode="KEEP", child_mode="KEEP", follow_mode="KEEP", strategy="KEEP"):
+    return SimpleNamespace(target_scp_id=target_scp_id, parent_anchor_mode=parent_mode, child_anchor_mode=child_mode, follow_rotation_mode=follow_mode, rotation_strategy=strategy)
 
 
 class Recorder:

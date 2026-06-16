@@ -86,8 +86,10 @@ class BlobSnapshot:
 @dataclass
 class ShortcutOverrideSnapshot:
     target_scp_id: str
-    parent_anchor_mode: str
-    child_anchor_mode: str
+    parent_anchor_mode: str = "KEEP"
+    child_anchor_mode: str = "KEEP"
+    follow_rotation_mode: str = "KEEP"
+    rotation_strategy: str = "KEEP"
 
     @classmethod
     def from_dict(cls, data):

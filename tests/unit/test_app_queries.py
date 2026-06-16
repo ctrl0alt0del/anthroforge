@@ -59,8 +59,8 @@ def shortcut(sid, name, owner_type, owner_id, data_path, overrides=()):
     return SimpleNamespace(id=sid, name=name, owner_type=owner_type, owner_id=owner_id, data_path=data_path, overrides=list(overrides))
 
 
-def override(target_scp_id, parent_mode="KEEP", child_mode="KEEP"):
-    return SimpleNamespace(target_scp_id=target_scp_id, parent_anchor_mode=parent_mode, child_anchor_mode=child_mode)
+def override(target_scp_id, parent_mode="KEEP", child_mode="KEEP", follow_mode="KEEP", strategy="KEEP"):
+    return SimpleNamespace(target_scp_id=target_scp_id, parent_anchor_mode=parent_mode, child_anchor_mode=child_mode, follow_rotation_mode=follow_mode, rotation_strategy=strategy)
 
 
 def root(active_scp=0, active_type="NONE", active_id="", scps=(), fibers=(), muscles=(), blobs=(), shortcuts=()):

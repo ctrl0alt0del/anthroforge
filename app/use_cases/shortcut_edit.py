@@ -3,14 +3,14 @@ import json
 from ..queries.root import root_for_context
 
 try:
-    from ...core.shortcuts import override_modes, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
+    from ...core.shortcuts import override_values, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
     from ...core.shortcuts.proxy_props import shortcut_prop_name
     from ...core.shortcuts.vector_modes import is_uniform_vector_shortcut
     from ...core.shortcuts.owners import selected_scp_id, shortcut_relation
     from ...core.shortcuts.session_state import begin_override_session, clear_override_session, suppress_next_depsgraph_ids
     from ...core.scp_runtime.common import find_scp_by_id
 except ImportError:
-    from core.shortcuts import override_modes, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
+    from core.shortcuts import override_values, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
     from core.shortcuts.proxy_props import shortcut_prop_name
     from core.shortcuts.vector_modes import is_uniform_vector_shortcut
     from core.shortcuts.owners import selected_scp_id, shortcut_relation
@@ -54,9 +54,9 @@ def _write_plain(target, value):
 
 def _apply_scp_session(context, root, shortcut, target, value):
     scp_id, relation = _session_target(root, context, shortcut)
-    parent_mode, child_mode = _session_modes(shortcut, scp_id, relation)
-    payload, dirty_ids = _session_sync(shortcut, scp_id, relation, root, parent_mode, child_mode)
-    begin_override_session(scp_id, parent_mode, child_mode)
+    values = _session_values(shortcut, scp_id, relation)
+    payload, dirty_ids = _session_sync(shortcut, scp_id, relation, root, values)
+    begin_override_session(scp_id, *values)
     suppress_next_depsgraph_ids({getattr(shortcut, "owner_id", "")})
     try:
         write_target_value(target, value)
@@ -71,12 +71,12 @@ def _session_target(root, context, shortcut):
     return scp_id, shortcut_relation(root, shortcut, scp_id)
 
 
-def _session_modes(shortcut, scp_id, relation):
-    return override_modes(shortcut, scp_id) if relation == "ANCESTOR" else ("KEEP", "KEEP")
+def _session_values(shortcut, scp_id, relation):
+    return override_values(shortcut, scp_id) if relation == "ANCESTOR" else _keep_values()
 
 
-def _session_sync(shortcut, scp_id, relation, root, parent_mode, child_mode):
-    recapture = _recapture_ids(root, scp_id, relation, parent_mode, child_mode)
+def _session_sync(shortcut, scp_id, relation, root, values):
+    recapture = _recapture_ids(root, scp_id, relation, values)
     return _session_payload(shortcut, recapture), _session_dirty_ids(shortcut, recapture)
 
 
@@ -90,16 +90,29 @@ def _session_dirty_ids(shortcut, recapture):
     return {sid for sid in ({owner_id} | set(recapture or set())) if sid}
 
 
-def _recapture_ids(root, scp_id, relation, parent_mode, child_mode):
-    if not _needs_session_recapture(parent_mode, child_mode):
+def _recapture_ids(root, scp_id, relation, values):
+    if not _needs_session_recapture(values):
         return set()
     scp = find_scp_by_id(root, scp_id)
     valid = relation in {"SELF", "ANCESTOR"} and str(getattr(scp, "parent_id", "") or "")
     return {str(scp_id or "")} if valid else set()
 
 
-def _needs_session_recapture(parent_mode, child_mode):
-    return str(parent_mode or "KEEP") != "KEEP" or str(child_mode or "KEEP") != "KEEP"
+def _needs_session_recapture(values):
+    return _anchor_override(values) or _strategy_override(values)
+
+
+def _anchor_override(values):
+    return any(str(value or "KEEP") != "KEEP" for value in tuple(values or ())[:2])
+
+
+def _strategy_override(values):
+    data = tuple(values or ())
+    return len(data) > 3 and str(data[3] or "KEEP") != "KEEP"
+
+
+def _keep_values():
+    return ("KEEP", "KEEP", "KEEP", "KEEP")
 
 
 def proxy_value(shortcut, target):
@@ -222,13 +235,19 @@ def _set_proxy(shortcut, key, value):
 def shortcut_override_modes(context, shortcut_id, target_scp_id):
     root = root_for_context(context)
     shortcut = find_shortcut(root, shortcut_id)
-    return ("KEEP", "KEEP") if shortcut is None else override_modes(shortcut, target_scp_id)
+    return _keep_values()[:2] if shortcut is None else override_values(shortcut, target_scp_id)[:2]
 
 
-def save_shortcut_override(context, shortcut_id, target_scp_id, parent_mode, child_mode):
+def shortcut_override_values(context, shortcut_id, target_scp_id):
     root = root_for_context(context)
     shortcut = find_shortcut(root, shortcut_id)
-    return bool(shortcut and upsert_override(shortcut, target_scp_id, parent_mode, child_mode))
+    return _keep_values() if shortcut is None else override_values(shortcut, target_scp_id)
+
+
+def save_shortcut_override(context, shortcut_id, target_scp_id, parent_mode, child_mode, follow_rotation_mode="KEEP", rotation_strategy="KEEP"):
+    root = root_for_context(context)
+    shortcut = find_shortcut(root, shortcut_id)
+    return bool(shortcut and upsert_override(shortcut, target_scp_id, parent_mode, child_mode, follow_rotation_mode, rotation_strategy))
 
 
 def find_shortcut(root, shortcut_id):

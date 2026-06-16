@@ -1,7 +1,7 @@
 import bpy
 
 from ..core.shortcuts.proxy_props import _FLOAT_SCALAR, _FLOAT_VECTOR
-from ..core.shortcuts import child_override_items, parent_override_items
+from ..core.shortcuts import child_override_items, follow_rotation_override_items, parent_override_items, rotation_strategy_override_items
 
 _VEC_SIZE = 32
 _FALSES = (False,) * _VEC_SIZE
@@ -105,6 +105,8 @@ class AF_DataShortcutOverride_Property(bpy.types.PropertyGroup):
     target_scp_id: bpy.props.StringProperty(name="Target SCP", default="")
     parent_anchor_mode: bpy.props.EnumProperty(name="Parent Anchor", items=parent_override_items(), default="KEEP")
     child_anchor_mode: bpy.props.EnumProperty(name="Child Anchor", items=child_override_items(), default="KEEP")
+    follow_rotation_mode: bpy.props.EnumProperty(name="Follow Rotation", items=follow_rotation_override_items(), default="KEEP")
+    rotation_strategy: bpy.props.EnumProperty(name="Rotation Strategy", items=rotation_strategy_override_items(), default="KEEP")
 
 
 class AF_DataShortcut_Property(bpy.types.PropertyGroup):

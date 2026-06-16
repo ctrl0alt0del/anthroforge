@@ -2,7 +2,7 @@ import bpy
 
 from ..app.queries.root import has_root
 from ..app.use_cases.shortcuts import add_shortcut_from_context, delete_shortcut_from_context
-from ..app.use_cases.shortcut_edit import save_shortcut_override, shortcut_override_modes
+from ..app.use_cases.shortcut_edit import save_shortcut_override, shortcut_override_values
 from ..app.use_cases.shortcut_wizard import apply_shortcut_wizard, clear_shortcut_wizard, populate_shortcut_wizard
 
 
@@ -44,6 +44,16 @@ def _child_items(_self, _context):
     return child_override_items()
 
 
+def _follow_items(_self, _context):
+    from ..core.shortcuts import follow_rotation_override_items
+    return follow_rotation_override_items()
+
+
+def _strategy_items(_self, _context):
+    from ..core.shortcuts import rotation_strategy_override_items
+    return rotation_strategy_override_items()
+
+
 class AF_OT_AddDataShortcut(bpy.types.Operator):
     bl_idname = "af.add_data_shortcut"
     bl_label = "Add Data Shortcut"
@@ -74,28 +84,32 @@ class AF_OT_DeleteDataShortcut(bpy.types.Operator):
 
 class AF_OT_EditShortcutOverride(bpy.types.Operator):
     bl_idname = "af.edit_shortcut_override"
-    bl_label = "Shortcut Anchor Override"
+    bl_label = "Shortcut Attachment Override"
     bl_options = {"REGISTER", "UNDO"}
 
     shortcut_id: bpy.props.StringProperty(default="")
     target_scp_id: bpy.props.StringProperty(default="")
     parent_anchor_mode: bpy.props.EnumProperty(name="Parent Anchor", items=_parent_items)
     child_anchor_mode: bpy.props.EnumProperty(name="Child Anchor", items=_child_items)
+    follow_rotation_mode: bpy.props.EnumProperty(name="Follow Rotation", items=_follow_items)
+    rotation_strategy: bpy.props.EnumProperty(name="Rotation Strategy", items=_strategy_items)
 
     def invoke(self, context, _event):
         if not has_root(context):
             return {"CANCELLED"}
-        self.parent_anchor_mode, self.child_anchor_mode = shortcut_override_modes(context, self.shortcut_id, self.target_scp_id)
+        self.parent_anchor_mode, self.child_anchor_mode, self.follow_rotation_mode, self.rotation_strategy = shortcut_override_values(context, self.shortcut_id, self.target_scp_id)
         return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, _context):
         self.layout.prop(self, "parent_anchor_mode")
         self.layout.prop(self, "child_anchor_mode")
+        self.layout.prop(self, "follow_rotation_mode")
+        self.layout.prop(self, "rotation_strategy")
 
     def execute(self, context):
         if not has_root(context):
             return {"CANCELLED"}
-        return {"FINISHED"} if save_shortcut_override(context, self.shortcut_id, self.target_scp_id, self.parent_anchor_mode, self.child_anchor_mode) else {"CANCELLED"}
+        return {"FINISHED"} if save_shortcut_override(context, self.shortcut_id, self.target_scp_id, self.parent_anchor_mode, self.child_anchor_mode, self.follow_rotation_mode, self.rotation_strategy) else {"CANCELLED"}
 
 
 class AF_OT_ShortcutWizard(bpy.types.Operator):

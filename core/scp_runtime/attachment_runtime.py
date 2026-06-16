@@ -1,6 +1,7 @@
 from mathutils import Matrix, Vector
 
 from ..utils import depsgraph_for_scene, scene_for_id, update_scene_view_layer
+from .attachment_session import follow_rotation_enabled, tangent_strategy
 from .common import as_bool, as_id, as_vec3, find_geometry_mesh_scp_obj, find_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix
 from .common import vec3_close, is_matrix_close, matrix_flat16
 from .child_anchor import anchor_mode as child_anchor_mode, capture_child_anchor
@@ -25,8 +26,7 @@ def _new_surface_cache():
 
 
 def _resolved_tangent_strategy(child_scp, parent_obj):
-    raw = getattr(child_scp, "attach_tangent_strategy", "AUTO")
-    return resolve_tangent_strategy(parent_obj, raw)
+    return resolve_tangent_strategy(parent_obj, tangent_strategy(child_scp))
 
 
 def _stored_flow_param(child_scp):
@@ -286,7 +286,7 @@ class AttachmentApply:
         return as_vec3(attach_parent_tangent_hint_local(self.child_scp), (1.0, 0.0, 0.0))
 
     def _matrix_world(self, frame):
-        follow = as_bool(getattr(self.child_scp, "attach_follow_rotation", True), default=True)
+        follow = follow_rotation_enabled(self.child_scp)
         rotation = self._rotation_world(frame, follow)
         anchor = _applied_child_anchor_local(self.child_scp)
         position = frame["point_world"] + self._parent_offset_world(frame) - (rotation @ self._scaled_child_anchor(anchor))

@@ -103,7 +103,7 @@ def _shortcut_snapshot(root, shortcut):
 
 
 def _shortcut_overrides(shortcut):
-    return [ShortcutOverrideSnapshot(str(item.target_scp_id or ""), str(item.parent_anchor_mode or "KEEP"), str(item.child_anchor_mode or "KEEP")) for item in shortcut.overrides if str(item.target_scp_id or "")]
+    return [ShortcutOverrideSnapshot(str(item.target_scp_id or ""), str(item.parent_anchor_mode or "KEEP"), str(item.child_anchor_mode or "KEEP"), str(getattr(item, "follow_rotation_mode", "KEEP") or "KEEP"), str(getattr(item, "rotation_strategy", "KEEP") or "KEEP")) for item in shortcut.overrides if str(item.target_scp_id or "")]
 
 
 def root_snapshot(root):
