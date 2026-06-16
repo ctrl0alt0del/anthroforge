@@ -1,5 +1,9 @@
+import time
+
 _ACTIVE = {}
 _SUPPRESSED = set()
+_RUNTIME = {}
+_CACHE_TTL = 1.0
 
 
 def begin_override_session(target_scp_id, parent_mode, child_mode, follow_rotation_mode="KEEP", rotation_strategy="KEEP"):
@@ -70,3 +74,36 @@ def consume_suppressed_ids(ids):
     hits = valid & _SUPPRESSED
     _SUPPRESSED.difference_update(hits)
     return valid - hits
+
+
+def cached_override_runtime(shortcut_id, overrides):
+    item = _runtime_item(shortcut_id, overrides)
+    return {} if item is None else _runtime_copy(item.get("runtime", {}))
+
+
+def store_override_runtime(shortcut_id, overrides, runtime_by_scp):
+    sid = str(shortcut_id or "")
+    if not sid or not runtime_by_scp:
+        _RUNTIME.pop(sid, None)
+        return
+    _RUNTIME[sid] = {"token": _runtime_token(overrides), "runtime": _runtime_copy(runtime_by_scp), "ts": time.monotonic()}
+
+
+def _runtime_item(shortcut_id, overrides):
+    sid = str(shortcut_id or "")
+    item = _RUNTIME.get(sid)
+    return item if _runtime_valid(item, overrides) else None
+
+
+def _runtime_valid(item, overrides):
+    return bool(item and item.get("token") == _runtime_token(overrides) and (time.monotonic() - float(item.get("ts", 0.0))) <= _CACHE_TTL)
+
+
+def _runtime_token(overrides):
+    items = dict(overrides or {}).items()
+    return tuple(sorted((str(sid or ""), tuple(values or ())) for sid, values in items if str(sid or "")))
+
+
+def _runtime_copy(runtime_by_scp):
+    items = dict(runtime_by_scp or {}).items()
+    return {str(sid or ""): dict(snapshot or {}) for sid, snapshot in items if str(sid or "")}

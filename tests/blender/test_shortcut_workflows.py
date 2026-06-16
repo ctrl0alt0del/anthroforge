@@ -14,6 +14,7 @@ from core.scp_runtime.attachment_runtime import apply_scp_attachments, capture_a
 from core.scp_runtime.common import scp_prop_map
 from core.scp_runtime.lookup import set_parent_relation
 from core.scp_runtime.runtime_state import attach_parent_param
+from anthroforge.core.shortcuts.session_state import cached_override_runtime
 from core.shortcuts import resolve_shortcut, upsert_override
 from core.shortcuts.proxy_props import proxy_prop_name
 
@@ -117,7 +118,7 @@ class ShortcutWorkflowTests(BlenderTestCase):
         self.assertTrue(_apply_float_shortcut(root_obj, shortcut, 2.0))
         session_loc = tuple(round(float(v), 4) for v in child.transform_object_ref.location)
         bpy.context.view_layer.update()
-        self.assertNotEqual(tuple(attach_parent_param(child)["tri_vidx"]), (-1, -1, -1))
+        self.assertIsNone(attach_parent_param(child))
         self.assertEqual(tuple(round(float(v), 4) for v in child.transform_object_ref.location), session_loc)
 
     def test_parent_shortcut_override_applies_without_selecting_child(self):
@@ -126,12 +127,14 @@ class ShortcutWorkflowTests(BlenderTestCase):
         child = scp_with_object(root_obj, "Child", mesh_object("Child", (1.0, 0.0, 0.0)))
         set_parent_relation(child.transform_object_ref, child, parent.transform_object_ref)
         child.attach_parent_anchor_mode = "OBJECT_ORIGIN"
-        shortcut = add_shortcut(root_obj, "Parent X", "SCP", parent.id, f'bpy.data.objects["{parent.transform_object_ref.name}"].location[0]')
+        shortcut = add_shortcut(root_obj, "Parent Scale X", "SCP", parent.id, f'bpy.data.objects["{parent.transform_object_ref.name}"].scale[0]')
         upsert_override(shortcut, child.id, "SURFACE_NEAREST", "KEEP")
         select_only(parent.transform_object_ref)
         self.assertTrue(_apply_float_shortcut(root_obj, shortcut, 2.0))
         bpy.context.view_layer.update()
-        self.assertNotEqual(tuple(attach_parent_param(child)["tri_vidx"]), (-1, -1, -1))
+        self.assertIsNone(attach_parent_param(child))
+        runtime = cached_override_runtime(shortcut.as_pointer(), {child.id: ("SURFACE_NEAREST", "KEEP", "KEEP", "KEEP")})
+        self.assertTrue(bool(runtime.get(child.id)))
 
     def test_parent_shortcut_moves_selected_child_without_override(self):
         root_obj = root()
