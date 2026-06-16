@@ -2,7 +2,8 @@ import bpy
 
 from ...app.queries.root import has_root
 from ...app.queries.shortcuts import shortcut_panel_state
-from ...core.shortcuts.proxy_props import proxy_prop_name
+from ...core.shortcuts.proxy_props import shortcut_prop_name
+from ...core.shortcuts.vector_modes import is_uniform_vector_shortcut
 
 
 class AF_UL_ShortcutWizardItems(bpy.types.UIList):
@@ -27,7 +28,7 @@ def _draw_override_button(row, row_state):
 
 
 def _draw_shortcut_value(layout, row_state):
-    return _draw_array_value(layout, row_state) if _whole_array(row_state.target) else _draw_inline_value(layout.row(align=True), row_state)
+    return _draw_array_value(layout, row_state) if _array_rows(row_state) else _draw_inline_value(layout.row(align=True), row_state)
 
 
 def _draw_invalid_shortcut(box, shortcut, error):
@@ -41,7 +42,7 @@ def _draw_valid_shortcut(box, row_state):
 
 
 def _draw_inline_value(row, row_state, index=None, actions=True):
-    prop_name = _prop_name(row_state.target, index)
+    prop_name = _prop_name(row_state.shortcut, row_state.target, index)
     kwargs = {"text": _row_label(row_state.shortcut.name, index)}
     if index is not None or (index is None and row_state.target.array_length and row_state.target.index >= 0):
         kwargs["index"] = row_state.target.index if index is None else int(index)
@@ -58,8 +59,12 @@ def _whole_array(target):
     return int(getattr(target, "array_length", 0) or 0) > 0 and int(getattr(target, "index", -1)) < 0
 
 
-def _prop_name(target, index):
-    return proxy_prop_name(target, index=index)
+def _prop_name(shortcut, target, index):
+    return shortcut_prop_name(shortcut, target, index=index)
+
+
+def _array_rows(row_state):
+    return _whole_array(row_state.target) and not is_uniform_vector_shortcut(row_state.shortcut, row_state.target)
 
 
 def _row_label(name, index):

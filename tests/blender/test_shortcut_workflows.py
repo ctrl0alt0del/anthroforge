@@ -134,3 +134,13 @@ class ShortcutWorkflowTests(BlenderTestCase):
         self.assertEqual(_evaluated_x(scp.transform_object_ref), (0.0, 1.0, 0.0))
         self.assertTrue(_apply_float_shortcut(root_obj, shortcut, 2.0))
         self.assertEqual(_evaluated_x(scp.transform_object_ref), (2.0, 3.0, 2.0))
+
+    def test_uniform_vector_shortcut_sets_all_scale_components(self):
+        root_obj = root()
+        scp = scp_with_object(root_obj, "Arm", mesh_object("Arm"))
+        shortcut = add_shortcut(root_obj, "Scale Uniform", "SCP", scp.id, f'bpy.data.objects["{scp.transform_object_ref.name}"].scale')
+        shortcut.vector_mode = "UNIFORM"
+        select_only(scp.transform_object_ref)
+        shortcut.proxy_float = 2.5
+        bpy.context.view_layer.update()
+        self.assertEqual(tuple(round(float(v), 4) for v in scp.transform_object_ref.scale), (2.5, 2.5, 2.5))

@@ -113,6 +113,7 @@ class AF_DataShortcut_Property(bpy.types.PropertyGroup):
     owner_type: bpy.props.StringProperty(name="Owner Type", default="NONE")
     owner_id: bpy.props.StringProperty(name="Owner ID", default="")
     data_path: bpy.props.StringProperty(name="Data Path", default="")
+    vector_mode: bpy.props.EnumProperty(name="Vector Mode", items=(("DEFAULT", "Default", ""), ("UNIFORM", "Uniform", "")), default="DEFAULT")
     overrides: bpy.props.CollectionProperty(type=AF_DataShortcutOverride_Property)
     proxy_sync_lock: bpy.props.BoolProperty(default=False, options={"SKIP_SAVE"})
     proxy_bool: bpy.props.BoolProperty(get=_bool_get, set=_bool_set, options={"SKIP_SAVE"})
@@ -131,6 +132,7 @@ class AF_ShortcutWizardItem_Property(bpy.types.PropertyGroup):
     data_path: bpy.props.StringProperty(default="", options={"SKIP_SAVE"})
     shortcut_id: bpy.props.StringProperty(default="", options={"SKIP_SAVE"})
     shortcut_name: bpy.props.StringProperty(default="", options={"SKIP_SAVE"})
+    vector_mode: bpy.props.EnumProperty(items=(("DEFAULT", "Default", ""), ("UNIFORM", "Uniform", "")), default="DEFAULT", options={"SKIP_SAVE"})
 
 
 def _add_float_proxy(name, subtype):

@@ -99,7 +99,7 @@ def _blob_snapshot(root, blob):
 
 
 def _shortcut_snapshot(root, shortcut):
-    return ShortcutSnapshot(str(shortcut.name or ""), str(shortcut.owner_type or "NONE"), str(shortcut.owner_id or ""), _canonical_path(root, shortcut.data_path), _shortcut_overrides(shortcut))
+    return ShortcutSnapshot(str(shortcut.name or ""), str(shortcut.owner_type or "NONE"), str(shortcut.owner_id or ""), _canonical_path(root, shortcut.data_path), str(getattr(shortcut, "vector_mode", "DEFAULT") or "DEFAULT"), _shortcut_overrides(shortcut))
 
 
 def _shortcut_overrides(shortcut):

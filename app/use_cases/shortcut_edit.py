@@ -4,11 +4,15 @@ from ..queries.root import root_for_context
 
 try:
     from ...core.shortcuts import override_modes, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
+    from ...core.shortcuts.proxy_props import shortcut_prop_name
+    from ...core.shortcuts.vector_modes import is_uniform_vector_shortcut
     from ...core.shortcuts.owners import selected_scp_id, shortcut_relation
     from ...core.shortcuts.session_state import begin_override_session, clear_override_session, suppress_next_depsgraph_ids
     from ...core.scp_runtime.common import find_scp_by_id
 except ImportError:
     from core.shortcuts import override_modes, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
+    from core.shortcuts.proxy_props import shortcut_prop_name
+    from core.shortcuts.vector_modes import is_uniform_vector_shortcut
     from core.shortcuts.owners import selected_scp_id, shortcut_relation
     from core.shortcuts.session_state import begin_override_session, clear_override_session, suppress_next_depsgraph_ids
     from core.scp_runtime.common import find_scp_by_id
@@ -39,6 +43,7 @@ def _apply_target(context, root, shortcut, target):
 
 
 def _apply_target_value(context, root, shortcut, target, value):
+    value = _target_write_value(shortcut, target, value)
     return _apply_scp_session(context, root, shortcut, target, value) if str(getattr(shortcut, "owner_type", "")) == "SCP" else _write_plain(target, value)
 
 
@@ -98,12 +103,11 @@ def _needs_session_recapture(parent_mode, child_mode):
 
 
 def proxy_value(shortcut, target):
-    return _proxy_array_value(shortcut, target) if int(getattr(target, "array_length", 0) or 0) else _proxy_scalar_value(shortcut, target)
+    return _proxy_array_value(shortcut, target) if _uses_array_proxy(shortcut, target) else _proxy_scalar_value(shortcut, target)
 
 
 def _proxy_scalar_value(shortcut, target):
-    names = {"BOOL": "proxy_bool", "INT": "proxy_int", "FLOAT": "proxy_float", "STRING": "proxy_string", "ENUM": "proxy_enum"}
-    return getattr(shortcut, names.get(getattr(target, "value_type", ""), "proxy_string"), "")
+    return getattr(shortcut, shortcut_prop_name(shortcut, target), "")
 
 
 def _proxy_array_value(shortcut, target):
@@ -120,6 +124,32 @@ def _proxy_array(shortcut, value_type, length):
 def _proxy_array_source(shortcut, value_type):
     names = {"BOOL": "proxy_bool_vec", "INT": "proxy_int_vec", "FLOAT": "proxy_float_vec"}
     return tuple(getattr(shortcut, names.get(value_type, "proxy_float_vec"), ()))
+
+
+def _uses_array_proxy(shortcut, target):
+    size = int(getattr(target, "array_length", 0) or 0)
+    return size > 0 and not is_uniform_vector_shortcut(shortcut, target)
+
+
+def _target_write_value(shortcut, target, value):
+    return _uniform_write_value(target, value) if is_uniform_vector_shortcut(shortcut, target) else value
+
+
+def _uniform_write_value(target, value):
+    caster = int if str(getattr(target, "value_type", "")).upper() == "INT" else float
+    scalar = _uniform_scalar(value)
+    size = int(getattr(target, "array_length", 0) or 0)
+    return tuple(caster(scalar) for _ in range(size))
+
+
+def _live_target_value(shortcut, target):
+    value = target_value(target)
+    return _uniform_scalar(value) if is_uniform_vector_shortcut(shortcut, target) else value
+
+
+def _uniform_scalar(value):
+    data = tuple(value) if hasattr(value, "__len__") and not isinstance(value, (str, bytes)) else ()
+    return data[0] if data else value
 
 
 def prime_shortcut_proxy(shortcut, target):
@@ -142,16 +172,17 @@ def _prime_meta(shortcut, target):
 
 
 def _prime_value(shortcut, target):
-    return _prime_array_value(shortcut, target) if int(getattr(target, "array_length", 0) or 0) else _prime_scalar_value(shortcut, target_value(target))
+    value = _live_target_value(shortcut, target)
+    return _prime_array_value(shortcut, target) if _uses_array_proxy(shortcut, target) else _prime_scalar_value(shortcut, target, value)
 
 
-def _prime_scalar_value(shortcut, value):
+def _prime_scalar_value(shortcut, target, value):
     if isinstance(value, bool):
         return _set_proxy(shortcut, "proxy_bool", bool(value))
     if isinstance(value, int) and not isinstance(value, bool):
         return _set_proxy(shortcut, "proxy_int", int(value))
     if isinstance(value, float):
-        return _set_proxy(shortcut, "proxy_float", float(value))
+        return _set_proxy(shortcut, shortcut_prop_name(shortcut, target), float(value))
     return _set_proxy(shortcut, "proxy_enum", _enum_value(shortcut, value)) if _enum_items(shortcut) else _set_proxy(shortcut, "proxy_string", str(value or ""))
 
 
@@ -223,7 +254,7 @@ def _dirty_hints_for():
 
 def live_shortcut_value(context, shortcut):
     target = resolve_shortcut_target(context, shortcut)
-    return None if target is None else target_value(target)
+    return None if target is None else _live_target_value(shortcut, target)
 
 
 def live_shortcut_array(context, shortcut, size, caster=float):

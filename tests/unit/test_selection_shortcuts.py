@@ -14,7 +14,7 @@ from _support import ensure_import_path, install_fake_modules
 ensure_import_path()
 bpy = install_fake_modules()
 
-from core.shortcuts.proxy_props import proxy_prop_name
+from core.shortcuts.proxy_props import proxy_prop_name, shortcut_prop_name
 from core.selection import get_active_af_entity
 from core.shortcuts import normalize_shortcut_path, resolve_shortcut
 
@@ -98,3 +98,8 @@ class SelectionShortcutTests(unittest.TestCase):
         self.assertEqual(proxy_prop_name(scalar), "proxy_float_angle")
         self.assertEqual(proxy_prop_name(vector), "proxy_float_vec_euler")
         self.assertEqual(proxy_prop_name(indexed), "proxy_float_angle")
+
+    def test_shortcut_prop_name_uses_scalar_proxy_for_uniform_vector(self):
+        shortcut = SimpleNamespace(vector_mode="UNIFORM")
+        target = SimpleNamespace(value_type="FLOAT", array_length=3, index=-1, subtype="EULER")
+        self.assertEqual(shortcut_prop_name(shortcut, target), "proxy_float_angle")

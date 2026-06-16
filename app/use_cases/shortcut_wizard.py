@@ -63,13 +63,18 @@ def _wizard_rows(root, context, owner, fields):
 
 def _existing_shortcuts(root, owner):
     rows = [item for item in tuple(root.af_shortcut_system.shortcuts) if matches_shortcut_owner(item, *owner)]
-    return {canonical_shortcut_path(getattr(item, "data_path", "")): item for item in rows}
+    return {_shortcut_key(getattr(item, "data_path", ""), getattr(item, "vector_mode", "DEFAULT")): item for item in rows}
 
 
 def _wizard_row(root, context, existing, field):
     path = normalize_shortcut_path(root, context, field.data_path)
-    match = existing.get(canonical_shortcut_path(path))
-    return {"label": field.label, "data_path": path, "shortcut_id": _shortcut_id(match), "shortcut_name": field.default_name if match is None else match.name, "enabled": match is not None}
+    mode = str(getattr(field, "vector_mode", "DEFAULT") or "DEFAULT")
+    match = existing.get(_shortcut_key(path, mode))
+    return {"label": field.label, "data_path": path, "shortcut_id": _shortcut_id(match), "shortcut_name": field.default_name if match is None else match.name, "enabled": match is not None, "vector_mode": mode}
+
+
+def _shortcut_key(path, vector_mode):
+    return canonical_shortcut_path(path), str(vector_mode or "DEFAULT").upper()
 
 
 def _shortcut_id(shortcut):
@@ -164,6 +169,7 @@ def _update_shortcut(shortcut, item, owner, name):
 def _write_shortcut(shortcut, item, owner, name):
     shortcut.name = name
     shortcut.data_path = str(getattr(item, "data_path", "") or "")
+    shortcut.vector_mode = str(getattr(item, "vector_mode", "DEFAULT") or "DEFAULT")
     shortcut.owner_type, shortcut.owner_id = owner
 
 

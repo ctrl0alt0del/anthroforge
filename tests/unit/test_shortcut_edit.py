@@ -44,6 +44,15 @@ class ShortcutEditTests(unittest.TestCase):
                     self.assertTrue(edit.apply_shortcut_proxy(SimpleNamespace(), shortcut))
         write.assert_called_once_with(target, (1.0, 2.0, 3.0))
 
+    def test_apply_shortcut_value_expands_uniform_vector(self):
+        shortcut = SimpleNamespace(proxy_sync_lock=False, owner_type="BLOB", owner_id="B1", data_path="PATH", vector_mode="UNIFORM")
+        target = SimpleNamespace(owner=object(), prop_name="scale", index=-1, value_type="FLOAT", array_length=3, subtype="XYZ")
+        with patch("app.use_cases.shortcut_edit.root_for_context", return_value=object()):
+            with patch("app.use_cases.shortcut_edit.resolve_shortcut", return_value=target):
+                with patch("app.use_cases.shortcut_edit.write_target_value") as write:
+                    self.assertTrue(edit.apply_shortcut_value(SimpleNamespace(), shortcut, 2.5))
+        write.assert_called_once_with(target, (2.5, 2.5, 2.5))
+
     def test_apply_shortcut_proxy_builds_scp_session_for_indexed_array(self):
         root = SimpleNamespace()
         shortcut = SimpleNamespace(proxy_sync_lock=False, owner_type="SCP", owner_id="P1", data_path="PATH", proxy_float_vec=(0.0, 4.5, 0.0))

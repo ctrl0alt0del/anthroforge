@@ -222,6 +222,7 @@ def _add_shortcut(root, shortcut, data_path, owner_type, owner_id, scp_map):
     item.id = next_prefixed_id(root.af_shortcut_system.shortcuts, "SHORTCUT")
     item.name, item.data_path = str(shortcut.name or item.id), data_path
     item.owner_type, item.owner_id = owner_type, owner_id
+    item.vector_mode = str(getattr(shortcut, "vector_mode", "DEFAULT") or "DEFAULT")
     remap_overrides(item, shortcut, scp_map)
 
 

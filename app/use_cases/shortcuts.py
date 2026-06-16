@@ -57,6 +57,7 @@ def _append_shortcut(shortcuts, name, path, owner):
     item = shortcuts.add()
     item.id = next_prefixed_id(shortcuts, "SHORTCUT")
     item.name, item.data_path = name, path
+    item.vector_mode = "DEFAULT"
     item.owner_type, item.owner_id = owner
 
 

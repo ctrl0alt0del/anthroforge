@@ -31,7 +31,7 @@ class ImportModelTests(unittest.TestCase):
         data = _snapshot_dict()
         snap = PackageSnapshot.from_dict(data)
         self.assertEqual((snap.scps[0].bound_objects[0].bound_id, snap.fibers[0].touches[0].parent_id), ("OBJ_1", "S1"))
-        self.assertEqual((snap.muscles[0].fiber_ids[0], snap.shortcuts[0].owner_type), ("F1", "SCP"))
+        self.assertEqual((snap.muscles[0].fiber_ids[0], snap.shortcuts[0].owner_type, snap.shortcuts[0].vector_mode), ("F1", "SCP", "DEFAULT"))
         self.assertEqual((snap.shortcuts[0].overrides[0].target_scp_id, snap.shortcuts[0].overrides[0].parent_anchor_mode), ("S1", "OBJECT_ORIGIN"))
 
 

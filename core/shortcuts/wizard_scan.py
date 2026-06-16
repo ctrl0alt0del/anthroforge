@@ -7,6 +7,7 @@ class ShortcutWizardField:
     label: str = ""
     data_path: str = ""
     default_name: str = ""
+    vector_mode: str = "DEFAULT"
 
 
 def collect_shortcut_fields(obj):
@@ -20,7 +21,7 @@ def collect_shortcut_fields(obj):
 def _transform_fields(obj):
     fields = []
     for name, prop_name in (("Location", "location"), ("Rotation", "rotation_euler"), ("Scale", "scale")):
-        fields += _component_fields(_object_base(obj), prop_name, name, ("X", "Y", "Z"))
+        fields += _vector_fields(_object_base(obj), prop_name, name, ("X", "Y", "Z"))
     return fields
 
 
@@ -76,11 +77,19 @@ def _scalar_prop_fields(base, prefix, prop):
 
 def _array_prop_fields(base, prefix, prop):
     suffixes = _component_suffixes(int(getattr(prop, "array_length", 0) or 0), getattr(prop, "subtype", ""))
-    return _component_fields(base, _prop_id(prop), f"{prefix}{_prop_label(prop)}", suffixes)
+    return _vector_fields(base, _prop_id(prop), f"{prefix}{_prop_label(prop)}", suffixes)
 
 
 def _component_fields(base, prop_name, label, suffixes):
     return [ShortcutWizardField(label=f"{label} {suffix}", data_path=_prop_path(base, prop_name, index), default_name=_default_name(f"{_base_label(label)} {suffix}")) for index, suffix in enumerate(tuple(suffixes or ()))]
+
+
+def _vector_fields(base, prop_name, label, suffixes):
+    return _component_fields(base, prop_name, label, suffixes) + [_uniform_field(base, prop_name, label)]
+
+
+def _uniform_field(base, prop_name, label):
+    return ShortcutWizardField(label=f"{label} Uniform", data_path=_prop_path(base, prop_name), default_name=_default_name(f"{_base_label(label)} Uniform"), vector_mode="UNIFORM")
 
 
 def _component_suffixes(length, subtype):
@@ -172,12 +181,21 @@ def _custom_array_fields(base, prefix, label, key, value, subtype):
     if not _is_numeric_array(value):
         return []
     suffixes = _component_suffixes(len(tuple(value or ())), subtype)
-    return _custom_component_fields(base, prefix, label, key, suffixes)
+    return _custom_vector_fields(base, prefix, label, key, suffixes)
 
 
 def _custom_component_fields(base, prefix, label, key, suffixes):
     text = f"{prefix}{label}"
     return [ShortcutWizardField(label=f"{text} {suffix}", data_path=_custom_path(base, key, index), default_name=_default_name(f"{label} {suffix}")) for index, suffix in enumerate(tuple(suffixes or ()))]
+
+
+def _custom_vector_fields(base, prefix, label, key, suffixes):
+    return _custom_component_fields(base, prefix, label, key, suffixes) + [_custom_uniform_field(base, prefix, label, key)]
+
+
+def _custom_uniform_field(base, prefix, label, key):
+    text = f"{prefix}{label} Uniform"
+    return ShortcutWizardField(label=text, data_path=_custom_path(base, key), default_name=_default_name(f"{label} Uniform"), vector_mode="UNIFORM")
 
 
 def _custom_array(value):

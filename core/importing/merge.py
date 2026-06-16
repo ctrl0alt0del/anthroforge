@@ -215,6 +215,7 @@ def _add_shortcut(state, snap):
     item.owner_type = str(snap.owner_type or "NONE")
     item.owner_id = _shortcut_owner_id(state, snap.owner_type, snap.owner_id)
     item.data_path = _remap_shortcut_path(state, snap.data_path)
+    item.vector_mode = str(getattr(snap, "vector_mode", "DEFAULT") or "DEFAULT")
     _copy_shortcut_overrides(state, item, snap)
 
 

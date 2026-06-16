@@ -71,7 +71,7 @@ class FakeNoIdPropModifier:
 
 class FakeShortcutCollection(list):
     def add(self):
-        item = SimpleNamespace(id="", name="", owner_type="", owner_id="", data_path="")
+        item = SimpleNamespace(id="", name="", owner_type="", owner_id="", data_path="", vector_mode="DEFAULT")
         self.append(item)
         return item
 
@@ -81,7 +81,7 @@ class FakeShortcutCollection(list):
 
 class FakeWizardCollection(list):
     def add(self):
-        item = SimpleNamespace(enabled=False, label="", data_path="", shortcut_id="", shortcut_name="")
+        item = SimpleNamespace(enabled=False, label="", data_path="", shortcut_id="", shortcut_name="", vector_mode="DEFAULT")
         self.append(item)
         return item
 
@@ -98,14 +98,18 @@ class ShortcutWizardTests(unittest.TestCase):
         obj = FakeObject("Cube", modifiers=[mod], ui_data={"Spin": {"subtype": "ANGLE"}}, Spin=2.0, Axis=[1.0, 2.0, 3.0])
         fields = {(field.label, field.data_path) for field in collect_shortcut_fields(obj)}
         self.assertIn(("Location X", 'bpy.data.objects["Cube"].location[0]'), fields)
+        self.assertIn(("Location Uniform", 'bpy.data.objects["Cube"].location'), fields)
         self.assertIn(("Rotation Z", 'bpy.data.objects["Cube"].rotation_euler[2]'), fields)
         self.assertIn(("Bevel: Width", 'bpy.data.objects["Cube"].modifiers["Bevel"].width'), fields)
         self.assertIn(("Bevel: Offset Y", 'bpy.data.objects["Cube"].modifiers["Bevel"].offset[1]'), fields)
+        self.assertIn(("Bevel: Offset Uniform", 'bpy.data.objects["Cube"].modifiers["Bevel"].offset'), fields)
         self.assertIn(("Spin", 'bpy.data.objects["Cube"]["Spin"]'), fields)
         names = {field.label: field.default_name for field in collect_shortcut_fields(obj)}
         self.assertEqual(names["Location X"], "* Location X")
+        self.assertEqual(names["Location Uniform"], "* Location Uniform")
         self.assertEqual(names["Bevel: Width"], "* Width")
         self.assertEqual(names["Bevel: Offset Y"], "* Offset Y")
+        self.assertEqual(names["Bevel: Offset Uniform"], "* Offset Uniform")
         self.assertEqual(names["Spin"], "* Spin")
 
     def test_collect_shortcut_fields_uses_geometry_nodes_socket_names(self):
@@ -127,7 +131,7 @@ class ShortcutWizardTests(unittest.TestCase):
         self.assertIn(("Subdivision: Levels", 'bpy.data.objects["Cube"].modifiers["Subdivision"].levels'), fields)
 
     def test_populate_shortcut_wizard_marks_existing_rows(self):
-        item = SimpleNamespace(id="K1", name="Existing", owner_type="SCP", owner_id="S1", data_path='af://object_rna/Cube/location[0]')
+        item = SimpleNamespace(id="K1", name="Existing", owner_type="SCP", owner_id="S1", data_path='af://object_rna/Cube/location[0]', vector_mode="DEFAULT")
         root = SimpleNamespace(af_shortcut_system=SimpleNamespace(shortcuts=[item]), af_scp_system=SimpleNamespace(scps=[SimpleNamespace(id="S1", name="Spine")]))
         scene = SimpleNamespace(af_shortcut_wizard_items=FakeWizardCollection(), af_shortcut_wizard_active_index=-1, af_shortcut_wizard_wildcard_value="")
         obj = SimpleNamespace(name="Cube")
@@ -145,13 +149,13 @@ class ShortcutWizardTests(unittest.TestCase):
 
     def test_apply_shortcut_wizard_creates_updates_and_deletes_rows(self):
         shortcuts = FakeShortcutCollection([
-            SimpleNamespace(id="K1", name="Old", owner_type="SCP", owner_id="S1", data_path="P1"),
-            SimpleNamespace(id="K2", name="Drop", owner_type="SCP", owner_id="S1", data_path="P2"),
+            SimpleNamespace(id="K1", name="Old", owner_type="SCP", owner_id="S1", data_path="P1", vector_mode="DEFAULT"),
+            SimpleNamespace(id="K2", name="Drop", owner_type="SCP", owner_id="S1", data_path="P2", vector_mode="DEFAULT"),
         ])
         items = FakeWizardCollection([
-            SimpleNamespace(enabled=True, label="Keep", data_path="P1N", shortcut_id="K1", shortcut_name="Renamed"),
-            SimpleNamespace(enabled=False, label="Drop", data_path="P2", shortcut_id="K2", shortcut_name="Drop"),
-            SimpleNamespace(enabled=True, label="Add", data_path="P3", shortcut_id="", shortcut_name="New"),
+            SimpleNamespace(enabled=True, label="Keep", data_path="P1N", shortcut_id="K1", shortcut_name="Renamed", vector_mode="DEFAULT"),
+            SimpleNamespace(enabled=False, label="Drop", data_path="P2", shortcut_id="K2", shortcut_name="Drop", vector_mode="DEFAULT"),
+            SimpleNamespace(enabled=True, label="Add", data_path="P3", shortcut_id="", shortcut_name="New", vector_mode="UNIFORM"),
         ])
         root = SimpleNamespace(af_shortcut_system=SimpleNamespace(shortcuts=shortcuts))
         scene = SimpleNamespace(af_shortcut_wizard_items=items, af_shortcut_wizard_active_index=2, af_shortcut_wizard_wildcard_value="")
@@ -160,8 +164,8 @@ class ShortcutWizardTests(unittest.TestCase):
             with patch("app.use_cases.shortcut_wizard.current_shortcut_owner", return_value=("SCP", "S1")):
                 with patch("app.use_cases.shortcut_wizard.next_prefixed_id", return_value="SHORTCUT_3"):
                     self.assertEqual(shortcut_wizard.apply_shortcut_wizard(ctx), (True, ""))
-        data = {(item.id, item.name, item.data_path, item.owner_id) for item in shortcuts}
-        self.assertEqual(data, {("K1", "Renamed", "P1N", "S1"), ("SHORTCUT_3", "New", "P3", "S1")})
+        data = {(item.id, item.name, item.data_path, item.owner_id, item.vector_mode) for item in shortcuts}
+        self.assertEqual(data, {("K1", "Renamed", "P1N", "S1", "DEFAULT"), ("SHORTCUT_3", "New", "P3", "S1", "UNIFORM")})
         self.assertEqual((len(scene.af_shortcut_wizard_items), scene.af_shortcut_wizard_active_index, scene.af_shortcut_wizard_wildcard_value), (0, -1, ""))
 
     def test_apply_shortcut_wizard_expands_wildcard_in_names(self):

@@ -7,10 +7,17 @@ _FLOAT_VECTOR = {
     "DIRECTION", "EULER", "QUATERNION", "TRANSLATION", "VELOCITY", "XYZ",
 }
 
+from .vector_modes import is_uniform_vector_shortcut
+
 
 def proxy_prop_name(target, index=None):
     _ = index
     return _array_prop_name(target) if _whole_array(target) else _scalar_prop_name(target)
+
+
+def shortcut_prop_name(shortcut, target, index=None):
+    direct = index is None and is_uniform_vector_shortcut(shortcut, target)
+    return _uniform_prop_name(target) if direct else proxy_prop_name(target, index=index)
 
 
 def _is_array(target):
@@ -39,6 +46,11 @@ def _scalar_prop_name(target):
     if value_type == "FLOAT":
         return _float_scalar_name(getattr(target, "subtype", ""))
     return "proxy_enum" if value_type == "ENUM" else "proxy_string"
+
+
+def _uniform_prop_name(target):
+    value_type = str(getattr(target, "value_type", "") or "").upper()
+    return "proxy_int" if value_type == "INT" else _float_scalar_name(getattr(target, "subtype", ""))
 
 
 def _float_scalar_name(subtype):
