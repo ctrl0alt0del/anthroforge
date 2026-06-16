@@ -10,6 +10,7 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 import bpy
 
 from _helpers import BlenderTestCase, empty_object, mesh_object, root, scp_with_object
+from anthroforge.core.visualization import sync_runner
 from core.scp_runtime.attachment_runtime import apply_scp_attachments, capture_attachment_from_link
 from core.scp_runtime.common import scp_prop_map
 from core.scp_runtime.lookup import set_parent_relation
@@ -19,6 +20,56 @@ from core.scp_runtime.runtime_state import attach_child_origin_local
 
 def _world_verts(obj):
     return [tuple(round(float(v), 4) for v in (obj.matrix_world @ vert.co)) for vert in obj.data.vertices]
+
+
+def _reset_sync_runner():
+    sync_runner._RUNNING = False
+    sync_runner._TIMER_ARMED = False
+    sync_runner._PENDING.clear()
+
+
+def _flush_attachment_runtime():
+    for _ in range(5):
+        state = sync_runner._flush_pending()
+        bpy.context.view_layer.update()
+        if state is None:
+            return
+
+
+def _capture_object_origin_link(parent, child):
+    child.attach_parent_anchor_mode = child.attach_child_anchor_mode = "OBJECT_ORIGIN"
+    set_parent_relation(child.transform_object_ref, child, parent.transform_object_ref)
+    return capture_attachment_from_link(child, child.transform_object_ref, None, parent.transform_object_ref, None)
+
+
+def _object_origin_chain():
+    root_obj = root()
+    top = scp_with_object(root_obj, "Top", empty_object("Top"), with_geometry=False)
+    mid = scp_with_object(root_obj, "Mid", empty_object("Mid", (1.0, 0.0, 0.0)), with_geometry=False)
+    child = scp_with_object(root_obj, "Child", empty_object("Child", (2.0, 0.0, 0.0)), with_geometry=False)
+    _capture_object_origin_link(top, mid)
+    _capture_object_origin_link(mid, child)
+    return root_obj, top, mid, child
+
+
+def _surface_child_chain():
+    root_obj = root()
+    top = scp_with_object(root_obj, "Top", empty_object("Top"), with_geometry=False)
+    mid = scp_with_object(root_obj, "Mid", mesh_object("Mid"), with_geometry=True)
+    child = scp_with_object(root_obj, "Child", empty_object("Child", (0.3333, 0.3333, 0.0)), with_geometry=False)
+    mid.attach_parent_anchor_mode = mid.attach_child_anchor_mode = "OBJECT_ORIGIN"
+    child.attach_parent_anchor_mode, child.attach_child_anchor_mode = "SURFACE_NEAREST", "OBJECT_ORIGIN"
+    set_parent_relation(mid.transform_object_ref, mid, top.transform_object_ref)
+    set_parent_relation(child.transform_object_ref, child, mid.transform_object_ref)
+    capture_attachment_from_link(mid, mid.transform_object_ref, mid.geometry_object_ref, top.transform_object_ref, None)
+    capture_attachment_from_link(child, child.transform_object_ref, None, mid.transform_object_ref, mid.geometry_object_ref)
+    return root_obj, top, mid, child
+
+
+def _offset_mesh_z(obj, distance):
+    for vert in obj.data.vertices:
+        vert.co.z += distance
+    obj.data.update()
 
 
 class AttachmentPipelineTests(BlenderTestCase):
@@ -64,6 +115,25 @@ class AttachmentPipelineTests(BlenderTestCase):
         top.transform_object_ref.location.x = 3.0
         changed = apply_scp_attachments(None, root_obj, bpy.context.scene, scp_prop_map(root_obj), parent_ids={top.id})
         self.assertEqual((changed, tuple(round(v, 4) for v in mid.transform_object_ref.location), tuple(round(v, 4) for v in child.transform_object_ref.location)), ({mid.id, child.id}, (4.0, 0.0, 0.0), (5.0, 0.0, 0.0)))
+
+    def test_depsgraph_apply_keeps_directly_moved_mid_scp(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        _, _, mid, child = _object_origin_chain()
+        bpy.context.view_layer.update()
+        _reset_sync_runner()
+        mid.transform_object_ref.location.x = 3.0
+        bpy.context.view_layer.update()
+        _flush_attachment_runtime()
+        self.assertEqual(tuple(round(v, 4) for v in mid.transform_object_ref.location), (3.0, 0.0, 0.0))
+        self.assertEqual(tuple(round(v, 4) for v in child.transform_object_ref.location), (4.0, 0.0, 0.0))
+
+    def test_targeted_mid_geometry_update_propagates_to_child(self):
+        root_obj, top, mid, child = _surface_child_chain()
+        _offset_mesh_z(mid.geometry_object_ref, 1.0)
+        changed = apply_scp_attachments(None, root_obj, bpy.context.scene, scp_prop_map(root_obj), {mid.id, child.id}, {top.id})
+        self.assertEqual(changed, {child.id})
+        self.assertEqual(tuple(round(v, 4) for v in child.transform_object_ref.location), (0.3333, 0.3333, 1.0))
 
     def test_global_attachment_toggle_freezes_and_rebinds_current_pose(self):
         root_obj = root()

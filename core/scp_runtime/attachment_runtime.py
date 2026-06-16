@@ -4,6 +4,7 @@ from ..utils import depsgraph_for_scene, scene_for_id, update_scene_view_layer
 from .attachment_session import follow_rotation_enabled, tangent_strategy
 from .common import as_bool, as_id, as_vec3, find_geometry_mesh_scp_obj, find_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix
 from .common import vec3_close, is_matrix_close, matrix_flat16
+from .common import payload_id_set
 from .child_anchor import anchor_mode as child_anchor_mode, capture_child_anchor
 from .attachment_gate import attachments_enabled
 from .parent_anchor import anchor_mode as parent_anchor_mode, is_surface_binding, resolve_parent_frame, stored_parent_binding
@@ -409,31 +410,52 @@ def _attachment_scene(*objs):
     return None
 
 
+def _apply_source(gate_meta):
+    return str(dict(gate_meta or {}).get("source", "") or "").lower()
+
+
+def _apply_payload(gate_meta):
+    return dict(dict(gate_meta or {}).get("payload", {}) or {})
+
+
+def _blocked_apply_ids(gate_meta):
+    if _apply_source(gate_meta) != "depsgraph":
+        return set()
+    return payload_id_set(_apply_payload(gate_meta), "scp_recapture_ids")
+
+
+def _active_parent_ids(parent_ids, target_scp_ids):
+    base = {as_id(v) for v in set(parent_ids or set()) if as_id(v)}
+    targets = {as_id(v) for v in set(target_scp_ids or set()) if as_id(v)}
+    return base | targets
+
+
 def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, parent_ids=None, gate_meta=None):
     _ = sync
-    _ = gate_meta
     if not attachments_enabled(scene):
         return set()
-    active_parent_ids = {as_id(v) for v in set(parent_ids or set()) if as_id(v)}
+    active_parent_ids = _active_parent_ids(parent_ids, target_scp_ids)
     if not active_parent_ids:
         return set()
-    return _apply_attachment_targets(root, scene, scp_by_id, target_scp_ids, active_parent_ids)
+    blocked_ids = _blocked_apply_ids(gate_meta)
+    return _apply_attachment_targets(root, scene, scp_by_id, target_scp_ids, active_parent_ids, blocked_ids)
 
 
-def _apply_attachment_targets(root, scene, scp_by_id, target_scp_ids, active_parent_ids):
+def _apply_attachment_targets(root, scene, scp_by_id, target_scp_ids, active_parent_ids, blocked_ids):
     surface_cache = _new_surface_cache()
     changed = set()
     targets = None if target_scp_ids is None else {as_id(v) for v in set(target_scp_ids)}
     for sid in children_depth_order(scp_by_id):
-        changed |= _apply_child(root, scene, scp_by_id, sid, targets, active_parent_ids, surface_cache)
+        args = root, scene, scp_by_id, sid, targets, active_parent_ids, blocked_ids, surface_cache
+        changed |= _apply_child(*args)
     return changed
 
 
-def _apply_child(root, scene, scp_by_id, sid, targets, active_parent_ids, surface_cache):
+def _apply_child(root, scene, scp_by_id, sid, targets, active_parent_ids, blocked_ids, surface_cache):
     child_scp = scp_by_id.get(sid)
     parent_id = as_id(getattr(child_scp, "parent_id", ""))
     _ = targets
-    if child_scp is None or parent_id not in active_parent_ids:
+    if child_scp is None or sid in blocked_ids or parent_id not in active_parent_ids:
         return set()
     changed = _apply_child_runtime(root, scene, sid, child_scp, parent_id, surface_cache)
     if changed:
