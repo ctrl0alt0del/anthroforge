@@ -34,14 +34,15 @@ def _assign_custom_value(owner, key, index, value):
 
 
 def _refresh_custom_owner(owner):
-    obj = _nodes_owner_object(owner)
+    obj = _refresh_object(owner)
     obj.update_tag() if obj is not None else None
 
 
-def _nodes_owner_object(owner):
+def _refresh_object(owner):
+    if hasattr(owner, "update_tag"):
+        return owner
     obj = getattr(owner, "id_data", None)
-    kind = str(getattr(owner, "type", "") or "").upper()
-    return obj if kind == "NODES" and hasattr(obj, "update_tag") else None
+    return obj if hasattr(obj, "update_tag") else None
 
 
 def _is_custom(target):

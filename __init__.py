@@ -42,6 +42,11 @@ from .operators.shortcuts import (
     AF_OT_EditShortcutOverride,
     AF_OT_ShortcutWizard,
 )
+from .operators.action_library import (
+    AF_OT_CreateLocalTransformProps,
+    AF_OT_RebindLocalTransformProps,
+    AF_OT_RemoveLocalTransformProps,
+)
 from .operators.control_objects import (
     AFOTMarkSelectedSCPControlObject,
     AFOTToggleControlObjectApplyParent,
@@ -67,6 +72,7 @@ from .ui.panels.vcp_edit_panel import AF_PT_VCPEditPanel
 from .ui.panels.blob_create_panel import AF_PT_BlobCreatePanel
 from .ui.panels.blob_edit_panel import AF_PT_BlobEditPanel
 from .ui.panels.shortcut_panel import AF_PT_ShortcutPanel, AF_UL_ShortcutWizardItems
+from .ui.panels.action_library_panel import AF_PT_ActionLibraryPanel
 from .ui.panels.control_objects_panel import AFPTControlObjectsPanel
 
 from .properties.scp_properties import (
@@ -164,11 +170,15 @@ classes = (
     AF_OT_DeleteDataShortcut,
     AF_OT_EditShortcutOverride,
     AF_OT_ShortcutWizard,
+    AF_OT_CreateLocalTransformProps,
+    AF_OT_RebindLocalTransformProps,
+    AF_OT_RemoveLocalTransformProps,
     AFOTMarkSelectedSCPControlObject,
     AFOTToggleControlObjectApplyParent,
     AFOTToggleControlObjectShortcutAxis,
     AF_UL_ShortcutWizardItems,
     AF_PT_ShortcutPanel,
+    AF_PT_ActionLibraryPanel,
     AFPTControlObjectsPanel,
 )
 
