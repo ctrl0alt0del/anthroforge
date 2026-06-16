@@ -10,7 +10,6 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 import bpy
 
 from _helpers import BlenderTestCase, add_shortcut, empty_object, mesh_object, root, scp_with_object, select_only
-from app.use_cases.shortcut_edit import apply_shortcut_proxy, prime_shortcut_proxy
 from core.scp_runtime.attachment_runtime import capture_attachment_from_link
 from core.scp_runtime.lookup import set_parent_relation
 from core.scp_runtime.runtime_state import attach_parent_param
@@ -19,12 +18,52 @@ from core.shortcuts.proxy_props import proxy_prop_name
 
 
 def _apply_float_shortcut(root_obj, shortcut, value):
-    target = resolve_shortcut(root_obj, bpy.context, shortcut.data_path)
-    prime_shortcut_proxy(shortcut, target)
-    shortcut.proxy_sync_lock = True
     shortcut.proxy_float = value
-    shortcut.proxy_sync_lock = False
-    return apply_shortcut_proxy(bpy.context, shortcut)
+    return True
+
+
+def _geometry_nodes_setup(obj):
+    group = bpy.data.node_groups.new(f"{obj.name}GN", "GeometryNodeTree")
+    _group_sockets(group)
+    _group_nodes(group)
+    mod = obj.modifiers.new("GeometryNodes", "NODES")
+    mod.node_group = group
+    bpy.context.view_layer.update()
+    return mod, _socket_key(mod)
+
+
+def _group_sockets(group):
+    iface = group.interface
+    iface.new_socket(name="Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
+    iface.new_socket(name="Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+    iface.new_socket(name="Offset", in_out="INPUT", socket_type="NodeSocketFloat")
+
+
+def _group_nodes(group):
+    nodes, links = group.nodes, group.links
+    nodes.clear()
+    in_node = nodes.new("NodeGroupInput")
+    out_node = nodes.new("NodeGroupOutput")
+    set_pos = nodes.new("GeometryNodeSetPosition")
+    combine = nodes.new("ShaderNodeCombineXYZ")
+    links.new(in_node.outputs[0], set_pos.inputs["Geometry"])
+    links.new(in_node.outputs[1], combine.inputs["X"])
+    links.new(combine.outputs[0], set_pos.inputs["Offset"])
+    links.new(set_pos.outputs["Geometry"], out_node.inputs[0])
+
+
+def _socket_key(mod):
+    keys = [key for key in mod.keys() if str(key).startswith("Socket_")]
+    keys = [key for key in keys if not str(key).endswith("_use_attribute")]
+    keys = [key for key in keys if not str(key).endswith("_attribute_name")]
+    return keys[-1]
+
+
+def _evaluated_x(obj):
+    bpy.context.view_layer.update()
+    deps = bpy.context.evaluated_depsgraph_get()
+    verts = obj.evaluated_get(deps).data.vertices
+    return tuple(round(float(v.co.x), 4) for v in verts)
 
 
 def _attached_empty_pair(root_obj):
@@ -84,3 +123,14 @@ class ShortcutWorkflowTests(BlenderTestCase):
         bpy.context.view_layer.update()
         loc = tuple(round(float(v), 4) for v in child.transform_object_ref.location)
         self.assertEqual(loc, (3.0, 0.0, 0.0))
+
+    def test_geometry_nodes_shortcut_recomputes_evaluated_geometry(self):
+        root_obj = root()
+        scp = scp_with_object(root_obj, "Arm", mesh_object("Arm"))
+        mod, key = _geometry_nodes_setup(scp.transform_object_ref)
+        path = f'bpy.data.objects["{scp.transform_object_ref.name}"].modifiers["{mod.name}"]["{key}"]'
+        shortcut = add_shortcut(root_obj, "Offset", "SCP", scp.id, path)
+        select_only(scp.transform_object_ref)
+        self.assertEqual(_evaluated_x(scp.transform_object_ref), (0.0, 1.0, 0.0))
+        self.assertTrue(_apply_float_shortcut(root_obj, shortcut, 2.0))
+        self.assertEqual(_evaluated_x(scp.transform_object_ref), (2.0, 3.0, 2.0))

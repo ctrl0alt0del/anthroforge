@@ -58,3 +58,22 @@ class AttachmentPipelineTests(BlenderTestCase):
         top.transform_object_ref.location.x = 3.0
         changed = apply_scp_attachments(None, root_obj, bpy.context.scene, scp_prop_map(root_obj), parent_ids={top.id})
         self.assertEqual((changed, tuple(round(v, 4) for v in mid.transform_object_ref.location), tuple(round(v, 4) for v in child.transform_object_ref.location)), ({mid.id, child.id}, (4.0, 0.0, 0.0), (5.0, 0.0, 0.0)))
+
+    def test_global_attachment_toggle_freezes_and_rebinds_current_pose(self):
+        root_obj = root()
+        parent_obj = empty_object("Parent", (0.0, 0.0, 0.0))
+        child_obj = empty_object("Child", (2.0, 0.0, 0.0))
+        parent = scp_with_object(root_obj, "Parent", parent_obj, with_geometry=False)
+        child = scp_with_object(root_obj, "Child", child_obj, with_geometry=False)
+        child.attach_parent_anchor_mode = child.attach_child_anchor_mode = "OBJECT_ORIGIN"
+        set_parent_relation(child_obj, child, parent_obj)
+        self.assertTrue(capture_attachment_from_link(child, child_obj, None, parent_obj, None))
+        bpy.context.scene.af_attachments_enabled = False
+        parent_obj.location.x = 3.0
+        changed = apply_scp_attachments(None, root_obj, bpy.context.scene, scp_prop_map(root_obj), parent_ids={parent.id})
+        self.assertEqual((changed, tuple(round(v, 4) for v in child_obj.location)), (set(), (2.0, 0.0, 0.0)))
+        bpy.context.scene.af_attachments_enabled = True
+        self.assertEqual(tuple(round(v, 4) for v in child_obj.location), (2.0, 0.0, 0.0))
+        parent_obj.location.x = 4.0
+        changed = apply_scp_attachments(None, root_obj, bpy.context.scene, scp_prop_map(root_obj), parent_ids={parent.id})
+        self.assertEqual((changed, tuple(round(v, 4) for v in child_obj.location)), ({child.id}, (3.0, 0.0, 0.0)))

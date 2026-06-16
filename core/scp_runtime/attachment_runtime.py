@@ -4,6 +4,7 @@ from ..utils import depsgraph_for_scene, scene_for_id, update_scene_view_layer
 from .common import as_bool, as_id, as_vec3, find_geometry_mesh_scp_obj, find_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix
 from .common import vec3_close, is_matrix_close, matrix_flat16
 from .child_anchor import anchor_mode as child_anchor_mode, capture_child_anchor
+from .attachment_gate import attachments_enabled
 from .parent_anchor import anchor_mode as parent_anchor_mode, is_surface_binding, resolve_parent_frame, stored_parent_binding
 from .runtime_state import attach_child_anchor_index, attach_child_normal_local, attach_child_origin_local, attach_child_tangent_local
 from .runtime_state import attach_flow_param, attach_initialized, attach_parent_offset_local, attach_parent_tangent_hint_local
@@ -228,6 +229,8 @@ def capture_attachment_from_link(child_scp, child_transform_obj, child_geometry_
 
 
 def recapture_attachment_for_scp(root, scene, sid):
+    if not attachments_enabled(scene):
+        return False
     depsgraph = depsgraph_for_scene(scene)
     if depsgraph is None:
         return False
@@ -237,7 +240,7 @@ def recapture_attachment_for_scp(root, scene, sid):
 
 def capture_authored_scp_attachments(root, scene, target_scp_ids=None):
     depsgraph = depsgraph_for_scene(scene)
-    if root is None or depsgraph is None:
+    if root is None or depsgraph is None or not attachments_enabled(scene):
         return set()
     scp_by_id = {as_id(s.id): s for s in root.af_scp_system.scps}
     wanted = _authoring_attachment_ids(scp_by_id, target_scp_ids)
@@ -312,7 +315,7 @@ class AttachmentApply:
 
 def capture_dirty_scp_attachments(root, scene, dirty_scp_ids, source="", recapture_ids=None, apply_parent_ids=None):
     source = as_id(source).lower()
-    if not _capture_source_allows(source):
+    if not attachments_enabled(scene) or not _capture_source_allows(source):
         return set()
     direct_ids = _direct_capture_ids(dirty_scp_ids, recapture_ids)
     if not direct_ids:
@@ -409,6 +412,8 @@ def _attachment_scene(*objs):
 def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, parent_ids=None, gate_meta=None):
     _ = sync
     _ = gate_meta
+    if not attachments_enabled(scene):
+        return set()
     active_parent_ids = {as_id(v) for v in set(parent_ids or set()) if as_id(v)}
     if not active_parent_ids:
         return set()

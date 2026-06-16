@@ -20,12 +20,28 @@ def _write_rna(target, value):
 
 def _write_custom(target, value):
     key = _custom_key(target.prop_name)
-    if int(getattr(target, "index", -1)) < 0:
-        target.owner[key] = value
+    _assign_custom_value(target.owner, key, int(getattr(target, "index", -1)), value)
+    _refresh_custom_owner(target.owner)
+
+
+def _assign_custom_value(owner, key, index, value):
+    if index < 0:
+        owner[key] = value
         return
-    values = list(target.owner.get(key, ()))
-    values[int(target.index)] = value
-    target.owner[key] = values
+    values = list(owner.get(key, ()))
+    values[index] = value
+    owner[key] = values
+
+
+def _refresh_custom_owner(owner):
+    obj = _nodes_owner_object(owner)
+    obj.update_tag() if obj is not None else None
+
+
+def _nodes_owner_object(owner):
+    obj = getattr(owner, "id_data", None)
+    kind = str(getattr(owner, "type", "") or "").upper()
+    return obj if kind == "NODES" and hasattr(obj, "update_tag") else None
 
 
 def _is_custom(target):

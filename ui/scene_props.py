@@ -4,6 +4,18 @@ from ..core.scp_runtime.common import is_geometry_mesh_scp_obj
 from ..core.utils import get_af_root
 
 
+def _attachment_toggle_api():
+    try:
+        from ..app.use_cases.attachment_toggle import handle_attachment_toggle
+    except ImportError:
+        from app.use_cases.attachment_toggle import handle_attachment_toggle
+    return handle_attachment_toggle
+
+
+def _on_attachment_toggle_update(_self, context):
+    _attachment_toggle_api()(context)
+
+
 def _poll_geometry_scp_mesh(self, obj):
     scene = getattr(bpy.context, "scene", None)
     root = get_af_root(scene)
@@ -28,6 +40,7 @@ def _poll_scp_obj(self, obj):
 
 
 def _register_scene_core_props():
+    bpy.types.Scene.af_attachments_enabled = bpy.props.BoolProperty(name="Attachments Enabled", default=True, update=_on_attachment_toggle_update, options={"SKIP_SAVE"})
     bpy.types.Scene.af_selection_sync_lock = bpy.props.BoolProperty(default=False)
 
 
@@ -80,5 +93,5 @@ def _delete_scene_prop(name):
 
 
 def unregister_scene_props():
-    for name in ("af_shortcut_wizard_active_index", "af_shortcut_wizard_items", "af_shortcut_wizard_wildcard_value", "af_shortcut_view_mode", "af_new_shortcut_path", "af_new_shortcut_name", "af_vcp_tree_collapsed_json", "af_tree_collapsed_json", "af_new_blob_target_obj", "af_new_fiber_insertion_obj", "af_new_fiber_origin_obj", "af_control_scp_obj", "af_scp_object_picker", "af_scp_parent_obj", "af_selection_sync_lock"):
+    for name in ("af_shortcut_wizard_active_index", "af_shortcut_wizard_items", "af_shortcut_wizard_wildcard_value", "af_shortcut_view_mode", "af_new_shortcut_path", "af_new_shortcut_name", "af_vcp_tree_collapsed_json", "af_tree_collapsed_json", "af_new_blob_target_obj", "af_new_fiber_insertion_obj", "af_new_fiber_origin_obj", "af_control_scp_obj", "af_scp_object_picker", "af_scp_parent_obj", "af_selection_sync_lock", "af_attachments_enabled"):
         _delete_scene_prop(name)
