@@ -2,7 +2,7 @@ import bpy
 
 from ..id_utils import next_prefixed_id
 from ..utils import scene_for_id
-from .common import as_id, set_prop_raw
+from .common import as_id, invalidate_scp_object_maps, set_prop_raw
 from .object_colors import apply_object_color, ensure_scp_color
 
 
@@ -187,6 +187,10 @@ def _sync_color(root, scp):
         apply_object_color(obj, color)
 
 
+def _invalidate_object_index(root):
+    invalidate_scp_object_maps(scene_for_id(root), root.name)
+
+
 def sync_scp_roles(root, scp):
     for obj in list(_live_bound_objects(scp)):
         clear_scp_tags(obj)
@@ -196,6 +200,7 @@ def sync_scp_roles(root, scp):
     _sync_parenting(scp)
     _sync_identity(scp)
     _sync_color(root, scp)
+    _invalidate_object_index(root)
 
 
 def _live_bound_objects(scp):

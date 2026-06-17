@@ -1,8 +1,7 @@
 import bpy
-from mathutils.bvhtree import BVHTree
 
 from ..deps.control_lifecycle import mark_dynamic_control_object
-from ..utils import depsgraph_for_scene, scene_for_id
+from ..scp_runtime.surface import surface_bvh_local
 
 
 def get_vis_collection(scene, collection_name):
@@ -120,10 +119,7 @@ def remove_ctrl_obj(obj):
 
 
 def _surface_bvh(mesh_obj):
-    depsgraph = depsgraph_for_scene(scene_for_id(mesh_obj))
-    if depsgraph is None:
-        return None
-    return BVHTree.FromObject(mesh_obj, depsgraph)
+    return surface_bvh_local(mesh_obj)
 
 
 def nearest_on_mesh_surface(mesh_obj, world_point):

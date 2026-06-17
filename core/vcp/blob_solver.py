@@ -1,5 +1,6 @@
 from mathutils import Vector
-from mathutils.bvhtree import BVHTree
+
+from ..scp_runtime.surface import surface_bvh_local
 
 
 class BlobSolveResult:
@@ -28,9 +29,8 @@ class BlobSolver:
     def _build_target_bvh(self, target_obj):
         if target_obj is None or target_obj.type != "MESH":
             return None
-        depsgraph = __import__("bpy").context.evaluated_depsgraph_get()
         try:
-            return BVHTree.FromObject(target_obj, depsgraph)
+            return surface_bvh_local(target_obj)
         except Exception:
             return None
 

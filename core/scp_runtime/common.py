@@ -1,4 +1,6 @@
-﻿from mathutils import Vector
+from mathutils import Vector
+
+from ..utils import scene_cache_drop, scene_cache_get, scene_cache_set
 
 _EPS = 1.0e-6
 _APPLIED_MW_KEY = "af_scp_attach_applied_mw"
@@ -89,13 +91,48 @@ def iter_geometry_mesh_scp_objects(scene, root_name):
             yield obj
 
 
+def _index_key(root_name):
+    return f"scp_index:{as_id(root_name)}"
+
+
+def invalidate_scp_object_maps(scene, root_name):
+    scene_cache_drop(scene, _index_key(root_name))
+
+
+def _cached_index_ok(cached, count):
+    return bool(cached and cached.get("count") == count and cached.get("index"))
+
+
 def scp_object_maps(scene, root_name):
-    index = {"transform": {}, "geometry": {}}
+    key = _index_key(root_name)
+    count = 0 if scene is None else len(scene.objects)
+    cached = scene_cache_get(scene, key)
+    if _cached_index_ok(cached, count):
+        return cached["index"]
+    index = _build_scp_object_maps(scene, root_name)
+    scene_cache_set(scene, key, {"count": count, "index": index})
+    return index
+
+
+def _build_scp_object_maps(scene, root_name):
+    index = {"transform": {}, "geometry": {}, "bound": {}}
     for obj in iter_bound_scp_objects(scene, root_name):
         sid = as_id(obj.get("af_scp_id"))
+        _index_bound_obj(index, sid, as_id(obj.get("af_scp_bound_id")), obj)
         _index_transform_obj(index, sid, obj)
         _index_geometry_obj(index, sid, obj)
     return index
+
+
+def _bound_obj_key(scp_id, bound_id):
+    sid, bid = as_id(scp_id), as_id(bound_id)
+    return "" if not sid or not bid else f"{sid}:{bid}"
+
+
+def _index_bound_obj(index, sid, bid, obj):
+    key = _bound_obj_key(sid, bid)
+    if key and key not in index["bound"]:
+        index["bound"][key] = obj
 
 
 def _index_transform_obj(index, sid, obj):
@@ -124,18 +161,22 @@ def find_geometry_mesh_scp_obj(scene, root_name, scp_id):
     return next((obj for obj in objs if as_id(obj.get("af_scp_id")) == sid), None)
 
 
+def indexed_bound_scp_obj(index, scp_id, bound_id):
+    return dict(index.get("bound", {})).get(_bound_obj_key(scp_id, bound_id))
+
+
 def indexed_transform_scp_obj(index, scp_id):
     return dict(index.get("transform", {})).get(as_id(scp_id))
 
 
 def find_transform_scp_obj(scene, root_name, scp_id):
     sid = as_id(scp_id)
-    return next((obj for obj in iter_bound_scp_objects(scene, root_name) if obj.get("af_scp_transform") and as_id(obj.get("af_scp_id")) == sid), None)
+    objs = iter_bound_scp_objects(scene, root_name)
+    return next((obj for obj in objs if obj.get("af_scp_transform") and as_id(obj.get("af_scp_id")) == sid), None)
 
 
 def find_bound_scp_obj_by_id(scene, root_name, scp_id, bound_id):
-    sid, bid = as_id(scp_id), as_id(bound_id)
-    return next((obj for obj in iter_bound_scp_objects(scene, root_name) if as_id(obj.get("af_scp_id")) == sid and as_id(obj.get("af_scp_bound_id")) == bid), None)
+    return indexed_bound_scp_obj(scp_object_maps(scene, root_name), scp_id, bound_id)
 
 
 def find_primary_scp_obj(scene, root_name, scp_id):
@@ -144,7 +185,8 @@ def find_primary_scp_obj(scene, root_name, scp_id):
 
 def _first_bound_scp_obj(scene, root_name, scp_id):
     sid = as_id(scp_id)
-    return next((obj for obj in iter_bound_scp_objects(scene, root_name) if as_id(obj.get("af_scp_id")) == sid), None)
+    objs = iter_bound_scp_objects(scene, root_name)
+    return next((obj for obj in objs if as_id(obj.get("af_scp_id")) == sid), None)
 
 
 def scp_prop_map(root):

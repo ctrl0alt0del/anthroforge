@@ -1,8 +1,8 @@
 from mathutils import Vector
-from mathutils.bvhtree import BVHTree
 
 from ..attachment_codec import parse_fiber_attach_param
 from ..scp_runtime.common import find_geometry_scp_obj, iter_geometry_mesh_scp_objects
+from ..scp_runtime.surface import build_mesh_surface_data
 from ..utils import depsgraph_for_scene, scene_for_id
 from .runtime_state import set_fiber_eps_disp, set_fiber_eps_pen, set_fiber_not_converged
 
@@ -295,31 +295,17 @@ class FiberSolver:
     def _build_collider_cache(self, colliders, depsgraph):
         cache = []
         for obj in colliders:
-            bvh = BVHTree.FromObject(obj, depsgraph)
-            if bvh is None:
-                continue
-
-            corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
-            mn = Vector((
-                min(v.x for v in corners),
-                min(v.y for v in corners),
-                min(v.z for v in corners),
-            ))
-            mx = Vector((
-                max(v.x for v in corners),
-                max(v.y for v in corners),
-                max(v.z for v in corners),
-            ))
-
-            cache.append({
-                "obj": obj,
-                "bvh": bvh,
-                "m_inv": obj.matrix_world.inverted(),
-                "m3": obj.matrix_world.to_3x3(),
-                "mn": mn,
-                "mx": mx,
-            })
+            item = self._collider_entry(obj, depsgraph)
+            if item is not None:
+                cache.append(item)
         return cache
+
+    def _collider_entry(self, obj, depsgraph):
+        surface = build_mesh_surface_data(obj, depsgraph)
+        if not surface:
+            return None
+        mn, mx = surface["bounds_world"]
+        return {"obj": obj, "bvh": surface["bvh_local"], "m_inv": obj.matrix_world.inverted(), "m3": obj.matrix_world.to_3x3(), "mn": mn, "mx": mx}
 
     def _point_near_aabb(self, p, mn, mx, margin):
         return (

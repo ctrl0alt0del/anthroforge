@@ -1,7 +1,8 @@
 from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
-from .common import _EPS
+from ..utils import depsgraph_for_scene, scene_cache_get, scene_cache_set, scene_for_id
+from .common import _EPS, matrix_flat16
 
 _AXIS_VECTORS = {
     "POS_X": Vector((1.0, 0.0, 0.0)),
@@ -82,14 +83,55 @@ def _cache_key(mesh_obj):
     return None if mesh_obj is None else int(mesh_obj.as_pointer())
 
 
+def _surface_entry_key(mesh_obj):
+    return None if mesh_obj is None else f"surface:{_cache_key(mesh_obj)}"
+
+
+def _data_id(data):
+    try:
+        return int(data.as_pointer())
+    except Exception:
+        return id(data)
+
+
+def _mesh_counts(data):
+    return (0, 0) if data is None else (len(data.vertices), len(data.polygons))
+
+
+def _surface_stamp(obj_eval):
+    data = getattr(obj_eval, "data", None)
+    return (_data_id(data), _mesh_counts(data), tuple(matrix_flat16(obj_eval.matrix_world)))
+
+
+def _remember_surface(cache, key, surface):
+    if cache is not None and key is not None and surface is not None:
+        cache[key] = surface
+    return surface
+
+
+def _cached_surface(mesh_obj, depsgraph):
+    scene = scene_for_id(mesh_obj)
+    if scene is None or mesh_obj is None or depsgraph is None:
+        return None, None, None
+    obj_eval = mesh_obj.evaluated_get(depsgraph)
+    return scene, _surface_stamp(obj_eval), scene_cache_get(scene, _surface_entry_key(mesh_obj))
+
+
+def _store_surface(scene, mesh_obj, stamp, surface):
+    if scene is not None and mesh_obj is not None and surface is not None:
+        scene_cache_set(scene, _surface_entry_key(mesh_obj), {"stamp": stamp, "surface": surface})
+
+
 def build_mesh_surface_data(mesh_obj, depsgraph, cache=None):
     key = _cache_key(mesh_obj)
     if cache is not None and key in cache:
         return cache[key]
+    scene, stamp, entry = _cached_surface(mesh_obj, depsgraph)
+    if entry and entry.get("stamp") == stamp:
+        return _remember_surface(cache, key, entry["surface"])
     surface = _build_surface(mesh_obj, depsgraph)
-    if cache is not None and key is not None and surface is not None:
-        cache[key] = surface
-    return surface
+    _store_surface(scene, mesh_obj, stamp, surface)
+    return _remember_surface(cache, key, surface)
 
 
 def _build_surface(mesh_obj, depsgraph):
@@ -107,15 +149,30 @@ def _surface_payload(obj_eval, mesh_eval):
     if len(mesh_eval.vertices) <= 0:
         return None
     mesh_eval.calc_loop_triangles()
-    verts = [obj_eval.matrix_world @ v.co for v in mesh_eval.vertices]
+    verts_local = [v.co.copy() for v in mesh_eval.vertices]
+    verts = [obj_eval.matrix_world @ v for v in verts_local]
     triangles = [tuple(tri.vertices) for tri in mesh_eval.loop_triangles]
-    bvh = None if not triangles else BVHTree.FromPolygons(verts, triangles, all_triangles=True)
-    return None if bvh is None else {"bvh": bvh, "face_centers": _face_centers(obj_eval, mesh_eval), "triangles": triangles, "verts_world": verts}
+    return _surface_payload_data(obj_eval, mesh_eval, verts_local, verts, triangles)
+
+
+def _surface_payload_data(obj_eval, mesh_eval, verts_local, verts_world, triangles):
+    bvh_local = None if not triangles else BVHTree.FromPolygons(verts_local, triangles, all_triangles=True)
+    bvh_world = None if not triangles else BVHTree.FromPolygons(verts_world, triangles, all_triangles=True)
+    if bvh_local is None or bvh_world is None:
+        return None
+    return {"bvh_local": bvh_local, "bvh_world": bvh_world, "face_centers": _face_centers(obj_eval, mesh_eval), "triangles": triangles, "verts_world": verts_world, "bounds_world": _world_bounds(verts_world)}
 
 
 def _face_centers(obj_eval, mesh_eval):
     matrix_world = obj_eval.matrix_world.copy()
     return [matrix_world @ poly.center for poly in mesh_eval.polygons]
+
+
+def _world_bounds(verts_world):
+    xs = [v.x for v in verts_world]
+    ys = [v.y for v in verts_world]
+    zs = [v.z for v in verts_world]
+    return Vector((min(xs), min(ys), min(zs))), Vector((max(xs), max(ys), max(zs)))
 
 
 def build_face_centers(mesh_obj, depsgraph, cache=None):
@@ -126,6 +183,14 @@ def build_face_centers(mesh_obj, depsgraph, cache=None):
 def build_vertex_points(mesh_obj, depsgraph, cache=None):
     surface = build_mesh_surface_data(mesh_obj, depsgraph, cache=cache)
     return None if not surface else surface["verts_world"]
+
+
+def surface_bvh_local(mesh_obj, depsgraph=None, cache=None):
+    if mesh_obj is None or mesh_obj.type != "MESH":
+        return None
+    depsgraph = depsgraph or depsgraph_for_scene(scene_for_id(mesh_obj))
+    surface = build_mesh_surface_data(mesh_obj, depsgraph, cache=cache)
+    return None if not surface else surface["bvh_local"]
 
 
 def _closest_point_barycentric(a, b, c, point):
@@ -149,7 +214,7 @@ def _normalized_weights(d00, d01, d11, d20, d21, denom):
 def _nearest_triangle_hit(surface, target_world):
     if not surface:
         return None
-    hit = surface["bvh"].find_nearest(target_world)
+    hit = surface["bvh_world"].find_nearest(target_world)
     return _hit_from_bvh(surface, hit)
 
 
