@@ -1,7 +1,7 @@
 from mathutils import Vector
 
 from ..utils import depsgraph_for_scene
-from ..scp_runtime.common import as_id, as_vec3, find_geometry_mesh_scp_obj, find_scp_by_id, find_transform_scp_obj, mark_applied_matrix
+from ..scp_runtime.common import as_id, as_vec3, find_scp_by_id, indexed_geometry_mesh_scp_obj, indexed_transform_scp_obj, mark_applied_matrix, scp_object_maps
 from ..scp_runtime.runtime_state import attach_child_anchor_index, attach_child_origin_local, attach_initialized
 
 
@@ -15,9 +15,10 @@ def capture_owner_backsolve_snapshot(root, scene, owner_id):
 
 def _snapshot_state(root, scene, owner_id):
     scp, parent_id = find_scp_by_id(root, owner_id), _parent_id(root, owner_id)
-    owner_obj = None if scene is None else find_transform_scp_obj(scene, root.name, owner_id)
-    owner_geo = None if scene is None else find_geometry_mesh_scp_obj(scene, root.name, owner_id)
-    parent_obj = _parent_frame(root, scene, parent_id)
+    index = None if scene is None else scp_object_maps(scene, root.name)
+    owner_obj = _transform_obj(index, owner_id)
+    owner_geo = _geometry_obj(index, owner_id)
+    parent_obj = _parent_frame(root, scene, parent_id, index)
     depsgraph = None if scene is None else depsgraph_for_scene(scene)
     valid = _can_snapshot(scp, owner_obj, parent_obj, depsgraph)
     return None if not valid else (scp, owner_obj, owner_geo, parent_id, parent_obj, depsgraph)
@@ -59,9 +60,10 @@ def apply_owner_backsolve(root, scene, snapshot):
 def _backsolve_state(root, scene, snapshot):
     data = dict(snapshot or {})
     owner_id, parent_id = as_id(data.get("owner_id")), as_id(data.get("parent_id"))
-    owner_obj = None if scene is None else find_transform_scp_obj(scene, root.name, owner_id)
-    owner_geo = None if scene is None else find_geometry_mesh_scp_obj(scene, root.name, owner_id)
-    parent_obj = _parent_frame(root, scene, parent_id)
+    index = None if scene is None else scp_object_maps(scene, root.name)
+    owner_obj = _transform_obj(index, owner_id)
+    owner_geo = _geometry_obj(index, owner_id)
+    parent_obj = _parent_frame(root, scene, parent_id, index)
     depsgraph = None if scene is None else depsgraph_for_scene(scene)
     anchor = _anchor_world(data.get("anchor_mode"), data.get("anchor_index"), data.get("anchor_local"), owner_obj, owner_geo, depsgraph)
     return None if owner_obj is None or parent_obj is None or anchor is None else (owner_obj, parent_obj, anchor, data)
@@ -107,16 +109,24 @@ def _anchor_mode(scp):
     return mode if mode in {"FACE_CENTER", "VERTEX_NEAREST", "OBJECT_ORIGIN"} else "FACE_CENTER"
 
 
-def _parent_frame(root, scene, parent_id):
+def _parent_frame(root, scene, parent_id, index=None):
     parent_frame_obj = _parent_frame_obj()
-    transform = None if scene is None else find_transform_scp_obj(scene, root.name, parent_id)
-    geometry = None if scene is None else find_geometry_mesh_scp_obj(scene, root.name, parent_id)
+    transform = _transform_obj(index, parent_id)
+    geometry = _geometry_obj(index, parent_id)
     return None if not parent_id else parent_frame_obj(transform, geometry)
 
 
 def _parent_id(root, owner_id):
     scp = find_scp_by_id(root, owner_id)
     return "" if scp is None else getattr(scp, "parent_id", "")
+
+
+def _transform_obj(index, scp_id):
+    return None if index is None else indexed_transform_scp_obj(index, scp_id)
+
+
+def _geometry_obj(index, scp_id):
+    return None if index is None else indexed_geometry_mesh_scp_obj(index, scp_id)
 
 
 def _surface_builder(mode):

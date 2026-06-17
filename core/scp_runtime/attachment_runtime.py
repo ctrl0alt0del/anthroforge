@@ -1,6 +1,7 @@
 from mathutils import Matrix, Vector
 
 from ..utils import depsgraph_for_scene, scene_for_id, update_scene_view_layer
+from ..shortcuts.owner_backsolve import apply_owner_backsolve
 from .attachment_session import follow_rotation_enabled, tangent_strategy
 from .common import as_bool, as_id, as_vec3, find_geometry_mesh_scp_obj, find_transform_scp_obj, indexed_geometry_mesh_scp_obj
 from .common import indexed_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix, scp_object_maps
@@ -425,6 +426,10 @@ def _blocked_apply_ids(gate_meta):
     return payload_id_set(_apply_payload(gate_meta), "scp_recapture_ids")
 
 
+def _shortcut_backsolve(gate_meta):
+    return dict(_apply_payload(gate_meta).get("scp_owner_backsolve", {}) or {})
+
+
 def _active_target_ids(target_scp_ids):
     return {as_id(value) for value in set(target_scp_ids or set()) if as_id(value)}
 
@@ -442,7 +447,7 @@ def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, par
     if not active_target_ids and not active_parent_ids:
         return set()
     blocked_ids = _blocked_apply_ids(gate_meta)
-    return _apply_attachment_targets(root, scene, scp_by_id, active_target_ids, active_parent_ids, blocked_ids)
+    return _apply_attachment_targets(root, scene, scp_by_id, active_target_ids, active_parent_ids, blocked_ids, _shortcut_backsolve(gate_meta))
 
 
 def _apply_order(scp_by_id, active_target_ids, active_parent_ids):
@@ -483,18 +488,24 @@ def _apply_depth(scp_by_id, sid, cache):
     return cache[sid]
 
 
-def _apply_attachment_targets(root, scene, scp_by_id, active_target_ids, active_parent_ids, blocked_ids):
+def _apply_attachment_targets(root, scene, scp_by_id, active_target_ids, active_parent_ids, blocked_ids, backsolve):
     depsgraph = depsgraph_for_scene(scene)
     if depsgraph is None:
         return set()
+    order = _apply_order(scp_by_id, active_target_ids, active_parent_ids)
+    pending = set(order)
+    kids = children_map(scp_by_id)
     surface_cache = _new_surface_cache()
     object_index = scp_object_maps(scene, root.name)
     changed = set()
-    for sid in _apply_order(scp_by_id, active_target_ids, active_parent_ids):
+    for sid in order:
+        pending.discard(sid)
         args = scp_by_id, sid, active_target_ids, active_parent_ids
-        if _apply_child(*args, blocked_ids, surface_cache, object_index, depsgraph):
+        applied = _apply_child(*args, blocked_ids, surface_cache, object_index, depsgraph)
+        moved = _apply_shortcut_backsolve(root, scene, sid, backsolve)
+        if applied or moved:
             changed.add(sid)
-            depsgraph = _refresh_child_chain(scene, active_parent_ids, sid, surface_cache)
+            depsgraph = _refresh_child_chain(scene, active_parent_ids, sid, kids, pending, depsgraph)
     return changed
 
 
@@ -512,10 +523,20 @@ def _should_apply_attachment(child_scp, sid, parent_id, active_target_ids, activ
     return bool(child_scp is not None and sid not in set(blocked_ids or set()) and (direct or chained))
 
 
-def _refresh_child_chain(scene, active_parent_ids, sid, surface_cache):
+def _refresh_child_chain(scene, active_parent_ids, sid, kids, pending, depsgraph):
     active_parent_ids.add(sid)
-    surface_cache.clear()
+    if not _needs_child_refresh(kids, pending, sid):
+        return depsgraph
     return depsgraph_for_scene(scene)
+
+
+def _apply_shortcut_backsolve(root, scene, sid, backsolve):
+    owner_id = as_id(dict(backsolve or {}).get("owner_id"))
+    return bool(owner_id and owner_id == sid and apply_owner_backsolve(root, scene, backsolve))
+
+
+def _needs_child_refresh(kids, pending, sid):
+    return any(child in pending for child in kids.get(sid, ()))
 
 
 def _apply_child_runtime(sid, child_scp, parent_id, surface_cache, object_index, depsgraph):

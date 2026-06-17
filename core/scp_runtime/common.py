@@ -1,6 +1,6 @@
 from mathutils import Vector
 
-from ..utils import scene_cache_drop, scene_cache_get, scene_cache_set
+from ..utils import scene_cache_drop, scene_cache_get, scene_cache_set, scene_for_id
 
 _EPS = 1.0e-6
 _APPLIED_MW_KEY = "af_scp_attach_applied_mw"
@@ -93,6 +93,21 @@ def iter_geometry_mesh_scp_objects(scene, root_name):
 
 def _index_key(root_name):
     return f"scp_index:{as_id(root_name)}"
+
+
+def _prop_key(root):
+    return f"scp_props:{_root_id(root)}"
+
+
+def _root_id(root):
+    try:
+        return int(root.as_pointer())
+    except Exception:
+        return id(root)
+
+
+def _scp_ids(root):
+    return tuple(as_id(s.id) for s in getattr(getattr(root, "af_scp_system", None), "scps", ()))
 
 
 def invalidate_scp_object_maps(scene, root_name):
@@ -190,12 +205,18 @@ def _first_bound_scp_obj(scene, root_name, scp_id):
 
 
 def scp_prop_map(root):
-    return {as_id(s.id): s for s in root.af_scp_system.scps}
+    scene = scene_for_id(root)
+    cached = scene_cache_get(scene, _prop_key(root))
+    stamp = _scp_ids(root)
+    if cached and cached.get("stamp") == stamp:
+        return cached["index"]
+    index = {as_id(s.id): s for s in root.af_scp_system.scps}
+    scene_cache_set(scene, _prop_key(root), {"stamp": stamp, "index": index})
+    return index
 
 
 def find_scp_by_id(root, scp_id):
-    sid = as_id(scp_id)
-    return next((scp for scp in root.af_scp_system.scps if as_id(scp.id) == sid), None)
+    return scp_prop_map(root).get(as_id(scp_id))
 
 
 def scp_for_object(root, obj):

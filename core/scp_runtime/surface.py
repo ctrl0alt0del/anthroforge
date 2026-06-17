@@ -103,10 +103,15 @@ def _surface_stamp(obj_eval):
     return (_data_id(data), _mesh_counts(data), tuple(matrix_flat16(obj_eval.matrix_world)))
 
 
-def _remember_surface(cache, key, surface):
-    if cache is not None and key is not None and surface is not None:
-        cache[key] = surface
+def _remember_surface(cache, key, stamp, surface):
+    if cache is not None and key is not None:
+        cache[key] = {"stamp": stamp, "surface": surface}
     return surface
+
+
+def _local_surface(cache, key, stamp):
+    entry = None if cache is None or key is None else cache.get(key)
+    return None if entry is None or entry.get("stamp") != stamp else entry.get("surface")
 
 
 def _cached_surface(mesh_obj, depsgraph):
@@ -124,14 +129,15 @@ def _store_surface(scene, mesh_obj, stamp, surface):
 
 def build_mesh_surface_data(mesh_obj, depsgraph, cache=None):
     key = _cache_key(mesh_obj)
-    if cache is not None and key in cache:
-        return cache[key]
     scene, stamp, entry = _cached_surface(mesh_obj, depsgraph)
+    local = _local_surface(cache, key, stamp)
+    if local is not None:
+        return local
     if entry and entry.get("stamp") == stamp:
-        return _remember_surface(cache, key, entry["surface"])
+        return _remember_surface(cache, key, stamp, entry["surface"])
     surface = _build_surface(mesh_obj, depsgraph)
     _store_surface(scene, mesh_obj, stamp, surface)
-    return _remember_surface(cache, key, surface)
+    return _remember_surface(cache, key, stamp, surface)
 
 
 def _build_surface(mesh_obj, depsgraph):

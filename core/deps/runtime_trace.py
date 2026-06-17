@@ -33,7 +33,7 @@ def trace_enabled(root=None, scene=None):
         return True
     if raw in ("0", "false", "no", "off"):
         return False
-    return _flag_enabled(scene) or _flag_enabled(root) or True
+    return _flag_enabled(scene) or _flag_enabled(root)
 
 
 def trace_min_ms():

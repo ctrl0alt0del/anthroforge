@@ -4,7 +4,7 @@ from ..queries.root import root_for_context
 
 try:
     from ...core.shortcuts import override_values, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
-    from ...core.shortcuts.owner_backsolve import apply_owner_backsolve, capture_owner_backsolve_snapshot
+    from ...core.shortcuts.owner_backsolve import capture_owner_backsolve_snapshot
     from ...core.shortcuts.proxy_props import shortcut_prop_name
     from ...core.shortcuts.vector_modes import is_uniform_vector_shortcut
     from ...core.shortcuts.owners import shortcut_relation
@@ -13,7 +13,7 @@ try:
     from ...core.scp_runtime.runtime_state import restore_attachment_runtime, snapshot_attachment_runtime
 except ImportError:
     from core.shortcuts import override_values, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
-    from core.shortcuts.owner_backsolve import apply_owner_backsolve, capture_owner_backsolve_snapshot
+    from core.shortcuts.owner_backsolve import capture_owner_backsolve_snapshot
     from core.shortcuts.proxy_props import shortcut_prop_name
     from core.shortcuts.vector_modes import is_uniform_vector_shortcut
     from core.shortcuts.owners import shortcut_relation
@@ -38,6 +38,18 @@ def apply_shortcut_value(context, shortcut, value):
     target = resolve_shortcut_target(context, shortcut)
     root = root_for_context(context)
     return False if target is None or root is None else _apply_target_value(context, root, shortcut, target, value)
+
+
+def set_shortcut_value(context, shortcut, value):
+    return apply_shortcut_value(context, shortcut, value)
+
+
+def flush_pending_shortcut_values():
+    return None
+
+
+def unregister_shortcut_queue():
+    return None
 
 
 def _apply_target(context, root, shortcut, target):
@@ -87,16 +99,7 @@ def _run_scp_session(context, root, shortcut, target, value, plan, session, auth
 
 def _run_shortcut_passes(context, root, shortcut, target, value, plan, session):
     write_target_value(target, value)
-    _run_shortcut_sync(context, _session_request(shortcut, plan))
-    _run_owner_followup(context, root, shortcut, session)
-
-
-def _run_owner_followup(context, root, shortcut, session):
-    if not apply_owner_backsolve(root, getattr(context, "scene", None), session.get("owner")):
-        return False
-    suppress_next_depsgraph_ids(session.get("suppressed", set()))
-    _run_shortcut_sync(context, _followup_request(shortcut))
-    return True
+    _run_shortcut_sync(context, _session_request(shortcut, plan, session))
 
 
 def _session_overrides(root, shortcut):
@@ -171,24 +174,21 @@ def _fresh_ids(root, runtime_overrides, cached_runtime):
     return {sid for sid, values in items if sid not in cached_runtime and _needs_recapture(root, sid, values)}
 
 
-def _session_request(shortcut, plan):
+def _session_request(shortcut, plan, session):
     owner_id = _owner_id(shortcut)
-    return _sync_request(owner_id, _session_dirty_ids(shortcut, plan), {owner_id})
+    return _sync_request(owner_id, _session_dirty_ids(shortcut, plan), {owner_id}, session.get("owner"))
 
 
-def _followup_request(shortcut):
-    owner_id = _owner_id(shortcut)
-    return _sync_request(owner_id, _followup_dirty_ids(owner_id), set())
-
-
-def _sync_request(owner_id, dirty_ids, target_ids):
-    payload = _session_payload(owner_id, target_ids)
+def _sync_request(owner_id, dirty_ids, target_ids, owner=None):
+    payload = _session_payload(owner_id, target_ids, owner)
     return set(dirty_ids or set()), payload
 
 
-def _session_payload(owner_id, target_ids):
+def _session_payload(owner_id, target_ids, owner=None):
     targets = [sid for sid in sorted(set(target_ids or set())) if sid]
-    return {"scp_apply_target_ids": targets, "scp_apply_parent_ids": [owner_id] if owner_id else [], "scp_recapture_ids": []}
+    payload = {"scp_apply_target_ids": targets, "scp_apply_parent_ids": [owner_id] if owner_id else [], "scp_recapture_ids": []}
+    payload["scp_owner_backsolve"] = dict(owner) if owner else {}
+    return payload
 
 
 def _session_dirty_ids(shortcut, plan):
@@ -265,10 +265,6 @@ def _restore_authored_runtime(root, authored):
 def _restore_runtime_snapshot(root, sid, snapshot):
     scp = _runtime_scp(root, sid)
     restore_attachment_runtime(scp, snapshot) if scp is not None else None
-
-
-def _followup_dirty_ids(owner_id):
-    return {owner_id} if owner_id else set()
 
 
 def _owner_id(shortcut):
