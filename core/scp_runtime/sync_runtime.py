@@ -141,4 +141,4 @@ def _record_update_ids(obj, changed_ids, transform_ids, geometry_ids):
 
 def _payload(transform_ids, geometry_ids):
     apply_ids = set(geometry_ids or set()) | set(transform_ids or set())
-    return {"scp_recapture_ids": sorted(transform_ids), "scp_apply_parent_ids": sorted(apply_ids)}
+    return {"scp_recapture_ids": sorted(transform_ids), "scp_apply_parent_ids": sorted(apply_ids), "scp_apply_target_ids": sorted(apply_ids)}

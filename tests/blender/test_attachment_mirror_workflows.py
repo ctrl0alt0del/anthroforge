@@ -189,7 +189,7 @@ class AttachmentMirrorWorkflowTests(BlenderTestCase):
 
     def test_sync_runtime_payload_marks_recapture_and_apply_ids(self):
         payload = sync_runtime._payload({"S1"}, {"S1", "S2"})
-        self.assertEqual((payload["scp_recapture_ids"], payload["scp_apply_parent_ids"]), (["S1"], ["S1", "S2"]))
+        self.assertEqual((payload["scp_recapture_ids"], payload["scp_apply_target_ids"], payload["scp_apply_parent_ids"]), (["S1"], ["S1", "S2"], ["S1", "S2"]))
 
     def test_mirror_sync_creates_and_cleans_target_clone(self):
         root_obj = root()

@@ -26,6 +26,7 @@ Every runtime request carries the same fields:
 The current payload contract includes these keys:
 
 - `scp_recapture_ids`: SCP ids that must recapture attachment data before sync.
+- `scp_apply_target_ids`: SCP ids whose own attachments must solve against their current parents.
 - `scp_apply_parent_ids`: SCP ids whose child attachments must be re-applied during sync.
 - `non_source_ids_by_type`: entity ids that are dirty side effects and must not seed source-start traversal.
 

@@ -26,7 +26,7 @@ CONTRACT_DOC = ADDON_ROOT / "docs" / "runtime_contract.md"
 class ArchitectureGuardrailTests(unittest.TestCase):
     def test_runtime_contract_doc_lists_required_runtime_metadata(self):
         text = CONTRACT_DOC.read_text(encoding="utf-8")
-        for token in ("dirty_hints", "source", "event_type", "scp_recapture_ids", "scp_apply_parent_ids", "non_source_ids_by_type", "_PENDING", "_TIMER_ARMED"):
+        for token in ("dirty_hints", "source", "event_type", "scp_recapture_ids", "scp_apply_target_ids", "scp_apply_parent_ids", "non_source_ids_by_type", "_PENDING", "_TIMER_ARMED"):
             self.assertIn(token, text)
 
     def test_function_size_ratchet_has_no_new_or_grown_violations(self):

@@ -13,7 +13,8 @@ from _helpers import BlenderTestCase, add_shortcut, empty_object, mesh_object, r
 from core.scp_runtime.attachment_runtime import apply_scp_attachments, capture_attachment_from_link
 from core.scp_runtime.common import scp_prop_map
 from core.scp_runtime.lookup import set_parent_relation
-from core.scp_runtime.runtime_state import attach_parent_param
+from core.scp_runtime.runtime_state import attach_child_anchor_index, attach_parent_param
+from core.scp_runtime.surface import build_face_centers
 from anthroforge.core.shortcuts.session_state import cached_override_runtime
 from core.shortcuts import resolve_shortcut, upsert_override
 from core.shortcuts.proxy_props import proxy_prop_name
@@ -67,6 +68,17 @@ def _evaluated_x(obj):
     deps = bpy.context.evaluated_depsgraph_get()
     verts = obj.evaluated_get(deps).data.vertices
     return tuple(round(float(v.co.x), 4) for v in verts)
+
+
+def _face_center_world(scp):
+    bpy.context.view_layer.update()
+    deps = bpy.context.evaluated_depsgraph_get()
+    return build_face_centers(scp.geometry_object_ref, deps, cache={})[attach_child_anchor_index(scp)]
+
+
+def _parent_local_face_center(parent, child):
+    point = parent.transform_object_ref.matrix_world.inverted() @ _face_center_world(child)
+    return tuple(round(float(value), 4) for value in point)
 
 
 def _attached_empty_pair(root_obj):
@@ -171,6 +183,21 @@ class ShortcutWorkflowTests(BlenderTestCase):
         self.assertEqual(_evaluated_x(scp.transform_object_ref), (0.0, 1.0, 0.0))
         self.assertTrue(_apply_float_shortcut(root_obj, shortcut, 2.0))
         self.assertEqual(_evaluated_x(scp.transform_object_ref), (2.0, 3.0, 2.0))
+
+    def test_owner_shortcut_preserves_attached_face_center_offset(self):
+        root_obj = root()
+        parent = scp_with_object(root_obj, "Parent", empty_object("Parent", (4.0, 1.0, 0.0)), with_geometry=False)
+        owner = scp_with_object(root_obj, "Owner", mesh_object("Owner", (4.0, 1.0, 0.0)))
+        owner.attach_parent_anchor_mode, owner.attach_child_anchor_mode = "OBJECT_ORIGIN", "FACE_CENTER"
+        set_parent_relation(owner.transform_object_ref, owner, parent.transform_object_ref)
+        self.assertTrue(capture_attachment_from_link(owner, owner.transform_object_ref, owner.geometry_object_ref, parent.transform_object_ref, None))
+        before = _parent_local_face_center(parent, owner)
+        mod, key = _geometry_nodes_setup(owner.transform_object_ref)
+        add_shortcut(root_obj, "Offset", "SCP", owner.id, f'bpy.data.objects["{owner.transform_object_ref.name}"].modifiers["{mod.name}"]["{key}"]').proxy_float = 2.0
+        bpy.context.view_layer.update()
+        self.assertEqual((_parent_local_face_center(parent, owner), tuple(round(float(v), 4) for v in owner.transform_object_ref.location)), (before, (2.0, 1.0, 0.0)))
+        bpy.context.view_layer.update()
+        self.assertEqual(_parent_local_face_center(parent, owner), before)
 
     def test_uniform_vector_shortcut_sets_all_scale_components(self):
         root_obj = root()

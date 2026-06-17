@@ -4,6 +4,7 @@ from ..queries.root import root_for_context
 
 try:
     from ...core.shortcuts import override_values, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
+    from ...core.shortcuts.owner_backsolve import apply_owner_backsolve, capture_owner_backsolve_snapshot
     from ...core.shortcuts.proxy_props import shortcut_prop_name
     from ...core.shortcuts.vector_modes import is_uniform_vector_shortcut
     from ...core.shortcuts.owners import shortcut_relation
@@ -12,6 +13,7 @@ try:
     from ...core.scp_runtime.runtime_state import restore_attachment_runtime, snapshot_attachment_runtime
 except ImportError:
     from core.shortcuts import override_values, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
+    from core.shortcuts.owner_backsolve import apply_owner_backsolve, capture_owner_backsolve_snapshot
     from core.shortcuts.proxy_props import shortcut_prop_name
     from core.shortcuts.vector_modes import is_uniform_vector_shortcut
     from core.shortcuts.owners import shortcut_relation
@@ -55,27 +57,46 @@ def _write_plain(target, value):
 
 
 def _apply_scp_session(context, root, shortcut, target, value):
+    scene = getattr(context, "scene", None)
     overrides = _session_overrides(root, shortcut)
     plan = _session_plan(root, shortcut, overrides)
-    payload, dirty_ids = _session_sync(shortcut, plan)
     authored = _authored_runtime(root, plan)
+    session = _session_state(root, scene, shortcut, overrides, plan)
+    return _run_scp_session(context, root, shortcut, target, value, plan, session, authored)
+
+
+def _session_state(root, scene, shortcut, overrides, plan):
+    owner = capture_owner_backsolve_snapshot(root, scene, _owner_id(shortcut))
     _prime_session_runtime(root, plan)
     begin_override_sessions(overrides)
-    suppress_next_depsgraph_ids(_suppressed_ids(shortcut, overrides))
-    return _run_scp_session(context, root, shortcut, target, value, plan, payload, dirty_ids, authored)
+    runtime = _prepare_session_runtime(root, scene, plan)
+    suppressed = _suppressed_ids(root, shortcut, overrides)
+    suppress_next_depsgraph_ids(suppressed)
+    return {"owner": owner, "runtime": runtime, "suppressed": suppressed}
 
 
-def _run_scp_session(context, root, shortcut, target, value, plan, payload, dirty_ids, authored):
+def _run_scp_session(context, root, shortcut, target, value, plan, session, authored):
     try:
-        write_target_value(target, value)
-        _capture_session_runtime(root, getattr(context, "scene", None), plan)
-        runtime = _session_runtime(root, plan)
-        _sync_context()(context, dirty_hints=_dirty_hints_for()("SCP", dirty_ids), source="shortcut", event_type="UPDATE", payload=payload)
-        _store_session_runtime(shortcut, plan, runtime)
+        _run_shortcut_passes(context, root, shortcut, target, value, plan, session)
+        _store_session_runtime(shortcut, plan, session.get("runtime", {}))
         return True
     finally:
         clear_override_session()
         _restore_authored_runtime(root, authored)
+
+
+def _run_shortcut_passes(context, root, shortcut, target, value, plan, session):
+    write_target_value(target, value)
+    _run_shortcut_sync(context, _session_request(shortcut, plan))
+    _run_owner_followup(context, root, shortcut, session)
+
+
+def _run_owner_followup(context, root, shortcut, session):
+    if not apply_owner_backsolve(root, getattr(context, "scene", None), session.get("owner")):
+        return False
+    suppress_next_depsgraph_ids(session.get("suppressed", set()))
+    _run_shortcut_sync(context, _followup_request(shortcut))
+    return True
 
 
 def _session_overrides(root, shortcut):
@@ -150,17 +171,28 @@ def _fresh_ids(root, runtime_overrides, cached_runtime):
     return {sid for sid, values in items if sid not in cached_runtime and _needs_recapture(root, sid, values)}
 
 
-def _session_sync(shortcut, plan):
-    return _session_payload(shortcut), _session_dirty_ids(shortcut, plan)
+def _session_request(shortcut, plan):
+    owner_id = _owner_id(shortcut)
+    return _sync_request(owner_id, _session_dirty_ids(shortcut, plan), {owner_id})
 
 
-def _session_payload(shortcut):
-    owner_id = str(getattr(shortcut, "owner_id", "") or "")
-    return {"scp_apply_parent_ids": [owner_id], "scp_recapture_ids": []}
+def _followup_request(shortcut):
+    owner_id = _owner_id(shortcut)
+    return _sync_request(owner_id, _followup_dirty_ids(owner_id), set())
+
+
+def _sync_request(owner_id, dirty_ids, target_ids):
+    payload = _session_payload(owner_id, target_ids)
+    return set(dirty_ids or set()), payload
+
+
+def _session_payload(owner_id, target_ids):
+    targets = [sid for sid in sorted(set(target_ids or set())) if sid]
+    return {"scp_apply_target_ids": targets, "scp_apply_parent_ids": [owner_id] if owner_id else [], "scp_recapture_ids": []}
 
 
 def _session_dirty_ids(shortcut, plan):
-    owner_id = str(getattr(shortcut, "owner_id", "") or "")
+    owner_id = _owner_id(shortcut)
     fresh = set(plan.get("fresh_ids", set()) or set())
     return {sid for sid in ({owner_id} | fresh) if sid}
 
@@ -190,6 +222,11 @@ def _runtime_scp(root, sid):
 def _prime_session_runtime(root, plan):
     for sid, snapshot in dict(plan.get("cached_runtime", {}) or {}).items():
         _restore_runtime_snapshot(root, sid, snapshot)
+
+
+def _prepare_session_runtime(root, scene, plan):
+    _capture_session_runtime(root, scene, plan)
+    return _session_runtime(root, plan)
 
 
 def _capture_session_runtime(root, scene, plan):
@@ -230,10 +267,40 @@ def _restore_runtime_snapshot(root, sid, snapshot):
     restore_attachment_runtime(scp, snapshot) if scp is not None else None
 
 
-def _suppressed_ids(shortcut, overrides):
-    owner_id = str(getattr(shortcut, "owner_id", "") or "")
-    ids = {owner_id} | set(dict(overrides or {}).keys())
+def _followup_dirty_ids(owner_id):
+    return {owner_id} if owner_id else set()
+
+
+def _owner_id(shortcut):
+    return str(getattr(shortcut, "owner_id", "") or "")
+
+
+def _suppressed_ids(root, shortcut, overrides):
+    owner_id = _owner_id(shortcut)
+    ids = _owner_subtree_ids(root, owner_id) or ({owner_id} | set(dict(overrides or {}).keys()))
     return {sid for sid in ids if sid}
+
+
+def _owner_subtree_ids(root, owner_id):
+    system = getattr(root, "af_scp_system", None)
+    scps = () if system is None else getattr(system, "scps", ())
+    scp_by_id = {str(getattr(scp, "id", "") or ""): scp for scp in scps}
+    return set() if owner_id not in scp_by_id else _descendant_ids(_children_map()(scp_by_id), owner_id)
+
+
+def _descendant_ids(kids, owner_id):
+    out, stack = set(), [owner_id]
+    while stack:
+        sid = stack.pop()
+        if sid and sid not in out:
+            out.add(sid)
+            stack.extend(reversed(kids.get(sid, ())))
+    return out
+
+
+def _run_shortcut_sync(context, request):
+    dirty_ids, payload = request
+    _sync_context()(context, dirty_hints=_dirty_hints_for()("SCP", dirty_ids), source="shortcut", event_type="UPDATE", payload=payload)
 
 
 def _needs_session_recapture(values):
@@ -407,6 +474,14 @@ def _dirty_hints_for():
     except ImportError:
         from core.deps.dirty_hints import dirty_hints_for
     return dirty_hints_for
+
+
+def _children_map():
+    try:
+        from ...core.scp_runtime.tree import children_map
+    except ImportError:
+        from core.scp_runtime.tree import children_map
+    return children_map
 
 
 def live_shortcut_value(context, shortcut):

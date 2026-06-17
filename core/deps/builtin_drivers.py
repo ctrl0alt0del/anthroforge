@@ -48,6 +48,15 @@ def _scp_parent_ids(meta):
     return _payload_id_set(payload, "scp_apply_parent_ids")
 
 
+def _payload_has_key(payload, key):
+    return str(key) in dict(payload or {})
+
+
+def _scp_target_ids(meta, fallback):
+    payload = _meta_payload(meta)
+    return _payload_id_set(payload, "scp_apply_target_ids") if _payload_has_key(payload, "scp_apply_target_ids") else set(fallback or set())
+
+
 def _all_scp_parent_ids(root):
     return {str(getattr(scp, "parent_id", "") or "") for scp in root.af_scp_system.scps if str(getattr(scp, "parent_id", "") or "")}
 
@@ -61,11 +70,12 @@ def _full_attachment_capture(ctx):
 
 def _sync_scp_scene(root, scene, ids, is_full, meta):
     parent_ids = _scp_parent_ids(meta) or (_all_scp_parent_ids(root) if is_full else set())
+    target_ids = _scp_target_ids(meta, ids)
     kwargs = {"root": root, "scene": scene, "attachment_parent_ids": parent_ids, "attachment_gate_meta": meta}
     if is_full:
         register_sync().sync_root_to_scene(**kwargs)
-    elif ids:
-        register_sync().sync_root_to_scene(target_scp_ids=ids, **kwargs)
+    elif ids or target_ids or parent_ids:
+        register_sync().sync_root_to_scene(target_scp_ids=target_ids, **kwargs)
 
 
 class RuntimeGraphDriver(DependencyDriver):
