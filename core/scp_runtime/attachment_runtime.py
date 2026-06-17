@@ -2,7 +2,8 @@ from mathutils import Matrix, Vector
 
 from ..utils import depsgraph_for_scene, scene_for_id, update_scene_view_layer
 from .attachment_session import follow_rotation_enabled, tangent_strategy
-from .common import as_bool, as_id, as_vec3, find_geometry_mesh_scp_obj, find_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix
+from .common import as_bool, as_id, as_vec3, find_geometry_mesh_scp_obj, find_transform_scp_obj, indexed_geometry_mesh_scp_obj
+from .common import indexed_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix, scp_object_maps
 from .common import vec3_close, is_matrix_close, matrix_flat16
 from .common import payload_id_set
 from .child_anchor import anchor_mode as child_anchor_mode, capture_child_anchor
@@ -13,7 +14,7 @@ from .runtime_state import attach_flow_param, attach_initialized, attach_parent_
 from .runtime_state import read_attachment_runtime, set_attach_child_anchor_index, set_attach_initialized, write_attachment_runtime
 from .surface import basis_from_tangent_normal, build_face_centers, build_vertex_points, flow_hint_world, nearest_parent_param_from_world
 from .surface import project_tangent_hint, resolve_tangent_strategy
-from .tree import children_depth_order
+from .tree import children_map
 
 
 def _child_basis_local(child_scp):
@@ -444,24 +445,65 @@ def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, par
     return _apply_attachment_targets(root, scene, scp_by_id, active_target_ids, active_parent_ids, blocked_ids)
 
 
+def _apply_order(scp_by_id, active_target_ids, active_parent_ids):
+    ids = _apply_candidate_ids(scp_by_id, active_target_ids, active_parent_ids)
+    cache = {}
+    return sorted(ids, key=lambda sid: (_apply_depth(scp_by_id, sid, cache), sid))
+
+
+def _apply_candidate_ids(scp_by_id, active_target_ids, active_parent_ids):
+    kids = children_map(scp_by_id)
+    ids = set(active_target_ids or set()) & set(scp_by_id)
+    for sid in sorted(_apply_seed_ids(scp_by_id, active_target_ids, active_parent_ids)):
+        ids |= _descendant_ids(kids, sid)
+    return ids
+
+
+def _apply_seed_ids(scp_by_id, active_target_ids, active_parent_ids):
+    seeds = set(active_target_ids or set()) | set(active_parent_ids or set())
+    return {sid for sid in seeds if sid in scp_by_id}
+
+
+def _descendant_ids(kids, sid):
+    out, stack = set(), [sid]
+    while stack:
+        current = stack.pop()
+        if current in out:
+            continue
+        out.add(current)
+        stack.extend(reversed(kids.get(current, ())))
+    return out
+
+
+def _apply_depth(scp_by_id, sid, cache):
+    if sid in cache:
+        return cache[sid]
+    parent_id = as_id(getattr(scp_by_id.get(sid), "parent_id", ""))
+    cache[sid] = 0 if parent_id not in scp_by_id or parent_id == sid else _apply_depth(scp_by_id, parent_id, cache) + 1
+    return cache[sid]
+
+
 def _apply_attachment_targets(root, scene, scp_by_id, active_target_ids, active_parent_ids, blocked_ids):
+    depsgraph = depsgraph_for_scene(scene)
+    if depsgraph is None:
+        return set()
     surface_cache = _new_surface_cache()
+    object_index = scp_object_maps(scene, root.name)
     changed = set()
-    for sid in children_depth_order(scp_by_id):
-        args = root, scene, scp_by_id, sid, active_target_ids, active_parent_ids, blocked_ids, surface_cache
-        changed |= _apply_child(*args)
+    for sid in _apply_order(scp_by_id, active_target_ids, active_parent_ids):
+        args = scp_by_id, sid, active_target_ids, active_parent_ids
+        if _apply_child(*args, blocked_ids, surface_cache, object_index, depsgraph):
+            changed.add(sid)
+            depsgraph = _refresh_child_chain(scene, active_parent_ids, sid, surface_cache)
     return changed
 
 
-def _apply_child(root, scene, scp_by_id, sid, active_target_ids, active_parent_ids, blocked_ids, surface_cache):
+def _apply_child(scp_by_id, sid, active_target_ids, active_parent_ids, blocked_ids, surface_cache, object_index, depsgraph):
     child_scp = scp_by_id.get(sid)
     parent_id = as_id(getattr(child_scp, "parent_id", ""))
     if not _should_apply_attachment(child_scp, sid, parent_id, active_target_ids, active_parent_ids, blocked_ids):
-        return set()
-    changed = _apply_child_runtime(root, scene, sid, child_scp, parent_id, surface_cache)
-    if changed:
-        _refresh_child_chain(scene, active_parent_ids, sid, surface_cache)
-    return {sid} if changed else set()
+        return False
+    return _apply_child_runtime(sid, child_scp, parent_id, surface_cache, object_index, depsgraph)
 
 
 def _should_apply_attachment(child_scp, sid, parent_id, active_target_ids, active_parent_ids, blocked_ids):
@@ -472,23 +514,30 @@ def _should_apply_attachment(child_scp, sid, parent_id, active_target_ids, activ
 
 def _refresh_child_chain(scene, active_parent_ids, sid, surface_cache):
     active_parent_ids.add(sid)
-    update_scene_view_layer(scene)
     surface_cache.clear()
+    return depsgraph_for_scene(scene)
 
 
-def _apply_child_runtime(root, scene, sid, child_scp, parent_id, surface_cache):
-    child_obj = find_transform_scp_obj(scene, root.name, sid)
-    child_geometry = find_geometry_mesh_scp_obj(scene, root.name, sid)
-    parent_transform = find_transform_scp_obj(scene, root.name, parent_id)
-    parent_geometry = find_geometry_mesh_scp_obj(scene, root.name, parent_id)
-    depsgraph = depsgraph_for_scene(scene)
-    if depsgraph is None:
-        return False
-    if not _is_initialized(child_scp):
-        return False
-    if _missing_attachment_objects(child_scp, child_obj, child_geometry, parent_transform, parent_geometry):
+def _apply_child_runtime(sid, child_scp, parent_id, surface_cache, object_index, depsgraph):
+    child_obj, child_geometry = _apply_child_objects(object_index, sid)
+    parent_transform, parent_geometry = _apply_parent_objects(object_index, parent_id)
+    if not _can_apply_runtime(child_scp, child_obj, child_geometry, parent_transform, parent_geometry, depsgraph):
         return False
     return AttachmentApply(child_scp, child_obj, child_geometry, parent_transform, parent_geometry, depsgraph, surface_cache).run()
+
+
+def _apply_child_objects(object_index, sid):
+    return indexed_transform_scp_obj(object_index, sid), indexed_geometry_mesh_scp_obj(object_index, sid)
+
+
+def _apply_parent_objects(object_index, parent_id):
+    return indexed_transform_scp_obj(object_index, parent_id), indexed_geometry_mesh_scp_obj(object_index, parent_id)
+
+
+def _can_apply_runtime(child_scp, child_obj, child_geometry, parent_transform, parent_geometry, depsgraph):
+    if depsgraph is None or not _is_initialized(child_scp):
+        return False
+    return not _missing_attachment_objects(child_scp, child_obj, child_geometry, parent_transform, parent_geometry)
 
 
 def _is_initialized(child_scp):

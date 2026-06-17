@@ -68,6 +68,10 @@ def _full_attachment_capture(ctx):
     return bool(ctx.is_full and (source == "load" or event in {"LOAD", "IMPORT"}))
 
 
+def _selection_event(meta):
+    return str(dict(meta or {}).get("event_type", "") or "").upper() == "SELECTION"
+
+
 def _sync_scp_scene(root, scene, ids, is_full, meta):
     parent_ids = _scp_parent_ids(meta) or (_all_scp_parent_ids(root) if is_full else set())
     target_ids = _scp_target_ids(meta, ids)
@@ -149,6 +153,8 @@ class SCPSyncDriver(DependencyDriver):
 
     def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
         _ = bake
+        if _selection_event(gate_meta):
+            return
         ids = set(impacted.get("SCP", set()) or set())
         _sync_scp_scene(root, scene, ids, is_full, dict(gate_meta or {}))
 

@@ -16,6 +16,7 @@ from core.scp_runtime.lookup import set_parent_relation
 from core.scp_runtime.runtime_state import attach_child_anchor_index, attach_parent_param
 from core.scp_runtime.surface import build_face_centers
 from anthroforge.core.shortcuts.session_state import cached_override_runtime
+from anthroforge.core.visualization.control_runtime import notify_selection_changed
 from core.shortcuts import resolve_shortcut, upsert_override
 from core.shortcuts.proxy_props import proxy_prop_name
 
@@ -92,6 +93,12 @@ def _attached_empty_pair(root_obj):
 
 def _apply_parent(root_obj, parent):
     return apply_scp_attachments(None, root_obj, bpy.context.scene, scp_prop_map(root_obj), parent_ids={parent.id})
+
+
+def _clear_selection():
+    for obj in tuple(bpy.context.selected_objects):
+        obj.select_set(False)
+    bpy.context.view_layer.objects.active = None
 
 
 class ShortcutWorkflowTests(BlenderTestCase):
@@ -198,6 +205,25 @@ class ShortcutWorkflowTests(BlenderTestCase):
         self.assertEqual((_parent_local_face_center(parent, owner), tuple(round(float(v), 4) for v in owner.transform_object_ref.location)), (before, (2.0, 1.0, 0.0)))
         bpy.context.view_layer.update()
         self.assertEqual(_parent_local_face_center(parent, owner), before)
+
+    def test_owner_shortcut_deselect_keeps_backsolved_pose(self):
+        root_obj = root()
+        parent = scp_with_object(root_obj, "Parent", empty_object("Parent", (4.0, 1.0, 0.0)), with_geometry=False)
+        owner = scp_with_object(root_obj, "Owner", mesh_object("Owner", (4.0, 1.0, 0.0)))
+        owner.attach_parent_anchor_mode, owner.attach_child_anchor_mode = "OBJECT_ORIGIN", "FACE_CENTER"
+        set_parent_relation(owner.transform_object_ref, owner, parent.transform_object_ref)
+        self.assertTrue(capture_attachment_from_link(owner, owner.transform_object_ref, owner.geometry_object_ref, parent.transform_object_ref, None))
+        mod, key = _geometry_nodes_setup(owner.transform_object_ref)
+        shortcut = add_shortcut(root_obj, "Offset", "SCP", owner.id, f'bpy.data.objects["{owner.transform_object_ref.name}"].modifiers["{mod.name}"]["{key}"]')
+        select_only(owner.transform_object_ref)
+        notify_selection_changed(bpy.context.scene, force=True, active_object=owner.transform_object_ref)
+        self.assertTrue(_apply_float_shortcut(root_obj, shortcut, 2.0))
+        bpy.context.view_layer.update()
+        stable = (_parent_local_face_center(parent, owner), tuple(round(float(v), 4) for v in owner.transform_object_ref.location))
+        _clear_selection()
+        notify_selection_changed(bpy.context.scene, force=True, active_object=None)
+        bpy.context.view_layer.update()
+        self.assertEqual((_parent_local_face_center(parent, owner), tuple(round(float(v), 4) for v in owner.transform_object_ref.location)), stable)
 
     def test_uniform_vector_shortcut_sets_all_scale_components(self):
         root_obj = root()

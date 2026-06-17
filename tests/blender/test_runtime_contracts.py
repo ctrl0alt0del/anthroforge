@@ -25,7 +25,7 @@ from core.utils import get_af_root
 from core.vcp.runtime_state import fiber_recompute_ms, fiber_recompute_status, set_fiber_recompute_ms, set_fiber_recompute_status
 from core.visualization.scp_control_helpers import mark_scp_control_object
 from core.visualization import control_runtime, delete_reconcile, sync_runner
-from core.deps import drivers, gates, runtime, runtime_intent_behaviors, runtime_intents
+from core.deps import builtin_drivers, drivers, gates, runtime, runtime_intent_behaviors, runtime_intents
 
 
 def _restore_addon():
@@ -259,3 +259,9 @@ class RuntimeContractTests(BlenderTestCase):
             runtime.run_dependency_runtime(SimpleNamespace(), SimpleNamespace(), {"SCP": {"S1", "S2"}})
         self.assertIn(("sync", False, {"S1"}), calls)
         self.assertIn(("post", {"S1", "S2"}), calls)
+
+    def test_scp_sync_driver_skips_selection_events(self):
+        driver = builtin_drivers.SCPSyncDriver()
+        with patch.object(builtin_drivers, "_sync_scp_scene") as sync:
+            driver.sync(root(), bpy.context.scene, False, {"SCP": {"S1"}}, False, gate_meta={"event_type": "SELECTION"})
+        self.assertEqual(sync.call_count, 0)

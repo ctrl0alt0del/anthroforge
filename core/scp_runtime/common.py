@@ -89,16 +89,43 @@ def iter_geometry_mesh_scp_objects(scene, root_name):
             yield obj
 
 
+def scp_object_maps(scene, root_name):
+    index = {"transform": {}, "geometry": {}}
+    for obj in iter_bound_scp_objects(scene, root_name):
+        sid = as_id(obj.get("af_scp_id"))
+        _index_transform_obj(index, sid, obj)
+        _index_geometry_obj(index, sid, obj)
+    return index
+
+
+def _index_transform_obj(index, sid, obj):
+    if sid and obj.get("af_scp_transform") and sid not in index["transform"]:
+        index["transform"][sid] = obj
+
+
+def _index_geometry_obj(index, sid, obj):
+    if sid and obj.type == "MESH" and obj.get("af_scp_geometry") and sid not in index["geometry"]:
+        index["geometry"][sid] = obj
+
+
 def find_geometry_scp_obj(scene, root_name, scp_id):
     sid = as_id(scp_id)
     objs = iter_bound_scp_objects(scene, root_name)
     return next((obj for obj in objs if obj.get("af_scp_geometry") and as_id(obj.get("af_scp_id")) == sid), None)
 
 
+def indexed_geometry_mesh_scp_obj(index, scp_id):
+    return dict(index.get("geometry", {})).get(as_id(scp_id))
+
+
 def find_geometry_mesh_scp_obj(scene, root_name, scp_id):
     sid = as_id(scp_id)
     objs = iter_geometry_mesh_scp_objects(scene, root_name)
     return next((obj for obj in objs if as_id(obj.get("af_scp_id")) == sid), None)
+
+
+def indexed_transform_scp_obj(index, scp_id):
+    return dict(index.get("transform", {})).get(as_id(scp_id))
 
 
 def find_transform_scp_obj(scene, root_name, scp_id):
