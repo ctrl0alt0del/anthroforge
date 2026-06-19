@@ -11,6 +11,7 @@ from .mirror_clone_prep import prepare_mirror_clone
 from .common import as_axis, as_id, is_bound_scp_obj
 from .mirror_placement import apply_parent_target, mirror_clone_pairs, mirror_parent_for, mirror_target_worlds
 from .runtime_state import mirror_effective_axis, mirror_source_id, mirror_status
+from .tree import children_map
 
 
 def _axis_to_scale(axis):
@@ -79,6 +80,26 @@ def _mirror_trace_names():
 def _trace_match(obj):
     names = _mirror_trace_names()
     return bool(_mirror_trace_enabled() and obj and (not names or str(obj.name).lower() in names))
+
+
+def _scope_ids(values):
+    return None if values is None else {as_id(v) for v in set(values or ()) if as_id(v)}
+
+
+def _expanded_target_ids(scp_by_id, values):
+    ids = _scope_ids(values)
+    return None if ids is None else _expand_scope(children_map(scp_by_id), ids)
+
+
+def _expand_scope(kids, seed_ids):
+    out, stack = set(seed_ids or set()), list(seed_ids or set())
+    while stack:
+        sid = stack.pop()
+        for child_id in kids.get(sid, ()):
+            if child_id not in out:
+                out.add(child_id)
+                stack.append(child_id)
+    return out
 
 
 def _curve_target_name(obj):
@@ -202,7 +223,7 @@ class MirrorSceneSync:
         self.root = root
         self.scene = scene
         self.scp_by_id = scp_by_id
-        self.target_ids = None if target_scp_ids is None else {as_id(v) for v in set(target_scp_ids)}
+        self.target_ids = _expanded_target_ids(self.scp_by_id, target_scp_ids)
         self.affected_ids = set() if self.target_ids is None else set(self.target_ids)
         self.desired_ids = set()
         self.bind_state_by_sid = {}

@@ -237,6 +237,25 @@ class AttachmentMirrorWorkflowTests(BlenderTestCase):
         self.assertIsNone(bpy.data.objects.get(clone_a_name))
         self.assertIsNotNone(bpy.data.objects.get(clone_b_name))
 
+    def test_targeted_mirror_sync_refreshes_mirrored_descendant_targets(self):
+        root_obj = root()
+        source = scp_with_object(root_obj, "Source", empty_object("Source"), with_geometry=False)
+        mid = scp_with_object(root_obj, "Mid", empty_object("Mid", (1.0, 0.0, 0.0)), with_geometry=False)
+        child = scp_with_object(root_obj, "Child", empty_object("Child", (2.0, 0.0, 0.0)), with_geometry=False)
+        for item, parent_obj in ((mid, source.transform_object_ref), (child, mid.transform_object_ref)):
+            item.attach_child_anchor_mode = item.attach_parent_anchor_mode = "OBJECT_ORIGIN"
+            set_parent_relation(item.transform_object_ref, item, parent_obj)
+            capture_attachment_from_link(item, item.transform_object_ref, None, parent_obj, None)
+        source.mirror_enabled = True
+        apply_scp_mirror_roles(root_obj)
+        sync = register_sync()
+        sync_mirrors(sync, root_obj, bpy.context.scene, scp_prop_map(root_obj))
+        mid.transform_object_ref.location.x = 4.0
+        apply_scp_attachments(None, root_obj, bpy.context.scene, scp_prop_map(root_obj), parent_ids={mid.id})
+        sync_mirrors(sync, root_obj, bpy.context.scene, scp_prop_map(root_obj), {mid.id})
+        clone = find_flagged("af_scp_mirror", child.id, "af_source_scp_id")
+        self.assertEqual((round(child.transform_object_ref.location.x, 4), round(clone.location.x, 4)), (5.0, -5.0))
+
     def test_mirror_sync_detaches_sheared_child_helper(self):
         root_obj = root()
         source = scp_with_object(root_obj, "Source", empty_object("Source"), with_geometry=False)
