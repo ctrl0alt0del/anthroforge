@@ -78,13 +78,23 @@ def _apply_scp_session(context, root, shortcut, target, value):
 
 
 def _session_state(root, scene, shortcut, overrides, plan):
-    owner = capture_owner_backsolve_snapshot(root, scene, _owner_id(shortcut))
+    owner = _owner_backsolve_snapshot(root, scene, shortcut)
     _prime_session_runtime(root, plan)
     begin_override_sessions(overrides)
     runtime = _prepare_session_runtime(root, scene, plan)
     suppressed = _suppressed_ids(root, shortcut, overrides)
     suppress_next_depsgraph_ids(suppressed)
     return {"owner": owner, "runtime": runtime, "suppressed": suppressed}
+
+
+def _owner_backsolve_snapshot(root, scene, shortcut):
+    if not _owner_backsolve_enabled(shortcut):
+        return None
+    return capture_owner_backsolve_snapshot(root, scene, _owner_id(shortcut))
+
+
+def _owner_backsolve_enabled(shortcut):
+    return bool(getattr(shortcut, "owner_backsolve", True))
 
 
 def _run_scp_session(context, root, shortcut, target, value, plan, session, authored):
@@ -442,13 +452,32 @@ def shortcut_override_modes(context, shortcut_id, target_scp_id):
 def shortcut_override_values(context, shortcut_id, target_scp_id):
     root = root_for_context(context)
     shortcut = find_shortcut(root, shortcut_id)
-    return _keep_values() if shortcut is None else override_values(shortcut, target_scp_id)
+    values = _keep_values() if shortcut is None else override_values(shortcut, target_scp_id)
+    return (*values, _owner_backsolve_enabled(shortcut))
 
 
-def save_shortcut_override(context, shortcut_id, target_scp_id, parent_mode, child_mode, follow_rotation_mode="KEEP", rotation_strategy="KEEP"):
+def save_shortcut_override(context, shortcut_id, target_scp_id, owner_backsolve, parent_mode, child_mode, follow_rotation_mode="KEEP", rotation_strategy="KEEP"):
     root = root_for_context(context)
     shortcut = find_shortcut(root, shortcut_id)
-    return bool(shortcut and upsert_override(shortcut, target_scp_id, parent_mode, child_mode, follow_rotation_mode, rotation_strategy))
+    if shortcut is None:
+        return False
+    shortcut.owner_backsolve = bool(owner_backsolve)
+    if not can_edit_shortcut_override(context, shortcut_id, target_scp_id):
+        return True
+    upsert_override(shortcut, target_scp_id, parent_mode, child_mode, follow_rotation_mode, rotation_strategy)
+    return True
+
+
+def can_edit_shortcut_override(context, shortcut_id, target_scp_id):
+    root = root_for_context(context)
+    shortcut = find_shortcut(root, shortcut_id)
+    return _can_edit_override(root, shortcut, target_scp_id)
+
+
+def _can_edit_override(root, shortcut, target_scp_id):
+    if shortcut is None or find_scp_by_id(root, target_scp_id) is None:
+        return False
+    return shortcut_relation(root, shortcut, target_scp_id) == "ANCESTOR"
 
 
 def find_shortcut(root, shortcut_id):

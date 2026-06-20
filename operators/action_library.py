@@ -1,5 +1,7 @@
 import bpy
 
+from ..app.use_cases.action_library_gn import create_curve_loft_group, curve_loft_exists, curve_loft_name
+from ..app.use_cases.action_library_split_corner import split_scp_by_corner
 from ..app.use_cases.local_transform_props import create_local_transform_props, rebind_local_transform_props, remove_local_transform_props
 
 
@@ -36,3 +38,34 @@ class AF_OT_RemoveLocalTransformProps(bpy.types.Operator):
 
     def execute(self, context):
         return _finish(self, context, remove_local_transform_props)
+
+
+class AF_OT_CreateCurveLoftGroup(bpy.types.Operator):
+    bl_idname = "af.create_curve_loft_group"
+    bl_label = "Create Curve Loft Geometry Nodes"
+    bl_options = {"REGISTER", "UNDO"}
+
+    overwrite_existing: bpy.props.BoolProperty(default=False, options={"SKIP_SAVE"})
+
+    def invoke(self, context, event):
+        return _invoke_curve_loft(self, context, event)
+
+    def execute(self, context):
+        return _finish(self, context, lambda ctx: create_curve_loft_group(ctx, overwrite=self.overwrite_existing))
+
+
+class AF_OT_SplitSCPByCorner(bpy.types.Operator):
+    bl_idname = "af.split_scp_by_corner"
+    bl_label = "Split SCP by Corner"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        return _finish(self, context, split_scp_by_corner)
+
+
+def _invoke_curve_loft(op, context, event):
+    if op.overwrite_existing or not curve_loft_exists(context):
+        return op.execute(context)
+    op.overwrite_existing = True
+    name = curve_loft_name(context)
+    return context.window_manager.invoke_confirm(op, event, title="Overwrite Geometry Nodes?", message=f'Overwrite "{name}"?', confirm_text="Overwrite", icon="ERROR")

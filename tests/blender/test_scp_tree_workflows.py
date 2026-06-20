@@ -114,6 +114,7 @@ class ScpTreeWorkflowTests(BlenderTestCase):
         entry = child.bound_objects[0]
         path = make_shortcut_path("scp_bound_rna", "location[0]", entity_id=make_bound_entity_id(child.id, entry.id))
         copied = add_shortcut(root_obj, "Child X", "SCP", child.id, path)
+        copied.owner_backsolve = False
         upsert_override(copied, child.id, "OBJECT_ORIGIN", "KEEP")
         new_parent_id = copy_scp_subtree(root_obj, bpy.context.scene, parent.id, [child.id])
         new_child = next(item for item in root_obj.af_scp_system.scps if item.parent_id == new_parent_id)
@@ -121,4 +122,5 @@ class ScpTreeWorkflowTests(BlenderTestCase):
         self.assertEqual(({new_fiber.a_parent_id, new_fiber.b_parent_id}, new_child.id), ({new_parent_id, new_child.id}, new_child.id))
         self.assertEqual((root_obj.af_vcp_system.muscles[-1].fiber_refs[0].fiber_id, root_obj.af_vcp_system.blobs[-1].attach_target_id), (new_fiber.id, root_obj.af_vcp_system.muscles[-1].id))
         self.assertEqual((root_obj.af_shortcut_system.shortcuts[-1].owner_id, find_scp_by_id(root_obj, new_parent_id).id, blob.attach_target_id), (new_child.id, new_parent_id, muscle.id))
+        self.assertFalse(root_obj.af_shortcut_system.shortcuts[-1].owner_backsolve)
         self.assertEqual(override_modes(root_obj.af_shortcut_system.shortcuts[-1], new_child.id), ("OBJECT_ORIGIN", "KEEP"))

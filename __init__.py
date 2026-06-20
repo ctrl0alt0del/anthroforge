@@ -43,9 +43,11 @@ from .operators.shortcuts import (
     AF_OT_ShortcutWizard,
 )
 from .operators.action_library import (
+    AF_OT_CreateCurveLoftGroup,
     AF_OT_CreateLocalTransformProps,
     AF_OT_RebindLocalTransformProps,
     AF_OT_RemoveLocalTransformProps,
+    AF_OT_SplitSCPByCorner,
 )
 from .operators.control_objects import (
     AFOTMarkSelectedSCPControlObject,
@@ -170,9 +172,11 @@ classes = (
     AF_OT_DeleteDataShortcut,
     AF_OT_EditShortcutOverride,
     AF_OT_ShortcutWizard,
+    AF_OT_CreateCurveLoftGroup,
     AF_OT_CreateLocalTransformProps,
     AF_OT_RebindLocalTransformProps,
     AF_OT_RemoveLocalTransformProps,
+    AF_OT_SplitSCPByCorner,
     AFOTMarkSelectedSCPControlObject,
     AFOTToggleControlObjectApplyParent,
     AFOTToggleControlObjectShortcutAxis,

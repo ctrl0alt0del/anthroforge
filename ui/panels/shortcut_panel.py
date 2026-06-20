@@ -20,9 +20,9 @@ def _draw_delete_button(row, shortcut):
 
 
 def _draw_override_button(row, row_state):
-    if not row_state.show_override:
+    if not row_state.show_settings:
         return
-    op = row.operator("af.edit_shortcut_override", text="", icon="KEY_HLT" if row_state.has_override else "KEY_DEHLT")
+    op = row.operator("af.edit_shortcut_override", text="", icon="KEY_HLT" if row_state.has_settings else "KEY_DEHLT")
     op.shortcut_id = row_state.shortcut.id
     op.target_scp_id = row_state.selected_scp_id
 

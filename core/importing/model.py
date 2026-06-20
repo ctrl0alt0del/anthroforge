@@ -103,6 +103,7 @@ class ShortcutSnapshot:
     owner_id: str
     data_path: str
     vector_mode: str = "DEFAULT"
+    owner_backsolve: bool = True
     overrides: list[ShortcutOverrideSnapshot] = field(default_factory=list)
 
     @classmethod

@@ -172,6 +172,16 @@ class ShortcutEditTests(unittest.TestCase):
             }},
         )])
 
+    def test_apply_shortcut_proxy_skips_owner_backsolve_when_disabled(self):
+        root, ctx = SimpleNamespace(), SimpleNamespace(scene=SimpleNamespace())
+        shortcut = SimpleNamespace(proxy_sync_lock=False, owner_type="SCP", owner_id="P1", data_path="PATH", proxy_float=2.5, overrides=[], owner_backsolve=False)
+        target = SimpleNamespace(owner=object(), prop_name="location", index=-1, value_type="FLOAT", array_length=0)
+        with patch("app.use_cases.shortcut_edit.root_for_context", return_value=root), patch("app.use_cases.shortcut_edit.resolve_shortcut", return_value=target), patch("app.use_cases.shortcut_edit.write_target_value"), patch("app.use_cases.shortcut_edit.capture_owner_backsolve_snapshot") as capture, patch("app.use_cases.shortcut_edit.begin_override_sessions"), patch("app.use_cases.shortcut_edit.suppress_next_depsgraph_ids"), patch("app.use_cases.shortcut_edit.clear_override_session"), patch("app.use_cases.shortcut_edit._dirty_hints_for", return_value=lambda _et, ids: set(ids)), patch("app.use_cases.shortcut_edit._sync_context", return_value=lambda *args, **kwargs: sync(*args, **kwargs)):
+            sync = Recorder()
+            self.assertTrue(edit.apply_shortcut_proxy(ctx, shortcut))
+        capture.assert_not_called()
+        self.assertEqual(sync.calls[0][1]["payload"]["scp_owner_backsolve"], {})
+
     def test_override_helpers_return_default_and_drop_orphans(self):
         src = SimpleNamespace(overrides=OverrideCollection([override("S1", "OBJECT_ORIGIN", follow_mode="DISABLED", strategy="DEFORMATION_FLOW"), override("S9", "KEEP", "OBJECT_ORIGIN")]))
         dst = SimpleNamespace(overrides=OverrideCollection())

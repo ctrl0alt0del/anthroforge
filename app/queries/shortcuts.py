@@ -16,6 +16,8 @@ class ShortcutRowState:
     target: object = None
     selected_scp_id: str = ""
     owner_relation: str = "UNRELATED"
+    show_settings: bool = False
+    has_settings: bool = False
     show_override: bool = False
     has_override: bool = False
 
@@ -38,11 +40,19 @@ def visible_shortcuts(root, context):
 def _row_state(root, context, shortcut, selected_id):
     relation = shortcut_relation(root, shortcut, selected_id)
     shown = _show_override(context, relation)
-    return ShortcutRowState(shortcut=shortcut, target=resolve_shortcut(root, context, shortcut.data_path), selected_scp_id=selected_id, owner_relation=relation, show_override=shown, has_override=shown and has_override(shortcut, selected_id))
+    return ShortcutRowState(shortcut=shortcut, target=resolve_shortcut(root, context, shortcut.data_path), selected_scp_id=selected_id, owner_relation=relation, show_settings=_show_settings(shortcut), has_settings=_has_settings(shortcut), show_override=shown, has_override=shown and has_override(shortcut, selected_id))
 
 
 def _show_override(context, relation):
     return getattr(context.scene, "af_shortcut_view_mode", "SELECTED") == "ALL" and relation == "ANCESTOR"
+
+
+def _show_settings(shortcut):
+    return str(getattr(shortcut, "owner_type", "") or "") == "SCP"
+
+
+def _has_settings(shortcut):
+    return bool(getattr(shortcut, "overrides", ())) or not bool(getattr(shortcut, "owner_backsolve", True))
 
 
 def shortcut_panel_state(context):

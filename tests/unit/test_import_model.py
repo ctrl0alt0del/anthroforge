@@ -31,7 +31,7 @@ class ImportModelTests(unittest.TestCase):
         data = _snapshot_dict()
         snap = PackageSnapshot.from_dict(data)
         self.assertEqual((snap.scps[0].bound_objects[0].bound_id, snap.fibers[0].touches[0].parent_id), ("OBJ_1", "S1"))
-        self.assertEqual((snap.muscles[0].fiber_ids[0], snap.shortcuts[0].owner_type, snap.shortcuts[0].vector_mode), ("F1", "SCP", "DEFAULT"))
+        self.assertEqual((snap.muscles[0].fiber_ids[0], snap.shortcuts[0].owner_type, snap.shortcuts[0].vector_mode, snap.shortcuts[0].owner_backsolve), ("F1", "SCP", "DEFAULT", False))
         item = snap.shortcuts[0].overrides[0]
         self.assertEqual((item.target_scp_id, item.parent_anchor_mode, item.follow_rotation_mode, item.rotation_strategy), ("S1", "OBJECT_ORIGIN", "KEEP", "KEEP"))
 
@@ -43,5 +43,5 @@ def _snapshot_dict():
         "fibers": [{"source_id": "F1", "name": "F1", "props": {}, "a_parent_id": "S1", "b_parent_id": "S2", "muscle_id": "", "touches": [{"parent_id": "S1", "props": {}}]}],
         "muscles": [{"source_id": "M1", "name": "M1", "props": {}, "fiber_ids": ["F1"]}],
         "blobs": [{"source_id": "B1", "name": "B1", "props": {}, "attach_target_type": "MUSCLE", "attach_target_id": "M1", "attach_target_object_name": ""}],
-        "shortcuts": [{"name": "X", "owner_type": "SCP", "owner_id": "S1", "data_path": "af://scp_prop/S1/name", "overrides": [{"target_scp_id": "S1", "parent_anchor_mode": "OBJECT_ORIGIN", "child_anchor_mode": "KEEP"}]}],
+        "shortcuts": [{"name": "X", "owner_type": "SCP", "owner_id": "S1", "data_path": "af://scp_prop/S1/name", "owner_backsolve": False, "overrides": [{"target_scp_id": "S1", "parent_anchor_mode": "OBJECT_ORIGIN", "child_anchor_mode": "KEEP"}]}],
     }
