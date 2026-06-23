@@ -31,9 +31,9 @@ class SplitCornerSpec:
     parent_scp_id: str
     modifier_name: str
     spline_index: int
-    point_index: int
+    split_indices: tuple
     spline_type: str
-    point_world: tuple
+    point_worlds: tuple
 
 
 @dataclass(frozen=True)
@@ -68,17 +68,16 @@ def split_corner(context):
     if error:
         return None, error
     bpy.ops.object.mode_set(mode="OBJECT")
-    left, right = _split_segments(spec)
-    dst, obj_map = _clone_scp(spec)
-    _rewrite_curve(spec.curve_obj, left)
-    _rewrite_curve(obj_map[spec.curve_obj], right)
-    _retarget_curve_object(spec.geometry_obj, spec.modifier_name, spec.curve_obj)
-    _retarget_curve_object(obj_map[spec.geometry_obj], spec.modifier_name, obj_map[spec.curve_obj])
-    ctrl = _create_control(spec)
-    _bind_split_hook(spec.curve_obj, left, len(left) - 1, ctrl, spec.spline_type)
-    _bind_split_hook(obj_map[spec.curve_obj], right, 0, ctrl, spec.spline_type)
-    _select_control(context, ctrl)
-    return {"clone_scp": dst, "control": ctrl}, ""
+    segments = _split_segments(spec)
+    clones = _clone_scps(spec, len(segments) - 1)
+    curves = _segment_objects(spec.curve_obj, clones)
+    geos = _segment_objects(spec.geometry_obj, clones)
+    _rewrite_segments(curves, segments)
+    _retarget_segments(geos, spec.modifier_name, curves)
+    ctrls = _create_controls(spec)
+    _bind_segment_hooks(curves, segments, ctrls, spec.spline_type)
+    _select_control(context, ctrls[-1])
+    return {"clone_scps": tuple(dst for dst, _map in clones), "controls": ctrls}, ""
 
 
 def _context_error(context, root):
@@ -177,12 +176,20 @@ def _selected_poly_ids(spline):
 
 def _selected_point_split(curve_obj, spline, ids):
     points = _spline_points(spline)
-    if len(ids) != 1:
-        return None, "Select exactly one interior curve point."
-    idx = ids[0]
-    if idx <= 0 or idx >= len(points) - 1:
-        return None, "Selected point must be an interior point."
-    return (0, idx, str(spline.type), _point_world(curve_obj, points[idx].co)), ""
+    ids = tuple(sorted(ids))
+    error = _split_selection_error(ids, len(points))
+    if error:
+        return None, error
+    worlds = tuple(_point_world(curve_obj, points[idx].co) for idx in ids)
+    return (0, ids, str(spline.type), worlds), ""
+
+
+def _split_selection_error(ids, point_count):
+    if not ids:
+        return "Select one or more interior curve points."
+    if ids[0] <= 0 or ids[-1] >= point_count - 1:
+        return "Selected points must be interior points."
+    return ""
 
 
 def _spline_points(spline):
@@ -195,33 +202,67 @@ def _point_world(curve_obj, co):
 
 
 def _build_spec(root, scene, source_scp, parent_scp, curve_obj, geo, mod, split):
-    spline_index, point_index, spline_type, point_world = split
+    spline_index, split_indices, spline_type, point_worlds = split
     return SplitCornerSpec(
         root, scene, str(source_scp.id or ""), str(source_scp.name or ""),
         str(source_scp.parent_id or ""), _scalar_payload(source_scp, _SCP_SKIP),
         snapshot_attachment_runtime(source_scp), _bound_snapshot(source_scp),
         curve_obj, getattr(source_scp, "transform_object_ref", None), geo,
-        str(parent_scp.id or ""), mod.name, spline_index, point_index,
-        spline_type, point_world,
+        str(parent_scp.id or ""), mod.name, spline_index, split_indices,
+        spline_type, point_worlds,
     )
 
 
 def _split_segments(spec):
     spline = spec.curve_obj.data.splines[spec.spline_index]
-    return _split_bezier_points(spline, spec.point_index) if spec.spline_type == "BEZIER" else _split_poly_points(spline, spec.point_index)
+    return _split_bezier_points(spline, spec.split_indices) if spec.spline_type == "BEZIER" else _split_poly_points(spline, spec.split_indices)
 
 
-def _split_bezier_points(spline, point_index):
+def _split_bezier_points(spline, split_indices):
     points = tuple(_bezier_point_data(point) for point in spline.bezier_points)
-    left, right = list(points[: point_index + 1]), list(points[point_index:])
-    left[-1] = replace(left[-1], handle_right=left[-1].co, handle_right_type="FREE")
-    right[0] = replace(right[0], handle_left=right[0].co, handle_left_type="FREE")
-    return tuple(left), tuple(right)
+    segments = [list(segment) for segment in _point_segments(points, split_indices)]
+    for index, segment in enumerate(segments):
+        if index > 0:
+            segment[0] = replace(segment[0], handle_left=segment[0].co, handle_left_type="FREE")
+        if index < len(segments) - 1:
+            segment[-1] = replace(segment[-1], handle_right=segment[-1].co, handle_right_type="FREE")
+    return tuple(tuple(segment) for segment in segments)
 
 
-def _split_poly_points(spline, point_index):
+def _split_poly_points(spline, split_indices):
     points = tuple(_poly_point_data(point) for point in spline.points)
-    return tuple(points[: point_index + 1]), tuple(points[point_index:])
+    return _point_segments(points, split_indices)
+
+
+def _point_segments(points, split_indices):
+    ranges = _segment_ranges(len(points), split_indices)
+    return tuple(tuple(points[start:end]) for start, end in ranges)
+
+
+def _segment_ranges(point_count, split_indices):
+    start, ranges = 0, []
+    for index in split_indices:
+        ranges.append((start, index + 1))
+        start = index
+    return (*ranges, (start, point_count))
+
+
+def _clone_scps(spec, count):
+    return tuple(_clone_scp(spec) for _ in range(count))
+
+
+def _segment_objects(source, clones):
+    return (source, *(obj_map[source] for _dst, obj_map in clones))
+
+
+def _rewrite_segments(curves, segments):
+    for curve, points in zip(curves, segments):
+        _rewrite_curve(curve, points)
+
+
+def _retarget_segments(geos, modifier_name, curves):
+    for geo, curve in zip(geos, curves):
+        _retarget_curve_object(geo, modifier_name, curve)
 
 
 def _bezier_point_data(point):
@@ -352,15 +393,19 @@ def _retarget_curve_object(geo, modifier_name, curve_obj):
         mod.object = curve_obj
 
 
-def _create_control(spec):
+def _create_controls(spec):
+    return tuple(_create_control(spec, point_world) for point_world in spec.point_worlds)
+
+
+def _create_control(spec, point_world):
     parent = find_scp_by_id(spec.root, spec.parent_scp_id)
     ctrl = bpy.data.objects.new(f"{spec.source_scp_id}_CORNER", None)
     _host_collection(spec.scene, spec.root).objects.link(ctrl)
     ctrl.empty_display_type, ctrl.empty_display_size = "PLAIN_AXES", 0.1
-    _set_world_location(ctrl, spec.point_world)
+    _set_world_location(ctrl, point_world)
     add_bound_object_to_scp(spec.root, parent, ctrl)
     sync_scp_roles(spec.root, parent)
-    _set_world_location(ctrl, spec.point_world)
+    _set_world_location(ctrl, point_world)
     return mark_scp_control_object(ctrl, spec.root, parent.id)
 
 
@@ -373,6 +418,18 @@ def _set_world_location(obj, location):
     world = obj.matrix_world.copy()
     world.translation = Vector(location)
     obj.matrix_world = world
+
+
+def _bind_segment_hooks(curves, segments, ctrls, spline_type):
+    for index, (curve, points) in enumerate(zip(curves, segments)):
+        _bind_segment_ends(curve, points, index, ctrls, spline_type)
+
+
+def _bind_segment_ends(curve_obj, points, index, ctrls, spline_type):
+    if index > 0:
+        _bind_split_hook(curve_obj, points, 0, ctrls[index - 1], spline_type)
+    if index < len(ctrls):
+        _bind_split_hook(curve_obj, points, len(points) - 1, ctrls[index], spline_type)
 
 
 def _bind_split_hook(curve_obj, points, point_index, ctrl, spline_type):

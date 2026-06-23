@@ -53,7 +53,7 @@ def _draw_curve_loft_button(box, state):
 
 def _draw_split_corner_header(box):
     box.label(text="Split SCP by Corner")
-    box.label(text="Split one selected curve corner into two SCPs.", icon="HOOK")
+    box.label(text="Split selected curve corners into SCP segments.", icon="HOOK")
 
 
 def _draw_split_corner_status(box, state):

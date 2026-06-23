@@ -121,13 +121,14 @@ def _bounds_world(obj):
     return tuple(min(axis) for axis in zip(*coords)), tuple(max(axis) for axis in zip(*coords))
 
 
-def _split_fixture():
+def _split_fixture(coords=None):
+    coords = coords or [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)]
     root_obj = root()
     parent = scp_with_object(root_obj, "Parent", empty_object("Parent"), with_geometry=False)
     geo = mesh_object("ChildGeo")
     child = scp_with_object(root_obj, "Child", geo)
     set_prop_raw(child, "parent_id", parent.id)
-    curve_obj = _curve_path("ChildCurve", [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)])
+    curve_obj = _curve_path("ChildCurve", coords)
     add_bound_object_to_scp(root_obj, child, curve_obj)
     sync_scp_roles(root_obj, child)
     geo.modifiers.new("CurvePath", "CURVE").object = curve_obj
@@ -135,11 +136,16 @@ def _split_fixture():
 
 
 def _select_curve_point(curve_obj, index):
+    _select_curve_points(curve_obj, index)
+
+
+def _select_curve_points(curve_obj, *indices):
     select_only(curve_obj)
     bpy.ops.object.mode_set(mode="EDIT")
     for point in curve_obj.data.splines[0].bezier_points:
         point.select_left_handle = point.select_control_point = point.select_right_handle = False
-    curve_obj.data.splines[0].bezier_points[index].select_control_point = True
+    for index in indices:
+        curve_obj.data.splines[0].bezier_points[index].select_control_point = True
 
 
 def _bound_curve(scp):
@@ -148,6 +154,10 @@ def _bound_curve(scp):
 
 def _hook_mod(obj):
     return next(mod for mod in obj.modifiers if str(getattr(mod, "type", "")) == "HOOK")
+
+
+def _hook_mods(obj):
+    return [mod for mod in obj.modifiers if str(getattr(mod, "type", "")) == "HOOK"]
 
 
 def _extra_scps(root_obj, count):
@@ -159,8 +169,16 @@ def _split_control(parent_id):
     return next(obj for obj in bpy.context.scene.objects if obj.get("af_scp_control") and obj.get("af_scp_id") == parent_id)
 
 
+def _split_controls(parent_id):
+    return [obj for obj in bpy.context.scene.objects if obj.get("af_scp_control") and obj.get("af_scp_id") == parent_id]
+
+
 def _round_vec(vec):
     return tuple(round(float(value), 4) for value in vec)
+
+
+def _hook_signature(mod):
+    return (_round_vec(mod.object.matrix_world.translation), tuple(mod.vertex_indices))
 
 
 def _assert_split_result(case, root_obj, parent_id, geo, curve_obj, expected_total, expected_world):
@@ -355,7 +373,7 @@ class ActionLibraryTests(BlenderTestCase):
     def test_split_scp_by_corner_rejects_endpoint_selection(self):
         root_obj, _parent, _child, _geo, curve_obj = _split_fixture()
         _select_curve_point(curve_obj, 0)
-        with self.assertRaisesRegex(RuntimeError, "Selected point must be an interior point."):
+        with self.assertRaisesRegex(RuntimeError, "Selected points must be interior points."):
             bpy.ops.af.split_scp_by_corner()
         self.assertEqual((len(root_obj.af_scp_system.scps), bpy.context.mode), (2, "EDIT_CURVE"))
 
@@ -368,3 +386,30 @@ class ActionLibraryTests(BlenderTestCase):
         _select_curve_point(curve_obj, 1)
         self.assertEqual(bpy.ops.af.split_scp_by_corner(), {"FINISHED"})
         _assert_split_result(self, root_obj, parent_id, geo, curve_obj, expected_total, expected_world)
+
+    def test_split_scp_by_corner_multi_selection_creates_multiple_segments(self):
+        coords = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0), (3.0, 0.0, 0.0), (4.0, 0.0, 0.0)]
+        root_obj, parent, _child, geo, curve_obj = _split_fixture(coords)
+        parent_id = parent.id
+        expected_total = len(root_obj.af_scp_system.scps) + 2
+        expected_worlds = [tuple(curve_obj.matrix_world @ curve_obj.data.splines[0].bezier_points[index].co) for index in (1, 3)]
+        _select_curve_points(curve_obj, 1, 3)
+        self.assertEqual(bpy.ops.af.split_scp_by_corner(), {"FINISHED"})
+        clones = root_obj.af_scp_system.scps[-2:]
+        curves = (curve_obj, *(_bound_curve(clone) for clone in clones))
+        geos = (geo, *(clone.geometry_object_ref for clone in clones))
+        controls = sorted(_split_controls(parent_id), key=lambda obj: float(obj.matrix_world.translation.x))
+        self.assertEqual((len(root_obj.af_scp_system.scps), tuple(clone.parent_id for clone in clones)), (expected_total, (parent_id, parent_id)))
+        self.assertEqual([len(curve.data.splines[0].bezier_points) for curve in curves], [2, 3, 2])
+        self.assertEqual(tuple(item.modifiers["CurvePath"].object for item in geos), curves)
+        self.assertEqual(tuple(curves[0].data.splines[0].bezier_points[-1].handle_right), tuple(curves[0].data.splines[0].bezier_points[-1].co))
+        self.assertEqual(tuple(curves[1].data.splines[0].bezier_points[0].handle_left), tuple(curves[1].data.splines[0].bezier_points[0].co))
+        self.assertEqual(tuple(curves[1].data.splines[0].bezier_points[-1].handle_right), tuple(curves[1].data.splines[0].bezier_points[-1].co))
+        self.assertEqual(tuple(curves[2].data.splines[0].bezier_points[0].handle_left), tuple(curves[2].data.splines[0].bezier_points[0].co))
+        self.assertEqual([_round_vec(ctrl.matrix_world.translation) for ctrl in controls], [_round_vec(world) for world in expected_worlds])
+        self.assertEqual(sorted((_hook_signature(mod) for mod in _hook_mods(curves[0])), key=lambda item: item[0]), [(_round_vec(expected_worlds[0]), (3, 4, 5))])
+        self.assertEqual(sorted((_hook_signature(mod) for mod in _hook_mods(curves[1])), key=lambda item: item[0]), [(_round_vec(expected_worlds[0]), (0, 1, 2)), (_round_vec(expected_worlds[1]), (6, 7, 8))])
+        self.assertEqual(sorted((_hook_signature(mod) for mod in _hook_mods(curves[2])), key=lambda item: item[0]), [(_round_vec(expected_worlds[1]), (0, 1, 2))])
+        self.assertIn(controls[0], [obj for _entry, obj in iter_bound_objects(parent)])
+        self.assertIn(controls[1], [obj for _entry, obj in iter_bound_objects(parent)])
+        self.assertEqual((bpy.context.active_object, bpy.context.mode), (controls[-1], "OBJECT"))

@@ -53,7 +53,7 @@ def curve_loft_panel_state(context):
 
 def split_corner_panel_state(context):
     _spec, error = split_corner_spec(context)
-    message = error or "Split the selected curve corner into two SCPs with one shared parent control."
+    message = error or "Split the selected curve corners into SCP segments with shared parent controls."
     return SplitCornerPanelState(not error, message)
 
 
