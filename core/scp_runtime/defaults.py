@@ -1,4 +1,5 @@
 from .common import set_prop_raw
+from .prop_update_guard import set_parent_id_raw
 from .runtime_state import reset_attachment_runtime, reset_mirror_runtime
 
 _ATTACH_DEFAULTS = (
@@ -41,7 +42,7 @@ def reset_color_state(prop):
 def initialize_scp_entry(prop, scp_id, label):
     set_prop_raw(prop, "id", scp_id)
     set_prop_raw(prop, "name", label)
-    set_prop_raw(prop, "parent_id", "")
+    set_parent_id_raw(prop, "")
     reset_color_state(prop)
     reset_attachment_state(prop)
     reset_mirror_state(prop)

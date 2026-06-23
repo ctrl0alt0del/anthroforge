@@ -2,6 +2,7 @@
 
 from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 from ..app.runtime_api import dispatch_intent_context, sync_context
+from ..core.scp_runtime.prop_update_guard import scp_prop_updates_suppressed
 
 
 def _sync_scene(context, scp_id=None, source="property", event_type="UPDATE"):
@@ -10,6 +11,8 @@ def _sync_scene(context, scp_id=None, source="property", event_type="UPDATE"):
 
 
 def _on_scp_prop_update(self, context):
+    if scp_prop_updates_suppressed():
+        return
     _sync_scene(context, getattr(self, "id", ""))
 
 

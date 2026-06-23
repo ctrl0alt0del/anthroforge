@@ -1,4 +1,5 @@
-from .common import as_id, scp_prop_map, set_prop_raw
+from .common import as_id, scp_prop_map
+from .prop_update_guard import set_parent_id_raw
 from .runtime_state import reset_attachment_runtime
 
 
@@ -66,7 +67,7 @@ def _invalid_parent_ids(root, scp_by_id):
 def _clear_parent_ids(root, invalid_ids):
     for scp in root.af_scp_system.scps:
         if as_id(getattr(scp, "id", "")) in invalid_ids:
-            set_prop_raw(scp, "parent_id", "")
+            set_parent_id_raw(scp, "")
             reset_attachment_runtime(scp)
 
 

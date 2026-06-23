@@ -7,6 +7,7 @@ from .scp_runtime.bound_objects import clear_scp_tags, find_bound_entry_by_objec
 from .scp_runtime.common import find_scp_by_id, scp_for_object, set_prop_raw
 from .scp_runtime.lookup import clear_native_parent_keep_world
 from .scp_runtime.object_roles import add_bound_object_to_scp, create_scp, set_scp_geometry_object, set_scp_transform_object
+from .scp_runtime.prop_update_guard import set_parent_id_raw
 from .scp_runtime.runtime_state import mirror_status, restore_attachment_runtime, snapshot_attachment_runtime
 from .utils import get_af_root
 from .visualization.mirror_objects import remap_object_cluster_parents, remap_object_cluster_refs
@@ -279,7 +280,7 @@ def _clone_scp(spec):
     obj_map, native = _clone_bound_objects(spec, dst)
     set_scp_transform_object(spec.root, dst, obj_map.get(spec.transform_obj))
     set_scp_geometry_object(spec.root, dst, obj_map.get(spec.geometry_obj))
-    set_prop_raw(dst, "parent_id", spec.source_parent_id)
+    set_parent_id_raw(dst, spec.source_parent_id)
     restore_attachment_runtime(dst, spec.source_runtime)
     _restore_native_flags(spec.root, dst, native)
     return dst, obj_map

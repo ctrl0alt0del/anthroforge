@@ -1,4 +1,5 @@
-from .common import find_scp_index, is_transform_scp_obj, scp_prop_map, set_prop_raw
+from .common import find_scp_index, is_transform_scp_obj, scp_prop_map
+from .prop_update_guard import set_parent_id_raw
 from .runtime_state import reset_attachment_runtime
 
 
@@ -36,7 +37,7 @@ def _has_parent_cycle(root, child_id, parent_id):
 def set_parent_relation(child_obj, child_scp, parent_obj):
     clear_native_parent_keep_world(child_obj)
     parent_id = "" if parent_obj is None else str(parent_obj.get("af_scp_id") or "")
-    set_prop_raw(child_scp, "parent_id", parent_id)
+    set_parent_id_raw(child_scp, parent_id)
     reset_attachment_runtime(child_scp)
 
 

@@ -7,6 +7,7 @@ from .bound_objects import clear_scp_tags, iter_bound_objects
 from .common import as_id, find_scp_by_id, scp_prop_map, set_prop_raw
 from .lookup import clear_native_parent_keep_world
 from .object_roles import add_bound_object_to_scp, create_scp, set_scp_geometry_object, set_scp_transform_object
+from .prop_update_guard import set_parent_id_raw
 from .tree import children_map
 
 _FULL_OBJECT_RE = re.compile(r"^bpy\.data\.objects\[[\"'](.+?)[\"']\](.+)$")
@@ -108,7 +109,7 @@ def _copy_scps(root, scene, scps, maps):
 
 def _apply_scp_links(pairs, scp_map):
     for src, dst in pairs:
-        set_prop_raw(dst, "parent_id", scp_map.get(as_id(getattr(src, "parent_id", "")), as_id(getattr(src, "parent_id", ""))))
+        set_parent_id_raw(dst, scp_map.get(as_id(getattr(src, "parent_id", "")), as_id(getattr(src, "parent_id", ""))))
 
 
 def _fiber_parent_ids(fiber):

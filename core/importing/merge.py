@@ -4,6 +4,7 @@ from ..deps.dirty_hints import empty_dirty_hints
 from ..id_utils import next_prefixed_id
 from ..scp_runtime.bound_objects import find_bound_entry_by_object, sync_all_scp_roles
 from ..scp_runtime.common import set_prop_raw
+from ..scp_runtime.prop_update_guard import set_parent_id_raw
 from ..scp_runtime.object_roles import add_bound_object_to_scp, create_scp, set_geometry_object, set_transform_object
 from ..shortcuts import upsert_override
 from ..shortcuts.path_codec import make_bound_entity_id, make_shortcut_path, parse_shortcut_path, split_bound_entity_id
@@ -122,7 +123,7 @@ def _create_scps(state):
 def _set_scp_parents(state):
     for snap in state.snapshot.scps:
         scp = next(x for x in state.root.af_scp_system.scps if str(x.id) == _remap(state.scps, snap.source_id))
-        set_prop_raw(scp, "parent_id", _remap(state.scps, snap.parent_id))
+        set_parent_id_raw(scp, _remap(state.scps, snap.parent_id))
 
 
 def _copy_touches(dst, snap, state):

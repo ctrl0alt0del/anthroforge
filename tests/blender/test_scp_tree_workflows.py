@@ -11,6 +11,7 @@ import bpy
 
 from _helpers import BlenderTestCase, add_shortcut, empty_object, fiber, mesh_object, root, scp_with_object, select_only
 from core.id_utils import next_prefixed_id
+from core.scp_runtime.attachment_runtime import capture_attachment_from_link
 from core.scp_runtime.copy import copy_scp_subtree
 from core.scp_runtime.lookup import set_parent_relation
 from core.scp_runtime.object_roles import add_bound_object_to_scp
@@ -53,6 +54,28 @@ def _copy_fixture(root_obj):
     muscle = _new_muscle(root_obj, fib.id)
     fib.muscle_id = muscle.id
     return parent, child, fib, muscle, _new_blob(root_obj, muscle.id)
+
+
+def _mesh_from_pydata(name, verts, faces):
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def _parent_surface(name, x):
+    verts = [(x, -1.0, 0.0), (x, 1.0, 0.0), (x, -1.0, 1.0), (x, 1.0, 1.0)]
+    return _mesh_from_pydata(name, verts, [(0, 1, 3, 2)])
+
+
+def _two_face_child(name):
+    verts = [(-2.0, -0.5, 0.0), (-2.0, 0.5, 0.0), (-2.0, -0.5, 1.0), (-2.0, 0.5, 1.0), (2.0, -0.5, 0.0), (2.0, 0.5, 0.0), (2.0, -0.5, 1.0), (2.0, 0.5, 1.0)]
+    return _mesh_from_pydata(name, verts, [(0, 1, 3, 2), (4, 5, 7, 6)])
+
+
+def _world_xyz(obj):
+    return tuple(round(float(value), 4) for value in obj.matrix_world.translation)
 
 
 class ScpTreeWorkflowTests(BlenderTestCase):
@@ -107,6 +130,19 @@ class ScpTreeWorkflowTests(BlenderTestCase):
         set_parent_relation(child.transform_object_ref, child, mid.transform_object_ref)
         self.assertEqual(bpy.ops.af.promote_scp_in_tree(scp_id=child.id), {"FINISHED"})
         self.assertEqual(child.parent_id, top.id)
+
+    def test_reparent_preserves_world_transform_for_surface_attachment(self):
+        root_obj = root()
+        left = scp_with_object(root_obj, "Left", _parent_surface("Left", -3.0))
+        right = scp_with_object(root_obj, "Right", _parent_surface("Right", 3.0))
+        child = scp_with_object(root_obj, "Child", _two_face_child("Child"))
+        child.attach_child_anchor_mode = "FACE_CENTER"
+        child.attach_parent_anchor_mode = "SURFACE_NEAREST"
+        set_parent_relation(child.transform_object_ref, child, left.transform_object_ref)
+        self.assertTrue(capture_attachment_from_link(child, child.transform_object_ref, child.geometry_object_ref, left.transform_object_ref, left.geometry_object_ref))
+        world = _world_xyz(child.transform_object_ref)
+        self.assertEqual(execute_reparent_scp(DummyOperator(), bpy.context, child.id, right.id), {"FINISHED"})
+        self.assertEqual((_world_xyz(child.transform_object_ref), child.parent_id), (world, right.id))
 
     def test_copy_subtree_remaps_vcps_and_shortcuts(self):
         root_obj = root()
