@@ -1,4 +1,5 @@
 from ...core.scp_runtime.common import scp_for_object
+from ...app.queries.attachment_anchor_lock import child_anchor_lock_panel_state
 
 
 def is_marked_scp_obj(obj):
@@ -25,24 +26,45 @@ def draw_create_buttons(layout):
     row.operator("af.create_empty_scp", icon="EMPTY_AXIS", text="Create Empty SCP")
 
 
-def draw_parent_box(layout, scene, scp):
+def draw_parent_box(layout, context, scene, scp):
     box = layout.box()
     box.label(text="Parent Relation")
     box.prop(scene, "af_scp_parent_obj", text="Parent")
     box.operator("af.set_scp_parent", text="Apply Parent", icon="CONSTRAINT")
-    draw_attachment_settings(box, scp)
+    draw_attachment_settings(box, context, scp)
 
 
-def draw_attachment_settings(layout, scp):
+def draw_attachment_settings(layout, context, scp):
     if scp is None or not str(getattr(scp, "parent_id", "") or ""):
         return
     layout.prop(scp, "attach_parent_anchor_mode", text="Parent Anchor")
     layout.prop(scp, "attach_child_anchor_mode", text="Child Anchor")
+    _draw_child_anchor_lock(layout, context, scp)
     layout.prop(scp, "attach_follow_rotation", text="Follow Rotation")
     row = layout.row()
     row.enabled = str(getattr(scp, "attach_parent_anchor_mode", "SURFACE_NEAREST")) == "SURFACE_NEAREST"
     row.prop(scp, "attach_tangent_strategy", text="Rotation Strategy")
     layout.operator("af.move_scp_origin_to_attachment", text="Move Origin To Attachment", icon="PIVOT_CURSOR")
+
+
+def _draw_child_anchor_lock(layout, context, scp):
+    state = child_anchor_lock_panel_state(context, scp)
+    if not state.visible:
+        return
+    _draw_lock_buttons(layout, state)
+    layout.label(text=state.message, icon="ERROR" if state.invalid_lock else "INFO")
+
+
+def _draw_lock_buttons(layout, state):
+    row = layout.row(align=True)
+    left, right = row.row(align=True), row.row(align=True)
+    left.enabled, right.enabled = state.can_set, state.has_lock
+    left.operator("af.set_scp_child_anchor_lock", text=_set_label(state.mode), icon="PINNED")
+    right.operator("af.clear_scp_child_anchor_lock", text="", icon="X")
+
+
+def _set_label(mode):
+    return "Set Permanent Face" if str(mode or "").upper() == "FACE_CENTER" else "Set Permanent Vertex"
 
 
 def draw_mirror_box(layout, scp):

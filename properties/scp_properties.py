@@ -83,6 +83,8 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         default="FACE_CENTER",
         update=_on_attachment_capture_update,
     )
+    attach_child_face_lock_index: bpy.props.IntProperty(default=-1, options={"HIDDEN"})
+    attach_child_vertex_lock_index: bpy.props.IntProperty(default=-1, options={"HIDDEN"})
 
     attach_follow_rotation: bpy.props.BoolProperty(name="Follow Parent Rotation", default=True, update=_on_scp_prop_update)
     attach_tangent_strategy: bpy.props.EnumProperty(

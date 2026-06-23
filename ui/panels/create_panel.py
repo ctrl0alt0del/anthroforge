@@ -6,11 +6,11 @@ from .scp_create_sections import draw_active_object_box, draw_create_buttons, dr
 from .scp_objects_panel import draw_scp_object_section
 
 
-def _draw_active_scp_sections(layout, scene, scp):
+def _draw_active_scp_sections(layout, context, scene, scp):
     if scp is None:
         return
     layout.separator()
-    draw_parent_box(layout, scene, scp)
+    draw_parent_box(layout, context, scene, scp)
     draw_mirror_box(layout, scp)
     draw_scp_object_section(layout, scene, scp)
 
@@ -31,4 +31,4 @@ class AF_PT_CreatePanel(bpy.types.Panel):
         state = create_panel_state(context)
         draw_active_object_box(self.layout, context.active_object)
         draw_create_buttons(self.layout)
-        _draw_active_scp_sections(self.layout, state.scene, state.active_scp)
+        _draw_active_scp_sections(self.layout, context, state.scene, state.active_scp)

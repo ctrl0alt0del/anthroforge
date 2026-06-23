@@ -1,5 +1,6 @@
 import bpy
 
+from ..app.use_cases.attachment_anchor_lock import clear_active_scp_child_anchor_lock, set_active_scp_child_anchor_lock
 from ..app.use_cases.attachment_origin import move_active_origin_to_attachment
 from ..app.use_cases.scp_parenting import mark_active_mesh_as_scp, set_active_scp_parent
 
@@ -35,3 +36,21 @@ class AF_OT_MoveSCPOriginToAttachment(bpy.types.Operator):
 
     def execute(self, context):
         return _finish(self, move_active_origin_to_attachment(context))
+
+
+class AF_OT_SetSCPChildAnchorLock(bpy.types.Operator):
+    bl_idname = "af.set_scp_child_anchor_lock"
+    bl_label = "Set SCP Child Anchor Lock"
+    bl_description = "Keep the selected child face or vertex as the permanent attachment anchor until cleared"
+
+    def execute(self, context):
+        return _finish(self, set_active_scp_child_anchor_lock(context))
+
+
+class AF_OT_ClearSCPChildAnchorLock(bpy.types.Operator):
+    bl_idname = "af.clear_scp_child_anchor_lock"
+    bl_label = "Clear SCP Child Anchor Lock"
+    bl_description = "Clear the permanent child attachment anchor for the active SCP"
+
+    def execute(self, context):
+        return _finish(self, clear_active_scp_child_anchor_lock(context))

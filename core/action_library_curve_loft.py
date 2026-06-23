@@ -6,8 +6,8 @@ _LOFT_GROUP = "AF_LoftTwoCurves_v1"
 
 
 def build_curve_loft_group(name, curve_count, overwrite=False, single_angle=False):
-    curve_group = ensure_curve_group(rebuild=True)
-    loft_group = ensure_loft_group(rebuild=True)
+    curve_group = ensure_curve_group()
+    loft_group = ensure_loft_group()
     group = _top_group(name, overwrite)
     group.is_modifier = True
     _build_curve_loft(group, curve_count, curve_group, loft_group, single_angle)

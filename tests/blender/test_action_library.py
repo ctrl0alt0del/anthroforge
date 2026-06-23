@@ -39,6 +39,10 @@ def _group_nodes_by_tree(group, name):
     return [node for node in group.nodes if getattr(getattr(node, "node_tree", None), "name", "") == name]
 
 
+def _socket_by_name(sockets, name):
+    return next(sock for sock in sockets if sock.name == name)
+
+
 def _factor_source(node):
     socket = next(sock for sock in node.inputs if sock.name == "Factor")
     return tuple(socket.links)[0].from_node.name
@@ -60,6 +64,24 @@ def _curve_path(name, coords):
     obj = bpy.data.objects.new(name, curve)
     bpy.context.scene.collection.objects.link(obj)
     return obj
+
+
+def _vector_passthrough_group(name):
+    group = bpy.data.node_groups.new(name, "GeometryNodeTree")
+    group.interface.new_socket(name="Value", in_out="INPUT", socket_type="NodeSocketVector")
+    group.interface.new_socket(name="Value", in_out="OUTPUT", socket_type="NodeSocketVector")
+    group.links.new(_socket_by_name(group.nodes.new("NodeGroupOutput").inputs, "Value"), _socket_by_name(group.nodes.new("NodeGroupInput").outputs, "Value"))
+    return group
+
+
+def _insert_custom_curve_helper_node(helper, custom):
+    sample, local = helper.nodes["Sample Curve"], helper.nodes["To Local"]
+    node = helper.nodes.new("GeometryNodeGroup")
+    node.name, node.node_tree = "Custom Bridge", custom
+    helper.links.remove(next(link for link in tuple(helper.links) if link.from_node == sample and link.to_node == local))
+    helper.links.new(_socket_by_name(node.inputs, "Value"), _socket_by_name(sample.outputs, "Value"))
+    helper.links.new(_socket_by_name(local.inputs, "Vector"), _socket_by_name(node.outputs, "Value"))
+    return node
 
 
 def _set_bezier_point(point, co):
@@ -242,6 +264,22 @@ class ActionLibraryTests(BlenderTestCase):
         self.assertEqual(len([group for group in bpy.data.node_groups if group.name == _LOFT_GROUP]), 1)
         self.assertEqual(len(_group_nodes_by_tree(bpy.data.node_groups["LoftTwo"], _LOFT_GROUP)), 1)
         self.assertEqual(len(_group_nodes_by_tree(bpy.data.node_groups["LoftFive"], _LOFT_GROUP)), 4)
+
+    def test_create_curve_loft_group_keeps_existing_helper_custom_group_links(self):
+        scene = bpy.context.scene
+        scene.af_action_gn_name = "LoftBase"
+        scene.af_action_curve_count = 2
+        scene.af_action_single_angle = False
+        self.assertEqual(bpy.ops.af.create_curve_loft_group(), {"FINISHED"})
+        helper = bpy.data.node_groups[_CURVE_GROUP]
+        helper_ptr = helper.as_pointer()
+        _insert_custom_curve_helper_node(helper, _vector_passthrough_group("CurveBridge"))
+        scene.af_action_gn_name = "LoftWide"
+        scene.af_action_curve_count = 5
+        self.assertEqual(bpy.ops.af.create_curve_loft_group(), {"FINISHED"})
+        helper = bpy.data.node_groups[_CURVE_GROUP]
+        bridge = helper.nodes["Custom Bridge"]
+        self.assertEqual((helper.as_pointer(), len(tuple(bridge.inputs["Value"].links)), len(tuple(bridge.outputs["Value"].links))), (helper_ptr, 1, 1))
 
     def test_create_curve_loft_group_rejects_duplicate_name(self):
         scene = bpy.context.scene

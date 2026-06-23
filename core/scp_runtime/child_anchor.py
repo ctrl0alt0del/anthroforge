@@ -1,16 +1,21 @@
 from mathutils import Vector
 
 from .common import as_id
+from .child_anchor_lock import locked_child_anchor_index
 from ..shortcuts.session_state import active_child_override
 from .parent_anchor import anchor_mode as parent_anchor_mode, capture_parent_binding, parent_origin_world
 from .surface import build_face_centers, build_vertex_points, closest_child_face_center_to_parent, closest_child_vertex_to_parent
 
 _MODES = {"FACE_CENTER", "VERTEX_NEAREST", "OBJECT_ORIGIN"}
+_NO_LOCK = object()
 
 
 def capture_child_anchor(child_scp, child_geometry_obj, parent_transform_obj, parent_geometry_obj, depsgraph, origin_obj=None, surface_cache=None):
     mode = anchor_mode(child_scp)
     origin = origin_obj or child_geometry_obj
+    locked = _capture_locked_anchor(mode, child_scp, child_geometry_obj, parent_transform_obj, parent_geometry_obj, depsgraph, surface_cache)
+    if locked is not _NO_LOCK:
+        return locked
     if parent_anchor_mode(child_scp) == "OBJECT_ORIGIN":
         return _capture_to_parent_origin(mode, child_scp, child_geometry_obj, parent_transform_obj, parent_geometry_obj, depsgraph, origin, surface_cache)
     return _capture_to_parent_surface(mode, child_scp, child_geometry_obj, parent_transform_obj, parent_geometry_obj, depsgraph, origin, surface_cache)
@@ -45,6 +50,26 @@ def _capture_fixed_origin(child_scp, origin_obj, parent_transform_obj, parent_ge
     anchor = origin_obj.matrix_world.to_translation().copy()
     binding = capture_parent_binding(child_scp, parent_transform_obj, parent_geometry_obj, anchor, depsgraph, surface_cache)
     return None if binding is None else _candidate(anchor, -1, binding)
+
+
+def _capture_locked_anchor(mode, child_scp, child_geometry_obj, parent_transform_obj, parent_geometry_obj, depsgraph, surface_cache):
+    index = locked_child_anchor_index(child_scp, mode)
+    if index < 0 or mode == "OBJECT_ORIGIN":
+        return _NO_LOCK
+    anchor = _locked_anchor_world(mode, child_geometry_obj, index, depsgraph, surface_cache)
+    return None if anchor is None else _locked_candidate(child_scp, parent_transform_obj, parent_geometry_obj, anchor, index, depsgraph, surface_cache)
+
+
+def _locked_anchor_world(mode, child_geometry_obj, index, depsgraph, surface_cache):
+    points = _candidate_points(mode, child_geometry_obj, depsgraph, surface_cache)
+    return None if points is None or index >= len(points) else points[index].copy()
+
+
+def _locked_candidate(child_scp, parent_transform_obj, parent_geometry_obj, anchor, index, depsgraph, surface_cache):
+    if parent_anchor_mode(child_scp) == "OBJECT_ORIGIN":
+        return _candidate(anchor, index, {"mode": "OBJECT_ORIGIN"})
+    binding = capture_parent_binding(child_scp, parent_transform_obj, parent_geometry_obj, anchor, depsgraph, surface_cache)
+    return None if binding is None else _candidate(anchor, index, binding)
 
 
 def _surface_candidate(mode, child_geometry_obj, parent_geometry_obj, depsgraph, surface_cache):

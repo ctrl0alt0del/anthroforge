@@ -11,7 +11,13 @@ bl_info = {
 import bpy
 
 from .operators.create_root import AF_OT_CreateRoot
-from .operators.add_scp import AF_OT_AddSCP, AF_OT_MoveSCPOriginToAttachment, AF_OT_SetSCPParent
+from .operators.add_scp import (
+    AF_OT_AddSCP,
+    AF_OT_ClearSCPChildAnchorLock,
+    AF_OT_MoveSCPOriginToAttachment,
+    AF_OT_SetSCPChildAnchorLock,
+    AF_OT_SetSCPParent,
+)
 from .operators.tree import (
     AF_OT_ToggleSCPCollapse,
     AF_OT_CopySCPInTree,
@@ -116,6 +122,8 @@ classes = (
     AF_OT_AddSCP,
     AF_OT_SetSCPParent,
     AF_OT_MoveSCPOriginToAttachment,
+    AF_OT_SetSCPChildAnchorLock,
+    AF_OT_ClearSCPChildAnchorLock,
     AF_OT_CreateEmptySCP,
     AF_OT_SetSCPTransformObject,
     AF_OT_ReplaceSCPTransformWithEmpty,
