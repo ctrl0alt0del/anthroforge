@@ -104,6 +104,7 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
 
     muscle_id: bpy.props.StringProperty(name="Muscle ID", default="")
 
+    use_warm_start: bpy.props.BoolProperty(name="Use Warm Start", default=True)
     node_count: bpy.props.IntProperty(name="Node Count", default=64, min=8, max=512)
     iterations_interactive: bpy.props.IntProperty(name="Iterations (Interactive)", default=12, min=1, max=200)
     iterations_bake: bpy.props.IntProperty(name="Iterations (Bake)", default=120, min=1, max=1000)

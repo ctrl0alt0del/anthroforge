@@ -29,7 +29,7 @@ from core.vcp.runtime_state import (
 from app.use_cases.blob_create import create_blob_vcp
 from app.use_cases.blob_tools import select_blob_control
 from app.use_cases.fiber_create import create_fiber_vcp
-from app.use_cases.fiber_tools import add_fiber_touch_point, clear_fiber_warm_start, recompute_fiber, remove_fiber_touch_point
+from app.use_cases.fiber_tools import _run_bake_passes, add_fiber_touch_point, clear_fiber_warm_start, recompute_fiber, remove_fiber_touch_point
 from app.use_cases.muscle_create import create_muscle_vcp
 from app.use_cases.muscle_tools import flip_muscle_normals, select_muscle_inflation_ctrl
 
@@ -172,6 +172,15 @@ class VcpUseCaseTests(unittest.TestCase):
         self.assertEqual((fiber_recompute_status(fiber), round(fiber_recompute_ms(fiber), 1)), ("NOT_CONVERGED", 12.5))
         self.assertFalse("af_prefer_bake" not in fiber)
         self.assertTrue(fiber["af_prefer_bake"])
+
+    def test_run_bake_passes_stops_when_residuals_stall(self):
+        fiber = Bag(id="F1"); calls = []
+        def fake_sync(*_args, **_kwargs):
+            calls.append(1); set_fiber_not_converged(fiber, True); set_fiber_eps_disp(fiber, 1.0); set_fiber_eps_pen(fiber, 2.0)
+        with patch("app.use_cases.fiber_tools._sync_entity", side_effect=fake_sync):
+            converged = _run_bake_passes(root(), scene(), fiber, 60)
+        self.assertFalse(converged)
+        self.assertEqual(len(calls), 2)
 
     def test_add_and_remove_fiber_touch_point_sync_runtime(self):
         fiber = Bag(id="F1", mid_touches=FakeCollection())

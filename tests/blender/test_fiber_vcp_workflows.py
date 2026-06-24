@@ -81,6 +81,11 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertIn(fiber_recompute_status(fiber), {"CONVERGED", "NOT_CONVERGED"})
         self.assertGreaterEqual(fiber_recompute_ms(fiber), 0.0)
 
+    def test_new_fiber_defaults_warm_start_on(self):
+        _root_obj, fiber, _origin, _insert = _fiber_setup()
+        self.assertTrue(hasattr(fiber, "use_warm_start"))
+        self.assertTrue(fiber.use_warm_start)
+
     def test_endpoint_handle_update_uses_conflict_resolution(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
         _sync_active_fiber(root_obj, fiber)

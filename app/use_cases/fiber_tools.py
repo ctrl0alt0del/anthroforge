@@ -4,6 +4,8 @@ from mathutils import Vector
 
 try:
     from ...core.vcp.runtime_state import (
+        fiber_eps_disp,
+        fiber_eps_pen,
         fiber_not_converged,
         reset_fiber_runtime,
         set_fiber_recompute_ms,
@@ -11,6 +13,8 @@ try:
     )
 except ImportError:
     from core.vcp.runtime_state import (
+        fiber_eps_disp,
+        fiber_eps_pen,
         fiber_not_converged,
         reset_fiber_runtime,
         set_fiber_recompute_ms,
@@ -30,7 +34,7 @@ def clear_fiber_warm_start(context, fiber_id=""):
     return success(f"Warm-start cache cleared for {fiber.id}", value=fiber)
 
 
-def recompute_fiber(context, fiber_id="", max_passes=60):
+def recompute_fiber(context, fiber_id="", max_passes=12):
     root = root_for_context(context)
     fiber, error = _resolved_fiber(root, fiber_id)
     if fiber is None:
@@ -103,11 +107,26 @@ def _recompute(root, scene, fiber, max_passes):
 
 
 def _run_bake_passes(root, scene, fiber, max_passes):
+    last = None
     for _ in range(max_passes):
         _sync_entity(root, scene, "FIBER", {fiber.id}, bake=True)
         if not fiber_not_converged(fiber):
             return True
+        state = _fiber_residual_state(fiber)
+        if _stalled_bake_state(last, state):
+            break
+        last = state
     return False
+
+
+def _fiber_residual_state(fiber):
+    return round(float(fiber_eps_disp(fiber)), 9), round(float(fiber_eps_pen(fiber)), 9)
+
+
+def _stalled_bake_state(previous, current, tol=1.0e-9):
+    if previous is None:
+        return False
+    return abs(previous[0] - current[0]) <= tol and abs(previous[1] - current[1]) <= tol
 
 
 def _resolved_touch(context, root, fiber_id):

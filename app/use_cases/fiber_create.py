@@ -87,6 +87,7 @@ def _new_fiber(root, origin_id, insert_id, origin_raw, insert_raw):
 
 def _fiber_defaults():
     return {
+        "use_warm_start": True,
         "node_count": 64,
         "iterations_interactive": 12,
         "iterations_bake": 180,
