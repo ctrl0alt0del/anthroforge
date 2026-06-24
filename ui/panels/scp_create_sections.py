@@ -1,5 +1,5 @@
-from ...core.scp_runtime.common import scp_for_object
 from ...app.queries.attachment_anchor_lock import child_anchor_lock_panel_state
+from ...core.scp_runtime.common import scp_for_object
 
 
 def is_marked_scp_obj(obj):
@@ -75,3 +75,6 @@ def draw_mirror_box(layout, scp):
     axis_row = box.row()
     axis_row.enabled = bool(scp.mirror_enabled)
     axis_row.prop(scp, "mirror_axis", text="Axis")
+    row = box.row()
+    row.enabled = bool(scp.mirror_enabled)
+    row.prop(scp, "mirror_shift", text="Shift")

@@ -1,7 +1,7 @@
-﻿import bpy
+import bpy
 
-from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 from ..app.runtime_api import dispatch_intent_context, sync_context
+from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 from ..core.scp_runtime.prop_update_guard import scp_prop_updates_suppressed
 
 
@@ -37,6 +37,23 @@ def _dispatch_attachment_recapture(context, scp_id):
         source="property",
         event_type="UPDATE",
     )
+
+
+def _mirror_shift_index(self):
+    axis = str(getattr(self, "mirror_axis", "X") or "X").upper()
+    return {"Y": 1, "Z": 2}.get(axis, 0)
+
+
+def _get_mirror_shift(self):
+    origin = tuple(getattr(self, "mirror_origin", (0.0, 0.0, 0.0)))
+    return float(origin[_mirror_shift_index(self)])
+
+
+def _set_mirror_shift(self, value):
+    origin = list(getattr(self, "mirror_origin", (0.0, 0.0, 0.0)))[:3]
+    origin += [0.0] * (3 - len(origin))
+    origin[_mirror_shift_index(self)] = float(value)
+    self.mirror_origin = tuple(origin)
 
 
 class AF_SCP_BoundObject_Property(bpy.types.PropertyGroup):
@@ -88,7 +105,6 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
     )
     attach_child_face_lock_index: bpy.props.IntProperty(default=-1, options={"HIDDEN"})
     attach_child_vertex_lock_index: bpy.props.IntProperty(default=-1, options={"HIDDEN"})
-
     attach_follow_rotation: bpy.props.BoolProperty(name="Follow Parent Rotation", default=True, update=_on_scp_prop_update)
     attach_tangent_strategy: bpy.props.EnumProperty(
         name="Rotation Strategy",
@@ -108,7 +124,10 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         default="X",
         update=_on_scp_prop_update,
     )
+    mirror_shift: bpy.props.FloatProperty(name="Mirror Shift", get=_get_mirror_shift, set=_set_mirror_shift)
     mirror_origin: bpy.props.FloatVectorProperty(name="Mirror Origin", size=3, subtype="TRANSLATION", default=(0.0, 0.0, 0.0), update=_on_scp_prop_update)
+
+
 class AF_SCP_System_Property(bpy.types.PropertyGroup):
     scps: bpy.props.CollectionProperty(type=AF_SCP_Property)
     active_scp_index: bpy.props.IntProperty(default=-1)

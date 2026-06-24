@@ -222,6 +222,14 @@ class AttachmentMirrorWorkflowTests(BlenderTestCase):
         clone = find_flagged("af_scp_mirror", target.id, "af_source_scp_id")
         self.assertEqual(_round_xyz(clone), (2.0, 0.0, 0.0))
 
+    def test_mirror_shift_maps_to_active_axis_origin(self):
+        root_obj = root()
+        source = scp_with_object(root_obj, "Source", mesh_object("Source"))
+        source.mirror_axis, source.mirror_shift = "Z", 3.5
+        self.assertEqual(tuple(round(v, 4) for v in source.mirror_origin), (0.0, 0.0, 3.5))
+        source.mirror_axis, source.mirror_shift = "Y", -2.0
+        self.assertEqual(tuple(round(v, 4) for v in source.mirror_origin), (0.0, -2.0, 3.5))
+
     def test_mirror_sync_scope_keeps_unrelated_clusters(self):
         root_obj = root()
         source_a = scp_with_object(root_obj, "SourceA", mesh_object("SourceA"))
