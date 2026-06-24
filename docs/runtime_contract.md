@@ -35,10 +35,12 @@ The current payload contract includes these keys:
 `schedule_sync_from_dirty_hints()` appends a request to the in-memory `_PENDING` queue in `core/visualization/sync_runner.py`.
 
 - Requests stay FIFO.
+- Queue items persist `scene` and `root` by name and resolve fresh RNA objects at flush time.
 - `_arm_timer()` registers exactly one Blender timer while `_TIMER_ARMED` is true.
 - `_flush_pending()` pops one request, calls `_run(**request)`, and returns `0.0` to keep draining the queue.
 - `_flush_pending()` returns `None` only when the queue is empty, and that transition clears `_TIMER_ARMED`.
 - `_RUNNING` prevents re-entrant execution inside `_run()`.
+- `load_pre`, `undo_pre`, and `redo_pre` clear queued work before history changes replace RNA data.
 
 ## Runtime Traversal Rules
 

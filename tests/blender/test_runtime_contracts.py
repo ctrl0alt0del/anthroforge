@@ -39,9 +39,7 @@ def _handler_count(seq, fn):
 
 
 def _reset_sync_runner():
-    sync_runner._RUNNING = False
-    sync_runner._TIMER_ARMED = False
-    sync_runner._PENDING.clear()
+    sync_runner.clear_pending_runtime(keep_timer=False)
 
 
 def _save_load_fixture():
@@ -148,11 +146,13 @@ class RecorderDriver(DependencyDriver):
 class RuntimeContractTests(BlenderTestCase):
     def test_register_cycle_restores_properties_and_handlers(self):
         import anthroforge
+        from anthroforge.core.visualization import sync_runner as package_sync_runner
         self.addCleanup(_restore_addon)
         anthroforge.unregister()
         self.assertFalse(hasattr(bpy.types.Object, "af_scp_system"))
         anthroforge.register()
         self.assertTrue(hasattr(bpy.types.Object, "af_scp_system"))
+        self.assertEqual(_handler_count(bpy.app.handlers.undo_pre, package_sync_runner._on_history_pre), 1)
         self.assertEqual(_handler_count(bpy.app.handlers.load_post, control_runtime._on_load_post), 1)
         self.assertEqual(_handler_count(bpy.app.handlers.load_post, delete_reconcile._on_load_post), 1)
 
@@ -213,10 +213,18 @@ class RuntimeContractTests(BlenderTestCase):
         _reset_sync_runner()
         root_obj = root()
         sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"SCP": {"S1"}}, source="depsgraph", event_type="DELETE", payload={"scp_recapture_ids": ["S1"]})
-        ctx, request = sync_runner._PENDING[0]
+        item = sync_runner._PENDING[0]
+        ctx, request = sync_runner._resolve_item(item)
         self.assertEqual((isinstance(ctx, AddonContext), isinstance(request, RuntimeRequest)), (True, True))
-        self.assertEqual((ctx.root, ctx.scene, request.source, request.event_type), (root_obj, bpy.context.scene, "depsgraph", "DELETE"))
+        self.assertEqual((item.root_name, item.scene_name, request.source, request.event_type), (root_obj.name, bpy.context.scene.name, "depsgraph", "DELETE"))
         self.assertEqual(request.payload["scp_recapture_ids"], ["S1"])
+
+    def test_undo_pre_clears_pending_runtime(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        sync_runner.schedule_sync_from_dirty_hints(root=root(), scene=bpy.context.scene, dirty_hints={"SCP": {"S1"}})
+        sync_runner._on_history_pre(None)
+        self.assertEqual((len(sync_runner._PENDING), sync_runner._RUNNING), (0, False))
 
     def test_source_start_nodes_exclude_non_source_payload_ids(self):
         starts = {("SCP", "S1"), ("SCP", "S2"), ("FIBER", "F1")}

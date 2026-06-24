@@ -109,6 +109,10 @@ from .core.visualization.sync import register_sync, unregister_sync
 from .core.visualization.fiber_sync import register_fiber_sync, unregister_fiber_sync
 from .core.visualization.muscle_sync import register_muscle_sync, unregister_muscle_sync
 from .core.visualization.blob_sync import register_blob_sync, unregister_blob_sync
+from .core.visualization.sync_runner import (
+    register_sync_runner_runtime,
+    unregister_sync_runner_runtime,
+)
 from .core.visualization.control_runtime import (
     register_control_runtime,
     unregister_control_runtime,
@@ -214,6 +218,7 @@ def register():
     register_fiber_sync()
     register_muscle_sync()
     register_blob_sync()
+    register_sync_runner_runtime()
     register_control_runtime()
     register_delete_reconcile()
     register_proxy_session_runtime()
@@ -223,6 +228,7 @@ def unregister():
     unregister_proxy_session_runtime()
     unregister_delete_reconcile()
     unregister_control_runtime()
+    unregister_sync_runner_runtime()
     unregister_blob_sync()
     unregister_muscle_sync()
     unregister_fiber_sync()
