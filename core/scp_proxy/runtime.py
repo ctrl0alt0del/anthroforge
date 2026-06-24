@@ -5,7 +5,7 @@ from ..utils import get_af_root
 from .scope import proxy_scope
 from .session import active_session, set_proxy_notice
 from .signature import snapshot_key, snapshot_row
-from .visibility import deactivate_session
+from .visibility import deactivate_session, rehide_session
 
 _PENDING = {}
 _TIMER_ARMED = False
@@ -147,11 +147,35 @@ def flush_proxy_session_runtime():
             break
 
 
+def _scene_roots():
+    for scene in bpy.data.scenes:
+        root = get_af_root(scene)
+        if root is not None:
+            yield scene, root
+
+
+def _restore_loaded_sessions():
+    for scene, root in _scene_roots():
+        _restore_loaded_session(scene, root)
+
+
+def _restore_loaded_session(scene, root):
+    session = active_session(root)
+    if not session:
+        return
+    if _stale_proxy(session):
+        set_proxy_notice(root, "Proxy view exited: session became stale.")
+        deactivate_session(root, scene)
+        return
+    rehide_session(scene, session)
+
+
 @persistent
 def _on_load_post(_dummy):
     global _TIMER_ARMED
     _PENDING.clear()
     _TIMER_ARMED = False
+    _restore_loaded_sessions()
 
 
 def register_proxy_session_runtime():

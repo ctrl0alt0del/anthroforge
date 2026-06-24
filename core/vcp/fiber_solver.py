@@ -1,9 +1,9 @@
 from mathutils import Vector
 
-from ..attachment_codec import parse_fiber_attach_param
 from ..scp_runtime.common import find_geometry_scp_obj, iter_geometry_mesh_scp_objects
 from ..scp_runtime.surface import build_mesh_surface_data
 from ..utils import depsgraph_for_scene, scene_for_id
+from ..visualization.fiber_sync_helpers import endpoint_world as resolve_fiber_endpoint_world
 from .runtime_state import set_fiber_eps_disp, set_fiber_eps_pen, set_fiber_not_converged
 
 
@@ -264,25 +264,7 @@ class FiberSolver:
             obj_eval.to_mesh_clear()
 
     def _endpoint_world(self, root, scene, runtime_registry, parent_id, attach_param_raw):
-        _ = runtime_registry
-        if not parent_id:
-            return None
-
-        proxy = self._get_scp_proxy(root, scene, parent_id)
-        if proxy is None:
-            return None
-
-        mode, payload = parse_fiber_attach_param(attach_param_raw)
-        if mode == "mesh_anchor":
-            local = payload
-        elif mode == "shape_param_v1":
-            local = self._mesh_local_point_from_shape_param(proxy, payload)
-        else:
-            return None
-
-        if local is None:
-            return None
-        return proxy.matrix_world @ local
+        return resolve_fiber_endpoint_world(root, scene, runtime_registry, parent_id, attach_param_raw)
 
     def _surface_colliders(self, root, scene, runtime_registry):
         _ = runtime_registry

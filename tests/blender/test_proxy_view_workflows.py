@@ -11,13 +11,14 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 import bmesh
 import bpy
 
-from _helpers import BlenderTestCase, empty_object, mesh_object, root, scp_with_object, select_only
+from _helpers import BlenderTestCase, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only, temp_blend_path
 from anthroforge.app.use_cases.proxy_view import switch_to_proxy_view
 from anthroforge.core.attachment_codec import parse_fiber_attach_param
 from anthroforge.core.scp_proxy import flush_proxy_session_runtime, run_proxy_session_guard
 from anthroforge.core.scp_proxy.consts import ATTR_SLOT, ATTR_VERTEX, SIDE_MIRRORED
 from anthroforge.core.scp_proxy.session import active_session
 from anthroforge.core.scp_runtime.lookup import set_parent_relation
+from anthroforge.core.utils import get_af_root
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
 from anthroforge.core.visualization.fiber_sync_helpers import endpoint_world
 from anthroforge.core.visualization.mirror_rules import mirror_matrix
@@ -92,6 +93,10 @@ def _slot_for_scp(obj, scp_id):
     return next(int(row["slot"]) for row in data if str(row.get("scp_id", "")) == str(scp_id))
 
 
+def _scp_named(root_obj, name):
+    return next(item for item in root_obj.af_scp_system.scps if str(item.name or "") == str(name))
+
+
 def _attr(obj, name, index):
     return int(obj.data.attributes[name].data[index].value)
 
@@ -126,6 +131,20 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         self.assertTrue(target.geometry_object_ref.hide_get())
         self.assertFalse(source.transform_object_ref.hide_get())
         self.assertIsNone(bpy.data.objects.get(original_name))
+
+    def test_proxy_view_rehides_scope_after_reload(self):
+        path = temp_blend_path()
+        self.addCleanup(lambda: Path(path).unlink(missing_ok=True))
+        root_obj, parent, left, _right = _proxy_setup()
+        self.assertEqual(_switch(parent.transform_object_ref), {"FINISHED"})
+        bpy.ops.wm.save_as_mainfile(filepath=path)
+        bpy.ops.wm.open_mainfile(filepath=path, load_ui=False)
+        root_obj = get_af_root(bpy.context.scene)
+        parent = _scp_named(root_obj, "Parent")
+        left = _scp_named(root_obj, "Left")
+        self.assertTrue(bool(active_session(root_obj)))
+        self.assertTrue(parent.transform_object_ref.hide_get())
+        self.assertTrue(left.geometry_object_ref.hide_get())
 
     def test_mirrored_proxy_matches_target_mirror_rule(self):
         root_obj, source, target = _mirror_setup()
@@ -180,9 +199,10 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         proxy = _session_proxy(root_obj, "original")
         _edit_select(proxy, _proxy_vertex_index(proxy, left.id, 1), _proxy_vertex_index(proxy, right.id, 2))
         self.assertEqual(bpy.ops.af.connect_proxy_vertices_with_fiber(), {"FINISHED"})
-        fiber = root_obj.af_vcp_system.fibers[0]
+        fiber = root_obj.af_vcp_system.fibers[0]; fiber_proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
         self.assertEqual((bpy.context.mode, bpy.context.active_object), ("EDIT_MESH", proxy))
         self.assertEqual((fiber.a_parent_id, fiber.b_parent_id), (left.id, right.id))
+        self.assertEqual((fiber_proxy is not None, len(fiber_proxy.data.splines) if fiber_proxy else 0), (True, 1))
         self.assertEqual((parse_fiber_attach_param(fiber.a_attach_param), parse_fiber_attach_param(fiber.b_attach_param)), (("mesh_vertex_v1", 1), ("mesh_vertex_v1", 2)))
         start = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
         left.geometry_object_ref.data.vertices[1].co.z = 1.25

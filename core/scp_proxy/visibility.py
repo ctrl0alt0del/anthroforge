@@ -17,6 +17,10 @@ def deactivate_session(root, scene):
     clear_session(root)
 
 
+def rehide_session(scene, payload):
+    _hide_objects(scene, dict(payload or {}).get("hidden_object_names", ()))
+
+
 def hidden_scope_objects(scene, root_name, scp_ids, mirror_ids):
     live = tuple(_scope_objects(scene, root_name, scp_ids, mirror_ids))
     return [obj.name for obj in live if not obj.hide_get()]
