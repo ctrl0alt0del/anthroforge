@@ -28,6 +28,7 @@ from .operators.tree import (
     AF_OT_SelectVCPInTree,
 )
 from .operators.add_fiber_vcp import AF_OT_AddFiberVCP
+from .operators.fiber_proxy import AF_OT_ConnectProxyVerticesWithFiber
 from .operators.add_muscle_vcp import AF_OT_AddMuscleVCP
 from .operators.add_blob_vcp import AF_OT_AddBlobVCP
 from .operators.fiber_tools import (
@@ -42,6 +43,7 @@ from .operators.muscle_tools import (
 )
 from .operators.blob_tools import AF_OT_SelectBlobControl
 from .operators.import_package import AF_OT_ImportPackage
+from .operators.proxy_view import AF_OT_ExitProxyView, AF_OT_SwitchToProxyView
 from .operators.shortcuts import (
     AF_OT_AddDataShortcut,
     AF_OT_DeleteDataShortcut,
@@ -115,6 +117,7 @@ from .core.visualization.delete_reconcile import (
     register_delete_reconcile,
     unregister_delete_reconcile,
 )
+from .core.scp_proxy import register_proxy_session_runtime, unregister_proxy_session_runtime
 from .ui.scene_props import register_scene_props, unregister_scene_props
 
 classes = (
@@ -161,6 +164,7 @@ classes = (
     AF_VCP_System_Property,
 
     AF_OT_AddFiberVCP,
+    AF_OT_ConnectProxyVerticesWithFiber,
     AF_OT_AddMuscleVCP,
     AF_OT_AddBlobVCP,
     AF_OT_ToggleVCPCollapse,
@@ -172,6 +176,8 @@ classes = (
     AF_PT_BlobCreatePanel,
     AF_PT_BlobEditPanel,
     AF_OT_ImportPackage,
+    AF_OT_SwitchToProxyView,
+    AF_OT_ExitProxyView,
     AF_DataShortcutOverride_Property,
     AF_DataShortcut_Property,
     AF_ShortcutWizardItem_Property,
@@ -210,9 +216,11 @@ def register():
     register_blob_sync()
     register_control_runtime()
     register_delete_reconcile()
+    register_proxy_session_runtime()
 
 
 def unregister():
+    unregister_proxy_session_runtime()
     unregister_delete_reconcile()
     unregister_control_runtime()
     unregister_blob_sync()

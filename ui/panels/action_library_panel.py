@@ -1,6 +1,7 @@
 import bpy
 
 from ...app.queries.action_library import curve_loft_panel_state, local_transform_panel_state, split_corner_panel_state
+from ...app.queries.proxy_view import proxy_view_panel_state
 
 
 def _status_icon(state):
@@ -67,6 +68,57 @@ def _draw_split_corner_button(box, state):
     row.operator("af.split_scp_by_corner", icon="SPLIT_HORIZONTAL")
 
 
+def _draw_proxy_header(box):
+    box.label(text="Proxy View")
+    box.label(text="Build subtree proxy meshes for vertex-level fiber work.", icon="MESH_DATA")
+
+
+def _draw_proxy_status(box, state):
+    box.label(text=state.message, icon="CHECKMARK" if state.can_switch else "INFO")
+
+
+def _draw_proxy_buttons(box, state):
+    row = box.row(align=True)
+    row.enabled = state.can_switch
+    row.operator("af.switch_to_proxy_view", icon="MOD_EDGESPLIT")
+    exit_row = box.row()
+    exit_row.enabled = state.can_exit
+    exit_row.operator("af.exit_proxy_view", icon="X")
+
+
+def _draw_proxy_box(layout, context):
+    state = proxy_view_panel_state(context)
+    box = layout.box()
+    _draw_proxy_header(box)
+    _draw_proxy_status(box, state)
+    _draw_proxy_buttons(box, state)
+
+
+def _draw_local_transform_box(layout, context):
+    state = local_transform_panel_state(context)
+    box = layout.box()
+    _draw_header(box, state)
+    _draw_status(box, state)
+    _draw_buttons(box, state)
+
+
+def _draw_curve_loft_box(layout, context):
+    state = curve_loft_panel_state(context)
+    box = layout.box()
+    _draw_curve_loft_header(box)
+    _draw_curve_loft_fields(box, context.scene)
+    _draw_curve_loft_status(box, state)
+    _draw_curve_loft_button(box, state)
+
+
+def _draw_split_corner_box(layout, context):
+    state = split_corner_panel_state(context)
+    box = layout.box()
+    _draw_split_corner_header(box)
+    _draw_split_corner_status(box, state)
+    _draw_split_corner_button(box, state)
+
+
 class AF_PT_ActionLibraryPanel(bpy.types.Panel):
     bl_label = "Action Library"
     bl_idname = "AF_PT_action_library_panel"
@@ -76,19 +128,7 @@ class AF_PT_ActionLibraryPanel(bpy.types.Panel):
     bl_parent_id = "AF_PT_main_panel"
 
     def draw(self, context):
-        state = local_transform_panel_state(context)
-        box = self.layout.box()
-        _draw_header(box, state)
-        _draw_status(box, state)
-        _draw_buttons(box, state)
-        curve_state = curve_loft_panel_state(context)
-        box = self.layout.box()
-        _draw_curve_loft_header(box)
-        _draw_curve_loft_fields(box, context.scene)
-        _draw_curve_loft_status(box, curve_state)
-        _draw_curve_loft_button(box, curve_state)
-        split_state = split_corner_panel_state(context)
-        box = self.layout.box()
-        _draw_split_corner_header(box)
-        _draw_split_corner_status(box, split_state)
-        _draw_split_corner_button(box, split_state)
+        _draw_local_transform_box(self.layout, context)
+        _draw_proxy_box(self.layout, context)
+        _draw_curve_loft_box(self.layout, context)
+        _draw_split_corner_box(self.layout, context)

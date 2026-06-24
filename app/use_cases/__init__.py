@@ -8,6 +8,7 @@ from .control_objects import (
     toggle_control_parent,
 )
 from .fiber_create import create_fiber_vcp
+from .proxy_view import exit_proxy_view, switch_to_proxy_view
 from .fiber_tools import (
     add_fiber_touch_point,
     clear_fiber_warm_start,
@@ -30,6 +31,7 @@ __all__ = [
     "create_muscle_vcp",
     "create_root_if_missing",
     "delete_shortcut_from_context",
+    "exit_proxy_view",
     "flip_muscle_normals",
     "mark_selected_control",
     "mark_active_mesh_as_scp",
@@ -44,4 +46,5 @@ __all__ = [
     "toggle_control_parent",
     "toggle_scp_tree_node",
     "toggle_vcp_tree_node",
+    "switch_to_proxy_view",
 ]

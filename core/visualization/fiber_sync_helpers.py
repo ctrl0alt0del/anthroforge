@@ -4,7 +4,8 @@ from mathutils import Vector
 from bpy_extras import view3d_utils
 
 from ..deps.control_lifecycle import mark_dynamic_control_object
-from ..attachment_codec import parse_fiber_attach_param
+from ..attachment_codec import fiber_attach_signature, parse_fiber_attach_param
+from ..scp_proxy.signature import mesh_topology_signature
 from ..utils import depsgraph_for_scene, scene_for_id
 from ..scp_runtime.common import find_geometry_scp_obj
 
@@ -29,44 +30,46 @@ def find_fiber_proxy(vis_col, root_name, fiber_id):
     return None
 
 
+def _find_with(objects, predicate):
+    return next((obj for obj in objects if predicate(obj)), None)
+
+
+def _endpoint_match(obj, root_name, fiber_id, endpoint):
+    return (
+        obj.get("af_fiber_endpoint_handle")
+        and obj.get("af_root_name") == root_name
+        and obj.get("af_fiber_id") == fiber_id
+        and obj.get("af_fiber_endpoint") == endpoint
+    )
+
+
 def find_endpoint_handle(vis_col, root_name, fiber_id, endpoint):
-    for obj in vis_col.objects:
-        if (
-            obj.get("af_fiber_endpoint_handle")
-            and obj.get("af_root_name") == root_name
-            and obj.get("af_fiber_id") == fiber_id
-            and obj.get("af_fiber_endpoint") == endpoint
-        ):
-            return obj
-    for obj in bpy.data.objects:
-        if (
-            obj.get("af_fiber_endpoint_handle")
-            and obj.get("af_root_name") == root_name
-            and obj.get("af_fiber_id") == fiber_id
-            and obj.get("af_fiber_endpoint") == endpoint
-        ):
-            return obj
-    return None
+    return _find_with(
+        vis_col.objects,
+        lambda obj: _endpoint_match(obj, root_name, fiber_id, endpoint),
+    ) or _find_with(
+        bpy.data.objects,
+        lambda obj: _endpoint_match(obj, root_name, fiber_id, endpoint),
+    )
+
+
+def _touch_match(obj, root_name, fiber_id, touch_index):
+    return (
+        obj.get("af_fiber_touch_handle")
+        and obj.get("af_root_name") == root_name
+        and obj.get("af_fiber_id") == fiber_id
+        and int(obj.get("af_fiber_touch_index", -1)) == int(touch_index)
+    )
 
 
 def find_touch_handle(vis_col, root_name, fiber_id, touch_index):
-    for obj in vis_col.objects:
-        if (
-            obj.get("af_fiber_touch_handle")
-            and obj.get("af_root_name") == root_name
-            and obj.get("af_fiber_id") == fiber_id
-            and int(obj.get("af_fiber_touch_index", -1)) == int(touch_index)
-        ):
-            return obj
-    for obj in bpy.data.objects:
-        if (
-            obj.get("af_fiber_touch_handle")
-            and obj.get("af_root_name") == root_name
-            and obj.get("af_fiber_id") == fiber_id
-            and int(obj.get("af_fiber_touch_index", -1)) == int(touch_index)
-        ):
-            return obj
-    return None
+    return _find_with(
+        vis_col.objects,
+        lambda obj: _touch_match(obj, root_name, fiber_id, touch_index),
+    ) or _find_with(
+        bpy.data.objects,
+        lambda obj: _touch_match(obj, root_name, fiber_id, touch_index),
+    )
 
 
 def create_endpoint_handle(vis_col, root, fiber_id, endpoint):
@@ -182,99 +185,102 @@ def _open_eval_mesh(obj):
     return obj_eval, mesh_eval
 
 
-def _mesh_local_point_from_shape_param(parent_obj, payload):
-    if parent_obj is None or parent_obj.type != "MESH" or parent_obj.data is None:
-        return None
+def _is_mesh_obj(obj):
+    return obj is not None and obj.type == "MESH" and obj.data is not None
 
+
+def _shape_index(mesh, payload):
     try:
-        p = max(0.0, min(1.0, float(payload)))
+        param = max(0.0, min(1.0, float(payload)))
     except Exception:
-        p = 0.0
+        param = 0.0
+    if len(mesh.vertices) <= 1:
+        return 0
+    return max(0, min(len(mesh.vertices) - 1, int(round(param * float(len(mesh.vertices) - 1)))))
 
+
+def _mesh_local_point_from_shape_param(parent_obj, payload):
+    if not _is_mesh_obj(parent_obj):
+        return None
     obj_eval, mesh_eval = _open_eval_mesh(parent_obj)
     if mesh_eval is None:
         return None
     try:
-        if len(mesh_eval.vertices) == 1:
-            return mesh_eval.vertices[0].co.copy()
-        idx = int(round(p * float(len(mesh_eval.vertices) - 1)))
-        idx = max(0, min(len(mesh_eval.vertices) - 1, idx))
-        return mesh_eval.vertices[idx].co.copy()
+        return mesh_eval.vertices[_shape_index(mesh_eval, payload)].co.copy()
     finally:
         obj_eval.to_mesh_clear()
+
+
+def _vertex_signature_ok(mesh_eval, raw):
+    wanted = fiber_attach_signature(raw)
+    return wanted == "" or wanted == mesh_topology_signature(mesh_eval)
+
+
+def _mesh_local_point_from_vertex_index(parent_obj, payload, raw):
+    obj_eval, mesh_eval = _open_eval_mesh(parent_obj)
+    if mesh_eval is None:
+        return None
+    try:
+        if not _vertex_signature_ok(mesh_eval, raw):
+            return None
+        index = max(0, min(len(mesh_eval.vertices) - 1, int(payload)))
+        return mesh_eval.vertices[index].co.copy()
+    finally:
+        obj_eval.to_mesh_clear()
+
+
+def _local_from_attach(proxy, mode, payload, raw):
+    if mode == "mesh_anchor":
+        return payload
+    if mode == "shape_param_v1":
+        return _mesh_local_point_from_shape_param(proxy, payload)
+    if mode == "mesh_vertex_v1":
+        return _mesh_local_point_from_vertex_index(proxy, payload, raw)
+    return None
 
 
 def endpoint_world(root, scene, runtime_registry, parent_id, attach_param_raw):
     _ = runtime_registry
     if not parent_id:
         return None
-
     proxy = get_scp_proxy(scene, root.name, parent_id)
     if proxy is None:
         return None
-
     mode, payload = parse_fiber_attach_param(attach_param_raw)
-    if mode == "mesh_anchor":
-        local = payload
-    elif mode == "shape_param_v1":
-        local = _mesh_local_point_from_shape_param(proxy, payload)
-    else:
-        return None
-
+    local = _local_from_attach(proxy, mode, payload, attach_param_raw)
     if local is None:
         return None
     return proxy.matrix_world @ local
 
 
-def nearest_param(parent_scp, parent_proxy, moved_world):
-    _ = parent_scp
-    if parent_proxy is None or parent_proxy.type != "MESH" or parent_proxy.data is None:
-        return 0.0
-
+def _nearest_eval_vertex(parent_proxy, moved_world):
     obj_eval, mesh_eval = _open_eval_mesh(parent_proxy)
     if mesh_eval is None:
-        return 0.0
-
-    mw = parent_proxy.matrix_world
-    vcount = len(mesh_eval.vertices)
-    best_index = 0
-    best_d2 = None
+        return None, 0, 0
     try:
-        for i, v in enumerate(mesh_eval.vertices):
-            w = mw @ v.co
-            d2 = (w - moved_world).length_squared
-            if best_d2 is None or d2 < best_d2:
-                best_d2 = d2
-                best_index = i
+        best = min(mesh_eval.vertices, key=lambda v: ((parent_proxy.matrix_world @ v.co) - moved_world).length_squared)
+        return best.co.copy(), best.index, len(mesh_eval.vertices)
     finally:
         obj_eval.to_mesh_clear()
 
-    if vcount <= 1:
+
+def nearest_param(parent_scp, parent_proxy, moved_world):
+    _ = parent_scp
+    if not _is_mesh_obj(parent_proxy):
         return 0.0
-    return float(best_index) / float(vcount - 1)
+    _local, index, count = _nearest_eval_vertex(parent_proxy, moved_world)
+    if count == 0:
+        return 0.0
+    if count <= 1:
+        return 0.0
+    return float(index) / float(count - 1)
 
 
 def nearest_parent_mesh_vertex_local_point(parent_proxy, moved_world):
-    if parent_proxy is None or parent_proxy.type != "MESH" or parent_proxy.data is None:
+    if not _is_mesh_obj(parent_proxy):
         return None
-
-    obj_eval, mesh_eval = _open_eval_mesh(parent_proxy)
-    if mesh_eval is None:
-        return None
-
-    mw = parent_proxy.matrix_world
-    best_local = None
-    best_d2 = None
-    try:
-        for v in mesh_eval.vertices:
-            w = mw @ v.co
-            d2 = (w - moved_world).length_squared
-            if best_d2 is None or d2 < best_d2:
-                best_d2 = d2
-                best_local = v.co.copy()
-    finally:
-        obj_eval.to_mesh_clear()
-    return best_local
+    local, _index, _count = _nearest_eval_vertex(parent_proxy, moved_world)
+    return local
 
 
 def _first_window_manager():

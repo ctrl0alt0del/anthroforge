@@ -18,15 +18,24 @@ def create_fiber_vcp(context):
     root = root_for_context(context)
     if root is None:
         return failure("No AF_ROOT found.")
-    resolved = _resolved_inputs(context, root)
+    return _create_fiber(context, root, _resolved_inputs(context, root), "Select valid SCP geometry endpoints.")
+
+
+def create_fiber_from_proxy_vertices(context):
+    root = root_for_context(context)
+    if root is None:
+        return failure("No AF_ROOT found.")
+    picks, error = _selected_proxy_vertices()(context)
+    return failure(error) if error else _create_fiber(context, root, _resolved_proxy_inputs(picks), "")
+
+
+def _create_fiber(context, root, resolved, error_message):
     if resolved is None:
-        return failure("Select valid SCP geometry endpoints.")
+        return failure(error_message or "Could not resolve fiber endpoints.")
     fiber = _new_fiber(root, *resolved)
     _activate(root.af_vcp_system, "FIBER", fiber.id)
     _sync_entity(root, context.scene, "FIBER", {fiber.id})
-    proxy = _find_proxy(context.scene, root.name, fiber.id)
-    _select_if_found(context, proxy)
-    _sync_selection(context.scene, proxy)
+    _finalize_selection(context, root, fiber)
     return success(f"Added {fiber.id}", value=fiber)
 
 
@@ -37,6 +46,14 @@ def _resolved_inputs(context, root):
     origin_raw = _first_attach_param(context.scene, root, origin_id)
     insert_raw = _first_attach_param(context.scene, root, insert_id)
     return None if origin_raw is None or insert_raw is None else (origin_id, insert_id, origin_raw, insert_raw)
+
+
+def _resolved_proxy_inputs(picks):
+    if len(tuple(picks or ())) != 2:
+        return None
+    a, b = tuple(picks or ())
+    encode = _encode_fiber_vertex_index()
+    return a.scp_id, b.scp_id, encode(a.vertex_index, a.signature), encode(b.vertex_index, b.signature)
 
 
 def _endpoint_ids(context):
@@ -88,6 +105,19 @@ def _apply_values(item, values):
 
 def _activate(vcp, kind, entity_id):
     vcp.active_vcp_type, vcp.active_vcp_id = str(kind or ""), str(entity_id or "")
+
+
+def _finalize_selection(context, root, fiber):
+    if getattr(context, "mode", "") == "EDIT_MESH" and _active_proxy(context):
+        return
+    proxy = _find_proxy(context.scene, root.name, fiber.id)
+    _select_if_found(context, proxy)
+    _sync_selection(context.scene, proxy)
+
+
+def _active_proxy(context):
+    obj = None if context is None else getattr(context, "active_object", None)
+    return bool(obj and obj.get("af_scp_proxy_view"))
 
 
 def _select_if_found(context, obj):
@@ -155,6 +185,22 @@ def _encode_fiber_anchor():
     except ImportError:
         from core.attachment_codec import encode_fiber_mesh_anchor
     return encode_fiber_mesh_anchor
+
+
+def _encode_fiber_vertex_index():
+    try:
+        from ...core.attachment_codec import encode_fiber_vertex_index
+    except ImportError:
+        from core.attachment_codec import encode_fiber_vertex_index
+    return encode_fiber_vertex_index
+
+
+def _selected_proxy_vertices():
+    try:
+        from ...core.scp_proxy import selected_proxy_vertices
+    except ImportError:
+        from core.scp_proxy import selected_proxy_vertices
+    return selected_proxy_vertices
 
 
 def _notify_selection_changed():

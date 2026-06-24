@@ -52,30 +52,34 @@ def _parse_behavior(mode, data):
     return normalize_behavior(mode, raw)
 
 
+def _default_scp_attach():
+    mode = "surface_frame_v1"
+    return mode, _default_surface_frame_payload(), default_behavior_for_mode(mode)
+
+
+def _scp_attach_from_data(data):
+    mode = "" if not isinstance(data, dict) else data.get("mode")
+    if mode == "surface_frame_v1":
+        parsed = _surface_frame_from_data(data)
+    elif mode == "mesh_anchor":
+        parsed = _mesh_anchor_from_data(data)
+    else:
+        parsed = None
+    if parsed is None:
+        return None
+    name, payload = parsed
+    return name, payload, _parse_behavior(name, data)
+
+
 def parse_scp_attach_descriptor(raw):
     raw = (raw or "").strip()
     if not raw:
-        mode = "surface_frame_v1"
-        payload = _default_surface_frame_payload()
-        return mode, payload, default_behavior_for_mode(mode)
-
+        return _default_scp_attach()
     try:
         data = json.loads(raw)
     except Exception:
         data = {}
-
-    if isinstance(data, dict) and data.get("mode") == "surface_frame_v1":
-        mode, payload = _surface_frame_from_data(data)
-        return mode, payload, _parse_behavior(mode, data)
-    if isinstance(data, dict) and data.get("mode") == "mesh_anchor":
-        parsed = _mesh_anchor_from_data(data)
-        if parsed is not None:
-            mode, payload = parsed
-            return mode, payload, _parse_behavior(mode, data)
-
-    mode = "surface_frame_v1"
-    payload = _default_surface_frame_payload()
-    return mode, payload, default_behavior_for_mode(mode)
+    return _scp_attach_from_data(data) or _default_scp_attach()
 
 
 def parse_scp_attach_param(raw):
@@ -100,25 +104,25 @@ def encode_surface_frame(parent_param, child_origin_local, child_tangent_local, 
     )
 
 
+def _vec_list(value):
+    return [float(value.x), float(value.y), float(value.z)]
+
+
+def _behavior_payload(behavior_n, default_id, default_aspects):
+    return {
+        "id": str(behavior_n.get("id", default_id)),
+        "aspects": [str(v) for v in behavior_n.get("aspects", default_aspects)],
+    }
+
+
 def encode_scp_mesh_anchor(parent_local_point, child_local_point, behavior=None):
     behavior_n = normalize_behavior("mesh_anchor", behavior or default_behavior_for_mode("mesh_anchor"))
     return json.dumps(
         {
             "mode": "mesh_anchor",
-            "parent_local_point": [
-                float(parent_local_point.x),
-                float(parent_local_point.y),
-                float(parent_local_point.z),
-            ],
-            "child_local_point": [
-                float(child_local_point.x),
-                float(child_local_point.y),
-                float(child_local_point.z),
-            ],
-            "behavior": {
-                "id": str(behavior_n.get("id", "mesh_anchor")),
-                "aspects": [str(v) for v in behavior_n.get("aspects", [ASPECT_POSITION])],
-            },
+            "parent_local_point": _vec_list(parent_local_point),
+            "child_local_point": _vec_list(child_local_point),
+            "behavior": _behavior_payload(behavior_n, "mesh_anchor", [ASPECT_POSITION]),
         }
     )
 
@@ -126,22 +130,36 @@ def encode_scp_mesh_anchor(parent_local_point, child_local_point, behavior=None)
 def parse_fiber_attach_param(raw):
     raw = (raw or "").strip()
     if not raw:
-        return ("shape_param_v1", 0.0)
+        return "shape_param_v1", 0.0
+    return _fiber_mode_payload(_json_data(raw))
 
+
+def fiber_attach_signature(raw):
+    data = _json_data(raw)
+    return "" if not isinstance(data, dict) else str(data.get("topology_signature", "") or "")
+
+
+def _fiber_mode_payload(data):
+    mode = "" if not isinstance(data, dict) else str(data.get("mode", "") or "")
+    if mode == "shape_param_v1":
+        return "shape_param_v1", data.get("parent_param", 0.0)
+    if mode == "mesh_anchor":
+        return _fiber_mesh_anchor(data)
+    if mode == "mesh_vertex_v1":
+        return "mesh_vertex_v1", int(data.get("vertex_index", -1))
+    return "shape_param_v1", 0.0
+
+
+def _fiber_mesh_anchor(data):
+    p = data.get("parent_local_point")
+    return ("mesh_anchor", Vector((float(p[0]), float(p[1]), float(p[2])))) if isinstance(p, (list, tuple)) and len(p) == 3 else ("shape_param_v1", 0.0)
+
+
+def _json_data(raw):
     try:
-        data = json.loads(raw)
+        return json.loads(raw)
     except Exception:
-        data = {}
-
-    if isinstance(data, dict) and data.get("mode") == "shape_param_v1":
-        return ("shape_param_v1", data.get("parent_param", 0.0))
-
-    if isinstance(data, dict) and data.get("mode") == "mesh_anchor":
-        p = data.get("parent_local_point")
-        if isinstance(p, (list, tuple)) and len(p) == 3:
-            return ("mesh_anchor", Vector((float(p[0]), float(p[1]), float(p[2]))))
-
-    return ("shape_param_v1", 0.0)
+        return {}
 
 
 def encode_fiber_shape_param(parent_param):
@@ -159,3 +177,7 @@ def encode_fiber_mesh_anchor(parent_local_point):
             ],
         }
     )
+
+
+def encode_fiber_vertex_index(vertex_index, topology_signature=""):
+    return json.dumps({"mode": "mesh_vertex_v1", "vertex_index": int(vertex_index), "topology_signature": str(topology_signature or "")})
