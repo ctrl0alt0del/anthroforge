@@ -10,11 +10,17 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
         sys.path.insert(0, value)
 
 import bpy
+from mathutils import Vector
 
 from _helpers import BlenderTestCase, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
+from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor
 from anthroforge.core.vcp.runtime_state import (
+    fiber_active_colliders,
+    fiber_planner_ms,
     fiber_recompute_ms,
     fiber_recompute_status,
+    fiber_refine_ms,
+    fiber_route_mode,
     set_fiber_eps_disp,
     set_fiber_eps_pen,
     set_fiber_recompute_ms,
@@ -35,6 +41,20 @@ def _fiber_setup():
     return root_obj, root_obj.af_vcp_system.fibers[0], origin, insert
 
 
+def _fiber_setup_direct():
+    root_obj = root()
+    origin_obj = mesh_object("Origin")
+    insert_obj = mesh_object("Insert", (2.0, 0.0, 0.0))
+    origin_obj.rotation_euler.y = 1.57079632679
+    insert_obj.rotation_euler.y = 1.57079632679
+    origin = scp_with_object(root_obj, "Origin", origin_obj)
+    insert = scp_with_object(root_obj, "Insert", insert_obj)
+    bpy.context.scene.af_new_fiber_origin_obj = origin.geometry_object_ref
+    bpy.context.scene.af_new_fiber_insertion_obj = insert.geometry_object_ref
+    bpy.ops.af.add_fiber_vcp()
+    return root_obj, root_obj.af_vcp_system.fibers[0], origin, insert
+
+
 def _clear_selection():
     for obj in tuple(bpy.context.selected_objects):
         obj.select_set(False)
@@ -45,6 +65,16 @@ def _sync_active_fiber(root_obj, fiber):
     _clear_selection()
     with patch.object(fiber_runtime, "_active_fiber_id", return_value=fiber.id):
         register_fiber_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+
+
+def _cube_scp(root_obj, name, location=(0.0, 0.0, 0.0), size=1.0):
+    bpy.ops.mesh.primitive_cube_add(size=size, location=location)
+    return scp_with_object(root_obj, name, bpy.context.active_object), bpy.context.active_object
+
+
+def _fiber_points_world(fiber):
+    proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+    return json.loads(proxy["af_fiber_points_world"])
 
 
 class FiberVcpWorkflowTests(BlenderTestCase):
@@ -88,6 +118,47 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         bpy.ops.af.recompute_fiber()
         proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
         self.assertEqual(len(json.loads(proxy["af_fiber_points_world"])), 96)
+
+    def test_recompute_fiber_direct_mode_records_planner_metrics(self):
+        _root_obj, fiber, _origin, _insert = _fiber_setup_direct()
+        bpy.ops.af.recompute_fiber()
+        self.assertEqual(fiber_route_mode(fiber), "DIRECT")
+        self.assertGreaterEqual(fiber_planner_ms(fiber), 0.0)
+        self.assertGreaterEqual(fiber_refine_ms(fiber), 0.0)
+
+    def test_recompute_fiber_roadmap_mode_detours_around_blocker(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        _cube_scp(root_obj, "Blocker", (1.0, 0.0, 0.0), 0.8)
+        bpy.ops.af.recompute_fiber()
+        points = _fiber_points_world(fiber)
+        self.assertEqual(fiber_route_mode(fiber), "ROADMAP")
+        self.assertTrue(any(abs(p[1]) > 1.0e-4 or abs(p[2]) > 1.0e-4 for p in points[1:-1]))
+
+    def test_interactive_sync_skips_roadmap_planner(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        _cube_scp(root_obj, "Blocker", (1.0, 0.0, 0.0), 0.8)
+        register_fiber_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene, bake=False)
+        self.assertEqual(fiber_route_mode(fiber), "LOCAL_FALLBACK")
+        self.assertEqual(fiber_planner_ms(fiber), 0.0)
+
+    def test_recompute_fiber_preserves_mid_touch_anchor(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        blocker, blocker_obj = _cube_scp(root_obj, "TouchBlocker", (1.0, 0.0, 0.0), 0.8)
+        target_local = Vector((0.0, 0.0, 0.4))
+        touch = fiber.mid_touches.add()
+        touch.parent_id = blocker.id
+        touch.attach_param = encode_fiber_mesh_anchor(target_local)
+        bpy.ops.af.recompute_fiber()
+        target_world = blocker_obj.matrix_world @ target_local
+        points = [Vector(value) for value in _fiber_points_world(fiber)]
+        self.assertLess(min((point - target_world).length for point in points), 1.0e-6)
+
+    def test_recompute_fiber_active_collider_metric_filters_far_blockers(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        for i in range(8):
+            _cube_scp(root_obj, f"Far{i}", (20.0, float(i) * 2.0, 0.0), 0.8)
+        bpy.ops.af.recompute_fiber()
+        self.assertLess(fiber_active_colliders(fiber), 5)
 
     def test_new_fiber_defaults_warm_start_on(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup()

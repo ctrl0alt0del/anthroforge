@@ -3,6 +3,10 @@ _FIBER_MS = "_af_rt_fiber_last_recompute_ms"
 _FIBER_STATUS = "_af_rt_fiber_last_recompute_status"
 _FIBER_DISP = "_af_rt_fiber_last_eps_disp"
 _FIBER_PEN = "_af_rt_fiber_last_eps_pen"
+_FIBER_ROUTE = "_af_rt_fiber_last_route_mode"
+_FIBER_PLAN = "_af_rt_fiber_last_planner_ms"
+_FIBER_REFINE = "_af_rt_fiber_last_refine_ms"
+_FIBER_ACTIVE = "_af_rt_fiber_last_active_colliders"
 _BLOB_OK = "_af_rt_blob_last_solve_converged"
 _BLOB_DISP = "_af_rt_blob_last_solve_max_disp"
 _BLOB_ITERS = "_af_rt_blob_last_solve_iterations"
@@ -49,12 +53,48 @@ def set_fiber_eps_pen(fiber, value):
     _write(fiber, _FIBER_PEN, float(value))
 
 
+def fiber_route_mode(fiber):
+    return str(_read(fiber, _FIBER_ROUTE, "LOCAL_FALLBACK") or "LOCAL_FALLBACK")
+
+
+def set_fiber_route_mode(fiber, value):
+    _write(fiber, _FIBER_ROUTE, str(value or "LOCAL_FALLBACK"))
+
+
+def fiber_planner_ms(fiber):
+    return float(_read(fiber, _FIBER_PLAN, 0.0))
+
+
+def set_fiber_planner_ms(fiber, value):
+    _write(fiber, _FIBER_PLAN, float(value))
+
+
+def fiber_refine_ms(fiber):
+    return float(_read(fiber, _FIBER_REFINE, 0.0))
+
+
+def set_fiber_refine_ms(fiber, value):
+    _write(fiber, _FIBER_REFINE, float(value))
+
+
+def fiber_active_colliders(fiber):
+    return int(_read(fiber, _FIBER_ACTIVE, 0))
+
+
+def set_fiber_active_colliders(fiber, value):
+    _write(fiber, _FIBER_ACTIVE, int(value))
+
+
 def reset_fiber_runtime(fiber):
     set_fiber_not_converged(fiber, False)
     set_fiber_recompute_ms(fiber, 0.0)
     set_fiber_recompute_status(fiber, "UNKNOWN")
     set_fiber_eps_disp(fiber, 0.0)
     set_fiber_eps_pen(fiber, 0.0)
+    set_fiber_route_mode(fiber, "LOCAL_FALLBACK")
+    set_fiber_planner_ms(fiber, 0.0)
+    set_fiber_refine_ms(fiber, 0.0)
+    set_fiber_active_colliders(fiber, 0)
 
 
 def blob_solve_converged(blob):

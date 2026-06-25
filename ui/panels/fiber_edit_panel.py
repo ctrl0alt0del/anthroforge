@@ -2,7 +2,16 @@ import bpy
 from ...app.queries.root import root_for_context
 from ...app.queries.scp import scp_label
 from ...app.queries.vcp import active_fiber_from_context, has_active_entity
-from ...core.vcp.runtime_state import fiber_eps_disp, fiber_eps_pen, fiber_recompute_ms, fiber_recompute_status
+from ...core.vcp.runtime_state import (
+    fiber_active_colliders,
+    fiber_eps_disp,
+    fiber_eps_pen,
+    fiber_planner_ms,
+    fiber_recompute_ms,
+    fiber_recompute_status,
+    fiber_refine_ms,
+    fiber_route_mode,
+)
 
 
 class AF_PT_FiberEditPanel(bpy.types.Panel):
@@ -54,16 +63,27 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
 
     def _draw_status(self, layout, fiber):
         status_box = layout.box()
+        self._draw_status_header(status_box, fiber)
+        self._draw_status_metrics(status_box, fiber)
+
+    def _draw_status_header(self, status_box, fiber):
         status = fiber_recompute_status(fiber)
         if status == "CONVERGED":
             status_box.label(text="Status: Converged", icon="CHECKMARK")
-        elif status == "NOT_CONVERGED":
+            return
+        if status == "NOT_CONVERGED":
             status_box.label(text="Status: Not Converged", icon="ERROR")
             status_box.label(text=f"Residual disp: {fiber_eps_disp(fiber):.6f}")
             status_box.label(text=f"Residual pen: {fiber_eps_pen(fiber):.6f}")
-        else:
-            status_box.label(text="Status: Unknown", icon="QUESTION")
+            return
+        status_box.label(text="Status: Unknown", icon="QUESTION")
+
+    def _draw_status_metrics(self, status_box, fiber):
         status_box.label(text=f"Recompute: {fiber_recompute_ms(fiber):.2f} ms")
+        status_box.label(text=f"Route: {fiber_route_mode(fiber)}")
+        status_box.label(text=f"Planner: {fiber_planner_ms(fiber):.2f} ms")
+        status_box.label(text=f"Refine: {fiber_refine_ms(fiber):.2f} ms")
+        status_box.label(text=f"Active Colliders: {fiber_active_colliders(fiber)}")
 
     def _draw_display(self, layout, fiber):
         display_box = layout.box()

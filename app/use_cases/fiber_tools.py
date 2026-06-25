@@ -39,8 +39,8 @@ def recompute_fiber(context, fiber_id="", max_passes=12):
     fiber, error = _resolved_fiber(root, fiber_id)
     if fiber is None:
         return failure(error)
-    elapsed_ms, converged = _recompute(root, context.scene, fiber, int(max_passes))
     _set_prefer_bake(fiber, True)
+    elapsed_ms, converged = _recompute(root, context.scene, fiber, int(max_passes))
     _set_recompute_state(fiber, elapsed_ms, converged)
     return success(_recompute_message(fiber.id, converged, max_passes), _recompute_level(converged), fiber)
 

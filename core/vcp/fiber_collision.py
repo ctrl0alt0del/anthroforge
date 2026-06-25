@@ -1,0 +1,317 @@
+from math import floor
+
+from mathutils import Vector
+
+from ..scp_runtime.common import iter_geometry_mesh_scp_objects
+from ..scp_runtime.surface import build_mesh_surface_data
+from ..utils import scene_cache_get, scene_cache_set
+
+
+class CollisionOracle:
+    def __init__(self, root, scene, depsgraph, margin=0.0, surface_offset=0.002):
+        self.root, self.scene, self.depsgraph = root, scene, depsgraph
+        self.margin = max(0.0, float(margin))
+        self.clearance = max(0.01, self.margin * 2.0, float(surface_offset) * 4.0)
+        self._colliders = None
+
+    def colliders(self):
+        self._colliders = self._colliders or _build_colliders(self.root, self.scene, self.depsgraph)
+        return self._colliders
+
+    def active_colliders_for_segment(self, a, b, owners=(), padding=0.0):
+        return _active_segment(self.scene, self.colliders(), a, b, self.margin, padding)
+
+    def active_colliders_for_polyline(self, points, padding=0.0):
+        return _active_polyline(self.scene, self.colliders(), points, self.margin, padding)
+
+    def segment_visible(self, a, b, owners=(), colliders=None):
+        cols = colliders or self.active_colliders_for_segment(a, b, owners=owners)
+        return all(_segment_clear(self, c, a, b, owners) for c in cols)
+
+    def push_out_point(self, point, colliders=None):
+        cols = colliders or self.active_colliders_for_polyline((point,))
+        return _push_out_world(self, point, cols)
+
+    def shell_nodes(self, collider, dense=False):
+        return _shell_nodes(self.scene, collider, self.margin, dense)
+
+
+def _build_colliders(root, scene, depsgraph):
+    items = []
+    for obj in iter_geometry_mesh_scp_objects(scene, root.name):
+        item = _collider_entry(obj, build_mesh_surface_data(obj, depsgraph))
+        if item is not None:
+            items.append(item)
+    return sorted(items, key=lambda item: item["sid"])
+
+
+def _collider_entry(obj, surface):
+    if not surface:
+        return None
+    return {
+        "sid": str(obj.get("af_scp_id", "") or ""), "obj": obj, "bvh": surface["bvh_local"],
+        "m_inv": obj.matrix_world.inverted(), "m": obj.matrix_world.copy(), "m3": obj.matrix_world.to_3x3(),
+        "mn": surface["bounds_world"][0], "mx": surface["bounds_world"][1], "stamp": _collider_stamp(obj),
+    }
+
+
+def _collider_stamp(obj):
+    data = getattr(obj, "data", None)
+    return (int(data.as_pointer()) if data else 0, len(getattr(data, "vertices", ())), tuple(float(v) for row in obj.matrix_world for v in row))
+
+
+def _active_segment(scene, colliders, a, b, margin, padding):
+    return _active_for_bounds(scene, colliders, _line_bounds((a, b), margin + padding))
+
+
+def _active_polyline(scene, colliders, points, margin, padding):
+    return colliders if not points else _active_for_bounds(scene, colliders, _line_bounds(points, margin + padding))
+
+
+def _active_for_bounds(scene, colliders, bounds):
+    ids = scene_cache_get(scene, _active_key(colliders, bounds))
+    return _colliders_from_ids(colliders, ids) if ids is not None else _store_active(scene, colliders, bounds)
+
+
+def _store_active(scene, colliders, bounds):
+    hits = [c for c in colliders if _aabb_overlap(bounds[0], bounds[1], c["mn"], c["mx"], 0.0)]
+    scene_cache_set(scene, _active_key(colliders, bounds), tuple(c["sid"] for c in hits))
+    return hits
+
+
+def _active_key(colliders, bounds):
+    return ("fiber_active", _round_bounds(bounds), tuple((c["sid"], c["stamp"]) for c in colliders))
+
+
+def _round_bounds(bounds):
+    return tuple(round(v, 5) for p in bounds for v in (p.x, p.y, p.z))
+
+
+def _colliders_from_ids(colliders, ids):
+    index = {c["sid"]: c for c in colliders}
+    return [index[sid] for sid in tuple(ids or ()) if sid in index]
+
+
+def _line_bounds(points, pad):
+    xs, ys, zs = [p.x for p in points], [p.y for p in points], [p.z for p in points]
+    mn = Vector((min(xs) - pad, min(ys) - pad, min(zs) - pad))
+    mx = Vector((max(xs) + pad, max(ys) + pad, max(zs) + pad))
+    return mn, mx
+
+
+def _aabb_overlap(a_mn, a_mx, b_mn, b_mx, margin):
+    return not (
+        a_mx.x < (b_mn.x - margin) or b_mx.x < (a_mn.x - margin)
+        or a_mx.y < (b_mn.y - margin) or b_mx.y < (a_mn.y - margin)
+        or a_mx.z < (b_mn.z - margin) or b_mx.z < (a_mn.z - margin)
+    )
+
+
+def _segment_clear(oracle, collider, a, b, owners):
+    if not _aabb_overlap(*_line_bounds((a, b), oracle.margin), collider["mn"], collider["mx"], 0.0):
+        return True
+    p0, p1 = _trimmed_segment(oracle, collider, a, b, owners)
+    return p0 is None or (not _segment_ray_hit(collider, p0, p1) and not _segment_sample_hit(oracle, collider, p0, p1))
+
+
+def _trimmed_segment(oracle, collider, a, b, owners):
+    length = (b - a).length
+    if length <= 1.0e-9:
+        return None, None
+    t0 = _trim_t(collider["sid"] == str((owners or ("", ""))[0] or ""), oracle.clearance, length)
+    t1 = 1.0 - _trim_t(collider["sid"] == str((owners or ("", ""))[1] or ""), oracle.clearance, length)
+    return (None, None) if t1 <= t0 else (a.lerp(b, t0), a.lerp(b, t1))
+
+
+def _trim_t(enabled, clearance, length):
+    return 0.0 if not enabled else min(0.45, max(0.0, clearance / max(length, 1.0e-9)))
+
+
+def _segment_ray_hit(collider, a, b):
+    local_a, local_b = collider["m_inv"] @ a, collider["m_inv"] @ b
+    delta = local_b - local_a
+    length = delta.length
+    if length <= 1.0e-9:
+        return False
+    hit = collider["bvh"].ray_cast(local_a, delta.normalized(), length)
+    return bool(hit and hit[0] is not None)
+
+
+def _segment_sample_hit(oracle, collider, a, b):
+    return any(_sample_pen(collider, a.lerp(b, step / 6.0), oracle.margin) > 0.0 for step in range(1, 6))
+
+
+def _sample_pen(collider, point, margin):
+    return max(0.0, margin - _bvh_signed_distance(collider, point))
+
+
+def _bvh_signed_distance(collider, point):
+    local = collider["m_inv"] @ point
+    hit = collider["bvh"].find_nearest(local)
+    return 1.0e9 if not hit or hit[0] is None else _signed_hit(collider, local, hit)
+
+
+def _signed_hit(collider, local, hit):
+    co, normal, _index, _dist = hit
+    dist = (local - co).length
+    sign = _ray_sign(collider, local)
+    return dist * (_normal_sign(local, co, normal) if sign is None else sign)
+
+
+def _ray_sign(collider, local):
+    limit = (collider["mx"] - collider["mn"]).length + 1.0
+    pos = _ray_hit(collider["bvh"], local, Vector((1.0, 0.0, 0.0)), limit)
+    neg = _ray_hit(collider["bvh"], local, Vector((-1.0, 0.0, 0.0)), limit)
+    return -1.0 if pos and neg else (1.0 if (not pos and not neg) else None)
+
+
+def _ray_hit(bvh, origin, direction, distance):
+    hit = bvh.ray_cast(origin, direction, distance)
+    return bool(hit and hit[0] is not None)
+
+
+def _normal_sign(local, co, normal):
+    return 1.0 if (Vector(local) - Vector(co)).dot(_safe_normal(normal)) >= 0.0 else -1.0
+
+
+def _safe_normal(normal):
+    return Vector((0.0, 0.0, 1.0)) if Vector(normal).length <= 1.0e-8 else Vector(normal).normalized()
+
+
+def _push_out_world(oracle, point, colliders):
+    best_point, max_pen = point, 0.0
+    for collider in colliders:
+        best_point, max_pen = _push_out_one(oracle, collider, best_point, max_pen)
+    return best_point, max_pen
+
+
+def _push_out_one(oracle, collider, point, max_pen):
+    if not _aabb_overlap(*_line_bounds((point,), oracle.margin * 2.0), collider["mn"], collider["mx"], 0.0):
+        return point, max_pen
+    if _voxel_signed_distance(oracle.scene, collider, point, oracle.margin) >= oracle.margin:
+        return point, max_pen
+    pushed, pen = _nearest_push(collider, point, oracle.margin)
+    return (pushed, max(max_pen, pen)) if pen > 0.0 else (point, max_pen)
+
+
+def _nearest_push(collider, point, margin):
+    local = collider["m_inv"] @ point
+    hit = collider["bvh"].find_nearest(local)
+    if not hit or hit[0] is None:
+        return point, 0.0
+    return _push_from_hit(collider, local, hit, margin)
+
+
+def _push_from_hit(collider, local, hit, margin):
+    co, normal, _index, _dist = hit
+    normal = _safe_normal(normal)
+    signed = (local - co).dot(normal)
+    if signed >= margin:
+        return collider["m"] @ local, 0.0
+    return collider["m"] @ (local + normal * (margin - signed)), margin - signed
+
+
+def _voxel_signed_distance(scene, collider, point, margin):
+    return _trilinear_distance(scene, collider, collider["m_inv"] @ point, margin)
+
+
+def _trilinear_distance(scene, collider, local, margin):
+    payload = _voxel_payload(scene, collider, margin)
+    coords = _grid_coords(payload, local)
+    base = tuple(max(0, min(payload["dims"][i] - 2, int(floor(coords[i])))) for i in range(3))
+    frac = tuple(coords[i] - base[i] for i in range(3))
+    return _trilinear_mix(_grid_values(scene, collider, payload, base), frac)
+
+
+def _voxel_payload(scene, collider, margin):
+    key = ("fiber_voxel", collider["sid"], collider["stamp"], round(margin, 6))
+    cached = scene_cache_get(scene, key)
+    return cached if cached is not None else scene_cache_set(scene, key, _new_voxel_payload(collider, margin))
+
+
+def _new_voxel_payload(collider, margin):
+    mn, mx = _local_voxel_bounds(collider, margin)
+    dims = _grid_dims(mx - mn)
+    step = Vector(tuple((mx[i] - mn[i]) / float(max(1, dims[i] - 1)) for i in range(3)))
+    return {"mn": mn, "mx": mx, "dims": dims, "step": step, "values": {}}
+
+
+def _inflate_bounds(mn, mx, margin):
+    pad = Vector((margin, margin, margin))
+    return mn - pad, mx + pad
+
+
+def _local_voxel_bounds(collider, margin):
+    corners = [collider["m_inv"] @ point for point in _corner_points(*_inflate_bounds(collider["mn"], collider["mx"], margin))]
+    return _point_bounds(corners)
+
+
+def _point_bounds(points):
+    xs, ys, zs = [p.x for p in points], [p.y for p in points], [p.z for p in points]
+    return Vector((min(xs), min(ys), min(zs))), Vector((max(xs), max(ys), max(zs)))
+
+
+def _grid_dims(span):
+    scale = 64.0 / max(1.0e-6, max(span.x, span.y, span.z))
+    vals = (int(round(span.x * scale)), int(round(span.y * scale)), int(round(span.z * scale)))
+    return tuple(max(24, min(96, value)) for value in vals)
+
+
+def _grid_coords(payload, local):
+    return tuple((local[i] - payload["mn"][i]) / max(payload["step"][i], 1.0e-9) for i in range(3))
+
+
+def _grid_values(scene, collider, payload, base):
+    return tuple(_grid_value(scene, collider, payload, base, dx, dy, dz) for dz in (0, 1) for dy in (0, 1) for dx in (0, 1))
+
+
+def _grid_value(scene, collider, payload, base, dx, dy, dz):
+    index = (base[0] + dx, base[1] + dy, base[2] + dz)
+    if index not in payload["values"]:
+        payload["values"][index] = _signed_grid_sample(collider, _grid_point(payload, index))
+    return payload["values"][index]
+
+
+def _grid_point(payload, index):
+    return Vector(tuple(payload["mn"][i] + payload["step"][i] * float(index[i]) for i in range(3)))
+
+
+def _signed_grid_sample(collider, local):
+    hit = collider["bvh"].find_nearest(local)
+    return 1.0e9 if not hit or hit[0] is None else _signed_hit(collider, local, hit)
+
+
+def _trilinear_mix(values, frac):
+    c00 = _lerp(values[0], values[1], frac[0]), _lerp(values[2], values[3], frac[0])
+    c01 = _lerp(values[4], values[5], frac[0]), _lerp(values[6], values[7], frac[0])
+    return _lerp(_lerp(c00[0], c00[1], frac[1]), _lerp(c01[0], c01[1], frac[1]), frac[2])
+
+
+def _lerp(a, b, t):
+    return float(a) + (float(b) - float(a)) * float(t)
+
+
+def _shell_nodes(scene, collider, margin, dense):
+    key = ("fiber_shell", collider["sid"], collider["stamp"], round(margin, 6), bool(dense))
+    cached = scene_cache_get(scene, key)
+    return cached if cached is not None else scene_cache_set(scene, key, _build_shell_nodes(collider, margin, dense))
+
+
+def _build_shell_nodes(collider, margin, dense):
+    mn, mx = _inflate_bounds(collider["mn"], collider["mx"], margin)
+    return tuple(_corner_points(mn, mx) + _face_points(mn, mx) + ([] if not dense else _edge_points(mn, mx)))
+
+
+def _corner_points(mn, mx):
+    vals = ((mn.x, mx.x), (mn.y, mx.y), (mn.z, mx.z))
+    return [Vector((x, y, z)) for x in vals[0] for y in vals[1] for z in vals[2]]
+
+
+def _face_points(mn, mx):
+    center = (mn + mx) * 0.5
+    return [Vector((mn.x, center.y, center.z)), Vector((mx.x, center.y, center.z)), Vector((center.x, mn.y, center.z)), Vector((center.x, mx.y, center.z)), Vector((center.x, center.y, mn.z)), Vector((center.x, center.y, mx.z))]
+
+
+def _edge_points(mn, mx):
+    center = (mn + mx) * 0.5
+    return [Vector((x, y, center.z)) for x in (mn.x, mx.x) for y in (center.y,)] + [Vector((x, center.y, z)) for x in (mn.x, mx.x) for z in (mn.z, mx.z)] + [Vector((center.x, y, z)) for y in (mn.y, mx.y) for z in (mn.z, mx.z)] + [Vector((center.x, mn.y, center.z)), Vector((center.x, mx.y, center.z))]

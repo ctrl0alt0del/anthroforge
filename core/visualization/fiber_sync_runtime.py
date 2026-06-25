@@ -58,22 +58,27 @@ def _active_fiber_id(root, scene=None, active_object=None):
     return active_entity_id(root, "FIBER", scene, active_object)
 
 
+def _active_fiber(root, scene):
+    fiber_id = _active_fiber_id(root, scene)
+    return None if not fiber_id else _find_fiber(root, fiber_id)
+
+
 def sync_handles(sync, root, scene, vis_col, runtime_registry, window_manager=None):
     live_endpoint_keys = set()
     live_touch_keys = set()
-    active_fiber_id = _active_fiber_id(root, scene)
-
-    for fiber in root.af_vcp_system.fibers:
-        if not active_fiber_id or fiber.id != active_fiber_id:
-            continue
-        for endpoint, pid, raw in _iter_endpoints(fiber):
-            live_endpoint_keys.add((fiber.id, endpoint))
-            _sync_endpoint_handle(sync, vis_col, root, scene, runtime_registry, fiber, endpoint, pid, raw, window_manager)
-
-        for i, tp in enumerate(fiber.mid_touches):
-            live_touch_keys.add((fiber.id, i))
-            _sync_touch_handle(sync, vis_col, root, scene, runtime_registry, fiber, i, tp, window_manager)
+    fiber = _active_fiber(root, scene)
+    if fiber is not None:
+        _sync_fiber_handles(sync, root, scene, vis_col, runtime_registry, fiber, live_endpoint_keys, live_touch_keys, window_manager)
     _cleanup_stale_handles(vis_col, root.name, live_endpoint_keys, live_touch_keys)
+
+
+def _sync_fiber_handles(sync, root, scene, vis_col, runtime_registry, fiber, live_endpoint_keys, live_touch_keys, window_manager=None):
+    for endpoint, pid, raw in _iter_endpoints(fiber):
+        live_endpoint_keys.add((fiber.id, endpoint))
+        _sync_endpoint_handle(sync, vis_col, root, scene, runtime_registry, fiber, endpoint, pid, raw, window_manager)
+    for i, tp in enumerate(fiber.mid_touches):
+        live_touch_keys.add((fiber.id, i))
+        _sync_touch_handle(sync, vis_col, root, scene, runtime_registry, fiber, i, tp, window_manager)
 
 
 def apply_selection_highlight(sync, root, scene):
@@ -103,7 +108,7 @@ def _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake):
     if obj is None:
         obj = sync._create_fiber_proxy(vis_col, root, fiber.id)
     use_bake = bool(bake or sync._fiber_prefer_bake(fiber))
-    points = sync._solver.solve_points(root=root, fiber_prop=fiber, scene=scene, depsgraph=depsgraph, bake=use_bake)
+    points = sync._solver.solve_points(root=root, fiber_prop=fiber, scene=scene, depsgraph=depsgraph, bake=bool(bake))
     if len(points) >= 2:
         sync._update_curve_points(obj, points, fiber.thickness, bake=use_bake)
 
@@ -124,26 +129,32 @@ def _sync_inputs(root, scene):
 def sync_root_to_scene(sync, root=None, scene=None, bake=False, target_fiber_ids=None, window_manager=None):
     if sync._syncing:
         return
-    root, scene, depsgraph = _sync_inputs(root, scene)
-    if root is None or depsgraph is None or not hasattr(root, "af_vcp_system"):
+    state = _scene_sync_state(root, scene)
+    if state is None:
         return
+    _run_scene_sync(sync, *state, bake, target_fiber_ids, window_manager)
 
+
+def _scene_sync_state(root, scene):
+    root, scene, depsgraph = _sync_inputs(root, scene)
+    return None if root is None or depsgraph is None or not hasattr(root, "af_vcp_system") else (root, scene, depsgraph)
+
+
+def _run_scene_sync(sync, root, scene, depsgraph, bake, target_fiber_ids, window_manager=None):
     sync._syncing = True
     try:
         vis_col = sync._get_vis_collection(scene)
-        fibers_to_sync = _fibers_to_sync(root, target_fiber_ids)
-
-        live_ids = set()
-        for fiber in fibers_to_sync:
-            live_ids.add(fiber.id)
-            _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake)
-
+        _sync_target_fibers(sync, vis_col, root, scene, depsgraph, bake, target_fiber_ids)
         _cleanup_stale_fiber_proxies(vis_col, root.name, {f.id for f in root.af_vcp_system.fibers})
-
         sync._sync_handles(root, scene, vis_col, {}, window_manager=window_manager)
         sync._apply_selection_highlight(root, scene)
     finally:
         sync._syncing = False
+
+
+def _sync_target_fibers(sync, vis_col, root, scene, depsgraph, bake, target_fiber_ids):
+    for fiber in _fibers_to_sync(root, target_fiber_ids):
+        _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake)
 
 
 def _find_fiber(root, fiber_id):
@@ -155,39 +166,41 @@ def _compute_attach_raw(sync, parent_obj, moved_world):
     return None if local_pt is None else encode_fiber_mesh_anchor(local_pt)
 
 
+def _resolved_parent_obj(sync, scene, root, parent_id):
+    return None if not parent_id else sync._get_scp_proxy(scene, root.name, parent_id)
+
+
+def _resolved_attachment(sync, parent_obj, moved_world):
+    return None if parent_obj is None else _compute_attach_raw(sync, parent_obj, moved_world)
+
+
+def _resolved_conflict(fiber, aspect, current, incoming, payload):
+    return str(resolve_conflict(entity_type="FIBER", entity_id=str(fiber.id or ""), aspect=aspect, source="blender_control", current=current, incoming=incoming, payload=payload) or "")
+
+
+def _apply_attach_update(sync, fiber, changed_ids, setter, current, resolved):
+    if current == resolved:
+        return False
+    setter(resolved)
+    sync._set_fiber_prefer_bake(fiber, False)
+    changed_ids.add(fiber.id)
+    return True
+
+
 def _update_endpoint_handle(sync, root, scene, obj, changed_ids):
     fiber = _find_fiber(root, obj.get("af_fiber_id"))
     endpoint = obj.get("af_fiber_endpoint")
     if fiber is None:
         return False
     parent_id = fiber.a_parent_id if endpoint == "A" else fiber.b_parent_id
-    parent_obj = sync._get_scp_proxy(scene, root.name, parent_id)
-    if parent_obj is None:
-        return False
-    raw = _compute_attach_raw(sync, parent_obj, obj.location.copy())
+    raw = _resolved_attachment(sync, _resolved_parent_obj(sync, scene, root, parent_id), obj.location.copy())
     if raw is None:
         return False
     slot = "a_attach_param" if endpoint == "A" else "b_attach_param"
     current = str(getattr(fiber, slot) or "")
     incoming = str(raw or "")
-    resolved = str(
-        resolve_conflict(
-            entity_type="FIBER",
-            entity_id=str(fiber.id or ""),
-            aspect=f"attachment.{str(endpoint).lower()}.param",
-            source="blender_control",
-            current=current,
-            incoming=incoming,
-            payload={"endpoint": str(endpoint or "")},
-        )
-        or ""
-    )
-    if current == resolved:
-        return False
-    setattr(fiber, slot, resolved)
-    sync._set_fiber_prefer_bake(fiber, False)
-    changed_ids.add(fiber.id)
-    return True
+    resolved = _resolved_conflict(fiber, f"attachment.{str(endpoint).lower()}.param", current, incoming, {"endpoint": str(endpoint or "")})
+    return _apply_attach_update(sync, fiber, changed_ids, lambda value: setattr(fiber, slot, value), current, resolved)
 
 
 def _update_touch_handle(sync, root, scene, obj, changed_ids):
@@ -196,32 +209,13 @@ def _update_touch_handle(sync, root, scene, obj, changed_ids):
     if fiber is None or touch_index < 0 or touch_index >= len(fiber.mid_touches):
         return False
     tp = fiber.mid_touches[touch_index]
-    parent_obj = sync._get_scp_proxy(scene, root.name, tp.parent_id)
-    if parent_obj is None:
-        return False
-    raw = _compute_attach_raw(sync, parent_obj, obj.location.copy())
+    raw = _resolved_attachment(sync, _resolved_parent_obj(sync, scene, root, tp.parent_id), obj.location.copy())
     if raw is None:
         return False
     current = str(tp.attach_param or "")
     incoming = str(raw or "")
-    resolved = str(
-        resolve_conflict(
-            entity_type="FIBER",
-            entity_id=str(fiber.id or ""),
-            aspect=f"attachment.touch[{int(touch_index)}].param",
-            source="blender_control",
-            current=current,
-            incoming=incoming,
-            payload={"touch_index": int(touch_index)},
-        )
-        or ""
-    )
-    if current == resolved:
-        return False
-    tp.attach_param = resolved
-    sync._set_fiber_prefer_bake(fiber, False)
-    changed_ids.add(fiber.id)
-    return True
+    resolved = _resolved_conflict(fiber, f"attachment.touch[{int(touch_index)}].param", current, incoming, {"touch_index": int(touch_index)})
+    return _apply_attach_update(sync, fiber, changed_ids, lambda value: setattr(tp, "attach_param", value), current, resolved)
 
 
 def _is_relevant_update_obj(sync, root, vis_col, obj):
@@ -259,40 +253,49 @@ def apply_fiber_control_update(sync, root, scene, obj, depsgraph):
 def on_depsgraph_update(sync, scene, depsgraph):
     if sync._syncing:
         return
+    state = _depsgraph_sync_state(sync, scene)
+    if state is None:
+        return
+    root, vis_col = state
+    changed_fiber_ids = _collect_depsgraph_runtime(sync, root, vis_col, depsgraph)
+    if changed_fiber_ids:
+        _enqueue_fiber_runtime(root, scene, changed_fiber_ids)
+
+
+def _depsgraph_sync_state(sync, scene):
     root = get_af_root(scene)
-    if root is None or not hasattr(root, "af_vcp_system"):
-        return
-
     vis_col = bpy.data.collections.get(sync.collection_name)
-    if vis_col is None:
-        return
+    return None if root is None or vis_col is None or not hasattr(root, "af_vcp_system") else (root, vis_col)
 
+
+def _collect_depsgraph_runtime(sync, root, vis_col, depsgraph):
     sync._syncing = True
     try:
-        changed_fiber_ids = set()
-        for upd in depsgraph.updates:
-            obj = upd.id
-            if not _is_relevant_update_obj(sync, root, vis_col, obj):
-                continue
-            classified = classify_control_object(obj)
-            if not classified:
-                continue
-            if str(classified["control_type"]) not in ("FIBER_ENDPOINT", "FIBER_TOUCH"):
-                continue
-            payload = dict(classified["payload"])
-            payload["binding"] = classified.get("binding")
-            if enqueue_control_intent(root, classified["control_type"], payload):
-                changed_fiber_ids |= set(classified["dirty_hints"].get("FIBER", set()) or set())
+        return _depsgraph_changed_fibers(sync, root, vis_col, depsgraph)
     finally:
         sync._syncing = False
 
-    if changed_fiber_ids:
-        from .sync_runner import sync_from_dirty_hints
 
-        sync_from_dirty_hints(
-            root=root,
-            scene=scene,
-            dirty_hints=dirty_hints_for("FIBER", changed_fiber_ids),
-            source="depsgraph",
-            event_type="TRANSFORM",
-        )
+def _depsgraph_changed_fibers(sync, root, vis_col, depsgraph):
+    changed = set()
+    for upd in depsgraph.updates:
+        _merge_changed_fibers(sync, root, vis_col, changed, upd.id)
+    return changed
+
+
+def _merge_changed_fibers(sync, root, vis_col, changed, obj):
+    if not _is_relevant_update_obj(sync, root, vis_col, obj):
+        return
+    classified = classify_control_object(obj)
+    if not classified or str(classified["control_type"]) not in ("FIBER_ENDPOINT", "FIBER_TOUCH"):
+        return
+    payload = dict(classified["payload"])
+    payload["binding"] = classified.get("binding")
+    if enqueue_control_intent(root, classified["control_type"], payload):
+        changed |= set(classified["dirty_hints"].get("FIBER", set()) or set())
+
+
+def _enqueue_fiber_runtime(root, scene, changed_fiber_ids):
+    from .sync_runner import sync_from_dirty_hints
+
+    sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("FIBER", changed_fiber_ids), source="depsgraph", event_type="TRANSFORM")
