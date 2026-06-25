@@ -13,7 +13,7 @@ from .utils import get_af_root
 from .visualization.mirror_objects import remap_object_cluster_parents, remap_object_cluster_refs
 from .visualization.scp_control_helpers import clear_scp_control_marks, mark_scp_control_object
 
-_SCP_SKIP = {"id", "name", "parent_id", "bound_objects", "transform_object_ref", "geometry_object_ref", "color_initialized"}
+_SCP_SKIP = {"id", "name", "parent_id", "color", "bound_objects", "transform_object_ref", "geometry_object_ref", "color_initialized"}
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,7 @@ class SplitCornerSpec:
     source_name: str
     source_parent_id: str
     source_scalars: tuple
+    source_color: tuple
     source_runtime: dict
     bound_items: tuple
     curve_obj: object
@@ -66,14 +67,17 @@ def split_corner_spec(context):
 
 def split_corner(context):
     spec, error = split_corner_spec(context)
-    if error:
-        return None, error
+    return (None, error) if error else _run_split_corner(context, spec)
+
+
+def _run_split_corner(context, spec):
     bpy.ops.object.mode_set(mode="OBJECT")
     segments = _split_segments(spec)
+    refs = _split_reference_frames(spec)
     clones = _clone_scps(spec, len(segments) - 1)
-    curves = _segment_objects(spec.curve_obj, clones)
-    geos = _segment_objects(spec.geometry_obj, clones)
+    curves, geos = _split_objects(spec, clones)
     _rewrite_segments(curves, segments)
+    _apply_tilt_offsets(curves, _segment_tilt_offsets(spec, curves, refs))
     _retarget_segments(geos, spec.modifier_name, curves)
     ctrls = _create_controls(spec)
     _bind_segment_hooks(curves, segments, ctrls, spec.spline_type)
@@ -97,16 +101,21 @@ def _context_error(context, root):
 def _validated_spec(root, context):
     curve_obj = context.active_object
     source_scp = scp_for_object(root, curve_obj)
-    error = _source_error(source_scp, curve_obj)
-    if error:
-        return None, error
     parent_scp = find_scp_by_id(root, getattr(source_scp, "parent_id", ""))
-    error = _parent_error(source_scp, parent_scp)
+    error = _spec_error(source_scp, curve_obj, parent_scp)
     if error:
         return None, error
     geo, mod, error = _geometry_target(source_scp, curve_obj)
     if error:
         return None, error
+    return _validated_split(root, context, source_scp, parent_scp, curve_obj, geo, mod)
+
+
+def _spec_error(source_scp, curve_obj, parent_scp):
+    return _source_error(source_scp, curve_obj) or _parent_error(source_scp, parent_scp)
+
+
+def _validated_split(root, context, source_scp, parent_scp, curve_obj, geo, mod):
     error = _curve_usage_error(curve_obj)
     if error:
         return None, error
@@ -206,7 +215,7 @@ def _build_spec(root, scene, source_scp, parent_scp, curve_obj, geo, mod, split)
     spline_index, split_indices, spline_type, point_worlds = split
     return SplitCornerSpec(
         root, scene, str(source_scp.id or ""), str(source_scp.name or ""),
-        str(source_scp.parent_id or ""), _scalar_payload(source_scp, _SCP_SKIP),
+        str(source_scp.parent_id or ""), _scalar_payload(source_scp, _SCP_SKIP), _source_color(source_scp),
         snapshot_attachment_runtime(source_scp), _bound_snapshot(source_scp),
         curve_obj, getattr(source_scp, "transform_object_ref", None), geo,
         str(parent_scp.id or ""), mod.name, spline_index, split_indices,
@@ -214,9 +223,184 @@ def _build_spec(root, scene, source_scp, parent_scp, curve_obj, geo, mod, split)
     )
 
 
+def _source_color(scp):
+    obj = _source_color_obj(scp)
+    return _object_color(obj) if obj is not None else _object_color(scp)
+
+
+def _source_color_obj(scp):
+    refs = (getattr(scp, "geometry_object_ref", None), getattr(scp, "transform_object_ref", None))
+    return next((obj for obj in refs if obj is not None), next((obj for _entry, obj in iter_bound_objects(scp)), None))
+
+
+def _object_color(obj):
+    color = tuple(getattr(obj, "color", (0.0, 0.0, 0.0, 1.0)) or ())
+    return tuple(float(v) for v in color[:4]) if len(color) >= 4 else (0.0, 0.0, 0.0, 1.0)
+
+
 def _split_segments(spec):
     spline = spec.curve_obj.data.splines[spec.spline_index]
     return _split_bezier_points(spline, spec.split_indices) if spec.spline_type == "BEZIER" else _split_poly_points(spline, spec.split_indices)
+
+
+def _split_reference_frames(spec):
+    if not _needs_tilt_compensation(spec.curve_obj):
+        return ()
+    factors = _split_factors(spec)
+    axis = _forward_axis(spec)
+    return tuple(_curve_frame(spec.scene, spec.curve_obj, factor, axis) for factor in factors)
+
+
+def _needs_tilt_compensation(curve_obj):
+    data = getattr(curve_obj, "data", None)
+    mode = str(getattr(data, "twist_mode", "MINIMUM") or "MINIMUM").upper()
+    return mode in {"MINIMUM", "MINIMUM_TWIST"}
+
+
+def _split_factors(spec):
+    spline = spec.curve_obj.data.splines[spec.spline_index]
+    samples = _world_samples(spec.curve_obj, _spline_points(spline), spec.spline_type)
+    lengths = _cumulative_lengths(samples)
+    return tuple(_nearest_factor(samples, lengths, Vector(point_world)) for point_world in spec.point_worlds)
+
+
+def _world_samples(curve_obj, points, spline_type):
+    samples, _cmap = _sampled_points(points, spline_type, _sample_steps(curve_obj))
+    return tuple(curve_obj.matrix_world @ point for point in samples)
+
+
+def _sample_steps(curve_obj):
+    data = getattr(curve_obj, "data", None)
+    return max(12, int(getattr(data, "resolution_u", 12) or 12))
+
+
+def _cumulative_lengths(samples):
+    total, lengths = 0.0, [0.0]
+    for a, b in zip(samples, samples[1:]):
+        total += (b - a).length
+        lengths.append(total)
+    return tuple(lengths)
+
+
+def _nearest_factor(samples, lengths, world_point):
+    index = min(range(len(samples)), key=lambda idx: (samples[idx] - world_point).length_squared)
+    total = lengths[-1] if lengths else 0.0
+    return 0.0 if total <= 1.0e-9 else lengths[index] / total
+
+
+def _segment_tilt_offsets(spec, curves, refs):
+    axis = _forward_axis(spec)
+    return tuple(_segment_tilt_offset(spec.scene, curve, index, refs, axis) for index, curve in enumerate(curves))
+
+
+def _segment_tilt_offset(scene, curve_obj, index, refs, axis):
+    if index <= 0 or index > len(refs):
+        return 0.0
+    tangent, normal = _curve_frame(scene, curve_obj, 0.0, axis)
+    ref_tangent, ref_normal = refs[index - 1]
+    return _roll_delta(normal, ref_normal, tangent if tangent.length > 1.0e-9 else ref_tangent)
+
+
+def _curve_frame(scene, curve_obj, factor, forward_axis):
+    probe, use_path = _curve_probe(scene, curve_obj, forward_axis)
+    try:
+        probe.constraints[0].offset_factor = max(0.0, min(1.0, float(factor)))
+        bpy.context.view_layer.update()
+        return _probe_axes(probe, forward_axis)
+    finally:
+        _clear_curve_probe(probe, curve_obj, use_path)
+
+
+def _curve_probe(scene, curve_obj, forward_axis):
+    probe = bpy.data.objects.new(f"{curve_obj.name}_AF_SPLIT_PROBE", None)
+    scene.collection.objects.link(probe)
+    use_path = bool(getattr(curve_obj.data, "use_path", False))
+    curve_obj.data.use_path = True
+    _configure_curve_probe(probe.constraints.new("FOLLOW_PATH"), curve_obj, forward_axis)
+    return probe, use_path
+
+
+def _configure_curve_probe(constraint, curve_obj, forward_axis):
+    constraint.target = curve_obj
+    constraint.use_curve_follow = True
+    constraint.use_fixed_location = True
+    constraint.forward_axis = forward_axis
+    constraint.up_axis = _up_axis(forward_axis)
+
+
+def _clear_curve_probe(probe, curve_obj, use_path):
+    curve_obj.data.use_path = use_path
+    bpy.data.objects.remove(probe, do_unlink=True)
+
+
+def _probe_axes(probe, forward_axis):
+    basis = probe.matrix_world.to_3x3()
+    tangent = basis @ _local_axis(forward_axis)
+    normal = basis @ _local_axis(_up_axis(forward_axis))
+    return tangent.normalized(), normal.normalized()
+
+
+def _forward_axis(spec):
+    mod = None if spec.geometry_obj is None else spec.geometry_obj.modifiers.get(spec.modifier_name)
+    axis = str(getattr(mod, "deform_axis", "POS_X") or "POS_X")
+    return {"POS_X": "FORWARD_X", "POS_Y": "FORWARD_Y", "POS_Z": "FORWARD_Z", "NEG_X": "TRACK_NEGATIVE_X", "NEG_Y": "TRACK_NEGATIVE_Y", "NEG_Z": "TRACK_NEGATIVE_Z"}.get(axis, "FORWARD_X")
+
+
+def _up_axis(forward_axis):
+    return "UP_Y" if str(forward_axis).endswith("Z") else "UP_Z"
+
+
+def _sampled_points(points, spline_type, steps):
+    return _sample_bezier_points(points, steps) if spline_type == "BEZIER" else _sample_poly_points(points)
+
+
+def _sample_poly_points(points):
+    samples = tuple(_co_vec(point.co) for point in points)
+    return samples, tuple(range(len(samples)))
+
+
+def _sample_bezier_points(points, steps):
+    samples, cmap = [_co_vec(points[0].co)], [0]
+    for index in range(len(points) - 1):
+        samples.extend(_bezier_segment_points(points[index], points[index + 1], steps)[1:])
+        cmap.append(len(samples) - 1)
+    return tuple(samples), tuple(cmap)
+
+
+def _bezier_segment_points(a, b, steps):
+    vals = (_co_vec(a.co), _co_vec(a.handle_right), _co_vec(b.handle_left), _co_vec(b.co))
+    return [_bezier_point(*vals, step / float(steps)) for step in range(steps + 1)]
+
+
+def _bezier_point(a, b, c, d, t):
+    omt = 1.0 - t
+    return (omt ** 3) * a + (3.0 * omt * omt * t) * b + (3.0 * omt * t * t) * c + (t ** 3) * d
+
+
+def _co_vec(co):
+    return Vector((float(co[0]), float(co[1]), float(co[2])))
+
+
+def _project_vector(vec, tangent):
+    return vec - tangent * vec.dot(tangent)
+
+
+def _local_axis(axis_name):
+    return {
+        "FORWARD_X": Vector((1, 0, 0)), "FORWARD_Y": Vector((0, 1, 0)), "FORWARD_Z": Vector((0, 0, 1)),
+        "TRACK_NEGATIVE_X": Vector((-1, 0, 0)), "TRACK_NEGATIVE_Y": Vector((0, -1, 0)), "TRACK_NEGATIVE_Z": Vector((0, 0, -1)),
+        "UP_X": Vector((1, 0, 0)), "UP_Y": Vector((0, 1, 0)), "UP_Z": Vector((0, 0, 1)),
+    }.get(str(axis_name), Vector((1, 0, 0)))
+
+
+def _roll_delta(current, target, tangent):
+    cur = _project_vector(current, tangent)
+    tgt = _project_vector(target, tangent)
+    if cur.length <= 1.0e-9 or tgt.length <= 1.0e-9:
+        return 0.0
+    cur, tgt = cur.normalized(), tgt.normalized()
+    sign = 1.0 if tangent.dot(cur.cross(tgt)) >= 0.0 else -1.0
+    return cur.angle(tgt) * sign
 
 
 def _split_bezier_points(spline, split_indices):
@@ -256,9 +440,25 @@ def _segment_objects(source, clones):
     return (source, *(obj_map[source] for _dst, obj_map in clones))
 
 
+def _split_objects(spec, clones):
+    return _segment_objects(spec.curve_obj, clones), _segment_objects(spec.geometry_obj, clones)
+
+
 def _rewrite_segments(curves, segments):
     for curve, points in zip(curves, segments):
         _rewrite_curve(curve, points)
+
+
+def _apply_tilt_offsets(curves, offsets):
+    for curve, offset in zip(curves, offsets):
+        _offset_curve_tilt(curve, offset)
+
+
+def _offset_curve_tilt(curve_obj, offset):
+    if abs(float(offset)) <= 1.0e-9:
+        return
+    for point in _spline_points(curve_obj.data.splines[0]):
+        point.tilt = float(point.tilt) + float(offset)
 
 
 def _retarget_segments(geos, modifier_name, curves):
@@ -283,7 +483,14 @@ def _clone_scp(spec):
     set_parent_id_raw(dst, spec.source_parent_id)
     restore_attachment_runtime(dst, spec.source_runtime)
     _restore_native_flags(spec.root, dst, native)
+    _restore_scp_color(spec.root, dst, spec.source_color)
     return dst, obj_map
+
+
+def _restore_scp_color(root, scp, color):
+    set_prop_raw(scp, "color", color)
+    set_prop_raw(scp, "color_initialized", True)
+    sync_scp_roles(root, scp)
 
 
 def _clone_bound_objects(spec, dst):
