@@ -62,19 +62,38 @@ class FiberSolver:
         return params
 
     def _initialize_nodes(self, fiber_prop, nodes_init, pin_targets, node_count):
-        use_warm_start = bool(getattr(fiber_prop, "use_warm_start", False))
-        cached = self._cache.get(fiber_prop.id) if use_warm_start else None
-        if cached and len(cached) == node_count:
-            nodes = [p.copy() for p in cached]
-            for idx, pt in pin_targets.items():
-                nodes[idx] = pt.copy()
-        else:
-            nodes = [p.copy() for p in nodes_init]
-
+        nodes = self._seed_or_cache_nodes(fiber_prop, nodes_init, node_count, None)
         pinned = [False] * node_count
+        for idx, pt in pin_targets.items():
+            nodes[idx] = pt.copy()
         for idx in pin_targets.keys():
             pinned[idx] = True
         return nodes, pinned
+
+    def _seed_or_cache_nodes(self, fiber_prop, nodes_init, node_count, seed):
+        if seed is not None:
+            return [p.copy() for p in seed]
+        cached = self._warm_start_nodes(fiber_prop, node_count)
+        return [p.copy() for p in nodes_init] if cached is None else cached
+
+    def _warm_start_nodes(self, fiber_prop, node_count):
+        cached = None if not bool(getattr(fiber_prop, "use_warm_start", False)) else self._cache.get(fiber_prop.id)
+        return None if not cached else self._resample_nodes(cached, node_count)
+
+    def _resample_nodes(self, src, count):
+        if not src or count <= 0:
+            return []
+        if len(src) == count:
+            return [p.copy() for p in src]
+        last = len(src) - 1
+        if last <= 0:
+            return [src[0].copy() for _ in range(count)]
+        return [self._resample_node(src, count, i, last) for i in range(count)]
+
+    def _resample_node(self, src, count, index, last):
+        t = 0.0 if count <= 1 else index * last / float(count - 1)
+        i0 = min(last - 1, int(t))
+        return src[-1].copy() if i0 >= last else src[i0].lerp(src[i0 + 1], t - i0)
 
     def _solver_iteration(self, nodes, prev_nodes, pinned, pin_targets, collider_cache, params, it):
         self._apply_length_shortening(nodes, pinned, params["shorten_strength"])
@@ -102,11 +121,11 @@ class FiberSolver:
             return []
         params = self._runtime_params(fiber_prop, bake)
         guide_worlds = self._guide_worlds(root, scene, runtime, fiber_prop)
-        nodes, pinned, pin_targets = self._build_initialized_nodes(fiber_prop, a_world, b_world, guide_worlds, params)
-        prev_nodes = [p.copy() for p in nodes]
         colliders = self._surface_colliders(root, scene, runtime)
         collider_cache = self._build_collider_cache(colliders, depsgraph)
-        converged, max_disp, max_pen = self._run_iterations(nodes, prev_nodes, pinned, pin_targets, collider_cache, params)
+        nodes, converged, max_disp, max_pen = self._solve_multilevel(
+            fiber_prop, a_world, b_world, guide_worlds, collider_cache, params
+        )
         self._store_status(fiber_prop, converged, max_disp, max_pen)
         self._cache[fiber_prop.id] = [p.copy() for p in nodes]
         return nodes
@@ -124,6 +143,49 @@ class FiberSolver:
         nodes_init, pin_targets = self._build_chain_with_anchors(a_world, b_world, guide_worlds, params["node_count"])
         nodes, pinned = self._initialize_nodes(fiber_prop, nodes_init, pin_targets, params["node_count"])
         return nodes, pinned, pin_targets
+
+    def _solve_multilevel(self, fiber_prop, a_world, b_world, guide_worlds, collider_cache, params):
+        counts = self._level_counts(params["node_count"], len(guide_worlds) + 2)
+        iters = self._split_iterations(params["iterations"], len(counts))
+        seed, converged, max_disp, max_pen = None, False, 0.0, 0.0
+        for i, count in enumerate(counts):
+            nodes, pinned, targets = self._build_level_nodes(fiber_prop, a_world, b_world, guide_worlds, count, seed)
+            active = self._active_colliders(collider_cache, nodes, params["margin"])
+            local = self._level_params(params, iters[i])
+            converged, max_disp, max_pen = self._run_iterations(nodes, [p.copy() for p in nodes], pinned, targets, active, local)
+            seed = nodes
+        return ([] if seed is None else seed), converged, max_disp, max_pen
+
+    def _level_counts(self, node_count, anchor_count):
+        count = min(node_count, max(8, anchor_count))
+        out = [count]
+        while out[-1] < node_count:
+            out.append(min(node_count, out[-1] * 2))
+        return out
+
+    def _split_iterations(self, total, level_count):
+        weights = [1 << i for i in range(level_count)]
+        scale = float(max(total, level_count)) / float(sum(weights))
+        out = [max(1, int(round(w * scale))) for w in weights]
+        while sum(out) > total and max(out) > 1:
+            out[out.index(max(out))] -= 1
+        out[-1] += max(0, total - sum(out))
+        return out
+
+    def _build_level_nodes(self, fiber_prop, a_world, b_world, guide_worlds, node_count, seed):
+        nodes_init, targets = self._build_chain_with_anchors(a_world, b_world, guide_worlds, node_count)
+        seed_nodes = None if seed is None else self._resample_nodes(seed, node_count)
+        nodes = self._seed_or_cache_nodes(fiber_prop, nodes_init, node_count, seed_nodes)
+        pinned = [False] * node_count
+        for idx, pt in targets.items():
+            nodes[idx], pinned[idx] = pt.copy(), True
+        return nodes, pinned, targets
+
+    def _level_params(self, params, iterations):
+        local = dict(params)
+        local["iterations"] = max(1, int(iterations))
+        local["min_iters"] = max(4, local["iterations"] // 4)
+        return local
 
     def _run_iterations(self, nodes, prev_nodes, pinned, pin_targets, collider_cache, params):
         converged = False
@@ -294,6 +356,24 @@ class FiberSolver:
             (mn.x - margin) <= p.x <= (mx.x + margin)
             and (mn.y - margin) <= p.y <= (mx.y + margin)
             and (mn.z - margin) <= p.z <= (mx.z + margin)
+        )
+
+    def _active_colliders(self, collider_cache, nodes, margin):
+        if len(collider_cache) <= 1 or not nodes:
+            return collider_cache
+        mn, mx = self._bounds_from_nodes(nodes)
+        active = [c for c in collider_cache if self._aabb_overlap(mn, mx, c["mn"], c["mx"], margin * 2.0)]
+        return collider_cache if not active else active
+
+    def _bounds_from_nodes(self, nodes):
+        xs, ys, zs = [p.x for p in nodes], [p.y for p in nodes], [p.z for p in nodes]
+        return Vector((min(xs), min(ys), min(zs))), Vector((max(xs), max(ys), max(zs)))
+
+    def _aabb_overlap(self, a_mn, a_mx, b_mn, b_mx, margin):
+        return not (
+            a_mx.x < (b_mn.x - margin) or b_mx.x < (a_mn.x - margin)
+            or a_mx.y < (b_mn.y - margin) or b_mx.y < (a_mn.y - margin)
+            or a_mx.z < (b_mn.z - margin) or b_mx.z < (a_mn.z - margin)
         )
 
     def _apply_length_shortening(self, nodes, pinned, strength):

@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import json
 from unittest.mock import patch
 
 TEST_ROOT = Path(__file__).resolve().parents[1]
@@ -80,6 +81,13 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         bpy.ops.af.recompute_fiber()
         self.assertIn(fiber_recompute_status(fiber), {"CONVERGED", "NOT_CONVERGED"})
         self.assertGreaterEqual(fiber_recompute_ms(fiber), 0.0)
+
+    def test_recompute_fiber_preserves_requested_node_count(self):
+        _root_obj, fiber, _origin, _insert = _fiber_setup()
+        fiber.node_count = 96
+        bpy.ops.af.recompute_fiber()
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        self.assertEqual(len(json.loads(proxy["af_fiber_points_world"])), 96)
 
     def test_new_fiber_defaults_warm_start_on(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup()
