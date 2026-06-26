@@ -3,6 +3,7 @@ import re
 from ..id_utils import next_prefixed_id
 from ..shortcuts import remap_overrides
 from ..shortcuts.owners import remapped_shortcut_owner
+from ..vcp.fiber_modes import driver_fiber_id, fiber_parent_ids, is_derived_loop
 from .bound_objects import clear_scp_tags, iter_bound_objects
 from .common import as_id, find_scp_by_id, scp_prop_map, set_prop_raw
 from .lookup import clear_native_parent_keep_world
@@ -12,7 +13,7 @@ from .tree import children_map
 
 _FULL_OBJECT_RE = re.compile(r"^bpy\.data\.objects\[[\"'](.+?)[\"']\](.+)$")
 _SCP_SKIP = {"id", "name", "parent_id", "color", "color_initialized", "bound_objects", "transform_object_ref", "geometry_object_ref", "mirror_status", "mirror_source_id", "mirror_effective_axis"}
-_FIBER_SKIP = {"id", "name", "mid_touches", "a_parent_id", "b_parent_id", "muscle_id", "not_converged", "last_recompute_ms", "last_recompute_status", "last_eps_disp", "last_eps_pen"}
+_FIBER_SKIP = {"id", "name", "driver_fiber_id", "mid_touches", "loop_anchors", "loop_profile_keys", "a_parent_id", "b_parent_id", "muscle_id", "not_converged", "last_recompute_ms", "last_recompute_status", "last_eps_disp", "last_eps_pen"}
 _MUSCLE_SKIP = {"id", "name", "fiber_refs", "active_fiber_ref_index"}
 _BLOB_SKIP = {"id", "name", "attach_target_id", "attach_target_object_name", "last_solve_converged", "last_solve_max_disp", "last_solve_iterations"}
 
@@ -112,13 +113,10 @@ def _apply_scp_links(pairs, scp_map):
         set_parent_id_raw(dst, scp_map.get(as_id(getattr(src, "parent_id", "")), as_id(getattr(src, "parent_id", ""))))
 
 
-def _fiber_parent_ids(fiber):
-    mids = [as_id(tp.parent_id) for tp in fiber.mid_touches if as_id(tp.parent_id)]
-    return [sid for sid in [as_id(fiber.a_parent_id), as_id(fiber.b_parent_id), *mids] if sid]
-
-
-def _copyable_fiber(fiber, scp_ids):
-    parent_ids = set(_fiber_parent_ids(fiber))
+def _copyable_fiber(fiber, scp_ids, fiber_ids=None):
+    if is_derived_loop(fiber):
+        return as_id(driver_fiber_id(fiber)) in set(fiber_ids or set())
+    parent_ids = {as_id(pid) for pid in fiber_parent_ids(fiber) if as_id(pid)}
     return bool(parent_ids) and parent_ids <= set(scp_ids or set())
 
 
@@ -135,6 +133,19 @@ def _copy_touches(src, dst, scp_map):
         new_touch.parent_id = scp_map.get(as_id(touch.parent_id), "")
 
 
+def _copy_loop_anchors(src, dst, scp_map):
+    for anchor in getattr(src, "loop_anchors", ()):
+        item = dst.loop_anchors.add()
+        _copy_scalars(anchor, item, skip={"parent_id"})
+        item.parent_id = scp_map.get(as_id(anchor.parent_id), "")
+
+
+def _copy_loop_profile_keys(src, dst):
+    for key in getattr(src, "loop_profile_keys", ()):
+        item = dst.loop_profile_keys.add()
+        _copy_scalars(key, item)
+
+
 def _copy_fiber_item(root, src, maps):
     dst = _new_item(root.af_vcp_system.fibers, "FIBER")
     maps["fibers"][as_id(src.id)] = as_id(dst.id)
@@ -142,11 +153,22 @@ def _copy_fiber_item(root, src, maps):
     dst.a_parent_id = maps["scps"].get(as_id(src.a_parent_id), "")
     dst.b_parent_id = maps["scps"].get(as_id(src.b_parent_id), "")
     _copy_touches(src, dst, maps["scps"])
+    _copy_loop_anchors(src, dst, maps["scps"])
+    _copy_loop_profile_keys(src, dst)
 
 
 def _copy_fibers(root, scp_ids, maps):
     for fiber in tuple(root.af_vcp_system.fibers):
         _copy_fiber_item(root, fiber, maps) if _copyable_fiber(fiber, scp_ids) else None
+    for fiber in tuple(root.af_vcp_system.fibers):
+        _copy_fiber_item(root, fiber, maps) if _copyable_fiber(fiber, scp_ids, maps["fibers"]) and as_id(fiber.id) not in maps["fibers"] else None
+    _remap_fiber_drivers(root, maps)
+
+
+def _remap_fiber_drivers(root, maps):
+    for fiber in tuple(root.af_vcp_system.fibers):
+        if as_id(fiber.id) in set(maps["fibers"].values()):
+            fiber.driver_fiber_id = maps["fibers"].get(as_id(fiber.driver_fiber_id), "")
 
 
 def _copyable_muscle(muscle, fiber_map):

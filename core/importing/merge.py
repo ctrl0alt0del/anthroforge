@@ -133,6 +133,19 @@ def _copy_touches(dst, snap, state):
         item.parent_id = _remap(state.scps, touch.parent_id)
 
 
+def _copy_loop_anchors(dst, snap, state):
+    for anchor in getattr(snap, "loop_anchors", ()):
+        item = dst.loop_anchors.add()
+        apply_scalar_dict(item, anchor.props)
+        item.parent_id = _remap(state.scps, anchor.parent_id)
+
+
+def _copy_loop_profile_keys(dst, snap):
+    for key in getattr(snap, "loop_profile_keys", ()):
+        item = dst.loop_profile_keys.add()
+        apply_scalar_dict(item, key.props)
+
+
 def _create_one_fiber(state, snap):
     dst = _new_vcp_item(state.root.af_vcp_system.fibers, "FIBER")
     state.fibers[str(snap.source_id or "")] = str(dst.id or "")
@@ -140,11 +153,20 @@ def _create_one_fiber(state, snap):
     dst.b_parent_id, dst.muscle_id = _remap(state.scps, snap.b_parent_id), ""
     apply_scalar_dict(dst, snap.props)
     _copy_touches(dst, snap, state)
+    _copy_loop_anchors(dst, snap, state)
+    _copy_loop_profile_keys(dst, snap)
 
 
 def _create_fibers(state):
     for snap in state.snapshot.fibers:
         _create_one_fiber(state, snap)
+
+
+def _remap_fiber_drivers(state):
+    for snap in state.snapshot.fibers:
+        fiber = _fiber_by_id(state.root, _remap(state.fibers, snap.source_id))
+        if fiber is not None:
+            fiber.driver_fiber_id = _remap(state.fibers, snap.driver_fiber_id)
 
 
 def _fiber_by_id(root, fiber_id):
@@ -242,6 +264,7 @@ def apply_snapshot(snapshot, stage_root, root, context):
     _create_scps(state)
     _set_scp_parents(state)
     _create_fibers(state)
+    _remap_fiber_drivers(state)
     _create_muscles(state)
     _create_blobs(state)
     _create_shortcuts(state)

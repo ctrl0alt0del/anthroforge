@@ -4,7 +4,7 @@ from ..app.runtime_api import sync_context
 from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 
 
-def _sync_vcp_scene(context):
+def _sync_vcp_scene(_self, context):
     sync_context(context, dirty_hints=empty_dirty_hints())
 
 
@@ -14,6 +14,10 @@ def _on_muscle_prop_update(self, context):
 
 def _on_blob_prop_update(self, context):
     sync_context(context, dirty_hints=dirty_hints_for("BLOB", {self.id}))
+
+
+def _on_fiber_prop_update(self, context):
+    sync_context(context, dirty_hints=dirty_hints_for("FIBER", {self.id}))
 
 
 class AF_MuscleFiberRef_Property(bpy.types.PropertyGroup):
@@ -103,36 +107,65 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
 
 
 class AF_FiberTouchPoint_Property(bpy.types.PropertyGroup):
-    parent_id: bpy.props.StringProperty(name="Touch SCP ID", default="")
-    attach_param: bpy.props.StringProperty(name="Touch Attach Param JSON", default="0.0")
+    parent_id: bpy.props.StringProperty(name="Touch SCP ID", default="", update=_sync_vcp_scene)
+    attach_param: bpy.props.StringProperty(name="Touch Attach Param JSON", default="0.0", update=_sync_vcp_scene)
+
+
+class AF_FiberLoopAnchor_Property(bpy.types.PropertyGroup):
+    parent_id: bpy.props.StringProperty(name="Loop SCP ID", default="", update=_sync_vcp_scene)
+    attach_param: bpy.props.StringProperty(name="Loop Attach Param JSON", default="0.0", update=_sync_vcp_scene)
+
+
+class AF_FiberLoopProfileKey_Property(bpy.types.PropertyGroup):
+    t: bpy.props.FloatProperty(name="T", default=0.0, min=0.0, max=0.9999, update=_sync_vcp_scene)
+    delta_u: bpy.props.FloatProperty(name="Delta U", default=0.0, update=_sync_vcp_scene)
+    delta_v: bpy.props.FloatProperty(name="Delta V", default=0.0, update=_sync_vcp_scene)
 
 
 class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
-    name: bpy.props.StringProperty(name="Name", default="")
+    name: bpy.props.StringProperty(name="Name", default="", update=_on_fiber_prop_update)
 
-    a_parent_id: bpy.props.StringProperty(name="Origin SCP ID")
-    a_attach_param: bpy.props.StringProperty(name="Origin Attach Param JSON")
-    b_parent_id: bpy.props.StringProperty(name="Insertion SCP ID")
-    b_attach_param: bpy.props.StringProperty(name="Insertion Attach Param JSON")
+    topology_mode: bpy.props.EnumProperty(
+        name="Topology",
+        items=(("OPEN", "Open", ""), ("LOOP", "Loop", "")),
+        default="OPEN",
+        update=_on_fiber_prop_update,
+    )
+    generation_mode: bpy.props.EnumProperty(
+        name="Generation",
+        items=(("SOLVED", "Solved", ""), ("DERIVED", "Derived", "")),
+        default="SOLVED",
+        update=_on_fiber_prop_update,
+    )
+    driver_fiber_id: bpy.props.StringProperty(name="Driver Fiber ID", default="", update=_on_fiber_prop_update)
+
+    a_parent_id: bpy.props.StringProperty(name="Origin SCP ID", update=_on_fiber_prop_update)
+    a_attach_param: bpy.props.StringProperty(name="Origin Attach Param JSON", update=_on_fiber_prop_update)
+    b_parent_id: bpy.props.StringProperty(name="Insertion SCP ID", update=_on_fiber_prop_update)
+    b_attach_param: bpy.props.StringProperty(name="Insertion Attach Param JSON", update=_on_fiber_prop_update)
 
     mid_touches: bpy.props.CollectionProperty(type=AF_FiberTouchPoint_Property)
-    guide_stiffness: bpy.props.FloatProperty(name="Guide Stiffness", default=1.0, min=0.0, max=1.0)
+    loop_anchors: bpy.props.CollectionProperty(type=AF_FiberLoopAnchor_Property)
+    loop_profile_keys: bpy.props.CollectionProperty(type=AF_FiberLoopProfileKey_Property)
+    loop_base_offset_u: bpy.props.FloatProperty(name="Base Offset U", default=0.0, update=_on_fiber_prop_update)
+    loop_base_offset_v: bpy.props.FloatProperty(name="Base Offset V", default=0.0, update=_on_fiber_prop_update)
+    guide_stiffness: bpy.props.FloatProperty(name="Guide Stiffness", default=1.0, min=0.0, max=1.0, update=_on_fiber_prop_update)
 
-    muscle_id: bpy.props.StringProperty(name="Muscle ID", default="")
+    muscle_id: bpy.props.StringProperty(name="Muscle ID", default="", update=_on_fiber_prop_update)
 
-    use_warm_start: bpy.props.BoolProperty(name="Use Warm Start", default=True)
-    node_count: bpy.props.IntProperty(name="Node Count", default=64, min=8, max=512)
-    iterations_interactive: bpy.props.IntProperty(name="Iterations (Interactive)", default=12, min=1, max=200)
-    iterations_bake: bpy.props.IntProperty(name="Iterations (Bake)", default=120, min=1, max=1000)
+    use_warm_start: bpy.props.BoolProperty(name="Use Warm Start", default=True, update=_on_fiber_prop_update)
+    node_count: bpy.props.IntProperty(name="Node Count", default=64, min=8, max=512, update=_on_fiber_prop_update)
+    iterations_interactive: bpy.props.IntProperty(name="Iterations (Interactive)", default=12, min=1, max=200, update=_on_fiber_prop_update)
+    iterations_bake: bpy.props.IntProperty(name="Iterations (Bake)", default=120, min=1, max=1000, update=_on_fiber_prop_update)
 
-    bend_stiffness: bpy.props.FloatProperty(name="Bend Stiffness", default=0.15, min=0.0, max=1.0)
-    collision_margin: bpy.props.FloatProperty(name="Collision Margin", default=0.002, min=0.0, max=1.0)
-    damping: bpy.props.FloatProperty(name="Damping", default=0.10, min=0.0, max=1.0)
+    bend_stiffness: bpy.props.FloatProperty(name="Bend Stiffness", default=0.15, min=0.0, max=1.0, update=_on_fiber_prop_update)
+    collision_margin: bpy.props.FloatProperty(name="Collision Margin", default=0.002, min=0.0, max=1.0, update=_on_fiber_prop_update)
+    damping: bpy.props.FloatProperty(name="Damping", default=0.10, min=0.0, max=1.0, update=_on_fiber_prop_update)
 
-    stretch_stiffness: bpy.props.FloatProperty(name="Shorten Strength", default=0.9, min=0.0, max=1.0)
+    stretch_stiffness: bpy.props.FloatProperty(name="Shorten Strength", default=0.9, min=0.0, max=1.0, update=_on_fiber_prop_update)
 
-    thickness: bpy.props.FloatProperty(name="Thickness", default=0.01, min=0.0)
+    thickness: bpy.props.FloatProperty(name="Thickness", default=0.01, min=0.0, update=_on_fiber_prop_update)
 
 
 class AF_BlobVCP_Property(bpy.types.PropertyGroup):

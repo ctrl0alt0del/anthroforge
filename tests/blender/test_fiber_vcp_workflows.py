@@ -102,6 +102,23 @@ def _handle_count(fiber_id):
     return sum(bool(obj.get("af_fiber_id") == fiber_id and (obj.get("af_fiber_endpoint_handle") or obj.get("af_fiber_touch_handle"))) for obj in bpy.context.scene.objects)
 
 
+def _loop_mesh_object(name, location=(0.0, 0.0, 0.0)):
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)], [], [(0, 1, 2, 3)])
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.location = location
+    return obj
+
+
+def _loop_setup():
+    root_obj = root()
+    loop = scp_with_object(root_obj, "Loop", _loop_mesh_object("Loop"))
+    _edit_select_vertex(loop.geometry_object_ref, 0, 1, 2, 3)
+    bpy.ops.af.create_loop_fiber_from_selected_vertices()
+    return root_obj, root_obj.af_vcp_system.fibers[0], loop
+
+
 class FiberVcpWorkflowTests(BlenderTestCase):
     def test_add_fiber_operator_selects_proxy_and_shows_endpoint_handles(self):
         root_obj, fiber, origin, insert = _fiber_setup()
@@ -225,3 +242,36 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(bpy.ops.af.delete_vcp_in_tree(node_id=fiber.id, node_type="FIBER"), {"FINISHED"})
         self.assertEqual((len(root_obj.af_vcp_system.fibers), find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")), (0, None))
         self.assertEqual((root_obj.af_vcp_system.active_vcp_type, _handle_count(fiber.id)), ("NONE", 0))
+
+    def test_create_loop_fiber_from_selected_vertices_preserves_order_and_cyclic_curve(self):
+        root_obj, fiber, loop = _loop_setup()
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        anchors = [endpoint_world(root_obj, bpy.context.scene, {}, item.parent_id, item.attach_param) for item in fiber.loop_anchors]
+        expected = [loop.geometry_object_ref.matrix_world @ loop.geometry_object_ref.data.vertices[i].co for i in (0, 1, 2, 3)]
+        self.assertEqual((fiber.topology_mode, fiber.generation_mode, len(fiber.loop_anchors)), ("LOOP", "SOLVED", 4))
+        self.assertTrue(proxy.data.splines[0].use_cyclic_u)
+        self.assertTrue(all((anchors[i] - expected[i]).length < 1.0e-6 for i in range(4)))
+
+    def test_recompute_loop_fiber_preserves_node_count_and_hides_handles(self):
+        root_obj, fiber, _loop = _loop_setup()
+        fiber.node_count = 48
+        bpy.ops.af.recompute_fiber(fiber_id=fiber.id)
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        self.assertEqual((len(_fiber_points_world(fiber)), proxy.data.splines[0].use_cyclic_u), (48, True))
+        self.assertEqual((_handle_count(fiber.id), fiber_route_mode(fiber)), (0, "DIRECT"))
+
+    def test_add_dependent_loop_creates_child_without_handles(self):
+        root_obj, fiber, _loop = _loop_setup()
+        self.assertEqual(bpy.ops.af.add_dependent_loop_fiber(fiber_id=fiber.id), {"FINISHED"})
+        child = root_obj.af_vcp_system.fibers[1]
+        proxy = find_flagged("af_fiber_proxy", child.id, "af_fiber_id")
+        self.assertEqual((child.topology_mode, child.generation_mode, child.driver_fiber_id, len(child.loop_profile_keys)), ("LOOP", "DERIVED", fiber.id, 4))
+        self.assertEqual((_handle_count(child.id), proxy.data.splines[0].use_cyclic_u), (0, True))
+
+    def test_delete_loop_root_cascades_to_derived_children(self):
+        root_obj, fiber, _loop = _loop_setup()
+        bpy.ops.af.add_dependent_loop_fiber(fiber_id=fiber.id)
+        child_id = root_obj.af_vcp_system.fibers[1].id
+        self.assertEqual(bpy.ops.af.delete_vcp_in_tree(node_id=fiber.id, node_type="FIBER"), {"FINISHED"})
+        self.assertEqual((len(root_obj.af_vcp_system.fibers), find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")), (0, None))
+        self.assertIsNone(find_flagged("af_fiber_proxy", child_id, "af_fiber_id"))

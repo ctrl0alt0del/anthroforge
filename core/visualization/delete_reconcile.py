@@ -11,6 +11,7 @@ from ..utils import get_af_root
 from ..scp_runtime.common import as_id, scp_prop_map
 from ..scp_runtime.marking import normalize_active_index
 from ..scp_runtime.tree import sanitize_parent_links
+from ..vcp.fiber_modes import driver_fiber_id, fiber_parent_ids, is_derived_loop
 
 
 def _owner_key(obj):
@@ -104,16 +105,31 @@ def _missing_scp_id(scp_id, live_ids):
 
 def _fiber_orphan_ids(root, live_scp_ids):
     out = set()
+    live_fiber_ids = {as_id(fiber.id) for fiber in root.af_vcp_system.fibers}
     for fiber in root.af_vcp_system.fibers:
-        if _missing_fiber_parent(fiber, live_scp_ids):
+        if _missing_fiber_parent(fiber, live_scp_ids) or _missing_fiber_driver(fiber, live_fiber_ids):
             out.add(as_id(fiber.id))
     return out
 
 
 def _missing_fiber_parent(fiber, live_scp_ids):
-    if _missing_scp_id(fiber.a_parent_id, live_scp_ids) or _missing_scp_id(fiber.b_parent_id, live_scp_ids):
-        return True
-    return any(_missing_scp_id(tp.parent_id, live_scp_ids) for tp in fiber.mid_touches)
+    return any(_missing_scp_id(parent_id, live_scp_ids) for parent_id in fiber_parent_ids(fiber))
+
+
+def _missing_fiber_driver(fiber, live_fiber_ids):
+    return bool(is_derived_loop(fiber) and as_id(driver_fiber_id(fiber)) not in set(live_fiber_ids or set()))
+
+
+def _fiber_family_ids(root, fiber_ids):
+    pending = set(fiber_ids or set())
+    expanded = set(pending)
+    while pending:
+        source = pending.pop()
+        for fiber in root.af_vcp_system.fibers:
+            if as_id(driver_fiber_id(fiber)) == source and as_id(fiber.id) not in expanded:
+                expanded.add(as_id(fiber.id))
+                pending.add(as_id(fiber.id))
+    return expanded
 
 
 def _orphan_blob_scp_ids(root):
@@ -122,6 +138,7 @@ def _orphan_blob_scp_ids(root):
 
 
 def _remove_fibers(root, fiber_ids):
+    fiber_ids = _fiber_family_ids(root, fiber_ids)
     changed = _remove_items_by_id(root.af_vcp_system.fibers, fiber_ids)
     changed = _clear_active_vcp(root, "FIBER", fiber_ids) or changed
     return _remove_muscle_refs(root, fiber_ids) or changed

@@ -4,7 +4,7 @@ import bpy
 from mathutils import Matrix, Vector
 
 from ..deps.runtime_trace import trace_line
-from ..utils import update_scene_view_layer
+from ..utils import depsgraph_for_scene, update_scene_view_layer
 from ..visualization.mirror_objects import remove_obj
 from .common import as_axis, as_id
 from .runtime_state import mirror_effective_axis, mirror_source_id, mirror_status
@@ -122,7 +122,7 @@ class MirrorSceneSync:
     def run(self):
         trace_line(f"mirror run targets={sorted(self.target_ids or set())}") if _mirror_trace_enabled() else None
         update_scene_view_layer(self.scene)
-        self.depsgraph = bpy.context.evaluated_depsgraph_get()
+        self.depsgraph = depsgraph_for_scene(self.scene)
         for sid, scp in self.scp_by_id.items():
             self._sync_target(sid, scp)
         self._remove_stale()

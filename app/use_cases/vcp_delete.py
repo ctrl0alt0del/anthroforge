@@ -35,7 +35,11 @@ def _has_target(vcp, kind, entity_id):
 
 def _clear_runtime_cache(kind, entity_id):
     if kind == "FIBER":
-        _fiber_sync().clear_solver_cache(entity_id)
+        sync = _fiber_sync()
+        try:
+            sync.clear_solver_cache()
+        except TypeError:
+            sync.clear_solver_cache(entity_id)
 
 
 def _delete_target(root, scene, kind, entity_id):

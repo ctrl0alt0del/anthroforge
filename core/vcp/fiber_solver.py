@@ -4,7 +4,9 @@ from mathutils import Vector
 
 from ..visualization.fiber_sync_helpers import endpoint_world as resolve_fiber_endpoint_world
 from .fiber_collision import CollisionOracle
-from .fiber_planner import LOCAL_FALLBACK, PlannerAnchor, plan_route
+from .fiber_loop import loop_frames, loop_pin_targets, profile_offsets, resample_closed
+from .fiber_modes import DERIVED_GENERATION, fiber_root, fibers_by_id, is_derived_loop, is_loop_fiber, loop_anchor_specs
+from .fiber_planner import DIRECT, LOCAL_FALLBACK, PlannerAnchor, plan_route
 from .runtime_state import (
     fiber_planner_ms,
     set_fiber_active_colliders,
@@ -102,6 +104,13 @@ class FiberSolver:
             nodes[idx] = pt.copy()
 
     def solve_points(self, root, fiber_prop, scene, depsgraph, bake=False):
+        if is_derived_loop(fiber_prop):
+            return self._solve_derived_loop(root, fiber_prop, scene, depsgraph)
+        if is_loop_fiber(fiber_prop):
+            return self._solve_solved_loop(root, fiber_prop, scene, depsgraph, bake)
+        return self._solve_open_fiber(root, fiber_prop, scene, depsgraph, bake)
+
+    def _solve_open_fiber(self, root, fiber_prop, scene, depsgraph, bake):
         runtime = self._runtime_registry(root)
         anchors = self._route_anchors(root, scene, runtime, fiber_prop)
         if anchors is None:
@@ -121,6 +130,184 @@ class FiberSolver:
         t0 = perf_counter()
         nodes, converged, max_disp, max_pen, active_count = self._solve_multilevel(fiber_prop, anchors, oracle, params, seed)
         return nodes, converged, max_disp, max_pen, active_count, (perf_counter() - t0) * 1000.0
+
+    def _solve_solved_loop(self, root, fiber_prop, scene, depsgraph, bake):
+        runtime = self._runtime_registry(root)
+        anchors = self._loop_route_anchors(root, scene, runtime, fiber_prop)
+        if anchors is None:
+            self._mark_failed(fiber_prop)
+            return []
+        params = self._runtime_params(fiber_prop, bake)
+        oracle = CollisionOracle(root, scene, depsgraph, params["margin"], self.surface_offset)
+        route, mode, planner_ms, planned = self._loop_seed_route(oracle, anchors, bake)
+        nodes, converged, max_disp, max_pen, active_count, refine_ms = self._refine_loop(fiber_prop, anchors, oracle, params, route)
+        self._store_status(fiber_prop, converged, max_disp, max_pen)
+        if not self._preserve_metrics(fiber_prop, bake):
+            self._store_metrics(fiber_prop, mode, planner_ms, refine_ms, max(active_count, len(planned)))
+        self._cache[fiber_prop.id] = [p.copy() for p in nodes]
+        return nodes
+
+    def _solve_derived_loop(self, root, fiber_prop, scene, depsgraph, bake=False):
+        fiber_map = fibers_by_id(root)
+        driver = fiber_root(fiber_prop, fiber_map)
+        points = self._driver_loop_points(root, driver, scene, depsgraph, bake)
+        if not points:
+            self._mark_failed(fiber_prop)
+            return []
+        self._sync_derived_node_count(fiber_prop, len(points))
+        params = self._runtime_params(fiber_prop, False)
+        oracle = CollisionOracle(root, scene, depsgraph, params["margin"], self.surface_offset)
+        t0 = perf_counter()
+        nodes, max_pen, active_count = self._build_derived_loop(fiber_prop, points, oracle)
+        self._store_status(fiber_prop, True, 0.0, max_pen)
+        self._store_metrics(fiber_prop, DERIVED_GENERATION, 0.0, (perf_counter() - t0) * 1000.0, active_count)
+        self._cache[fiber_prop.id] = [p.copy() for p in nodes]
+        return nodes
+
+    def _loop_route_anchors(self, root, scene, runtime_registry, fiber_prop):
+        pairs = loop_anchor_specs(fiber_prop)
+        if len(pairs) < 3:
+            return None
+        anchors = [self._route_anchor(root, scene, runtime_registry, pid, raw) for pid, raw in pairs]
+        return None if any(anchor is None for anchor in anchors) else anchors
+
+    def _loop_seed_route(self, oracle, anchors, bake):
+        if not bake:
+            return None, LOCAL_FALLBACK, 0.0, ()
+        if self._shared_loop_owner(anchors):
+            return self._owner_loop_seed(oracle, anchors)
+        t0 = perf_counter()
+        result = plan_route(oracle, list(anchors) + [anchors[0]])
+        return result.points, result.mode, (perf_counter() - t0) * 1000.0, result.active_ids
+
+    def _shared_loop_owner(self, anchors):
+        owners = {str(anchor.owner_id or "") for anchor in anchors}
+        return len(owners) == 1 and "" not in owners
+
+    def _owner_loop_seed(self, oracle, anchors):
+        points = [anchor.point.copy() for anchor in anchors]
+        active = oracle.active_colliders_for_polyline(points, padding=max(0.05, oracle.margin * 4.0))
+        return points, DIRECT, 0.0, tuple(c["sid"] for c in active)
+
+    def _refine_loop(self, fiber_prop, anchors, oracle, params, route):
+        t0 = perf_counter()
+        nodes, converged, max_disp, max_pen, active_count = self._solve_loop_nodes(fiber_prop, anchors, oracle, params, route)
+        return nodes, converged, max_disp, max_pen, active_count, (perf_counter() - t0) * 1000.0
+
+    def _solve_loop_nodes(self, fiber_prop, anchors, oracle, params, route):
+        route = route or [anchor.point.copy() for anchor in anchors]
+        nodes = self._loop_nodes(fiber_prop, route, params["node_count"])
+        targets = loop_pin_targets(route, [anchor.point.copy() for anchor in anchors], len(nodes))
+        active = self._active_colliders(oracle, nodes, params["margin"])
+        converged, max_disp, max_pen = self._run_cyclic_iterations(nodes, targets, oracle, active, params)
+        return nodes, converged, max_disp, max_pen, len(active)
+
+    def _loop_nodes(self, fiber_prop, route, node_count):
+        cached = self._warm_loop_nodes(fiber_prop, node_count)
+        return resample_closed(route, node_count) if cached is None else cached
+
+    def _warm_loop_nodes(self, fiber_prop, node_count):
+        cached = None if not bool(getattr(fiber_prop, "use_warm_start", False)) else self._cache.get(fiber_prop.id)
+        return None if not cached else resample_closed(cached, node_count)
+
+    def _run_cyclic_iterations(self, nodes, pin_targets, oracle, colliders, params):
+        prev_nodes = [p.copy() for p in nodes]
+        pinned = set(pin_targets)
+        for it in range(params["iterations"]):
+            max_disp, max_pen = self._cyclic_iteration(nodes, prev_nodes, pinned, pin_targets, oracle, colliders, params, it)
+            prev_nodes = [p.copy() for p in nodes]
+            if it >= params["min_iters"] and max_disp < params["eps_disp"] and max_pen < params["eps_pen"]:
+                return True, max_disp, max_pen
+        return False, max_disp, max_pen
+
+    def _cyclic_iteration(self, nodes, prev_nodes, pinned, pin_targets, oracle, colliders, params, it):
+        self._apply_cyclic_shortening(nodes, pinned, params["shorten_strength"])
+        if params["bend_strength"] > 0.0 and (it % 2) == 0:
+            self._apply_cyclic_bend(nodes, pinned, params["bend_strength"])
+        max_pen = self._apply_cyclic_collision_constraints(nodes, pinned, oracle, colliders, params["margin"])
+        self._restore_pins(nodes, pin_targets)
+        self._apply_cyclic_damping(nodes, prev_nodes, pinned, params["damping"])
+        return self._max_displacement(nodes, prev_nodes), max_pen
+
+    def _apply_cyclic_shortening(self, nodes, pinned, strength):
+        self._apply_cyclic_average(nodes, pinned, strength, additive=False)
+
+    def _apply_cyclic_bend(self, nodes, pinned, strength):
+        self._apply_cyclic_average(nodes, pinned, strength, additive=True)
+
+    def _apply_cyclic_average(self, nodes, pinned, strength, additive):
+        if len(nodes) < 3 or strength <= 0.0:
+            return
+        new_nodes = [p.copy() for p in nodes]
+        for i in range(len(nodes)):
+            if i not in pinned:
+                new_nodes[i] = self._cyclic_target(nodes, i, strength, additive)
+        self._commit_cyclic_nodes(nodes, new_nodes, pinned)
+
+    def _cyclic_target(self, nodes, index, strength, additive):
+        avg = (nodes[index - 1] + nodes[(index + 1) % len(nodes)]) * 0.5
+        return nodes[index] + (avg - nodes[index]) * strength if additive else nodes[index].lerp(avg, strength)
+
+    def _commit_cyclic_nodes(self, nodes, new_nodes, pinned):
+        for i in range(len(nodes)):
+            if i not in pinned:
+                nodes[i] = new_nodes[i]
+
+    def _apply_cyclic_collision_constraints(self, nodes, pinned, oracle, colliders, margin):
+        max_pen = 0.0
+        for i in range(len(nodes)):
+            if i in pinned:
+                continue
+            nodes[i], pen = oracle.push_out_point(nodes[i], colliders)
+            max_pen = max(max_pen, pen)
+        return max_pen
+
+    def _apply_cyclic_damping(self, nodes, prev_nodes, pinned, damping):
+        if damping <= 0.0:
+            return
+        alpha = max(0.0, min(1.0, 1.0 - damping))
+        for i in range(len(nodes)):
+            if i not in pinned:
+                nodes[i] = prev_nodes[i].lerp(nodes[i], alpha)
+
+    def _driver_loop_points(self, root, fiber_prop, scene, depsgraph, bake):
+        if fiber_prop is None or is_derived_loop(fiber_prop):
+            return []
+        cached = self._cache.get(fiber_prop.id)
+        return [p.copy() for p in cached] if cached and not bake else self.solve_points(root, fiber_prop, scene, depsgraph, bake=bake)
+
+    def _sync_derived_node_count(self, fiber_prop, node_count):
+        if int(getattr(fiber_prop, "node_count", 0)) != int(node_count):
+            fiber_prop.node_count = int(node_count)
+
+    def _build_derived_loop(self, fiber_prop, driver_points, oracle):
+        target = self._derived_target_points(driver_points, fiber_prop)
+        return self._smooth_derived_loop(target, oracle)
+
+    def _derived_target_points(self, driver_points, fiber_prop):
+        tangents, normals, binormals = loop_frames(driver_points)
+        count = float(max(1, len(driver_points)))
+        return [self._derived_point(driver_points[i], normals[i], binormals[i], fiber_prop, i / count) for i in range(len(driver_points))]
+
+    def _derived_point(self, point, normal, binormal, fiber_prop, t):
+        offset_u, offset_v = profile_offsets(fiber_prop, t)
+        return point + normal * offset_u + binormal * offset_v
+
+    def _smooth_derived_loop(self, points, oracle):
+        nodes = [point.copy() for point in points]
+        active = oracle.active_colliders_for_polyline(nodes, padding=oracle.margin * 2.0)
+        max_pen = 0.0
+        for _ in range(6):
+            prev_nodes = [p.copy() for p in nodes]
+            self._apply_cyclic_shortening(nodes, set(), 0.12)
+            self._apply_spring_to_targets(nodes, points, 0.35)
+            max_pen = max(max_pen, self._apply_cyclic_collision_constraints(nodes, set(), oracle, active, oracle.margin))
+            self._apply_cyclic_damping(nodes, prev_nodes, set(), 0.05)
+        return nodes, max_pen, len(active)
+
+    def _apply_spring_to_targets(self, nodes, targets, strength):
+        for i in range(len(nodes)):
+            nodes[i] = nodes[i].lerp(targets[i], max(0.0, min(1.0, strength)))
 
     def _runtime_registry(self, root):
         _ = root

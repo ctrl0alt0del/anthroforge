@@ -1,7 +1,9 @@
 from mathutils import Vector
 
+from .fiber_loop import resample_closed
 
-def build_surface_topology(m, n, closed_v=False):
+
+def build_surface_topology(m, n, closed_v=False, closed_u=False):
     """
     Build quad topology for a grid of M fibers x N nodes.
     vertex_index = i * n + j
@@ -16,14 +18,19 @@ def build_surface_topology(m, n, closed_v=False):
         v_pairs.append((m - 1, 0))
 
     for i0, i1 in v_pairs:
-        for j in range(n - 1):
-            v0 = i0 * n + j
-            v1 = i1 * n + j
-            v2 = i1 * n + (j + 1)
-            v3 = i0 * n + (j + 1)
-            faces.append((v0, v1, v2, v3))
+        for j in _u_columns(n, closed_u):
+            faces.append(_quad(i0, i1, j, n))
 
     return faces
+
+
+def _u_columns(n, closed_u):
+    return range(n) if closed_u and n > 2 else range(n - 1)
+
+
+def _quad(i0, i1, j, n):
+    j1 = (j + 1) % n
+    return i0 * n + j, i1 * n + j, i1 * n + j1, i0 * n + j1
 
 
 def flatten_fiber_points(ordered_fiber_points):
@@ -63,7 +70,7 @@ def validate_fiber_point_grid(ordered_fiber_points):
     return True, "", n
 
 
-def build_surface_data(ordered_fiber_points, closed_v=False):
+def build_surface_data(ordered_fiber_points, closed_v=False, closed_u=False):
     """
     Convenience builder:
     returns (verts, faces, n)
@@ -74,7 +81,7 @@ def build_surface_data(ordered_fiber_points, closed_v=False):
 
     m = len(ordered_fiber_points)
     verts = flatten_fiber_points(ordered_fiber_points)
-    faces = build_surface_topology(m=m, n=n, closed_v=closed_v)
+    faces = build_surface_topology(m=m, n=n, closed_v=closed_v, closed_u=closed_u)
     return verts, faces, n
 
 
@@ -173,20 +180,24 @@ def _sample_polyline(points, s):
     return points[-1].copy()
 
 
-def resample_uniform(points, n):
+def resample_uniform(points, n, closed=False):
     """
     Arc-length uniform resample for one fiber polyline.
     """
+    if closed:
+        return resample_closed(points, n)
     if not points:
         return []
     if n <= 1:
         return [points[0].copy()]
+    return _resample_open(points, n)
 
+
+def _resample_open(points, n):
     cum = _cumlen(points)
     total = cum[-1]
     if total <= 1e-9:
         return [points[0].copy() for _ in range(n)]
-
     out = []
     for k in range(n):
         s = (k / float(n - 1)) * total
@@ -194,11 +205,11 @@ def resample_uniform(points, n):
     return out
 
 
-def normalize_fibers_uniform(ordered_fiber_points, n):
+def normalize_fibers_uniform(ordered_fiber_points, n, closed_u=False):
     """
     Resample all fibers to same N points.
     """
-    return [resample_uniform(pts, n) for pts in ordered_fiber_points]
+    return [resample_uniform(pts, n, closed=closed_u) for pts in ordered_fiber_points]
 
 
 def densify_between_fibers(ordered_fiber_points):
@@ -247,7 +258,7 @@ def _inserts_for_row_pair(a, b, n, u_step):
     return max(0, int(round(v_avg / u_step)) - 1)
 
 
-def prepare_surface_rows(ordered_fiber_points, target_n=None, densify_v=True):
+def prepare_surface_rows(ordered_fiber_points, target_n=None, densify_v=True, closed_u=False):
     """
     Full preprocessing pipeline:
     1) uniform U resample
@@ -259,7 +270,7 @@ def prepare_surface_rows(ordered_fiber_points, target_n=None, densify_v=True):
     if target_n is None:
         target_n = len(ordered_fiber_points[0])
 
-    rows = normalize_fibers_uniform(ordered_fiber_points, target_n)
+    rows = normalize_fibers_uniform(ordered_fiber_points, target_n, closed_u=closed_u)
     if densify_v:
         rows = densify_between_fibers(rows)
     return rows

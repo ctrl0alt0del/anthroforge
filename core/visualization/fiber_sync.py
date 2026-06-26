@@ -1,5 +1,6 @@
 import bpy
 
+from ..vcp.fiber_modes import is_loop_fiber
 from ..vcp.fiber_solver import FiberSolver
 from .fiber_sync_helpers import (
     get_vis_collection,
@@ -75,8 +76,11 @@ class FiberSceneSync:
     def _create_fiber_proxy(self, vis_col, root, fiber_id):
         return create_fiber_proxy(vis_col, root, fiber_id, DEFAULT_FIBER_COLOR)
 
-    def _update_curve_points(self, obj, points, thickness, bake=False):
-        update_curve_points(obj, points, thickness, bake=bake)
+    def _update_curve_points(self, obj, points, thickness, bake=False, cyclic=False):
+        update_curve_points(obj, points, thickness, bake=bake, cyclic=cyclic)
+
+    def _fiber_cyclic(self, fiber):
+        return is_loop_fiber(fiber)
 
     def _get_scp_proxy(self, scene, root_name, scp_id):
         return get_scp_proxy(scene, root_name, scp_id)

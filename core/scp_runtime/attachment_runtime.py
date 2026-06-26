@@ -492,21 +492,34 @@ def _apply_attachment_targets(root, scene, scp_by_id, active_target_ids, active_
     depsgraph = depsgraph_for_scene(scene)
     if depsgraph is None:
         return set()
+    state = _apply_state(root, scene, scp_by_id, active_target_ids, active_parent_ids)
+    return _apply_runtime_targets(root, scene, state, blocked_ids, backsolve, depsgraph)
+
+
+def _apply_state(root, scene, scp_by_id, active_target_ids, active_parent_ids):
     order = _apply_order(scp_by_id, active_target_ids, active_parent_ids)
-    pending = set(order)
-    kids = children_map(scp_by_id)
-    surface_cache = _new_surface_cache()
-    object_index = scp_object_maps(scene, root.name)
+    return {
+        "scp_by_id": scp_by_id, "targets": active_target_ids, "parents": active_parent_ids,
+        "order": order, "pending": set(order), "kids": children_map(scp_by_id),
+        "surface_cache": _new_surface_cache(), "object_index": scp_object_maps(scene, root.name),
+    }
+
+
+def _apply_runtime_targets(root, scene, state, blocked_ids, backsolve, depsgraph):
     changed = set()
-    for sid in order:
-        pending.discard(sid)
-        args = scp_by_id, sid, active_target_ids, active_parent_ids
-        applied = _apply_child(*args, blocked_ids, surface_cache, object_index, depsgraph)
-        moved = _apply_shortcut_backsolve(root, scene, sid, backsolve)
-        if applied or moved:
-            changed.add(sid)
-            depsgraph = _refresh_child_chain(scene, active_parent_ids, sid, kids, pending, depsgraph)
+    for sid in state["order"]:
+        depsgraph = _apply_runtime_step(root, scene, state, sid, blocked_ids, backsolve, depsgraph, changed)
     return changed
+
+
+def _apply_runtime_step(root, scene, state, sid, blocked_ids, backsolve, depsgraph, changed):
+    state["pending"].discard(sid)
+    applied = _apply_child(state["scp_by_id"], sid, state["targets"], state["parents"], blocked_ids, state["surface_cache"], state["object_index"], depsgraph)
+    moved = _apply_shortcut_backsolve(root, scene, sid, backsolve)
+    if not (applied or moved):
+        return depsgraph
+    changed.add(sid)
+    return _refresh_child_chain(scene, state["parents"], sid, state["kids"], state["pending"], depsgraph)
 
 
 def _apply_child(scp_by_id, sid, active_target_ids, active_parent_ids, blocked_ids, surface_cache, object_index, depsgraph):

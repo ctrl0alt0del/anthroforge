@@ -1,3 +1,5 @@
+import bpy
+
 from mathutils import Vector
 
 from ..queries.root import root_for_context
@@ -27,6 +29,20 @@ def create_fiber_from_proxy_vertices(context):
         return failure("No AF_ROOT found.")
     picks, error = _selected_proxy_vertices()(context)
     return failure(error) if error else _create_fiber(context, root, _resolved_proxy_inputs(picks), "Select at least two proxy vertices.")
+
+
+def create_loop_fiber_from_selected_vertices(context):
+    root = root_for_context(context)
+    if root is None:
+        return failure("No AF_ROOT found.")
+    specs, error = _resolved_loop_specs(context, root)
+    if not specs:
+        return failure(error or "Select at least three ordered vertices.")
+    fiber = _new_loop_fiber(root, specs)
+    _activate(root.af_vcp_system, "FIBER", fiber.id)
+    _sync_entity(root, context.scene, "FIBER", {fiber.id})
+    _finalize_selection(context, root, fiber)
+    return success(f"Added {fiber.id}", value=fiber)
 
 
 def _create_fiber(context, root, resolved, error_message):
@@ -66,6 +82,31 @@ def _proxy_touch_specs(picks):
     return tuple((pick.scp_id, encode(pick.vertex_index, pick.signature)) for pick in tuple(picks or ()))
 
 
+def _resolved_loop_specs(context, root):
+    if _proxy_edit_target(context):
+        return _proxy_loop_specs(context)
+    if _geometry_edit_target(context, root.name):
+        return _mesh_loop_specs(context)
+    return None, "Select ordered mesh/proxy vertices in Edit Mode."
+
+
+def _proxy_loop_specs(context):
+    picks, error = _selected_proxy_vertices()(context)
+    return (None, error) if error else (_proxy_specs_from_picks(picks), "")
+
+
+def _proxy_specs_from_picks(picks):
+    encode = _encode_fiber_vertex_index()
+    items = tuple(picks or ())
+    return None if len(items) < 3 else tuple((pick.scp_id, encode(pick.vertex_index, pick.signature)) for pick in items)
+
+
+def _mesh_loop_specs(context):
+    obj = getattr(context, "active_object", None)
+    indices = _selected_mesh_indices(obj)
+    return (None, "Select at least three mesh vertices.") if len(indices) < 3 else (_mesh_specs(obj, indices), "")
+
+
 def _endpoint_ids(context):
     origin = getattr(context.scene, "af_new_fiber_origin_obj", None)
     insert = getattr(context.scene, "af_new_fiber_insertion_obj", None)
@@ -96,6 +137,16 @@ def _new_fiber(root, origin_id, insert_id, origin_raw, insert_raw, touch_specs=(
     return fiber
 
 
+def _new_loop_fiber(root, anchor_specs):
+    fiber = _new_fiber(root, "", "", "0.0", "0.0")
+    fiber.topology_mode, fiber.generation_mode = "LOOP", "SOLVED"
+    fiber.a_parent_id, fiber.a_attach_param = "", ""
+    fiber.b_parent_id, fiber.b_attach_param = "", ""
+    fiber.driver_fiber_id = ""
+    _apply_loop_anchor_specs(fiber, anchor_specs)
+    return fiber
+
+
 def _apply_touch_specs(fiber, touch_specs):
     for parent_id, attach_param in tuple(touch_specs or ()):
         _append_touch(fiber, parent_id, attach_param)
@@ -104,6 +155,16 @@ def _apply_touch_specs(fiber, touch_specs):
 def _append_touch(fiber, parent_id, attach_param):
     touch = fiber.mid_touches.add()
     touch.parent_id, touch.attach_param = parent_id, attach_param
+
+
+def _apply_loop_anchor_specs(fiber, anchor_specs):
+    for parent_id, attach_param in tuple(anchor_specs or ()):
+        _append_loop_anchor(fiber, parent_id, attach_param)
+
+
+def _append_loop_anchor(fiber, parent_id, attach_param):
+    anchor = fiber.loop_anchors.add()
+    anchor.parent_id, anchor.attach_param = parent_id, attach_param
 
 
 def _fiber_defaults():
@@ -132,14 +193,61 @@ def _activate(vcp, kind, entity_id):
 def _finalize_selection(context, root, fiber):
     if getattr(context, "mode", "") == "EDIT_MESH" and _active_proxy(context):
         return
+    _exit_edit_mode(context)
     proxy = _find_proxy(context.scene, root.name, fiber.id)
     _select_if_found(context, proxy)
     _sync_selection(context.scene, proxy)
 
 
+def _exit_edit_mode(context):
+    if getattr(context, "mode", "") == "EDIT_MESH":
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+
 def _active_proxy(context):
     obj = None if context is None else getattr(context, "active_object", None)
     return bool(obj and obj.get("af_scp_proxy_view"))
+
+
+def _proxy_edit_target(context):
+    obj = getattr(context, "active_object", None)
+    return bool(getattr(context, "mode", "") == "EDIT_MESH" and obj and obj.get("af_scp_proxy_view"))
+
+
+def _geometry_edit_target(context, root_name):
+    obj = getattr(context, "active_object", None)
+    valid = getattr(context, "mode", "") == "EDIT_MESH" and _single_edit_target(context, obj)
+    return bool(valid and _is_geometry_scp_obj()(obj, root_name))
+
+
+def _single_edit_target(context, obj):
+    return len(tuple(getattr(context, "objects_in_mode", ()) or (obj,))) == 1
+
+
+def _selected_mesh_indices(obj):
+    import bmesh
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    return _ordered_mesh_indices(bm)
+
+
+def _ordered_mesh_indices(bm):
+    history = _history_mesh_indices(bm)
+    seen = set(history)
+    return history + [vert.index for vert in bm.verts if vert.select and vert.index not in seen]
+
+
+def _history_mesh_indices(bm):
+    import bmesh
+
+    return [elem.index for elem in bm.select_history if isinstance(elem, bmesh.types.BMVert) and elem.select]
+
+
+def _mesh_specs(obj, indices):
+    scp_id = str(obj.get("af_scp_id", "") or "")
+    encode = _encode_fiber_anchor()
+    return tuple((scp_id, encode(obj.data.vertices[i].co.copy())) for i in tuple(indices or ()) if 0 <= int(i) < len(obj.data.vertices))
 
 
 def _select_if_found(context, obj):
@@ -215,6 +323,14 @@ def _encode_fiber_vertex_index():
     except ImportError:
         from core.attachment_codec import encode_fiber_vertex_index
     return encode_fiber_vertex_index
+
+
+def _is_geometry_scp_obj():
+    try:
+        from ...core.scp_runtime.common import is_geometry_scp_obj
+    except ImportError:
+        from core.scp_runtime.common import is_geometry_scp_obj
+    return is_geometry_scp_obj
 
 
 def _selected_proxy_vertices():

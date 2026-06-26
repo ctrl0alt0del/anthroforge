@@ -132,8 +132,8 @@ def _exit_now(key, reason):
 
 
 def _ensure_object_mode():
-    if getattr(bpy.context, "mode", "") == "OBJECT":
-        return True
+    if not bpy.ops.object.mode_set.poll():
+        return False
     try:
         bpy.ops.object.mode_set(mode="OBJECT")
         return True

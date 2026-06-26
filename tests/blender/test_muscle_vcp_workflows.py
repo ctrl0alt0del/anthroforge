@@ -12,6 +12,7 @@ import bpy
 from _helpers import BlenderTestCase, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
 from core.id_utils import next_prefixed_id
 from core.vcp.runtime_state import muscle_inflation_ctrl_world
+from core.visualization.fiber_sync import register_fiber_sync
 from core.visualization.muscle_sync import apply_muscle_control_update, register_muscle_sync
 from core.visualization.muscle_sync_helpers import find_muscle_proxy, mark_inflation_ctrl
 
@@ -116,6 +117,45 @@ def _restored_ctrl_state(root_obj, muscle):
     sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
     ctrl = find_flagged("af_muscle_inflation_ctrl", muscle.id, "af_muscle_id")
     return ctrl, tuple(round(v, 4) for v in muscle_inflation_ctrl_world(muscle)), original
+
+
+def _loop_mesh_object(name, location=(0.0, 0.0, 0.0)):
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)], [], [(0, 1, 2, 3)])
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.location = location
+    return obj
+
+
+def _edit_select(obj, *indices):
+    import bmesh
+
+    select_only(obj)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    for vert in bm.verts:
+        vert.select_set(False)
+    bm.select_history.clear()
+    for index in indices:
+        vert = bm.verts[int(index)]
+        vert.select_set(True)
+        bm.select_history.add(vert)
+    bmesh.update_edit_mesh(obj.data)
+
+
+def _loop_family_setup(offset=0.25, location=(0.0, 0.0, 0.0)):
+    root_obj = root()
+    loop = scp_with_object(root_obj, "Loop", _loop_mesh_object("Loop", location))
+    _edit_select(loop.geometry_object_ref, 0, 1, 2, 3)
+    bpy.ops.af.create_loop_fiber_from_selected_vertices()
+    solved = root_obj.af_vcp_system.fibers[0]
+    bpy.ops.af.add_dependent_loop_fiber(fiber_id=solved.id)
+    child = root_obj.af_vcp_system.fibers[1]
+    child.loop_base_offset_u = offset
+    register_fiber_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+    return root_obj, solved, child
 
 
 class MuscleVcpWorkflowTests(BlenderTestCase):
@@ -296,3 +336,36 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         self.assertEqual((len(root_obj.af_vcp_system.muscles), root_obj.af_vcp_system.active_vcp_type), (0, "NONE"))
         self.assertEqual((_surface_obj(root_obj, muscle, "BASE"), _surface_obj(root_obj, muscle, "INFL")), (None, None))
         self.assertEqual((find_flagged("af_muscle_inflation_ctrl", muscle.id, "af_muscle_id"), [f.muscle_id for f in root_obj.af_vcp_system.fibers]), (None, ["", ""]))
+
+    def test_loop_muscle_rejects_mixed_open_and_loop_fibers(self):
+        root_obj, first, _second = _muscle_setup()
+        loop = scp_with_object(root_obj, "Loop", _loop_mesh_object("Loop", (4.0, 0.0, 0.0)))
+        _edit_select(loop.geometry_object_ref, 0, 1, 2, 3)
+        bpy.ops.af.create_loop_fiber_from_selected_vertices()
+        loop_proxy = find_flagged("af_fiber_proxy", root_obj.af_vcp_system.fibers[-1].id, "af_fiber_id")
+        select_only(first)
+        loop_proxy.select_set(True)
+        with self.assertRaises(RuntimeError):
+            bpy.ops.af.add_muscle_vcp()
+
+    def test_loop_muscle_requires_same_solved_root(self):
+        root_obj, first_root, first_child = _loop_family_setup()
+        other = scp_with_object(root_obj, "OtherLoop", _loop_mesh_object("OtherLoop", (3.0, 0.0, 0.0)))
+        _edit_select(other.geometry_object_ref, 0, 1, 2, 3)
+        bpy.ops.af.create_loop_fiber_from_selected_vertices()
+        other_proxy = find_flagged("af_fiber_proxy", root_obj.af_vcp_system.fibers[-1].id, "af_fiber_id")
+        select_only(find_flagged("af_fiber_proxy", first_root.id, "af_fiber_id"))
+        other_proxy.select_set(True)
+        with self.assertRaises(RuntimeError):
+            bpy.ops.af.add_muscle_vcp()
+
+    def test_loop_outer_and_derived_inner_create_valid_surface(self):
+        root_obj, solved, child = _loop_family_setup()
+        select_only(find_flagged("af_fiber_proxy", solved.id, "af_fiber_id"))
+        find_flagged("af_fiber_proxy", child.id, "af_fiber_id").select_set(True)
+        bpy.ops.af.add_muscle_vcp()
+        register_muscle_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        muscle = root_obj.af_vcp_system.muscles[0]
+        base = _surface_obj(root_obj, muscle, "BASE")
+        self.assertGreater(len(base.data.vertices), 0)
+        self.assertGreater(len(base.data.polygons), 0)

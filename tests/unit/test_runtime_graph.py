@@ -34,9 +34,10 @@ adapters = _load_module("adapters")
 runtime_graph = _load_module("runtime_graph")
 
 
-def fiber(fid, a_id, b_id, touch_ids=()):
+def fiber(fid, a_id, b_id, touch_ids=(), topology="OPEN", generation="SOLVED", driver_id="", loop_ids=()):
     touches = [SimpleNamespace(parent_id=value) for value in touch_ids]
-    return SimpleNamespace(id=fid, a_parent_id=a_id, b_parent_id=b_id, mid_touches=touches)
+    anchors = [SimpleNamespace(parent_id=value, attach_param="RAW") for value in loop_ids]
+    return SimpleNamespace(id=fid, a_parent_id=a_id, b_parent_id=b_id, mid_touches=touches, topology_mode=topology, generation_mode=generation, driver_fiber_id=driver_id, loop_anchors=anchors)
 
 
 def muscle(mid, fiber_ids):
@@ -62,3 +63,11 @@ class RuntimeGraphTests(unittest.TestCase):
         self.assertIn({"A", "B"}, sccs)
         self.assertIn({"C"}, sccs)
         self.assertIn({"D"}, sccs)
+
+    def test_runtime_graph_links_solved_loop_driver_to_derived_loop(self):
+        scps = [SimpleNamespace(id="S1", parent_id=""), SimpleNamespace(id="S2", parent_id=""), SimpleNamespace(id="S3", parent_id="")]
+        fibers = [fiber("F1", "", "", topology="LOOP", loop_ids=("S1", "S2", "S3")), fiber("F2", "", "", topology="LOOP", generation="DERIVED", driver_id="F1")]
+        root = SimpleNamespace(af_scp_system=SimpleNamespace(scps=scps), af_vcp_system=SimpleNamespace(fibers=fibers, muscles=[], blobs=[]))
+        graph = runtime_graph.RuntimeGraph()
+        adapters.build_runtime_graph(root, graph)
+        self.assertIn(("FIBER", "F2"), graph.downstream_entities({("FIBER", "F1")}))

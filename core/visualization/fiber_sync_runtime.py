@@ -3,6 +3,7 @@ import bpy
 from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..deps.conflict_resolver import resolve_conflict
+from ..vcp.fiber_modes import is_derived_loop, is_open_fiber
 from ..utils import depsgraph_for_scene, get_af_root, scene_for_id
 from ..attachment_codec import encode_fiber_mesh_anchor
 from .control_runtime import active_entity_id
@@ -67,7 +68,7 @@ def sync_handles(sync, root, scene, vis_col, runtime_registry, window_manager=No
     live_endpoint_keys = set()
     live_touch_keys = set()
     fiber = _active_fiber(root, scene)
-    if fiber is not None:
+    if fiber is not None and is_open_fiber(fiber):
         _sync_fiber_handles(sync, root, scene, vis_col, runtime_registry, fiber, live_endpoint_keys, live_touch_keys, window_manager)
     _cleanup_stale_handles(vis_col, root.name, live_endpoint_keys, live_touch_keys)
 
@@ -98,9 +99,13 @@ def apply_selection_highlight(sync, root, scene):
 
 def _fibers_to_sync(root, target_fiber_ids):
     if target_fiber_ids is None:
-        return list(root.af_vcp_system.fibers)
+        return _ordered_fibers(root.af_vcp_system.fibers)
     target_set = set(target_fiber_ids)
-    return [f for f in root.af_vcp_system.fibers if f.id in target_set]
+    return _ordered_fibers([f for f in root.af_vcp_system.fibers if f.id in target_set])
+
+
+def _ordered_fibers(fibers):
+    return sorted(tuple(fibers or ()), key=lambda fiber: (1 if is_derived_loop(fiber) else 0, str(fiber.id or "")))
 
 
 def _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake):
@@ -110,7 +115,7 @@ def _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake):
     use_bake = bool(bake or sync._fiber_prefer_bake(fiber))
     points = sync._solver.solve_points(root=root, fiber_prop=fiber, scene=scene, depsgraph=depsgraph, bake=bool(bake))
     if len(points) >= 2:
-        sync._update_curve_points(obj, points, fiber.thickness, bake=use_bake)
+        sync._update_curve_points(obj, points, fiber.thickness, bake=use_bake, cyclic=sync._fiber_cyclic(fiber))
 
 
 def _cleanup_stale_fiber_proxies(vis_col, root_name, live_ids):

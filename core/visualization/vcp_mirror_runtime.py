@@ -2,6 +2,7 @@ import bpy
 
 from ..scp_runtime.runtime_state import mirror_effective_axis, mirror_source_id, mirror_status
 from ..utils import get_af_root, scene_for_id
+from ..vcp.fiber_modes import fiber_parent_ids, fiber_root
 from .mirror_objects import create_mirror_from_source, ensure_obj_type, remove_obj, copy_data
 from .mirror_rules import mirror_world_matrix
 
@@ -85,24 +86,20 @@ def _rule_for_scp(scp_id, scp_by_id):
     return _source_rule(source_id, scp_by_id)
 
 
-def _rule_for_fiber(fiber, scp_by_id):
-    parent_ids = []
-    a_parent_id = _as_id(getattr(fiber, "a_parent_id", ""))
-    if a_parent_id:
-        parent_ids.append(a_parent_id)
-    b_parent_id = _as_id(getattr(fiber, "b_parent_id", ""))
-    if b_parent_id:
-        parent_ids.append(b_parent_id)
-    for tp in getattr(fiber, "mid_touches", []):
-        pid = _as_id(getattr(tp, "parent_id", ""))
-        if pid:
-            parent_ids.append(pid)
-
+def _rule_for_fiber(fiber, fibers_by_id, scp_by_id):
+    parent_ids = [_as_id(pid) for pid in fiber_parent_ids(fiber) if _as_id(pid)]
+    if not parent_ids:
+        parent_ids = _fiber_root_parents(fiber, fibers_by_id)
     for pid in parent_ids:
         rule = _rule_for_scp(pid, scp_by_id)
         if rule is not None:
             return rule
     return None
+
+
+def _fiber_root_parents(fiber, fibers_by_id):
+    root = fiber_root(fiber, fibers_by_id)
+    return [] if root is None or root == fiber else [_as_id(pid) for pid in fiber_parent_ids(root) if _as_id(pid)]
 
 
 def _rule_for_muscle(muscle, fibers_by_id, scp_by_id):
@@ -113,7 +110,7 @@ def _rule_for_muscle(muscle, fibers_by_id, scp_by_id):
         fiber = fibers_by_id.get(fid)
         if fiber is None:
             continue
-        rule = _rule_for_fiber(fiber, scp_by_id)
+        rule = _rule_for_fiber(fiber, fibers_by_id, scp_by_id)
         if rule is not None:
             return rule
     return None
@@ -250,7 +247,7 @@ def _sync_fiber_mirrors(root, vis_col, fibers_by_id, scp_by_id, target_fiber_ids
         if target_ids is not None and fid not in target_ids:
             continue
         affected.add(fid)
-        rule = _rule_for_fiber(fiber, scp_by_id)
+        rule = _rule_for_fiber(fiber, fibers_by_id, scp_by_id)
         src = _find_source_fiber_obj(vis_col, root.name, fid)
         mir = _find_mirror_fiber_obj(vis_col, root.name, fid)
         if rule is None or src is None:

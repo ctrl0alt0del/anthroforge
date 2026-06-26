@@ -1,5 +1,7 @@
 from mathutils import Matrix, Vector
 
+from ..vcp.fiber_modes import fiber_parent_ids, fiber_root
+
 
 def axis_to_scale(axis: str):
     a = (axis or "X").upper()
@@ -46,11 +48,6 @@ def effective_rule_for_scp(scp_id, scp_map):
     return None
 
 
-def _fiber_parent_ids(fiber_prop):
-    ids = [pid for pid in (fiber_prop.a_parent_id, fiber_prop.b_parent_id) if pid]
-    return ids + [tp.parent_id for tp in fiber_prop.mid_touches if tp.parent_id]
-
-
 def _first_scp_rule(parent_ids, scp_map):
     for pid in parent_ids:
         rule = effective_rule_for_scp(pid, scp_map)
@@ -59,8 +56,12 @@ def _first_scp_rule(parent_ids, scp_map):
     return None
 
 
-def effective_rule_for_fiber(fiber_prop, scp_map):
-    return _first_scp_rule(_fiber_parent_ids(fiber_prop), scp_map)
+def effective_rule_for_fiber(fiber_prop, scp_map, fibers_by_id=None):
+    parent_ids = fiber_parent_ids(fiber_prop)
+    if parent_ids:
+        return _first_scp_rule(parent_ids, scp_map)
+    root = None if fibers_by_id is None else fiber_root(fiber_prop, fibers_by_id)
+    return None if root is None or root == fiber_prop else _first_scp_rule(fiber_parent_ids(root), scp_map)
 
 
 def effective_rule_for_muscle(muscle_prop, fibers_by_id, scp_map):
@@ -68,7 +69,7 @@ def effective_rule_for_muscle(muscle_prop, fibers_by_id, scp_map):
         f = fibers_by_id.get(ref.fiber_id)
         if f is None:
             continue
-        r = effective_rule_for_fiber(f, scp_map)
+        r = effective_rule_for_fiber(f, scp_map, fibers_by_id)
         if r is not None:
             return r
     return None

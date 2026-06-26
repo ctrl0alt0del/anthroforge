@@ -2,6 +2,7 @@ import bpy
 from ...app.queries.root import root_for_context
 from ...app.queries.scp import scp_label
 from ...app.queries.vcp import active_fiber_from_context, has_active_entity
+from ...core.vcp.fiber_modes import is_derived_loop, is_loop_fiber, is_solved_loop
 from ...core.vcp.runtime_state import (
     fiber_active_colliders,
     fiber_eps_disp,
@@ -32,6 +33,39 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         endpoints_box.label(text=f"Origin: {scp_label(root, fiber.a_parent_id)}")
         endpoints_box.label(text=f"Insertion: {scp_label(root, fiber.b_parent_id)}")
 
+    def _draw_loop_anchors(self, layout, root, fiber):
+        box = layout.box()
+        box.label(text="Loop Anchors")
+        box.label(text=f"Seam: {scp_label(root, fiber.loop_anchors[0].parent_id) if fiber.loop_anchors else 'Missing'}")
+        for i, anchor in enumerate(fiber.loop_anchors):
+            box.label(text=f"{i + 1}. {scp_label(root, anchor.parent_id)}")
+
+    def _draw_derived_loop(self, layout, fiber):
+        box = layout.box()
+        box.label(text="Derived Loop")
+        box.label(text=f"Driver: {fiber.driver_fiber_id or 'Missing'}")
+        row = box.row()
+        row.enabled = False
+        row.prop(fiber, "node_count")
+        box.prop(fiber, "loop_base_offset_u")
+        box.prop(fiber, "loop_base_offset_v")
+        self._draw_profile_keys(box, fiber)
+
+    def _draw_profile_keys(self, layout, fiber):
+        row = layout.row(align=True)
+        op = row.operator("af.add_loop_profile_key", icon="ADD", text="Add Profile Key")
+        op.fiber_id = fiber.id
+        for i, key in enumerate(fiber.loop_profile_keys):
+            self._draw_profile_key(layout, fiber, i, key)
+
+    def _draw_profile_key(self, layout, fiber, index, key):
+        row = layout.row(align=True)
+        row.prop(key, "t", text="T")
+        row.prop(key, "delta_u", text="dU")
+        row.prop(key, "delta_v", text="dV")
+        op = row.operator("af.remove_loop_profile_key", text="", icon="X")
+        op.fiber_id, op.key_index = fiber.id, index
+
     def _draw_solver(self, layout, fiber):
         solver_box = layout.box()
         solver_box.label(text="Solver")
@@ -48,6 +82,12 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         if hasattr(fiber, "guide_stiffness"):
             solver_box.prop(fiber, "guide_stiffness")
 
+    def _draw_loop_solver(self, layout, fiber):
+        self._draw_solver(layout, fiber)
+        row = layout.row()
+        op = row.operator("af.add_dependent_loop_fiber", icon="DUPLICATE")
+        op.fiber_id = fiber.id
+
     def _draw_touch_points(self, layout, root, fiber):
         touch_box = layout.box()
         touch_box.label(text="Mid Touch Points")
@@ -60,6 +100,12 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
             op = row.operator("af.remove_fiber_touch_point", text="", icon="X")
             op.fiber_id = fiber.id
             op.touch_index = i
+
+    def _draw_derived_display(self, layout, fiber):
+        box = layout.box()
+        box.label(text="Display")
+        box.prop(fiber, "collision_margin")
+        box.prop(fiber, "thickness")
 
     def _draw_status(self, layout, fiber):
         status_box = layout.box()
@@ -92,6 +138,39 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         op = layout.operator("af.recompute_fiber", icon="FILE_REFRESH")
         op.fiber_id = fiber.id
 
+    def _draw_header(self, layout, fiber):
+        suffix = "Loop" if is_loop_fiber(fiber) else "Open"
+        if is_derived_loop(fiber):
+            suffix = "Derived Loop"
+        layout.label(text=f"{fiber.id} ({suffix})", icon="CURVE_DATA")
+
+    def _draw_mode_layout(self, layout, root, fiber):
+        if is_derived_loop(fiber):
+            self._draw_derived_mode(layout, fiber)
+            return
+        if is_solved_loop(fiber):
+            self._draw_solved_loop_mode(layout, root, fiber)
+            return
+        self._draw_open_mode(layout, root, fiber)
+
+    def _draw_derived_mode(self, layout, fiber):
+        self._draw_derived_loop(layout, fiber)
+        self._draw_status(layout, fiber)
+        self._draw_derived_display(layout, fiber)
+
+    def _draw_solved_loop_mode(self, layout, root, fiber):
+        self._draw_loop_anchors(layout, root, fiber)
+        self._draw_loop_solver(layout, fiber)
+        self._draw_status(layout, fiber)
+        self._draw_display(layout, fiber)
+
+    def _draw_open_mode(self, layout, root, fiber):
+        self._draw_endpoints(layout, root, fiber)
+        self._draw_solver(layout, fiber)
+        self._draw_touch_points(layout, root, fiber)
+        self._draw_status(layout, fiber)
+        self._draw_display(layout, fiber)
+
     def draw(self, context):
         layout = self.layout
         root = root_for_context(context)
@@ -100,9 +179,5 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
             layout.label(text="Fiber not found")
             return
 
-        layout.label(text=fiber.id, icon="CURVE_DATA")
-        self._draw_endpoints(layout, root, fiber)
-        self._draw_solver(layout, fiber)
-        self._draw_touch_points(layout, root, fiber)
-        self._draw_status(layout, fiber)
-        self._draw_display(layout, fiber)
+        self._draw_header(layout, fiber)
+        self._draw_mode_layout(layout, root, fiber)

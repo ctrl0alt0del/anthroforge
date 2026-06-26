@@ -151,7 +151,7 @@ def create_fiber_proxy(vis_col, root, fiber_id, default_color):
     return obj
 
 
-def update_curve_points(obj, points, thickness, bake=False):
+def update_curve_points(obj, points, thickness, bake=False, cyclic=False):
     curve = obj.data
     while curve.splines:
         curve.splines.remove(curve.splines[0])
@@ -160,6 +160,7 @@ def update_curve_points(obj, points, thickness, bake=False):
     spline.points.add(len(points) - 1)
     for i, p in enumerate(points):
         spline.points[i].co = (p.x, p.y, p.z, 1.0)
+    spline.use_cyclic_u = bool(cyclic and len(points) > 2)
 
     curve.bevel_depth = max(0.0, float(thickness))
     curve.fill_mode = "FULL"

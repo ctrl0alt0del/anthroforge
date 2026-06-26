@@ -9,7 +9,7 @@ from .scp_runtime.lookup import clear_native_parent_keep_world
 from .scp_runtime.object_roles import add_bound_object_to_scp, create_scp, set_scp_geometry_object, set_scp_transform_object
 from .scp_runtime.prop_update_guard import set_parent_id_raw
 from .scp_runtime.runtime_state import mirror_status, restore_attachment_runtime, snapshot_attachment_runtime
-from .utils import get_af_root
+from .utils import get_af_root, scene_for_id, update_scene_view_layer
 from .visualization.mirror_objects import remap_object_cluster_parents, remap_object_cluster_refs
 from .visualization.scp_control_helpers import clear_scp_control_marks, mark_scp_control_object
 
@@ -305,7 +305,7 @@ def _curve_frame(scene, curve_obj, factor, forward_axis):
     probe, use_path = _curve_probe(scene, curve_obj, forward_axis)
     try:
         probe.constraints[0].offset_factor = max(0.0, min(1.0, float(factor)))
-        bpy.context.view_layer.update()
+        update_scene_view_layer(scene or scene_for_id(curve_obj) or scene_for_id(probe))
         return _probe_axes(probe, forward_axis)
     finally:
         _clear_curve_probe(probe, curve_obj, use_path)

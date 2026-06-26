@@ -1,4 +1,3 @@
-from .runtime import run_dependency_runtime
 from .drivers import (
     DependencyDriver,
     DependencyRuntimeContext,
@@ -25,6 +24,11 @@ from .conflict_resolver import (
     list_conflict_policies,
     clear_conflict_policies,
 )
+
+
+def run_dependency_runtime(*args, **kwargs):
+    from .runtime import run_dependency_runtime as runner
+    return runner(*args, **kwargs)
 
 __all__ = [
     "run_dependency_runtime",

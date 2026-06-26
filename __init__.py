@@ -10,6 +10,8 @@ bl_info = {
 
 import bpy
 
+__addon_enabled__ = False
+
 from .operators.create_root import AF_OT_CreateRoot
 from .operators.add_scp import (
     AF_OT_AddSCP,
@@ -29,14 +31,20 @@ from .operators.tree import (
     AF_OT_SelectVCPInTree,
 )
 from .operators.add_fiber_vcp import AF_OT_AddFiberVCP
-from .operators.fiber_proxy import AF_OT_ConnectProxyVerticesWithFiber
+from .operators.fiber_proxy import (
+    AF_OT_ConnectProxyVerticesWithFiber,
+    AF_OT_CreateLoopFiberFromSelectedVertices,
+)
 from .operators.add_muscle_vcp import AF_OT_AddMuscleVCP
 from .operators.add_blob_vcp import AF_OT_AddBlobVCP
 from .operators.fiber_tools import (
     AF_OT_ClearFiberWarmStart,
     AF_OT_RecomputeFiber,
     AF_OT_AddFiberTouchPoint,
+    AF_OT_AddDependentLoopFiber,
+    AF_OT_AddLoopProfileKey,
     AF_OT_RemoveFiberTouchPoint,
+    AF_OT_RemoveLoopProfileKey,
 )
 from .operators.muscle_tools import (
     AF_OT_FlipMuscleNormals,
@@ -95,6 +103,8 @@ from .properties.vcp_properties import (
     AF_MuscleFiberRef_Property,
     AF_MuscleVCP_Property,
     AF_FiberTouchPoint_Property,
+    AF_FiberLoopAnchor_Property,
+    AF_FiberLoopProfileKey_Property,
     AF_FiberVCP_Property,
     AF_BlobVCP_Property,
     AF_VCP_System_Property,
@@ -156,7 +166,10 @@ classes = (
     AF_OT_ClearFiberWarmStart,
     AF_OT_RecomputeFiber,
     AF_OT_AddFiberTouchPoint,
+    AF_OT_AddDependentLoopFiber,
+    AF_OT_AddLoopProfileKey,
     AF_OT_RemoveFiberTouchPoint,
+    AF_OT_RemoveLoopProfileKey,
 
     AF_PT_FiberEditPanel,
     AF_PT_FiberCreatePanel,
@@ -164,12 +177,15 @@ classes = (
     AF_MuscleFiberRef_Property,
     AF_MuscleVCP_Property,
     AF_FiberTouchPoint_Property,
+    AF_FiberLoopAnchor_Property,
+    AF_FiberLoopProfileKey_Property,
     AF_FiberVCP_Property,
     AF_BlobVCP_Property,
     AF_VCP_System_Property,
 
     AF_OT_AddFiberVCP,
     AF_OT_ConnectProxyVerticesWithFiber,
+    AF_OT_CreateLoopFiberFromSelectedVertices,
     AF_OT_AddMuscleVCP,
     AF_OT_AddBlobVCP,
     AF_OT_ToggleVCPCollapse,
@@ -207,15 +223,51 @@ classes = (
 )
 
 
-def register():
-    for cls in classes:
+def _already_registered(error):
+    return "already registered as a subclass" in str(error)
+
+
+def _not_registered(error):
+    text = str(error)
+    return "missing bl_rna" in text or "not registered" in text
+
+
+def _safe_register_class(cls):
+    try:
         bpy.utils.register_class(cls)
+    except ValueError as exc:
+        if not _already_registered(exc):
+            raise
 
-    bpy.types.Object.af_scp_system = bpy.props.PointerProperty(type=AF_SCP_System_Property)
-    bpy.types.Object.af_vcp_system = bpy.props.PointerProperty(type=AF_VCP_System_Property)
-    bpy.types.Object.af_shortcut_system = bpy.props.PointerProperty(type=AF_DataShortcut_System_Property)
 
-    register_scene_props()
+def _safe_unregister_class(cls):
+    try:
+        bpy.utils.unregister_class(cls)
+    except RuntimeError as exc:
+        if not _not_registered(exc):
+            raise
+
+
+def _ensure_object_props():
+    if not hasattr(bpy.types.Object, "af_scp_system"):
+        bpy.types.Object.af_scp_system = bpy.props.PointerProperty(type=AF_SCP_System_Property)
+    if not hasattr(bpy.types.Object, "af_vcp_system"):
+        bpy.types.Object.af_vcp_system = bpy.props.PointerProperty(type=AF_VCP_System_Property)
+    if not hasattr(bpy.types.Object, "af_shortcut_system"):
+        bpy.types.Object.af_shortcut_system = bpy.props.PointerProperty(type=AF_DataShortcut_System_Property)
+
+
+def _drop_object_prop(name):
+    if hasattr(bpy.types.Object, name):
+        delattr(bpy.types.Object, name)
+
+
+def _ensure_scene_props():
+    if not hasattr(bpy.types.Scene, "af_attachments_enabled"):
+        register_scene_props()
+
+
+def _register_runtime_hooks():
     register_sync()
     register_fiber_sync()
     register_muscle_sync()
@@ -226,7 +278,7 @@ def register():
     register_proxy_session_runtime()
 
 
-def unregister():
+def _unregister_runtime_hooks():
     unregister_proxy_session_runtime()
     unregister_delete_reconcile()
     unregister_control_runtime()
@@ -235,11 +287,28 @@ def unregister():
     unregister_muscle_sync()
     unregister_fiber_sync()
     unregister_sync()
+
+
+def register():
+    global __addon_enabled__
+    for cls in classes:
+        _safe_register_class(cls)
+    _ensure_object_props()
+    _ensure_scene_props()
+    if __addon_enabled__:
+        return
+    _register_runtime_hooks()
+    __addon_enabled__ = True
+
+
+def unregister():
+    global __addon_enabled__
+    if __addon_enabled__:
+        _unregister_runtime_hooks()
+        __addon_enabled__ = False
     unregister_scene_props()
-
-    del bpy.types.Object.af_scp_system
-    del bpy.types.Object.af_vcp_system
-    del bpy.types.Object.af_shortcut_system
-
+    _drop_object_prop("af_scp_system")
+    _drop_object_prop("af_vcp_system")
+    _drop_object_prop("af_shortcut_system")
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        _safe_unregister_class(cls)

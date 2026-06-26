@@ -12,6 +12,11 @@ from .types import (
     EDGE_ATTACHMENT,
 )
 
+try:
+    from ..vcp.fiber_modes import driver_fiber_id, fiber_parent_ids, is_derived_loop
+except ImportError:
+    from core.vcp.fiber_modes import driver_fiber_id, fiber_parent_ids, is_derived_loop
+
 
 def _add_dependency_edge(graph, src_entity, dst_entity):
     if src_entity == dst_entity:
@@ -50,14 +55,14 @@ def _add_fiber_entities(root, graph, entity_sets):
         graph.add_edge(Edge(fp_in, fp_local, EDGE_EVAL))
         graph.add_edge(Edge(fp_local, fp_probe, EDGE_EVAL))
 
-        parents = {sid for sid in (f.a_parent_id, f.b_parent_id) if sid}
-        for tp in f.mid_touches:
-            if tp.parent_id:
-                parents.add(tp.parent_id)
-        for sid in parents:
+        for sid in fiber_parent_ids(f):
             sp = graph.add_port(PortRef("SCP", sid, "probe", PHASE_PROBES, MUT_PROBE))
             graph.add_edge(Edge(sp, fp_local, EDGE_ATTACHMENT))
             _add_dependency_edge(graph, ("SCP", sid), ("FIBER", fid))
+        if is_derived_loop(f) and driver_fiber_id(f):
+            dp = graph.add_port(PortRef("FIBER", driver_fiber_id(f), "probe", PHASE_PROBES, MUT_PROBE))
+            graph.add_edge(Edge(dp, fp_local, EDGE_EVAL))
+            _add_dependency_edge(graph, ("FIBER", driver_fiber_id(f)), ("FIBER", fid))
 
 
 def _add_muscle_entities(root, graph, entity_sets):
