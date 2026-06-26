@@ -32,6 +32,7 @@ from app.use_cases.fiber_create import create_fiber_vcp
 from app.use_cases.fiber_tools import _run_bake_passes, add_fiber_touch_point, clear_fiber_warm_start, recompute_fiber, remove_fiber_touch_point
 from app.use_cases.muscle_create import create_muscle_vcp
 from app.use_cases.muscle_tools import flip_muscle_normals, select_muscle_inflation_ctrl
+from app.use_cases.vcp_delete import delete_vcp_in_tree
 
 
 class Bag(dict):
@@ -82,6 +83,22 @@ def context(scene_obj, active_object=None, selected_objects=()):
     return SimpleNamespace(scene=scene_obj, active_object=active_object, selected_objects=list(selected_objects), view_layer=layer)
 
 
+def _vcp_root(fibers=(), muscles=(), blobs=(), active_type="NONE", active_id=""):
+    root_obj = root(active_type=active_type, active_id=active_id)
+    root_obj.af_vcp_system.fibers = FakeCollection(list(fibers))
+    root_obj.af_vcp_system.muscles = FakeCollection(list(muscles))
+    root_obj.af_vcp_system.blobs = FakeCollection(list(blobs))
+    return root_obj
+
+
+def _run_delete(root_obj, node_type, node_id):
+    synced, cleared = [], []
+    with patch("app.use_cases.vcp_delete._fiber_sync", return_value=SimpleNamespace(clear_solver_cache=cleared.append)):
+        with patch("app.use_cases.vcp_delete._empty_dirty_hints", return_value=lambda: "HINTS"), patch("app.use_cases.vcp_delete._sync_scene", return_value=lambda **kwargs: synced.append(kwargs)):
+            result = delete_vcp_in_tree(context(scene(root_obj)), node_type, node_id)
+    return result, synced, cleared
+
+
 class VcpUseCaseTests(unittest.TestCase):
     def test_create_fiber_vcp_initializes_and_syncs(self):
         root_obj = root()
@@ -115,6 +132,7 @@ class VcpUseCaseTests(unittest.TestCase):
         refs = {ref.fiber_id for ref in muscle.fiber_refs}
         self.assertTrue(result.ok)
         self.assertEqual(refs, {"F1", "F2"})
+        self.assertEqual(muscle.inflation_mode, "CTRL_POINT")
         self.assertEqual((fiber1.muscle_id, fiber2.muscle_id), (muscle.id, muscle.id))
         self.assertEqual(len(old.fiber_refs), 0)
 
@@ -130,6 +148,18 @@ class VcpUseCaseTests(unittest.TestCase):
         ctx = context(scene(root_obj, proxy1, proxy2), active_object=proxy1, selected_objects=[proxy1, proxy2])
         result = create_muscle_vcp(ctx)
         self.assertEqual((result.ok, result.message), (False, "Selected fibers must have identical node_count."))
+
+    def test_create_muscle_vcp_allows_different_mid_touch_counts(self):
+        fiber1 = Bag(id="F1", node_count=8, mid_touches=[], muscle_id="")
+        fiber2 = Bag(id="F2", node_count=8, mid_touches=[Bag(parent_id="S1")], muscle_id="")
+        root_obj = root(fibers=[fiber1, fiber2]); root_obj.af_vcp_system.muscles = FakeCollection()
+        proxy1 = FakeSelectable("P1", af_fiber_proxy=True, af_root_name="ROOT", af_fiber_id="F1")
+        proxy2 = FakeSelectable("P2", af_fiber_proxy=True, af_root_name="ROOT", af_fiber_id="F2")
+        proxy1.select_set(True); proxy2.select_set(True)
+        ctx = context(scene(root_obj, proxy1, proxy2), active_object=proxy1, selected_objects=[proxy1, proxy2])
+        with patch("app.use_cases.muscle_create._sync_entity", return_value=None), patch("app.use_cases.muscle_create._find_ctrl", return_value=None):
+            result = create_muscle_vcp(ctx)
+        self.assertTrue(result.ok)
 
     def test_create_blob_vcp_sets_target_and_syncs(self):
         root_obj = root()
@@ -222,6 +252,12 @@ class VcpUseCaseTests(unittest.TestCase):
         self.assertIs(ctx.view_layer.objects.active, ctrl)
         self.assertEqual((root_obj.af_vcp_system.active_vcp_type, root_obj.af_vcp_system.active_vcp_id), ("MUSCLE", "M1"))
 
+    def test_select_muscle_inflation_ctrl_fails_for_distributed_mode(self):
+        muscle = Bag(id="M1", inflation_mode="DISTRIBUTED")
+        root_obj = root(muscles=[muscle], active_type="MUSCLE", active_id="M1")
+        result = select_muscle_inflation_ctrl(context(scene(root_obj)))
+        self.assertEqual((result.ok, result.message), (False, "Inflation control is only available in CTRL_POINT mode."))
+
     def test_select_blob_control_updates_selection_and_active_vcp(self):
         blob = Bag(id="B1")
         root_obj = root(blobs=[blob], active_type="BLOB", active_id="B1")
@@ -237,6 +273,24 @@ class VcpUseCaseTests(unittest.TestCase):
         self.assertEqual((other.selected, ctrl.selected), (False, True))
         self.assertIs(ctx.view_layer.objects.active, ctrl)
         self.assertEqual((root_obj.af_vcp_system.active_vcp_type, root_obj.af_vcp_system.active_vcp_id), ("BLOB", "B1"))
+
+    def test_delete_vcp_in_tree_removes_fiber_and_muscle_refs(self):
+        fiber = Bag(id="F1", muscle_id="M1", mid_touches=FakeCollection())
+        muscle = Bag(id="M1", fiber_refs=FakeCollection([Bag(fiber_id="F1")]))
+        root_obj = _vcp_root([fiber], [muscle], active_type="FIBER", active_id="F1")
+        result, synced, cleared = _run_delete(root_obj, "FIBER", "F1")
+        self.assertTrue(result.ok)
+        self.assertEqual((len(root_obj.af_vcp_system.fibers), len(muscle.fiber_refs), cleared), (0, 0, ["F1"]))
+        self.assertEqual((root_obj.af_vcp_system.active_vcp_type, synced[0]["event_type"]), ("NONE", "DELETE"))
+
+    def test_delete_vcp_in_tree_removes_muscle_and_clears_fibers(self):
+        fibers = [Bag(id="F1", muscle_id="M1"), Bag(id="F2", muscle_id="M1")]
+        refs = FakeCollection([Bag(fiber_id="F1"), Bag(fiber_id="F2")])
+        root_obj = _vcp_root(fibers, [Bag(id="M1", fiber_refs=refs)], active_type="MUSCLE", active_id="M1")
+        result, synced, cleared = _run_delete(root_obj, "MUSCLE", "M1")
+        self.assertTrue(result.ok)
+        self.assertEqual((len(root_obj.af_vcp_system.muscles), [f.muscle_id for f in fibers], cleared), (0, ["", ""], []))
+        self.assertEqual((root_obj.af_vcp_system.active_vcp_type, synced[0]["source"]), ("NONE", "operator"))
 
 
 if __name__ == "__main__":

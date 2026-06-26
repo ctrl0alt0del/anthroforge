@@ -68,12 +68,9 @@ def _resolved_fibers(vcp, fiber_ids):
 
 def _compatibility_error(fibers):
     node_count = int(fibers[0].node_count)
-    anchor_count = len(fibers[0].mid_touches)
     for fiber in fibers[1:]:
         if int(fiber.node_count) != node_count:
             return "Selected fibers must have identical node_count."
-        if len(fiber.mid_touches) != anchor_count:
-            return "Selected fibers must have identical anchor structure."
     return ""
 
 
@@ -90,6 +87,7 @@ def _new_muscle(vcp, name, closed_v):
 def _muscle_defaults():
     return {
         "inflation_enabled": True,
+        "inflation_mode": "CTRL_POINT",
         "inflation_max_value": 0.05,
         "inflation_falloff_type": "GAUSSIAN",
         "inflation_falloff_radius": 0.2,

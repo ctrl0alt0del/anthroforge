@@ -2,6 +2,7 @@ import bpy
 from ..app.runtime_api import sync_scene
 from ..app.use_cases.scp_parenting import reparent_scp
 from ..app.use_cases.tree_state import toggle_scp_tree_node, toggle_vcp_tree_node
+from ..app.use_cases.vcp_delete import delete_vcp_in_tree
 from ..core.utils import get_af_root
 from ..core.deps.dirty_hints import empty_dirty_hints
 from ..core.scp_runtime.copy import copy_scp_subtree
@@ -260,3 +261,18 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
         v.active_vcp_type = self.node_type
         self._sync_selected_vcp(context, root)
         return {"FINISHED"}
+
+
+class AF_OT_DeleteVCPInTree(bpy.types.Operator):
+    bl_idname = "af.delete_vcp_in_tree"
+    bl_label = "Delete VCP In Tree"
+    bl_options = {"REGISTER", "UNDO"}
+
+    node_id: bpy.props.StringProperty()
+    node_type: bpy.props.EnumProperty(items=(("MUSCLE", "Muscle", ""), ("FIBER", "Fiber", "")))
+
+    def execute(self, context):
+        result = delete_vcp_in_tree(context, self.node_type, self.node_id)
+        if result.ok:
+            notify_selection_changed(context.scene, force=True, active_object=context.active_object)
+        return _finish(self, result)

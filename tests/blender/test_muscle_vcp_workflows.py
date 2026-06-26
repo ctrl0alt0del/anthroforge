@@ -10,9 +10,10 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 import bpy
 
 from _helpers import BlenderTestCase, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
+from core.id_utils import next_prefixed_id
 from core.vcp.runtime_state import muscle_inflation_ctrl_world
 from core.visualization.muscle_sync import apply_muscle_control_update, register_muscle_sync
-from core.visualization.muscle_sync_helpers import mark_inflation_ctrl
+from core.visualization.muscle_sync_helpers import find_muscle_proxy, mark_inflation_ctrl
 
 
 def _add_fiber(origin, insert):
@@ -35,6 +36,86 @@ def _clear_selection():
     for obj in tuple(bpy.context.selected_objects):
         obj.select_set(False)
     bpy.context.view_layer.objects.active = None
+
+
+def _new_muscle(root_obj, fiber_ids, mode="CTRL_POINT"):
+    muscle = root_obj.af_vcp_system.muscles.add()
+    muscle.id = next_prefixed_id(root_obj.af_vcp_system.muscles, "MUSCLE")
+    muscle.name = muscle.id
+    muscle.inflation_mode = mode
+    for fiber_id in fiber_ids:
+        muscle.fiber_refs.add().fiber_id = fiber_id
+        _fiber_by_id(root_obj, fiber_id).muscle_id = muscle.id
+    root_obj.af_vcp_system.active_vcp_type, root_obj.af_vcp_system.active_vcp_id = "MUSCLE", muscle.id
+    return muscle
+
+
+def _fiber_by_id(root_obj, fiber_id):
+    return next(item for item in root_obj.af_vcp_system.fibers if item.id == fiber_id)
+
+
+def _surface_obj(root_obj, muscle, surface_type):
+    vis = register_muscle_sync()._get_vis_collection(bpy.context.scene)
+    return find_muscle_proxy(vis, root_obj.name, muscle.id, surface_type)
+
+
+def _vertex_delta(base_obj, infl_obj, index):
+    return (infl_obj.data.vertices[index].co - base_obj.data.vertices[index].co).length
+
+
+def _center_delta(root_obj, muscle, amount):
+    muscle.inflation_max_value = amount
+    register_muscle_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+    base = _surface_obj(root_obj, muscle, "BASE")
+    infl = _surface_obj(root_obj, muscle, "INFL")
+    n = int(root_obj.af_vcp_system.fibers[0].node_count)
+    rows = len(base.data.vertices) // n
+    return _vertex_delta(base, infl, (rows // 2) * n + (n // 2))
+
+
+def _distributed_deltas(root_obj, muscle):
+    base = _surface_obj(root_obj, muscle, "BASE")
+    infl = _surface_obj(root_obj, muscle, "INFL")
+    n = int(root_obj.af_vcp_system.fibers[0].node_count)
+    rows = len(base.data.vertices) // n
+    mid_row, mid_col = rows // 2, n // 2
+    return (
+        _vertex_delta(base, infl, mid_row * n + mid_col),
+        _vertex_delta(base, infl, mid_row * n),
+        _vertex_delta(base, infl, mid_row * n + (n - 1)),
+        _vertex_delta(base, infl, mid_col),
+    )
+
+
+def _near_end_delta(root_obj, muscle, taper_band):
+    muscle.inflation_length_taper_band = taper_band
+    register_muscle_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+    base = _surface_obj(root_obj, muscle, "BASE")
+    infl = _surface_obj(root_obj, muscle, "INFL")
+    n = int(root_obj.af_vcp_system.fibers[0].node_count)
+    rows = len(base.data.vertices) // n
+    return _vertex_delta(base, infl, (rows // 2) * n + 1)
+
+
+def _three_fiber_setup():
+    root_obj = root()
+    for name, loc in (("O1", (0.0, 0.0, 0.0)), ("I1", (2.0, 0.0, 0.0)), ("O2", (0.0, 1.0, 0.0)), ("I2", (2.0, 1.0, 0.0)), ("O3", (0.0, 2.0, 0.0)), ("I3", (2.0, 2.0, 0.0))):
+        scp_with_object(root_obj, name, mesh_object(name, loc))
+    scps = root_obj.af_scp_system.scps
+    _add_fiber(scps[0], scps[1]), _add_fiber(scps[2], scps[3]), _add_fiber(scps[4], scps[5])
+    return root_obj, [find_flagged("af_fiber_proxy", item.id, "af_fiber_id") for item in root_obj.af_vcp_system.fibers]
+
+
+def _restored_ctrl_state(root_obj, muscle):
+    sync = register_muscle_sync()
+    original = tuple(round(v, 4) for v in muscle_inflation_ctrl_world(muscle))
+    muscle.inflation_mode = "DISTRIBUTED"
+    sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+    root_obj.af_vcp_system.active_vcp_type, root_obj.af_vcp_system.active_vcp_id = "MUSCLE", muscle.id
+    muscle.inflation_mode = "CTRL_POINT"
+    sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+    ctrl = find_flagged("af_muscle_inflation_ctrl", muscle.id, "af_muscle_id")
+    return ctrl, tuple(round(v, 4) for v in muscle_inflation_ctrl_world(muscle)), original
 
 
 class MuscleVcpWorkflowTests(BlenderTestCase):
@@ -67,6 +148,16 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
             bpy.ops.af.add_muscle_vcp()
         self.assertEqual(len(root_obj.af_vcp_system.muscles), 0)
 
+    def test_fibers_with_different_mid_touch_counts_still_build_muscle(self):
+        root_obj, first, second = _muscle_setup()
+        touch = root_obj.af_vcp_system.fibers[1].mid_touches.add()
+        touch.parent_id, touch.attach_param = root_obj.af_scp_system.scps[2].id, "RAW"
+        select_only(first); second.select_set(True); bpy.ops.af.add_muscle_vcp()
+        register_muscle_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        muscle = root_obj.af_vcp_system.muscles[0]
+        base = find_flagged("af_muscle_proxy", muscle.id, "af_muscle_id")
+        self.assertGreater(len(base.data.vertices), 0)
+
     def test_flip_normals_and_inflation_control_selection_keep_muscle_active(self):
         root_obj, first, second = _muscle_setup()
         select_only(first)
@@ -84,12 +175,7 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(bpy.context.active_object.get("af_muscle_id"), muscle.id)
 
     def test_reassigning_fiber_detaches_it_from_older_muscle(self):
-        root_obj = root()
-        for name, loc in (("O1", (0.0, 0.0, 0.0)), ("I1", (2.0, 0.0, 0.0)), ("O2", (0.0, 1.0, 0.0)), ("I2", (2.0, 1.0, 0.0)), ("O3", (0.0, 2.0, 0.0)), ("I3", (2.0, 2.0, 0.0))):
-            scp_with_object(root_obj, name, mesh_object(name, loc))
-        scps = root_obj.af_scp_system.scps
-        _add_fiber(scps[0], scps[1]), _add_fiber(scps[2], scps[3]), _add_fiber(scps[4], scps[5])
-        proxies = [find_flagged("af_fiber_proxy", item.id, "af_fiber_id") for item in root_obj.af_vcp_system.fibers]
+        root_obj, proxies = _three_fiber_setup()
         select_only(proxies[0])
         proxies[1].select_set(True)
         bpy.ops.af.add_muscle_vcp()
@@ -151,3 +237,62 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(bpy.ops.af.select_muscle_inflation_ctrl(), {"FINISHED"})
         ctrl = find_flagged("af_muscle_inflation_ctrl", muscle.id, "af_muscle_id")
         self.assertEqual((ctrl is not None, bpy.context.active_object), (True, ctrl))
+
+    def test_distributed_mode_builds_surfaces_without_control(self):
+        root_obj, _first, _second = _muscle_setup()
+        fibers = [item.id for item in root_obj.af_vcp_system.fibers[:2]]
+        muscle = _new_muscle(root_obj, fibers, mode="DISTRIBUTED")
+        register_muscle_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        base = _surface_obj(root_obj, muscle, "BASE")
+        infl = _surface_obj(root_obj, muscle, "INFL")
+        ctrl = find_flagged("af_muscle_inflation_ctrl", muscle.id, "af_muscle_id")
+        self.assertEqual((base is not None, infl is not None, ctrl), (True, True, None))
+
+    def test_switching_modes_removes_and_restores_inflation_control(self):
+        root_obj, first, second = _muscle_setup()
+        select_only(first)
+        second.select_set(True)
+        bpy.ops.af.add_muscle_vcp()
+        sync = register_muscle_sync()
+        sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        muscle = root_obj.af_vcp_system.muscles[0]
+        ctrl, current, original = _restored_ctrl_state(root_obj, muscle)
+        self.assertEqual((ctrl is not None, current), (True, original))
+        self.assertEqual(tuple(round(v, 4) for v in ctrl.location), original)
+
+    def test_distributed_mode_tapers_longitudinally_and_respects_side_boundaries(self):
+        root_obj, _first, _second = _muscle_setup()
+        fibers = [item.id for item in root_obj.af_vcp_system.fibers[:2]]
+        muscle = _new_muscle(root_obj, fibers, mode="DISTRIBUTED")
+        register_muscle_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        center, start, end, side = _distributed_deltas(root_obj, muscle)
+        self.assertGreater(center, 1e-4)
+        self.assertLess(start, 1e-6)
+        self.assertLess(end, 1e-6)
+        self.assertLess(side, 1e-6)
+
+    def test_distributed_mode_inflation_amount_scales_beyond_small_values(self):
+        root_obj, _first, _second = _muscle_setup()
+        fibers = [item.id for item in root_obj.af_vcp_system.fibers[:2]]
+        muscle = _new_muscle(root_obj, fibers, mode="DISTRIBUTED")
+        low = _center_delta(root_obj, muscle, 0.01)
+        high = _center_delta(root_obj, muscle, 0.08)
+        self.assertGreater(high, low * 2.0)
+
+    def test_distributed_mode_smaller_taper_band_flattens_later(self):
+        root_obj, _first, _second = _muscle_setup()
+        fibers = [item.id for item in root_obj.af_vcp_system.fibers[:2]]
+        muscle = _new_muscle(root_obj, fibers, mode="DISTRIBUTED")
+        early = _near_end_delta(root_obj, muscle, 0.35)
+        late = _near_end_delta(root_obj, muscle, 0.08)
+        self.assertGreater(late, early * 1.5)
+
+    def test_delete_muscle_in_tree_removes_surfaces_and_control(self):
+        root_obj, first, second = _muscle_setup()
+        select_only(first); second.select_set(True); bpy.ops.af.add_muscle_vcp()
+        register_muscle_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        muscle = root_obj.af_vcp_system.muscles[0]
+        self.assertEqual(bpy.ops.af.delete_vcp_in_tree(node_id=muscle.id, node_type="MUSCLE"), {"FINISHED"})
+        self.assertEqual((len(root_obj.af_vcp_system.muscles), root_obj.af_vcp_system.active_vcp_type), (0, "NONE"))
+        self.assertEqual((_surface_obj(root_obj, muscle, "BASE"), _surface_obj(root_obj, muscle, "INFL")), (None, None))
+        self.assertEqual((find_flagged("af_muscle_inflation_ctrl", muscle.id, "af_muscle_id"), [f.muscle_id for f in root_obj.af_vcp_system.fibers]), (None, ["", ""]))

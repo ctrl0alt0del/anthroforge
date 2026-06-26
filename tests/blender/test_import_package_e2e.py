@@ -25,6 +25,7 @@ def _muscle(root_obj, fiber_id):
     item = root_obj.af_vcp_system.muscles.add()
     item.id = next_prefixed_id(root_obj.af_vcp_system.muscles, "MUSCLE")
     item.name = item.id
+    item.inflation_mode = "DISTRIBUTED"
     item.fiber_refs.add().fiber_id = fiber_id
     return item
 
@@ -72,6 +73,7 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertIn("attach_follow_rotation", snapshot.scps[0].props)
         self.assertNotIn("attach_initialized", snapshot.scps[0].props)
         self.assertNotIn("attach_child_origin_local", snapshot.scps[0].props)
+        self.assertEqual(snapshot.muscles[0].props["inflation_mode"], "DISTRIBUTED")
         self.assertNotIn("inflation_ctrl_world", snapshot.muscles[0].props)
         reset_scene()
         scp_with_object(root(), "Existing", mesh_object("Existing"))
@@ -82,6 +84,7 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertEqual((result.scp_count, result.fiber_count, result.muscle_count, result.blob_count, result.shortcut_count), (2, 1, 1, 1, 1))
         self.assertEqual({fiber_item.a_parent_id, fiber_item.b_parent_id}, {imported["Left"].id, imported["Right"].id})
         self.assertEqual((root_obj.af_vcp_system.muscles[-1].fiber_refs[0].fiber_id, root_obj.af_vcp_system.blobs[-1].attach_target_id), (fiber_item.id, root_obj.af_vcp_system.muscles[-1].id))
+        self.assertEqual(root_obj.af_vcp_system.muscles[-1].inflation_mode, "DISTRIBUTED")
         self.assertEqual((root_obj.af_shortcut_system.shortcuts[-1].owner_id, imported["Right"].id in root_obj.af_shortcut_system.shortcuts[-1].data_path), (imported["Right"].id, True))
         self.assertFalse(root_obj.af_shortcut_system.shortcuts[-1].owner_backsolve)
         self.assertEqual(root_obj.af_shortcut_system.shortcuts[-1].overrides[0].target_scp_id, imported["Left"].id)

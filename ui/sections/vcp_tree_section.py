@@ -29,97 +29,94 @@ def _build_vcp_tree(root):
     return muscles, by_muscle, free_fibers, blobs
 
 
-def _draw_fiber_row(layout, fiber, depth, selected_fiber_ids):
-    row = layout.row(align=True)
+def _draw_indent(row, depth):
+    if depth <= 0:
+        return
+    indent = row.row(align=True)
+    indent.ui_units_x = depth * 1.2
+    indent.label(text="")
 
-    if depth > 0:
-        indent = row.row(align=True)
-        indent.ui_units_x = depth * 1.2
-        indent.label(text="")
 
-    row.label(text="", icon="CURVE_DATA")
+def _draw_select_op(row, node_id, node_type, label, selected):
+    op = row.operator("af.select_vcp_in_tree", text=label, emboss=True, depress=selected)
+    op.node_id = node_id
+    op.node_type = node_type
 
-    label = fiber.name if getattr(fiber, "name", "") else fiber.id
-    op = row.operator(
-        "af.select_vcp_in_tree",
-        text=label,
-        emboss=True,
-        depress=(fiber.id in selected_fiber_ids),
-    )
-    op.node_id = fiber.id
-    op.node_type = "FIBER"
 
-    a = fiber.a_parent_id if fiber.a_parent_id else "?"
-    b = fiber.b_parent_id if fiber.b_parent_id else "?"
+def _draw_delete_op(row, node_id, node_type):
+    op = row.operator("af.delete_vcp_in_tree", text="", icon="TRASH", emboss=False)
+    op.node_id = node_id
+    op.node_type = node_type
+
+
+def _draw_right_hint(row, text):
     right = row.row(align=True)
     right.alignment = "RIGHT"
     right.enabled = False
-    right.label(text=f"{a} -> {b}")
+    right.label(text=text)
+
+
+def _fiber_hint(fiber):
+    a = fiber.a_parent_id if fiber.a_parent_id else "?"
+    b = fiber.b_parent_id if fiber.b_parent_id else "?"
+    return f"{a} -> {b}"
+
+
+def _draw_fiber_row(layout, fiber, depth, selected_fiber_ids):
+    row = layout.row(align=True)
+    _draw_indent(row, depth)
+    row.label(text="", icon="CURVE_DATA")
+    label = fiber.name if getattr(fiber, "name", "") else fiber.id
+    _draw_select_op(row, fiber.id, "FIBER", label, fiber.id in selected_fiber_ids)
+    _draw_delete_op(row, fiber.id, "FIBER")
+    _draw_right_hint(row, _fiber_hint(fiber))
 
 
 def _draw_blob_row(layout, blob, selected_blob_ids):
     row = layout.row(align=True)
     row.label(text="", icon="META_BALL")
+    _draw_select_op(row, blob.id, "BLOB", blob.name or blob.id, blob.id in selected_blob_ids)
+    _draw_right_hint(row, "BLOB")
 
-    op = row.operator(
-        "af.select_vcp_in_tree",
-        text=(blob.name or blob.id),
-        emboss=True,
-        depress=(blob.id in selected_blob_ids),
-    )
-    op.node_id = blob.id
-    op.node_type = "BLOB"
 
-    right = row.row(align=True)
-    right.alignment = "RIGHT"
-    right.enabled = False
-    right.label(text="BLOB")
+def _draw_muscle_toggle(row, node_key, collapsed):
+    icon = "TRIA_RIGHT" if collapsed else "TRIA_DOWN"
+    op = row.operator("af.toggle_vcp_collapse", text="", icon=icon, emboss=False)
+    op.node_key = node_key
+
+
+def _draw_muscle_children(layout, children, selected_fiber_ids):
+    for fiber in children:
+        _draw_fiber_row(layout, fiber, depth=1, selected_fiber_ids=selected_fiber_ids)
 
 
 def _draw_muscle_node(layout, scene, muscle, by_muscle, selected_muscle_ids, selected_fiber_ids):
     node_key = f"MUSCLE:{muscle.id}"
     collapsed = _is_collapsed(scene, node_key)
     children = by_muscle.get(muscle.id, [])
-
     row = layout.row(align=True)
-
-    icon = "TRIA_RIGHT" if collapsed else "TRIA_DOWN"
-    op = row.operator("af.toggle_vcp_collapse", text="", icon=icon, emboss=False)
-    op.node_key = node_key
-
-    op = row.operator(
-        "af.select_vcp_in_tree",
-        text=muscle.name or muscle.id,
-        emboss=True,
-        depress=(muscle.id in selected_muscle_ids),
-    )
-    op.node_id = muscle.id
-    op.node_type = "MUSCLE"
-
-    right = row.row(align=True)
-    right.alignment = "RIGHT"
-    right.enabled = False
-    right.label(text="MUSCLE")
-
+    _draw_muscle_toggle(row, node_key, collapsed)
+    _draw_select_op(row, muscle.id, "MUSCLE", muscle.name or muscle.id, muscle.id in selected_muscle_ids)
+    _draw_delete_op(row, muscle.id, "MUSCLE")
+    _draw_right_hint(row, "MUSCLE")
     if not collapsed:
-        for f in children:
-            _draw_fiber_row(layout, f, depth=1, selected_fiber_ids=selected_fiber_ids)
+        _draw_muscle_children(layout, children, selected_fiber_ids)
+
+
+def _draw_blob_rows(layout, blobs, selected_blob_ids):
+    for blob in blobs:
+        _draw_blob_row(layout, blob, selected_blob_ids)
 
 
 def draw_vcp_tree_section(layout, scene, root, selected_fiber_ids, selected_muscle_ids, selected_blob_ids):
     muscles, by_muscle, free_fibers, blobs = _build_vcp_tree(root)
-
     if not muscles and not free_fibers and not blobs:
         layout.label(text="No VCPs")
         return
-
     for m in muscles:
         _draw_muscle_node(layout, scene, m, by_muscle, selected_muscle_ids, selected_fiber_ids)
-
     for f in free_fibers:
         _draw_fiber_row(layout, f, depth=0, selected_fiber_ids=selected_fiber_ids)
-
     if blobs:
         layout.separator()
-        for b in blobs:
-            _draw_blob_row(layout, b, selected_blob_ids)
+        _draw_blob_rows(layout, blobs, selected_blob_ids)

@@ -98,6 +98,10 @@ def _select_edit_vert(bm, index):
     bm.select_history.add(vert)
 
 
+def _handle_count(fiber_id):
+    return sum(bool(obj.get("af_fiber_id") == fiber_id and (obj.get("af_fiber_endpoint_handle") or obj.get("af_fiber_touch_handle"))) for obj in bpy.context.scene.objects)
+
+
 class FiberVcpWorkflowTests(BlenderTestCase):
     def test_add_fiber_operator_selects_proxy_and_shows_endpoint_handles(self):
         root_obj, fiber, origin, insert = _fiber_setup()
@@ -214,3 +218,10 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         with patch.object(fiber_runtime, "resolve_conflict", return_value="TOUCH_RAW"):
             fiber_runtime.apply_fiber_control_update(sync, root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
         self.assertEqual(fiber.mid_touches[0].attach_param, "TOUCH_RAW")
+
+    def test_delete_fiber_in_tree_removes_proxy_and_handles(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        _sync_active_fiber(root_obj, fiber)
+        self.assertEqual(bpy.ops.af.delete_vcp_in_tree(node_id=fiber.id, node_type="FIBER"), {"FINISHED"})
+        self.assertEqual((len(root_obj.af_vcp_system.fibers), find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")), (0, None))
+        self.assertEqual((root_obj.af_vcp_system.active_vcp_type, _handle_count(fiber.id)), ("NONE", 0))

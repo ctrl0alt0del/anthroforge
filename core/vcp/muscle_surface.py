@@ -124,8 +124,8 @@ def anchor_indices_from_fiber(fiber_prop, node_count):
 
 def validate_anchor_structure(fibers):
     """
-    v1 anchor-structure validation:
-    all fibers must have identical node_count and identical derived anchor indices.
+    Current muscle surface build only requires aligned node_count.
+    Mid-touch layout may differ because rows are resampled uniformly later.
     Returns (ok, reason, node_count, anchor_indices)
     """
     if len(fibers) < 2:
@@ -137,9 +137,6 @@ def validate_anchor_structure(fibers):
     for i, f in enumerate(fibers[1:], start=1):
         if int(f.node_count) != node_count:
             return False, f"Fiber[{i}] node_count mismatch.", 0, []
-        idxs = anchor_indices_from_fiber(f, node_count)
-        if idxs != ref_indices:
-            return False, f"Fiber[{i}] anchor structure mismatch.", 0, []
 
     return True, "", node_count, ref_indices
 

@@ -1,6 +1,7 @@
 import bpy
 from ...app.queries.root import root_for_context
 from ...app.queries.vcp import active_muscle_from_context, has_active_entity
+from ...core.visualization.muscle_inflation_modes import CTRL_POINT_MODE, muscle_inflation_mode
 
 
 class AF_PT_VCPEditPanel(bpy.types.Panel):
@@ -26,26 +27,48 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
         infl = layout.box()
         infl.label(text="Inflation")
         infl.prop(muscle, "inflation_enabled", text="Enabled")
+        infl.prop(muscle, "inflation_mode", text="Mode")
         col = infl.column()
         col.enabled = muscle.inflation_enabled
-        col.prop(muscle, "inflation_max_value", text="Max Inflation")
-        col.prop(muscle, "inflation_falloff_type", text="Falloff")
-        col.prop(muscle, "inflation_falloff_radius", text="Radius")
-        col.prop(muscle, "inflation_direction_depth", text="Direction Depth (L)")
-        col.prop(muscle, "inflation_boundary_strength", text="Boundary Strength")
-        col.prop(muscle, "inflation_boundary_band", text="Boundary Band")
-        col.prop(muscle, "inflation_boundary_power", text="Boundary Power")
-        pick = infl.operator("af.select_muscle_inflation_ctrl", icon="RESTRICT_SELECT_OFF")
-        pick.muscle_id = muscle.id
+        self._draw_shared_inflation(col, muscle)
+        self._draw_point_inflation(col, muscle)
+        self._draw_distributed_inflation(col, muscle)
+        self._draw_inflation_pick(infl, muscle)
         return infl
 
     def _draw_actions(self, layout, infl, muscle):
         op = layout.operator("af.flip_muscle_normals", icon="ARROW_LEFTRIGHT")
         op.muscle_id = muscle.id
+        if muscle_inflation_mode(muscle) != CTRL_POINT_MODE:
+            return
         info = infl.column()
         info.enabled = False
         info.label(text="Move gizmo in viewport:")
         info.label(text=f"AF_{muscle.id}_INFL_MAX")
+
+    def _draw_shared_inflation(self, layout, muscle):
+        layout.prop(muscle, "inflation_max_value", text="Max Inflation")
+        layout.prop(muscle, "inflation_boundary_strength", text="Boundary Strength")
+        layout.prop(muscle, "inflation_boundary_band", text="Boundary Band")
+        layout.prop(muscle, "inflation_boundary_power", text="Boundary Power")
+
+    def _draw_point_inflation(self, layout, muscle):
+        if muscle_inflation_mode(muscle) != CTRL_POINT_MODE:
+            return
+        layout.prop(muscle, "inflation_falloff_type", text="Falloff")
+        layout.prop(muscle, "inflation_falloff_radius", text="Radius")
+        layout.prop(muscle, "inflation_direction_depth", text="Direction Depth (L)")
+
+    def _draw_distributed_inflation(self, layout, muscle):
+        if muscle_inflation_mode(muscle) == CTRL_POINT_MODE:
+            return
+        layout.prop(muscle, "inflation_length_taper_band", text="Length Taper Band")
+
+    def _draw_inflation_pick(self, layout, muscle):
+        if muscle_inflation_mode(muscle) != CTRL_POINT_MODE:
+            return
+        pick = layout.operator("af.select_muscle_inflation_ctrl", icon="RESTRICT_SELECT_OFF")
+        pick.muscle_id = muscle.id
 
     def draw(self, context):
         layout = self.layout

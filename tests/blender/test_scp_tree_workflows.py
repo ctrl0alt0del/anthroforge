@@ -33,6 +33,7 @@ def _new_muscle(root_obj, fiber_id):
     item = root_obj.af_vcp_system.muscles.add()
     item.id = next_prefixed_id(root_obj.af_vcp_system.muscles, "MUSCLE")
     item.name = item.id
+    item.inflation_mode = "DISTRIBUTED"
     item.fiber_refs.add().fiber_id = fiber_id
     return item
 
@@ -155,8 +156,10 @@ class ScpTreeWorkflowTests(BlenderTestCase):
         new_parent_id = copy_scp_subtree(root_obj, bpy.context.scene, parent.id, [child.id])
         new_child = next(item for item in root_obj.af_scp_system.scps if item.parent_id == new_parent_id)
         new_fiber = next(item for item in root_obj.af_vcp_system.fibers if item.id != fib.id)
+        new_muscle = root_obj.af_vcp_system.muscles[-1]
         self.assertEqual(({new_fiber.a_parent_id, new_fiber.b_parent_id}, new_child.id), ({new_parent_id, new_child.id}, new_child.id))
-        self.assertEqual((root_obj.af_vcp_system.muscles[-1].fiber_refs[0].fiber_id, root_obj.af_vcp_system.blobs[-1].attach_target_id), (new_fiber.id, root_obj.af_vcp_system.muscles[-1].id))
+        self.assertEqual((new_muscle.fiber_refs[0].fiber_id, root_obj.af_vcp_system.blobs[-1].attach_target_id), (new_fiber.id, new_muscle.id))
+        self.assertEqual(new_muscle.inflation_mode, "DISTRIBUTED")
         self.assertEqual((root_obj.af_shortcut_system.shortcuts[-1].owner_id, find_scp_by_id(root_obj, new_parent_id).id, blob.attach_target_id), (new_child.id, new_parent_id, muscle.id))
         self.assertFalse(root_obj.af_shortcut_system.shortcuts[-1].owner_backsolve)
         self.assertEqual(override_modes(root_obj.af_shortcut_system.shortcuts[-1], new_child.id), ("OBJECT_ORIGIN", "KEEP"))

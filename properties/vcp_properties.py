@@ -30,6 +30,15 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
     active_fiber_ref_index: bpy.props.IntProperty(name="Active Fiber Ref", default=-1)
 
     inflation_enabled: bpy.props.BoolProperty(name="Inflation Enabled", default=True, update=_on_muscle_prop_update)
+    inflation_mode: bpy.props.EnumProperty(
+        name="Inflation Mode",
+        items=(
+            ("CTRL_POINT", "Control Point", ""),
+            ("DISTRIBUTED", "Distributed", ""),
+        ),
+        default="CTRL_POINT",
+        update=_on_muscle_prop_update,
+    )
     inflation_max_value: bpy.props.FloatProperty(
         name="Max Inflation",
         default=0.05,
@@ -76,6 +85,14 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
     inflation_boundary_power: bpy.props.FloatProperty(
         name="Boundary Power",
         default=1.5, min=0.1, max=8.0, update=_on_muscle_prop_update
+    )
+
+    inflation_length_taper_band: bpy.props.FloatProperty(
+        name="Length Taper Band",
+        default=0.2,
+        min=0.01,
+        max=0.49,
+        update=_on_muscle_prop_update,
     )
 
     flip_normals: bpy.props.BoolProperty(

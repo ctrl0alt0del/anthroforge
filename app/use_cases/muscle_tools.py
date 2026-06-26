@@ -1,6 +1,11 @@
 from ..queries.root import root_for_context
 from .results import failure, success
 
+try:
+    from ...core.visualization.muscle_inflation_modes import muscle_inflation_behavior
+except ImportError:
+    from core.visualization.muscle_inflation_modes import muscle_inflation_behavior
+
 
 def flip_muscle_normals(context, muscle_id=""):
     root = root_for_context(context)
@@ -17,8 +22,15 @@ def select_muscle_inflation_ctrl(context, muscle_id=""):
     vcp, muscle, error = _resolved_muscle(root, muscle_id)
     if muscle is None:
         return failure(error)
-    ctrl = _resolved_ctrl(context, root, vcp, muscle)
-    return failure("Inflation control not found.") if ctrl is None else success(value=ctrl)
+    ctrl, error = _selected_ctrl_for_mode(context, root, vcp, muscle)
+    if ctrl is None:
+        return failure(error or "Inflation control not found.")
+    return success(value=ctrl)
+
+
+def _selected_ctrl_for_mode(context, root, vcp, muscle):
+    control = muscle_inflation_behavior(muscle).control
+    return control.select_control(context, root, vcp, muscle, _resolved_ctrl)
 
 
 def _resolved_muscle(root, muscle_id):
