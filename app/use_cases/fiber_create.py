@@ -26,7 +26,7 @@ def create_fiber_from_proxy_vertices(context):
     if root is None:
         return failure("No AF_ROOT found.")
     picks, error = _selected_proxy_vertices()(context)
-    return failure(error) if error else _create_fiber(context, root, _resolved_proxy_inputs(picks), "")
+    return failure(error) if error else _create_fiber(context, root, _resolved_proxy_inputs(picks), "Select at least two proxy vertices.")
 
 
 def _create_fiber(context, root, resolved, error_message):
@@ -45,15 +45,25 @@ def _resolved_inputs(context, root):
         return None
     origin_raw = _first_attach_param(context.scene, root, origin_id)
     insert_raw = _first_attach_param(context.scene, root, insert_id)
-    return None if origin_raw is None or insert_raw is None else (origin_id, insert_id, origin_raw, insert_raw)
+    return None if origin_raw is None or insert_raw is None else _fiber_spec(origin_id, insert_id, origin_raw, insert_raw)
 
 
 def _resolved_proxy_inputs(picks):
-    if len(tuple(picks or ())) != 2:
+    picks = tuple(picks or ())
+    if len(picks) < 2:
         return None
-    a, b = tuple(picks or ())
+    a, b = picks[0], picks[-1]
     encode = _encode_fiber_vertex_index()
-    return a.scp_id, b.scp_id, encode(a.vertex_index, a.signature), encode(b.vertex_index, b.signature)
+    return _fiber_spec(a.scp_id, b.scp_id, encode(a.vertex_index, a.signature), encode(b.vertex_index, b.signature), _proxy_touch_specs(picks[1:-1]))
+
+
+def _fiber_spec(origin_id, insert_id, origin_raw, insert_raw, touch_specs=()):
+    return origin_id, insert_id, origin_raw, insert_raw, tuple(touch_specs or ())
+
+
+def _proxy_touch_specs(picks):
+    encode = _encode_fiber_vertex_index()
+    return tuple((pick.scp_id, encode(pick.vertex_index, pick.signature)) for pick in tuple(picks or ()))
 
 
 def _endpoint_ids(context):
@@ -73,16 +83,27 @@ def _first_attach_param(scene, root, parent_id):
     return _encode_fiber_anchor()(point)
 
 
-def _new_fiber(root, origin_id, insert_id, origin_raw, insert_raw):
+def _new_fiber(root, origin_id, insert_id, origin_raw, insert_raw, touch_specs=()):
     fibers = root.af_vcp_system.fibers
     fiber = fibers.add()
     fiber.id = next_prefixed_id(fibers, "FIBER")
     fiber.name = fiber.id
     fiber.a_parent_id, fiber.a_attach_param = origin_id, origin_raw
     fiber.b_parent_id, fiber.b_attach_param = insert_id, insert_raw
+    _apply_touch_specs(fiber, touch_specs)
     _apply_values(fiber, _fiber_defaults())
     reset_fiber_runtime(fiber)
     return fiber
+
+
+def _apply_touch_specs(fiber, touch_specs):
+    for parent_id, attach_param in tuple(touch_specs or ()):
+        _append_touch(fiber, parent_id, attach_param)
+
+
+def _append_touch(fiber, parent_id, attach_param):
+    touch = fiber.mid_touches.add()
+    touch.parent_id, touch.attach_param = parent_id, attach_param
 
 
 def _fiber_defaults():

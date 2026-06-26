@@ -20,8 +20,8 @@ def selected_proxy_vertices(context):
     if error:
         return (), error
     picks = _selected_picks(obj)
-    if len(picks) != 2:
-        return (), "Select exactly two proxy vertices."
+    if not picks:
+        return (), "Select one or more proxy vertices."
     return ((), "Selected proxy vertices are missing provenance.") if any(p.scp_id == "" for p in picks) else (picks, "")
 
 
@@ -39,7 +39,18 @@ def _selected_picks(obj):
     slot = bm.verts.layers.int.get(ATTR_SLOT)
     vertex = bm.verts.layers.int.get(ATTR_VERTEX)
     bm.verts.ensure_lookup_table()
-    return [] if slot is None or vertex is None else [_pick_for_vert(obj, vert, slot, vertex) for vert in bm.verts if vert.select]
+    verts = _ordered_selected_verts(bm)
+    return [] if slot is None or vertex is None else [_pick_for_vert(obj, vert, slot, vertex) for vert in verts]
+
+
+def _ordered_selected_verts(bm):
+    history = _history_selected_verts(bm)
+    seen = {vert.index for vert in history}
+    return history + [vert for vert in bm.verts if vert.select and vert.index not in seen]
+
+
+def _history_selected_verts(bm):
+    return [elem for elem in bm.select_history if isinstance(elem, bmesh.types.BMVert) and elem.select]
 
 
 def _pick_for_vert(obj, vert, slot, vertex):

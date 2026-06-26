@@ -47,12 +47,11 @@ def recompute_fiber(context, fiber_id="", max_passes=12):
 
 def add_fiber_touch_point(context, fiber_id=""):
     root = root_for_context(context)
-    resolved = _resolved_touch(context, root, fiber_id)
+    resolved, error = _resolved_touches(context, root, fiber_id)
     if resolved is None:
-        return failure("Select a fiber and a valid SCP geometry object.")
-    fiber, scp_id, attach_param = resolved
-    touch = fiber.mid_touches.add()
-    touch.parent_id, touch.attach_param = scp_id, attach_param
+        return failure(error or "Select a fiber and a valid SCP geometry object.")
+    fiber, touch_specs = resolved
+    _append_touch_specs(fiber, touch_specs)
     _set_prefer_bake(fiber, False)
     _fiber_sync().clear_solver_cache(fiber.id)
     _sync_entity(root, context.scene, "FIBER", {fiber.id}, bake=False)
@@ -129,13 +128,96 @@ def _stalled_bake_state(previous, current, tol=1.0e-9):
     return abs(previous[0] - current[0]) <= tol and abs(previous[1] - current[1]) <= tol
 
 
-def _resolved_touch(context, root, fiber_id):
+def _resolved_touches(context, root, fiber_id):
     fiber, _error = _resolved_fiber(root, fiber_id)
+    if fiber is None:
+        return None, "No active fiber."
+    touch_specs, error = _selected_touch_specs(context, root)
+    if error:
+        return None, error
+    touch_specs = touch_specs or _default_touch_specs(context, root)
+    return (None, "Select a fiber and a valid SCP geometry object.") if not touch_specs else ((fiber, touch_specs), "")
+
+
+def _append_touch_specs(fiber, touch_specs):
+    for scp_id, attach_param in tuple(touch_specs or ()):
+        _append_touch(fiber, scp_id, attach_param)
+
+
+def _append_touch(fiber, scp_id, attach_param):
+    touch = fiber.mid_touches.add()
+    touch.parent_id, touch.attach_param = scp_id, attach_param
+
+
+def _selected_touch_specs(context, root):
+    if _proxy_edit_target(context):
+        return _proxy_touch_specs(context)
+    if _geometry_edit_target(context, root.name):
+        return _mesh_touch_specs(context)
+    return (), ""
+
+
+def _proxy_touch_specs(context):
+    picks, error = _selected_proxy_vertices()(context)
+    return ((), error) if error else (_proxy_specs_from_picks(picks), "")
+
+
+def _proxy_specs_from_picks(picks):
+    encode = _encode_fiber_vertex_index()
+    return tuple((pick.scp_id, encode(pick.vertex_index, pick.signature)) for pick in tuple(picks or ()))
+
+
+def _proxy_edit_target(context):
+    obj = getattr(context, "active_object", None)
+    return bool(getattr(context, "mode", "") == "EDIT_MESH" and obj and obj.get("af_scp_proxy_view"))
+
+
+def _geometry_edit_target(context, root_name):
+    obj = getattr(context, "active_object", None)
+    valid = getattr(context, "mode", "") == "EDIT_MESH" and _single_edit_target(context, obj)
+    return bool(valid and _is_geometry_scp_obj()(obj, root_name))
+
+
+def _single_edit_target(context, obj):
+    return len(tuple(getattr(context, "objects_in_mode", ()) or (obj,))) == 1
+
+
+def _mesh_touch_specs(context):
+    obj = getattr(context, "active_object", None)
+    indices = _selected_mesh_indices(obj)
+    return ((), "Select one or more mesh vertices.") if not indices else (_mesh_specs(obj, indices), "")
+
+
+def _selected_mesh_indices(obj):
+    import bmesh
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    return _ordered_mesh_indices(bm)
+
+
+def _ordered_mesh_indices(bm):
+    history = _history_mesh_indices(bm)
+    seen = set(history)
+    return history + [vert.index for vert in bm.verts if vert.select and vert.index not in seen]
+
+
+def _history_mesh_indices(bm):
+    import bmesh
+
+    return [elem.index for elem in bm.select_history if isinstance(elem, bmesh.types.BMVert) and elem.select]
+
+
+def _mesh_specs(obj, indices):
+    scp_id = str(obj.get("af_scp_id", "") or "")
+    encode = _encode_fiber_anchor()
+    return tuple((scp_id, encode(obj.data.vertices[i].co.copy())) for i in tuple(indices or ()) if 0 <= int(i) < len(obj.data.vertices))
+
+
+def _default_touch_specs(context, root):
     scp_id = _touch_parent_id(context, root)
-    if fiber is None or not scp_id:
-        return None
-    attach_param = _first_attach_param(context.scene, root, scp_id)
-    return None if not attach_param else (fiber, scp_id, attach_param)
+    attach_param = None if not scp_id else _first_attach_param(context.scene, root, scp_id)
+    return () if not attach_param else ((scp_id, attach_param),)
 
 
 def _touch_parent_id(context, root):
@@ -223,3 +305,27 @@ def _encode_fiber_anchor():
     except ImportError:
         from core.attachment_codec import encode_fiber_mesh_anchor
     return encode_fiber_mesh_anchor
+
+
+def _encode_fiber_vertex_index():
+    try:
+        from ...core.attachment_codec import encode_fiber_vertex_index
+    except ImportError:
+        from core.attachment_codec import encode_fiber_vertex_index
+    return encode_fiber_vertex_index
+
+
+def _selected_proxy_vertices():
+    try:
+        from ...core.scp_proxy import selected_proxy_vertices
+    except ImportError:
+        from core.scp_proxy import selected_proxy_vertices
+    return selected_proxy_vertices
+
+
+def _is_geometry_scp_obj():
+    try:
+        from ...core.scp_runtime.common import is_geometry_scp_obj
+    except ImportError:
+        from core.scp_runtime.common import is_geometry_scp_obj
+    return is_geometry_scp_obj

@@ -3,6 +3,8 @@ import sys
 import json
 from unittest.mock import patch
 
+import bmesh
+
 TEST_ROOT = Path(__file__).resolve().parents[1]
 ADDON_ROOT = Path(__file__).resolve().parents[2]
 for value in (str(TEST_ROOT), str(ADDON_ROOT)):
@@ -28,7 +30,7 @@ from anthroforge.core.vcp.runtime_state import (
 )
 from anthroforge.core.visualization import fiber_sync_runtime as fiber_runtime
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
-from anthroforge.core.visualization.fiber_sync_helpers import mark_endpoint_handle, mark_touch_handle
+from anthroforge.core.visualization.fiber_sync_helpers import endpoint_world, mark_endpoint_handle, mark_touch_handle
 
 
 def _fiber_setup():
@@ -77,6 +79,25 @@ def _fiber_points_world(fiber):
     return json.loads(proxy["af_fiber_points_world"])
 
 
+def _edit_select_vertex(obj, *indices):
+    select_only(obj)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    for vert in bm.verts:
+        vert.select_set(False)
+    bm.select_history.clear()
+    for index in indices:
+        _select_edit_vert(bm, index)
+    bmesh.update_edit_mesh(obj.data)
+
+
+def _select_edit_vert(bm, index):
+    vert = bm.verts[int(index)]
+    vert.select_set(True)
+    bm.select_history.add(vert)
+
+
 class FiberVcpWorkflowTests(BlenderTestCase):
     def test_add_fiber_operator_selects_proxy_and_shows_endpoint_handles(self):
         root_obj, fiber, origin, insert = _fiber_setup()
@@ -105,6 +126,15 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual((fiber_recompute_status(fiber), fiber_recompute_ms(fiber)), ("UNKNOWN", 0.0))
         bpy.ops.af.remove_fiber_touch_point(touch_index=0)
         self.assertEqual(len(fiber.mid_touches), 0)
+
+    def test_add_fiber_touch_point_uses_selected_geometry_vertex(self):
+        root_obj, fiber, origin, _insert = _fiber_setup()
+        _edit_select_vertex(origin.geometry_object_ref, 1)
+        self.assertEqual(bpy.ops.af.add_fiber_touch_point(fiber_id=fiber.id), {"FINISHED"})
+        self.assertEqual((len(fiber.mid_touches), fiber.mid_touches[0].parent_id), (1, origin.id))
+        target = origin.geometry_object_ref.matrix_world @ origin.geometry_object_ref.data.vertices[1].co
+        actual = endpoint_world(root_obj, bpy.context.scene, {}, fiber.mid_touches[0].parent_id, fiber.mid_touches[0].attach_param)
+        self.assertLess((actual - target).length, 1.0e-6)
 
     def test_recompute_fiber_sets_status_and_elapsed_time(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup()

@@ -21,4 +21,11 @@ def proxy_fiber_create_state(context):
     if not active_session(root):
         return ProxyFiberCreateState(False, "Switch to proxy view first.")
     picks, error = selected_proxy_vertices(context)
-    return ProxyFiberCreateState(not error and len(tuple(picks or ())) == 2, error or "Create a fiber from selected proxy vertices.")
+    return _proxy_state(picks, error)
+
+
+def _proxy_state(picks, error):
+    if error:
+        return ProxyFiberCreateState(False, error)
+    enough = len(tuple(picks or ())) >= 2
+    return ProxyFiberCreateState(enough, "Connect selected proxy vertices with a fiber." if enough else "Select at least two proxy vertices.")

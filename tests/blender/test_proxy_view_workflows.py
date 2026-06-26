@@ -107,10 +107,25 @@ def _edit_select(obj, *indices):
     bm = bmesh.from_edit_mesh(obj.data)
     bm.verts.ensure_lookup_table()
     for vert in bm.verts:
-        vert.select = False
+        vert.select_set(False)
+    bm.select_history.clear()
     for index in indices:
-        bm.verts[int(index)].select = True
+        _select_edit_vert(bm, index)
     bmesh.update_edit_mesh(obj.data)
+
+
+def _select_edit_vert(bm, index):
+    vert = bm.verts[int(index)]
+    vert.select_set(True)
+    bm.select_history.add(vert)
+
+
+def _assert_attach_moves(root_obj, fiber, scp, index):
+    start = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
+    scp.geometry_object_ref.data.vertices[int(index)].co.z = 1.25
+    scp.geometry_object_ref.data.update()
+    moved = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
+    return round(start.z, 4), round(moved.z, 4)
 
 
 class ProxyViewWorkflowTests(BlenderTestCase):
@@ -204,11 +219,32 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         self.assertEqual((fiber.a_parent_id, fiber.b_parent_id), (left.id, right.id))
         self.assertEqual((fiber_proxy is not None, len(fiber_proxy.data.splines) if fiber_proxy else 0), (True, 1))
         self.assertEqual((parse_fiber_attach_param(fiber.a_attach_param), parse_fiber_attach_param(fiber.b_attach_param)), (("mesh_vertex_v1", 1), ("mesh_vertex_v1", 2)))
-        start = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
-        left.geometry_object_ref.data.vertices[1].co.z = 1.25
-        left.geometry_object_ref.data.update()
-        moved = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
-        self.assertNotEqual(round(start.z, 4), round(moved.z, 4))
+        self.assertNotEqual(*_assert_attach_moves(root_obj, fiber, left, 1))
+
+    def test_connect_proxy_vertices_with_fiber_uses_middle_vertices_as_touch_points(self):
+        root_obj, parent, left, right = _proxy_setup()
+        middle = scp_with_object(root_obj, "Middle", mesh_object("Middle", (1.5, 0.0, 0.0)))
+        set_parent_relation(middle.transform_object_ref, middle, parent.transform_object_ref)
+        self.assertEqual(_switch(parent.transform_object_ref), {"FINISHED"})
+        proxy = _session_proxy(root_obj, "original")
+        _edit_select(proxy, _proxy_vertex_index(proxy, left.id, 1), _proxy_vertex_index(proxy, middle.id, 0), _proxy_vertex_index(proxy, right.id, 2))
+        self.assertEqual(bpy.ops.af.connect_proxy_vertices_with_fiber(), {"FINISHED"})
+        fiber = root_obj.af_vcp_system.fibers[0]
+        self.assertEqual((fiber.a_parent_id, fiber.b_parent_id, len(fiber.mid_touches)), (left.id, right.id, 1))
+        self.assertEqual((fiber.mid_touches[0].parent_id, parse_fiber_attach_param(fiber.mid_touches[0].attach_param)), (middle.id, ("mesh_vertex_v1", 0)))
+
+    def test_add_fiber_touch_point_uses_selected_proxy_vertex(self):
+        root_obj, parent, left, right = _proxy_setup()
+        bpy.context.scene.af_new_fiber_origin_obj = left.geometry_object_ref
+        bpy.context.scene.af_new_fiber_insertion_obj = right.geometry_object_ref
+        bpy.ops.af.add_fiber_vcp()
+        fiber = root_obj.af_vcp_system.fibers[0]
+        self.assertEqual(_switch(parent.transform_object_ref), {"FINISHED"})
+        proxy = _session_proxy(root_obj, "original")
+        _edit_select(proxy, _proxy_vertex_index(proxy, left.id, 0))
+        self.assertEqual(bpy.ops.af.add_fiber_touch_point(fiber_id=fiber.id), {"FINISHED"})
+        self.assertEqual((len(fiber.mid_touches), fiber.mid_touches[0].parent_id), (1, left.id))
+        self.assertEqual(parse_fiber_attach_param(fiber.mid_touches[0].attach_param), ("mesh_vertex_v1", 0))
 
     def test_mirrored_proxy_selection_maps_back_to_target_scp(self):
         root_obj, source, target = _mirror_setup()
