@@ -21,6 +21,7 @@ from .fiber_sync_helpers import (
 from .fiber_sync_runtime import (
     sync_handles as _sync_handles_runtime,
     apply_selection_highlight as _apply_selection_highlight_runtime,
+    refresh_selection as _refresh_selection_runtime,
     sync_root_to_scene as _sync_root_to_scene_runtime,
     on_depsgraph_update as _on_depsgraph_update_runtime,
 )
@@ -108,6 +109,9 @@ class FiberSceneSync:
 
     def _apply_selection_highlight(self, root, scene):
         return _apply_selection_highlight_runtime(self, root, scene)
+
+    def refresh_selection(self, root=None, scene=None, window_manager=None):
+        return _refresh_selection_runtime(self, root=root, scene=scene, window_manager=window_manager)
 
     def sync_root_to_scene(self, root=None, scene=None, bake=False, target_fiber_ids=None, window_manager=None):
         return _sync_root_to_scene_runtime(

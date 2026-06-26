@@ -249,7 +249,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         anchors = [endpoint_world(root_obj, bpy.context.scene, {}, item.parent_id, item.attach_param) for item in fiber.loop_anchors]
         expected = [loop.geometry_object_ref.matrix_world @ loop.geometry_object_ref.data.vertices[i].co for i in (0, 1, 2, 3)]
         self.assertEqual((fiber.topology_mode, fiber.generation_mode, len(fiber.loop_anchors)), ("LOOP", "SOLVED", 4))
-        self.assertTrue(proxy.data.splines[0].use_cyclic_u)
+        self.assertEqual((proxy.data.splines[0].use_cyclic_u, fiber_route_mode(fiber)), (True, "DIRECT"))
         self.assertTrue(all((anchors[i] - expected[i]).length < 1.0e-6 for i in range(4)))
 
     def test_recompute_loop_fiber_preserves_node_count_and_hides_handles(self):
@@ -259,6 +259,14 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
         self.assertEqual((len(_fiber_points_world(fiber)), proxy.data.splines[0].use_cyclic_u), (48, True))
         self.assertEqual((_handle_count(fiber.id), fiber_route_mode(fiber)), (0, "DIRECT"))
+
+    def test_tree_selection_does_not_resolve_loop_again(self):
+        root_obj, fiber, _loop = _loop_setup()
+        other = mesh_object("Other", (5.0, 0.0, 0.0))
+        before = _fiber_points_world(fiber)
+        select_only(other)
+        self.assertEqual(bpy.ops.af.select_vcp_in_tree(node_id=fiber.id, node_type="FIBER"), {"FINISHED"})
+        self.assertEqual(before, _fiber_points_world(fiber))
 
     def test_add_dependent_loop_creates_child_without_handles(self):
         root_obj, fiber, _loop = _loop_setup()

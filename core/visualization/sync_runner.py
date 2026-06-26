@@ -34,8 +34,25 @@ def _run_request(ctx, request):
     try:
         run_runtime_now(ctx, request, run_dependency_runtime)
     finally:
+        _rehide_proxy_session(ctx.root, ctx.scene)
         _RUNNING = False
     return True
+
+
+def _rehide_proxy_session(root, scene):
+    session = _active_proxy_session(root)
+    if scene is not None and session:
+        _proxy_rehide()(scene, session)
+
+
+def _active_proxy_session(root):
+    from ..scp_proxy.session import active_session
+    return {} if root is None else active_session(root)
+
+
+def _proxy_rehide():
+    from ..scp_proxy.visibility import rehide_session
+    return rehide_session
 
 
 def _scheduler(ctx, request):

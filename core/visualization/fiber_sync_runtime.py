@@ -140,6 +140,15 @@ def sync_root_to_scene(sync, root=None, scene=None, bake=False, target_fiber_ids
     _run_scene_sync(sync, *state, bake, target_fiber_ids, window_manager)
 
 
+def refresh_selection(sync, root=None, scene=None, window_manager=None):
+    if sync._syncing:
+        return
+    state = _scene_sync_state(root, scene)
+    if state is None:
+        return
+    _run_selection_refresh(sync, state[0], state[1], window_manager)
+
+
 def _scene_sync_state(root, scene):
     root, scene, depsgraph = _sync_inputs(root, scene)
     return None if root is None or depsgraph is None or not hasattr(root, "af_vcp_system") else (root, scene, depsgraph)
@@ -151,6 +160,16 @@ def _run_scene_sync(sync, root, scene, depsgraph, bake, target_fiber_ids, window
         vis_col = sync._get_vis_collection(scene)
         _sync_target_fibers(sync, vis_col, root, scene, depsgraph, bake, target_fiber_ids)
         _cleanup_stale_fiber_proxies(vis_col, root.name, {f.id for f in root.af_vcp_system.fibers})
+        sync._sync_handles(root, scene, vis_col, {}, window_manager=window_manager)
+        sync._apply_selection_highlight(root, scene)
+    finally:
+        sync._syncing = False
+
+
+def _run_selection_refresh(sync, root, scene, window_manager=None):
+    sync._syncing = True
+    try:
+        vis_col = sync._get_vis_collection(scene)
         sync._sync_handles(root, scene, vis_col, {}, window_manager=window_manager)
         sync._apply_selection_highlight(root, scene)
     finally:

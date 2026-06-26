@@ -11,7 +11,6 @@ from ..core.scp_runtime.common import as_id, find_primary_scp_obj, find_scp_by_i
 from ..core.scp_runtime.lookup import activate_scp
 from ..core.scp_runtime.object_colors import enable_object_color_view
 from ..core.scp_runtime.tree import children_map
-from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.visualization.control_runtime import notify_selection_changed
 
 
@@ -245,8 +244,8 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
         context.view_layer.objects.active = obj
 
     def _sync_selected_vcp(self, context, root):
+        _ = root
         notify_selection_changed(context.scene, active_object=context.active_object)
-        sync_scene(root=root, scene=context.scene, dirty_hints=dirty_hints_for(self.node_type, {self.node_id}), bake=False)
 
     def execute(self, context):
         root = get_af_root(context.scene)

@@ -69,6 +69,12 @@ def _session_proxy(root_obj, key):
     return bpy.data.objects.get(active_session(root_obj).get(key, ""))
 
 
+def _session_hidden(root_obj):
+    for name in active_session(root_obj).get("hidden_object_names", []):
+        obj = bpy.context.scene.objects.get(name)
+        yield obj is not None and obj.hide_get()
+
+
 def _proxy_world_verts(obj):
     return tuple(obj.matrix_world @ vert.co.copy() for vert in obj.data.vertices)
 
@@ -169,6 +175,14 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         verts = tuple((round(v.x, 4), round(v.y, 4), round(v.z, 4)) for v in _proxy_world_verts(mirrored))
         want = tuple((round(v.x, 4), round(v.y, 4), round(v.z, 4)) for v in expected)
         self.assertEqual(verts, want)
+
+    def test_create_loop_from_proxy_rehides_mirror_scope(self):
+        root_obj, source, _target = _mirror_setup()
+        self.assertEqual(_switch(source.transform_object_ref), {"FINISHED"})
+        proxy = _session_proxy(root_obj, "original")
+        _edit_select(proxy, 0, 1, 2)
+        self.assertEqual(bpy.ops.af.create_loop_fiber_from_selected_vertices(), {"FINISHED"})
+        self.assertTrue(all(_session_hidden(root_obj)))
 
     def test_failed_proxy_build_keeps_existing_session(self):
         root_obj, parent, _left, _right = _proxy_setup()

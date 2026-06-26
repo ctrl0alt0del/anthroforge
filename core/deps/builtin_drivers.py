@@ -166,7 +166,9 @@ class FiberSyncDriver(DependencyDriver):
         return ("FIBER",)
 
     def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
-        _ = gate_meta
+        if _selection_event(gate_meta):
+            register_fiber_sync().refresh_selection(root=root, scene=scene)
+            return
         ids = set(impacted.get("FIBER", set()) or set())
         if is_full:
             register_fiber_sync().sync_root_to_scene(root=root, scene=scene, bake=bake)

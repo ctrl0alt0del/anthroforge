@@ -2,7 +2,7 @@ from pathlib import Path
 from collections import OrderedDict
 from types import SimpleNamespace
 import sys
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 TEST_ROOT = Path(__file__).resolve().parents[1]
 ADDON_ROOT = Path(__file__).resolve().parents[2]
@@ -273,3 +273,10 @@ class RuntimeContractTests(BlenderTestCase):
         with patch.object(builtin_drivers, "_sync_scp_scene") as sync:
             driver.sync(root(), bpy.context.scene, False, {"SCP": {"S1"}}, False, gate_meta={"event_type": "SELECTION"})
         self.assertEqual(sync.call_count, 0)
+
+    def test_fiber_sync_driver_refreshes_selection_without_geometry_sync(self):
+        driver = builtin_drivers.FiberSyncDriver()
+        sync = SimpleNamespace(refresh_selection=Mock(), sync_root_to_scene=Mock())
+        with patch.object(builtin_drivers, "register_fiber_sync", return_value=sync):
+            driver.sync(root(), bpy.context.scene, False, {"FIBER": {"F1"}}, False, gate_meta={"event_type": "SELECTION"})
+        self.assertEqual((sync.refresh_selection.call_count, sync.sync_root_to_scene.call_count), (1, 0))

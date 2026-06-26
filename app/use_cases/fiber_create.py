@@ -40,7 +40,7 @@ def create_loop_fiber_from_selected_vertices(context):
         return failure(error or "Select at least three ordered vertices.")
     fiber = _new_loop_fiber(root, specs)
     _activate(root.af_vcp_system, "FIBER", fiber.id)
-    _sync_entity(root, context.scene, "FIBER", {fiber.id})
+    _sync_entity(root, context.scene, "FIBER", {fiber.id}, bake=True)
     _finalize_selection(context, root, fiber)
     return success(f"Added {fiber.id}", value=fiber)
 
@@ -259,9 +259,9 @@ def _select_if_found(context, obj):
     context.view_layer.objects.active = obj
 
 
-def _sync_entity(root, scene, kind, entity_ids):
+def _sync_entity(root, scene, kind, entity_ids, bake=False):
     hints = _dirty_hints_for()(kind, entity_ids)
-    _sync_scene()(root=root, scene=scene, dirty_hints=hints)
+    _sync_scene()(root=root, scene=scene, dirty_hints=hints, bake=bake)
 
 
 def _sync_selection(scene, active_object):
