@@ -212,6 +212,15 @@ class VcpUseCaseTests(unittest.TestCase):
         self.assertFalse(converged)
         self.assertEqual(len(calls), 2)
 
+    def test_run_bake_passes_caps_solved_loop_retries(self):
+        fiber = Bag(id="F1", topology_mode="LOOP", generation_mode="SOLVED"); calls = []
+        def fake_sync(*_args, **_kwargs):
+            calls.append(1); set_fiber_not_converged(fiber, True); set_fiber_eps_disp(fiber, float(len(calls))); set_fiber_eps_pen(fiber, float(len(calls)))
+        with patch("app.use_cases.fiber_tools._sync_entity", side_effect=fake_sync):
+            converged = _run_bake_passes(root(), scene(), fiber, 60)
+        self.assertFalse(converged)
+        self.assertEqual(len(calls), 3)
+
     def test_add_and_remove_fiber_touch_point_sync_runtime(self):
         fiber = Bag(id="F1", mid_touches=FakeCollection())
         root_obj = root(fibers=[fiber], active_type="FIBER", active_id="F1")

@@ -172,19 +172,10 @@ class FiberSolver:
         return None if any(anchor is None for anchor in anchors) else anchors
 
     def _loop_seed_route(self, oracle, anchors, bake):
-        if not bake:
-            return None, LOCAL_FALLBACK, 0.0, ()
-        if self._shared_loop_owner(anchors):
-            return self._owner_loop_seed(oracle, anchors)
-        t0 = perf_counter()
-        result = plan_route(oracle, list(anchors) + [anchors[0]])
-        return result.points, result.mode, (perf_counter() - t0) * 1000.0, result.active_ids
+        _ = bake
+        return self._local_loop_seed(oracle, anchors)
 
-    def _shared_loop_owner(self, anchors):
-        owners = {str(anchor.owner_id or "") for anchor in anchors}
-        return len(owners) == 1 and "" not in owners
-
-    def _owner_loop_seed(self, oracle, anchors):
+    def _local_loop_seed(self, oracle, anchors):
         points = [anchor.point.copy() for anchor in anchors]
         active = oracle.active_colliders_for_polyline(points, padding=max(0.05, oracle.margin * 4.0))
         return points, DIRECT, 0.0, tuple(c["sid"] for c in active)

@@ -259,6 +259,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
         self.assertEqual((len(_fiber_points_world(fiber)), proxy.data.splines[0].use_cyclic_u), (48, True))
         self.assertEqual((_handle_count(fiber.id), fiber_route_mode(fiber)), (0, "DIRECT"))
+        self.assertEqual(round(fiber_planner_ms(fiber), 4), 0.0)
 
     def test_tree_selection_does_not_resolve_loop_again(self):
         root_obj, fiber, _loop = _loop_setup()

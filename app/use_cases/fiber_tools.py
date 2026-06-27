@@ -144,7 +144,7 @@ def _recompute(root, scene, fiber, max_passes):
 
 def _run_bake_passes(root, scene, fiber, max_passes):
     last = None
-    for _ in range(max_passes):
+    for _ in range(_bake_pass_total(fiber, max_passes)):
         _sync_entity(root, scene, "FIBER", {fiber.id}, bake=True)
         if not fiber_not_converged(fiber):
             return True
@@ -157,6 +157,11 @@ def _run_bake_passes(root, scene, fiber, max_passes):
 
 def _fiber_residual_state(fiber):
     return round(float(fiber_eps_disp(fiber)), 9), round(float(fiber_eps_pen(fiber)), 9)
+
+
+def _bake_pass_total(fiber, max_passes):
+    limit = 3 if is_solved_loop(fiber) else int(max_passes)
+    return max(1, min(int(max_passes), limit))
 
 
 def _stalled_bake_state(previous, current, tol=1.0e-9):
