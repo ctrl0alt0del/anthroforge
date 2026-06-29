@@ -4,6 +4,7 @@ from mathutils import Vector
 from bpy_extras import view3d_utils
 
 from ..deps.control_lifecycle import mark_dynamic_control_object
+from ..scp_runtime.object_colors import apply_object_color
 from ..attachment_codec import fiber_attach_signature, parse_fiber_attach_param
 from ..scp_proxy.signature import mesh_topology_signature
 from ..utils import depsgraph_for_scene, scene_for_id
@@ -134,6 +135,7 @@ def ensure_fiber_material(obj):
 
 def set_fiber_color(obj, color):
     mat = ensure_fiber_material(obj)
+    apply_object_color(obj, color)
     if mat:
         mat.diffuse_color = color
 

@@ -159,6 +159,17 @@ def _loop_family_setup(offset=0.25, location=(0.0, 0.0, 0.0)):
 
 
 class MuscleVcpWorkflowTests(BlenderTestCase):
+    def test_muscle_proxy_object_color_matches_material(self):
+        root_obj, first, second = _muscle_setup()
+        select_only(first)
+        second.select_set(True)
+        bpy.ops.af.add_muscle_vcp()
+        register_muscle_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        muscle = root_obj.af_vcp_system.muscles[0]
+        base = _surface_obj(root_obj, muscle, "BASE")
+        want = tuple(round(float(v), 4) for v in base.data.materials[0].diffuse_color)
+        self.assertEqual(tuple(round(float(v), 4) for v in base.color), want)
+
     def test_add_muscle_operator_selects_inflation_control(self):
         root_obj, first, second = _muscle_setup()
         select_only(first)

@@ -46,6 +46,16 @@ def _clear_selection():
 
 
 class BlobVcpWorkflowTests(BlenderTestCase):
+    def test_blob_proxy_object_color_matches_material(self):
+        root_obj = root()
+        scp = scp_with_object(root_obj, "Bone", mesh_object("Bone"))
+        _add_blob(scp.geometry_object_ref)
+        blob = root_obj.af_vcp_system.blobs[0]
+        register_blob_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        proxy = find_flagged("af_blob_proxy", blob.id, "af_blob_id")
+        want = tuple(round(float(v), 4) for v in proxy.data.materials[0].diffuse_color)
+        self.assertEqual(tuple(round(float(v), 4) for v in proxy.color), want)
+
     def test_proxy_selection_keeps_blob_control_visible(self):
         root_obj = root()
         scp = scp_with_object(root_obj, "Bone", mesh_object("Bone"))

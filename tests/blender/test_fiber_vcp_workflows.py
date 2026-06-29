@@ -163,6 +163,13 @@ def _self_intersects(points):
 
 
 class FiberVcpWorkflowTests(BlenderTestCase):
+    def test_fiber_proxy_object_color_matches_material(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        register_fiber_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        want = tuple(round(float(v), 4) for v in proxy.data.materials[0].diffuse_color)
+        self.assertEqual(tuple(round(float(v), 4) for v in proxy.color), want)
+
     def test_add_fiber_operator_selects_proxy_and_shows_endpoint_handles(self):
         root_obj, fiber, origin, insert = _fiber_setup()
         proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")

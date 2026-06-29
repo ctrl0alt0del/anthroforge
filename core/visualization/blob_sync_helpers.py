@@ -3,6 +3,7 @@ import bmesh
 from mathutils import Vector
 
 from ..deps.control_lifecycle import mark_dynamic_control_object
+from ..scp_runtime.object_colors import apply_object_color
 from ..vcp.blob import BlobVCPRuntime
 from ..scp_runtime.common import find_geometry_scp_obj
 
@@ -86,6 +87,7 @@ def ensure_blob_material(obj, active=False, default_blob_color=(0.72, 0.52, 0.40
         mat = bpy.data.materials.new(name)
         mat.use_nodes = False
     mat.diffuse_color = selected_blob_color if active else default_blob_color
+    apply_object_color(obj, mat.diffuse_color)
     obj.data.materials.clear()
     obj.data.materials.append(mat)
 

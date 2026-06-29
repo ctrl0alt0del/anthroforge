@@ -1,6 +1,7 @@
 import bpy
 
 from ..deps.control_lifecycle import mark_dynamic_control_object
+from ..scp_runtime.object_colors import apply_object_color
 from ..scp_runtime.surface import surface_bvh_local
 
 
@@ -93,6 +94,7 @@ def ensure_material(obj, active=False):
     else:
         mat.diffuse_color = (0.80, 0.35, 0.30, 0.80) if active else (0.72, 0.42, 0.32, 0.65)
 
+    apply_object_color(obj, mat.diffuse_color)
     obj.data.materials.clear()
     obj.data.materials.append(mat)
 
