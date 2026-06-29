@@ -146,6 +146,8 @@ class RecorderDriver(DependencyDriver):
 class RuntimeContractTests(BlenderTestCase):
     def test_register_cycle_restores_properties_and_handlers(self):
         import anthroforge
+        from anthroforge.core.visualization import control_runtime as package_control_runtime
+        from anthroforge.core.visualization import delete_reconcile as package_delete_reconcile
         from anthroforge.core.visualization import sync_runner as package_sync_runner
         self.addCleanup(_restore_addon)
         anthroforge.unregister()
@@ -153,8 +155,10 @@ class RuntimeContractTests(BlenderTestCase):
         anthroforge.register()
         self.assertTrue(hasattr(bpy.types.Object, "af_scp_system"))
         self.assertEqual(_handler_count(bpy.app.handlers.undo_pre, package_sync_runner._on_history_pre), 1)
-        self.assertEqual(_handler_count(bpy.app.handlers.load_post, control_runtime._on_load_post), 1)
-        self.assertEqual(_handler_count(bpy.app.handlers.load_post, delete_reconcile._on_load_post), 1)
+        self.assertEqual(_handler_count(bpy.app.handlers.undo_pre, package_control_runtime._on_history_pre), 1)
+        self.assertEqual(_handler_count(bpy.app.handlers.redo_pre, package_control_runtime._on_history_pre), 1)
+        self.assertEqual(_handler_count(bpy.app.handlers.load_post, package_control_runtime._on_load_post), 1)
+        self.assertEqual(_handler_count(bpy.app.handlers.load_post, package_delete_reconcile._on_load_post), 1)
 
     def test_load_save_hooks_remove_transient_controls_and_reset_runtime(self):
         root_obj = root()
@@ -225,6 +229,15 @@ class RuntimeContractTests(BlenderTestCase):
         sync_runner.schedule_sync_from_dirty_hints(root=root(), scene=bpy.context.scene, dirty_hints={"SCP": {"S1"}})
         sync_runner._on_history_pre(None)
         self.assertEqual((len(sync_runner._PENDING), sync_runner._RUNNING), (0, False))
+
+    def test_control_runtime_history_pre_skips_next_depsgraph_sync(self):
+        runtime = control_runtime.register_control_runtime()
+        runtime._last_active = ("SCP", "S1")
+        with patch.object(runtime, "sync_now") as sync_now:
+            control_runtime._on_history_pre(None)
+            runtime.on_depsgraph_update(bpy.context.scene, None)
+            runtime.on_depsgraph_update(bpy.context.scene, None)
+        self.assertEqual((runtime._last_active, sync_now.call_count), (("NONE", ""), 1))
 
     def test_source_start_nodes_exclude_non_source_payload_ids(self):
         starts = {("SCP", "S1"), ("SCP", "S2"), ("FIBER", "F1")}

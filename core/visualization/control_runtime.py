@@ -15,6 +15,7 @@ from ..vcp.runtime_state import reset_vcp_runtime_state
 
 
 ENTITY_TYPES = ("SCP", "FIBER", "MUSCLE", "BLOB")
+_HISTORY_SUSPENDED = False
 
 
 def _active_object(scene, active_object=None):
@@ -171,7 +172,7 @@ class ControlRuntimeOrchestrator:
 
     def on_depsgraph_update(self, scene, depsgraph):
         _depsgraph = depsgraph
-        if self._syncing:
+        if self._syncing or _consume_history_suspend():
             return
         self.sync_now(scene, force=False)
 
@@ -205,6 +206,21 @@ class ControlRuntimeOrchestrator:
 
 
 _CONTROL_RUNTIME = None
+
+
+def _consume_history_suspend():
+    global _HISTORY_SUSPENDED
+    if not _HISTORY_SUSPENDED:
+        return False
+    _HISTORY_SUSPENDED = False
+    return True
+
+
+@persistent
+def _on_history_pre(_dummy):
+    global _HISTORY_SUSPENDED
+    _HISTORY_SUSPENDED = True
+    None if _CONTROL_RUNTIME is None else _CONTROL_RUNTIME.reset()
 
 
 @persistent
@@ -267,6 +283,10 @@ def register_control_runtime():
         _CONTROL_RUNTIME = ControlRuntimeOrchestrator()
     if _CONTROL_RUNTIME.on_depsgraph_update not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(_CONTROL_RUNTIME.on_depsgraph_update)
+    if _on_history_pre not in bpy.app.handlers.undo_pre:
+        bpy.app.handlers.undo_pre.append(_on_history_pre)
+    if _on_history_pre not in bpy.app.handlers.redo_pre:
+        bpy.app.handlers.redo_pre.append(_on_history_pre)
     if _on_save_pre not in bpy.app.handlers.save_pre:
         bpy.app.handlers.save_pre.append(_on_save_pre)
     if _on_load_post not in bpy.app.handlers.load_post:
@@ -285,6 +305,10 @@ def unregister_control_runtime():
         return
     if _CONTROL_RUNTIME.on_depsgraph_update in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_CONTROL_RUNTIME.on_depsgraph_update)
+    if _on_history_pre in bpy.app.handlers.redo_pre:
+        bpy.app.handlers.redo_pre.remove(_on_history_pre)
+    if _on_history_pre in bpy.app.handlers.undo_pre:
+        bpy.app.handlers.undo_pre.remove(_on_history_pre)
     if _on_save_pre in bpy.app.handlers.save_pre:
         bpy.app.handlers.save_pre.remove(_on_save_pre)
     if _on_load_post in bpy.app.handlers.load_post:
