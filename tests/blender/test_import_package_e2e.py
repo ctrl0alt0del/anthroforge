@@ -11,6 +11,7 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 import bpy
 
 from _helpers import BlenderTestCase, add_shortcut, fiber, find_flagged, mesh_object, reset_scene, root, scp_with_object, select_only, temp_blend_path
+from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor
 from anthroforge.core.id_utils import next_prefixed_id
 from anthroforge.core.importing.extract import root_snapshot
 from anthroforge.core.importing.service import import_package_from_blend
@@ -48,6 +49,10 @@ def _source_snapshot():
     set_mirror_effective_axis(right, "Y")
     item = fiber(root_obj, left.id, right.id)
     item.a_attach_param, item.b_attach_param = "A", "B"
+    touch = item.mid_touches.add()
+    touch.parent_id = left.id
+    touch.attach_param = encode_fiber_mesh_anchor(left.geometry_object_ref.data.vertices[0].co.copy())
+    touch.normal_offset = 0.125
     set_fiber_not_converged(item, True)
     muscle = _muscle(root_obj, item.id)
     item.muscle_id = muscle.id
@@ -124,6 +129,7 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertEqual({fiber_item.a_parent_id, fiber_item.b_parent_id}, {imported["Left"].id, imported["Right"].id})
         self.assertEqual((root_obj.af_vcp_system.muscles[-1].fiber_refs[0].fiber_id, root_obj.af_vcp_system.blobs[-1].attach_target_id), (fiber_item.id, root_obj.af_vcp_system.muscles[-1].id))
         self.assertEqual(root_obj.af_vcp_system.muscles[-1].inflation_mode, "DISTRIBUTED")
+        self.assertEqual((len(fiber_item.mid_touches), round(fiber_item.mid_touches[0].normal_offset, 4)), (1, 0.125))
         self.assertEqual((root_obj.af_shortcut_system.shortcuts[-1].owner_id, imported["Right"].id in root_obj.af_shortcut_system.shortcuts[-1].data_path), (imported["Right"].id, True))
         self.assertFalse(root_obj.af_shortcut_system.shortcuts[-1].owner_backsolve)
         self.assertEqual(root_obj.af_shortcut_system.shortcuts[-1].overrides[0].target_scp_id, imported["Left"].id)

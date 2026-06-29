@@ -2,7 +2,7 @@ from time import perf_counter
 
 from mathutils import Vector
 
-from ..visualization.fiber_sync_helpers import endpoint_world as resolve_fiber_endpoint_world
+from ..visualization.fiber_sync_helpers import endpoint_world as resolve_fiber_endpoint_world, touch_world as resolve_fiber_touch_world
 from .fiber_collision import CollisionOracle
 from .fiber_loop import derived_loop_targets, loop_frames, loop_pin_targets, profile_offsets, resample_closed
 from .fiber_modes import DERIVED_GENERATION, fiber_root, fibers_by_id, is_derived_loop, is_loop_fiber, loop_anchor_specs
@@ -39,6 +39,9 @@ class FiberSolver:
         else:
             self._cache.pop(fiber_id, None)
 
+    def _default_margin(self):
+        return 0.002
+
     def _runtime_params(self, fiber_prop, bake):
         node_count = max(8, int(fiber_prop.node_count))
         iterations = int(fiber_prop.iterations_bake if bake else fiber_prop.iterations_interactive)
@@ -49,7 +52,7 @@ class FiberSolver:
 
     def _base_params(self, fiber_prop, node_count, iterations):
         shorten, bend = self._strengths(fiber_prop)
-        return {"node_count": node_count, "iterations": iterations, "margin": float(fiber_prop.collision_margin), "damping": float(fiber_prop.damping), "shorten_strength": shorten, "bend_strength": bend, "eps_disp": 1e-5, "eps_pen": 1e-5}
+        return {"node_count": node_count, "iterations": iterations, "margin": self._default_margin(), "shorten_strength": shorten, "bend_strength": bend, "eps_disp": 1e-5, "eps_pen": 1e-5}
 
     def _strengths(self, fiber_prop):
         shorten = max(0.0, min(1.0, float(getattr(fiber_prop, "stretch_stiffness", 0.9))))
@@ -96,7 +99,6 @@ class FiberSolver:
             self._apply_bend_smoothing(nodes, pinned, params["bend_strength"])
         max_pen = self._apply_collision_constraints(nodes=nodes, pinned=pinned, oracle=oracle, colliders=colliders, margin=params["margin"])
         self._restore_pins(nodes, pin_targets)
-        self._apply_damping(nodes, prev_nodes, pinned, params["damping"])
         return self._max_displacement(nodes, prev_nodes), max_pen
 
     def _restore_pins(self, nodes, pin_targets):
@@ -217,7 +219,6 @@ class FiberSolver:
             self._apply_cyclic_bend(nodes, pinned, params["bend_strength"])
         max_pen = self._apply_cyclic_collision_constraints(nodes, pinned, oracle, colliders, params["margin"])
         self._restore_pins(nodes, pin_targets)
-        self._apply_cyclic_damping(nodes, prev_nodes, pinned, params["damping"])
         return self._max_displacement(nodes, prev_nodes), max_pen
 
     def _apply_cyclic_shortening(self, nodes, pinned, strength):
@@ -252,14 +253,6 @@ class FiberSolver:
             nodes[i], pen = oracle.push_out_point(nodes[i], colliders)
             max_pen = max(max_pen, pen)
         return max_pen
-
-    def _apply_cyclic_damping(self, nodes, prev_nodes, pinned, damping):
-        if damping <= 0.0:
-            return
-        alpha = max(0.0, min(1.0, 1.0 - damping))
-        for i in range(len(nodes)):
-            if i not in pinned:
-                nodes[i] = prev_nodes[i].lerp(nodes[i], alpha)
 
     def _driver_loop_points(self, root, fiber_prop, scene, depsgraph, bake):
         if fiber_prop is None or is_derived_loop(fiber_prop):
@@ -297,7 +290,7 @@ class FiberSolver:
             self._apply_cyclic_shortening(nodes, set(), 0.12)
             self._apply_spring_to_targets(nodes, points, 0.35)
             max_pen = max(max_pen, self._apply_cyclic_collision_constraints(nodes, set(), oracle, active, oracle.margin))
-            self._apply_cyclic_damping(nodes, prev_nodes, set(), 0.05)
+            self._apply_spring_to_targets(nodes, prev_nodes, 0.05)
         return nodes, max_pen, len(active)
 
     def _apply_spring_to_targets(self, nodes, targets, strength):
@@ -315,11 +308,14 @@ class FiberSolver:
         self._store_metrics(fiber_prop, LOCAL_FALLBACK, 0.0, 0.0, 0)
 
     def _route_anchors(self, root, scene, runtime_registry, fiber_prop):
-        pairs = [(fiber_prop.a_parent_id, fiber_prop.a_attach_param)]
-        pairs.extend((tp.parent_id, tp.attach_param) for tp in getattr(fiber_prop, "mid_touches", ()))
-        pairs.append((fiber_prop.b_parent_id, fiber_prop.b_attach_param))
-        anchors = [self._route_anchor(root, scene, runtime_registry, pid, raw) for pid, raw in pairs]
+        anchors = [self._route_anchor(root, scene, runtime_registry, fiber_prop.a_parent_id, fiber_prop.a_attach_param)]
+        anchors.extend(self._touch_anchor(root, scene, runtime_registry, tp) for tp in getattr(fiber_prop, "mid_touches", ()))
+        anchors.append(self._route_anchor(root, scene, runtime_registry, fiber_prop.b_parent_id, fiber_prop.b_attach_param))
         return None if any(anchor is None for anchor in anchors) else anchors
+
+    def _touch_anchor(self, root, scene, runtime_registry, touch):
+        point = resolve_fiber_touch_world(root, scene, runtime_registry, touch)
+        return None if point is None else PlannerAnchor(point.copy(), str(touch.parent_id or ""))
 
     def _route_anchor(self, root, scene, runtime_registry, parent_id, attach_param_raw):
         point = self._endpoint_world(root, scene, runtime_registry, parent_id, attach_param_raw)
@@ -551,15 +547,6 @@ class FiberSolver:
         seg = next((i for i in range(len(spans) - 1) if spans[i + 1] >= target), len(spans) - 2)
         span = max(1.0e-9, spans[seg + 1] - spans[seg])
         return src[seg].lerp(src[seg + 1], (target - spans[seg]) / span)
-
-    def _apply_damping(self, nodes, prev_nodes, pinned, damping):
-        if damping <= 0.0:
-            return
-        alpha = max(0.0, min(1.0, 1.0 - damping))
-        for i in range(len(nodes)):
-            if pinned[i]:
-                continue
-            nodes[i] = prev_nodes[i].lerp(nodes[i], alpha)
 
     def _max_displacement(self, nodes, prev_nodes):
         md = 0.0

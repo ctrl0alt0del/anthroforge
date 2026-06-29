@@ -35,13 +35,14 @@ class ImportModelTests(unittest.TestCase):
         item = snap.shortcuts[0].overrides[0]
         self.assertEqual((item.target_scp_id, item.parent_anchor_mode, item.follow_rotation_mode, item.rotation_strategy), ("S1", "OBJECT_ORIGIN", "KEEP", "KEEP"))
         self.assertEqual((snap.fibers[0].driver_fiber_id, snap.fibers[0].loop_anchors[0].parent_id, snap.fibers[0].loop_profile_keys[0].props["delta_u"]), ("F0", "S1", 0.1))
+        self.assertEqual(snap.fibers[0].touches[0].props["normal_offset"], 0.25)
 
 
 def _snapshot_dict():
     return {
         "root_name": "AF_ROOT",
         "scps": [{"source_id": "S1", "name": "Arm", "parent_id": "", "props": {}, "bound_objects": [{"bound_id": "OBJ_1", "label": "Arm", "object_name": "ArmObj"}]}],
-        "fibers": [{"source_id": "F1", "name": "F1", "props": {"topology_mode": "LOOP"}, "a_parent_id": "S1", "b_parent_id": "S2", "muscle_id": "", "driver_fiber_id": "F0", "touches": [{"parent_id": "S1", "props": {}}], "loop_anchors": [{"parent_id": "S1", "props": {"attach_param": "RAW"}}], "loop_profile_keys": [{"props": {"t": 0.25, "delta_u": 0.1, "delta_v": -0.2}}]}],
+        "fibers": [{"source_id": "F1", "name": "F1", "props": {"topology_mode": "LOOP", "collision_margin": 0.2, "damping": 0.3, "guide_stiffness": 0.4}, "a_parent_id": "S1", "b_parent_id": "S2", "muscle_id": "", "driver_fiber_id": "F0", "touches": [{"parent_id": "S1", "props": {"normal_offset": 0.25}}], "loop_anchors": [{"parent_id": "S1", "props": {"attach_param": "RAW"}}], "loop_profile_keys": [{"props": {"t": 0.25, "delta_u": 0.1, "delta_v": -0.2}}]}],
         "muscles": [{"source_id": "M1", "name": "M1", "props": {}, "fiber_ids": ["F1"]}],
         "blobs": [{"source_id": "B1", "name": "B1", "props": {}, "attach_target_type": "MUSCLE", "attach_target_id": "M1", "attach_target_object_name": ""}],
         "shortcuts": [{"name": "X", "owner_type": "SCP", "owner_id": "S1", "data_path": "af://scp_prop/S1/name", "owner_backsolve": False, "overrides": [{"target_scp_id": "S1", "parent_anchor_mode": "OBJECT_ORIGIN", "child_anchor_mode": "KEEP"}]}],

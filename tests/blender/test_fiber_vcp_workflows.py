@@ -15,7 +15,7 @@ import bpy
 from mathutils import Vector
 
 from _helpers import BlenderTestCase, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
-from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor
+from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor, parse_fiber_attach_param
 from anthroforge.core.vcp.runtime_state import (
     fiber_active_colliders,
     fiber_planner_ms,
@@ -30,7 +30,7 @@ from anthroforge.core.vcp.runtime_state import (
 )
 from anthroforge.core.visualization import fiber_sync_runtime as fiber_runtime
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
-from anthroforge.core.visualization.fiber_sync_helpers import endpoint_world, mark_endpoint_handle, mark_touch_handle
+from anthroforge.core.visualization.fiber_sync_helpers import endpoint_world, mark_endpoint_handle, mark_touch_handle, touch_world
 
 
 def _fiber_setup():
@@ -100,6 +100,10 @@ def _select_edit_vert(bm, index):
 
 def _handle_count(fiber_id):
     return sum(bool(obj.get("af_fiber_id") == fiber_id and (obj.get("af_fiber_endpoint_handle") or obj.get("af_fiber_touch_handle"))) for obj in bpy.context.scene.objects)
+
+
+def _touch_handle(fiber_id, index=0):
+    return next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_touch_handle") and obj.get("af_fiber_id") == fiber_id and int(obj.get("af_fiber_touch_index", -1)) == index)
 
 
 def _loop_mesh_object(name, location=(0.0, 0.0, 0.0)):
@@ -205,6 +209,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual((len(fiber.mid_touches), fiber.mid_touches[0].parent_id), (1, origin.id))
         target = origin.geometry_object_ref.matrix_world @ origin.geometry_object_ref.data.vertices[1].co
         actual = endpoint_world(root_obj, bpy.context.scene, {}, fiber.mid_touches[0].parent_id, fiber.mid_touches[0].attach_param)
+        self.assertEqual(parse_fiber_attach_param(fiber.mid_touches[0].attach_param), ("mesh_vertex_v1", 1))
         self.assertLess((actual - target).length, 1.0e-6)
 
     def test_recompute_fiber_sets_status_and_elapsed_time(self):
@@ -266,6 +271,39 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertTrue(hasattr(fiber, "use_warm_start"))
         self.assertTrue(fiber.use_warm_start)
 
+    def test_new_fiber_defaults_remove_legacy_solver_knobs(self):
+        _root_obj, fiber, _origin, _insert = _fiber_setup()
+        self.assertFalse(hasattr(fiber, "collision_margin"))
+        self.assertFalse(hasattr(fiber, "damping"))
+        self.assertFalse(hasattr(fiber, "guide_stiffness"))
+
+    def test_default_touch_keeps_mesh_anchor_and_zero_offset(self):
+        root_obj, fiber, origin, _insert = _fiber_setup()
+        select_only(origin.geometry_object_ref)
+        self.assertEqual(bpy.ops.af.add_fiber_touch_point(fiber_id=fiber.id), {"FINISHED"})
+        touch = fiber.mid_touches[0]
+        self.assertEqual((touch.normal_offset, parse_fiber_attach_param(touch.attach_param)[0]), (0.0, "mesh_anchor"))
+
+    def test_vertex_touch_offset_lifts_solver_pin(self):
+        root_obj, fiber, origin, _insert = _fiber_setup()
+        _edit_select_vertex(origin.geometry_object_ref, 1)
+        self.assertEqual(bpy.ops.af.add_fiber_touch_point(fiber_id=fiber.id), {"FINISHED"})
+        touch = fiber.mid_touches[0]
+        touch.normal_offset = 0.25
+        target = origin.geometry_object_ref.matrix_world @ origin.geometry_object_ref.data.vertices[1].co
+        lifted = touch_world(root_obj, bpy.context.scene, {}, touch)
+        self.assertEqual((round(lifted.x, 4), round(lifted.y, 4), round(lifted.z, 4)), (round(target.x, 4), round(target.y, 4), round(target.z + 0.25, 4)))
+
+    def test_vertex_touch_negative_offset_lifts_along_negative_normal(self):
+        root_obj, fiber, origin, _insert = _fiber_setup()
+        _edit_select_vertex(origin.geometry_object_ref, 1)
+        self.assertEqual(bpy.ops.af.add_fiber_touch_point(fiber_id=fiber.id), {"FINISHED"})
+        touch = fiber.mid_touches[0]
+        touch.normal_offset = -0.25
+        target = origin.geometry_object_ref.matrix_world @ origin.geometry_object_ref.data.vertices[1].co
+        lifted = touch_world(root_obj, bpy.context.scene, {}, touch)
+        self.assertEqual((round(lifted.x, 4), round(lifted.y, 4), round(lifted.z, 4)), (round(target.x, 4), round(target.y, 4), round(target.z - 0.25, 4)))
+
     def test_endpoint_handle_update_uses_conflict_resolution(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
         _sync_active_fiber(root_obj, fiber)
@@ -285,6 +323,29 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         with patch.object(fiber_runtime, "resolve_conflict", return_value="TOUCH_RAW"):
             fiber_runtime.apply_fiber_control_update(sync, root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
         self.assertEqual(fiber.mid_touches[0].attach_param, "TOUCH_RAW")
+
+    def test_touch_handle_stays_on_base_surface_with_offset(self):
+        root_obj, fiber, origin, _insert = _fiber_setup()
+        _edit_select_vertex(origin.geometry_object_ref, 1)
+        self.assertEqual(bpy.ops.af.add_fiber_touch_point(fiber_id=fiber.id), {"FINISHED"})
+        fiber.mid_touches[0].normal_offset = 0.2
+        handle = mark_touch_handle(empty_object("TouchBase"), root_obj, fiber.id, 0)
+        base = endpoint_world(root_obj, bpy.context.scene, {}, fiber.mid_touches[0].parent_id, fiber.mid_touches[0].attach_param)
+        lifted = touch_world(root_obj, bpy.context.scene, {}, fiber.mid_touches[0])
+        handle.location = base
+        self.assertLess((handle.location - base).length, 1.0e-6)
+        self.assertGreater((handle.location - lifted).length, 1.0e-6)
+
+    def test_touch_handle_move_preserves_vertex_attach_mode(self):
+        root_obj, fiber, origin, _insert = _fiber_setup()
+        _edit_select_vertex(origin.geometry_object_ref, 1)
+        self.assertEqual(bpy.ops.af.add_fiber_touch_point(fiber_id=fiber.id), {"FINISHED"})
+        handle = mark_touch_handle(empty_object("TouchMove"), root_obj, fiber.id, 0)
+        handle.location = origin.geometry_object_ref.matrix_world @ origin.geometry_object_ref.data.vertices[2].co
+        sync = register_fiber_sync()
+        with patch.object(fiber_runtime, "resolve_conflict", side_effect=lambda **kwargs: kwargs["incoming"]):
+            fiber_runtime.apply_fiber_control_update(sync, root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        self.assertEqual(parse_fiber_attach_param(fiber.mid_touches[0].attach_param), ("mesh_vertex_v1", 2))
 
     def test_delete_fiber_in_tree_removes_proxy_and_handles(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()

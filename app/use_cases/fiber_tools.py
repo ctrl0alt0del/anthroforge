@@ -224,7 +224,7 @@ def _apply_derived_defaults(child, fiber):
 
 
 def _copy_loop_settings(child, fiber):
-    for key in ("thickness", "collision_margin", "damping", "bend_stiffness", "stretch_stiffness", "iterations_interactive", "iterations_bake", "guide_stiffness"):
+    for key in ("thickness", "bend_stiffness", "stretch_stiffness", "iterations_interactive", "iterations_bake"):
         setattr(child, key, getattr(fiber, key))
 
 
@@ -299,8 +299,9 @@ def _history_mesh_indices(bm):
 
 def _mesh_specs(obj, indices):
     scp_id = str(obj.get("af_scp_id", "") or "")
-    encode = _encode_fiber_anchor()
-    return tuple((scp_id, encode(obj.data.vertices[i].co.copy())) for i in tuple(indices or ()) if 0 <= int(i) < len(obj.data.vertices))
+    encode = _encode_fiber_vertex_index()
+    signature = _mesh_signature()(obj.data)
+    return tuple((scp_id, encode(i, signature)) for i in tuple(indices or ()) if 0 <= int(i) < len(obj.data.vertices))
 
 
 def _default_touch_specs(context, root):
@@ -410,6 +411,14 @@ def _selected_proxy_vertices():
     except ImportError:
         from core.scp_proxy import selected_proxy_vertices
     return selected_proxy_vertices
+
+
+def _mesh_signature():
+    try:
+        from ...core.scp_proxy.signature import mesh_topology_signature
+    except ImportError:
+        from core.scp_proxy.signature import mesh_topology_signature
+    return mesh_topology_signature
 
 
 def _is_geometry_scp_obj():

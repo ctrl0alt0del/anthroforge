@@ -14,6 +14,7 @@ from .fiber_sync_helpers import (
     update_curve_points,
     get_scp_proxy,
     endpoint_world,
+    nearest_parent_mesh_vertex_attach,
     nearest_param,
     nearest_parent_mesh_vertex_local_point,
     world_units_per_pixel,
@@ -94,6 +95,9 @@ class FiberSceneSync:
 
     def _nearest_parent_mesh_vertex_local_point(self, parent_proxy, moved_world):
         return nearest_parent_mesh_vertex_local_point(parent_proxy, moved_world)
+
+    def _nearest_parent_mesh_vertex_attach(self, parent_proxy, moved_world):
+        return nearest_parent_mesh_vertex_attach(parent_proxy, moved_world)
 
     def _world_units_per_pixel(self, world_loc, window_manager=None):
         return world_units_per_pixel(world_loc, window_manager)

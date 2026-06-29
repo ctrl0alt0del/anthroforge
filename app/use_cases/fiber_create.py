@@ -175,8 +175,6 @@ def _fiber_defaults():
         "iterations_bake": 180,
         "stretch_stiffness": 0.9,
         "bend_stiffness": 0.02,
-        "collision_margin": 0.002,
-        "damping": 0.01,
         "thickness": 0.01,
     }
 
@@ -238,16 +236,17 @@ def _ordered_mesh_indices(bm):
     return history + [vert.index for vert in bm.verts if vert.select and vert.index not in seen]
 
 
+def _mesh_specs(obj, indices):
+    scp_id = str(obj.get("af_scp_id", "") or "")
+    encode = _encode_fiber_vertex_index()
+    signature = _mesh_signature()(obj.data)
+    return tuple((scp_id, encode(i, signature)) for i in tuple(indices or ()) if 0 <= int(i) < len(obj.data.vertices))
+
+
 def _history_mesh_indices(bm):
     import bmesh
 
     return [elem.index for elem in bm.select_history if isinstance(elem, bmesh.types.BMVert) and elem.select]
-
-
-def _mesh_specs(obj, indices):
-    scp_id = str(obj.get("af_scp_id", "") or "")
-    encode = _encode_fiber_anchor()
-    return tuple((scp_id, encode(obj.data.vertices[i].co.copy())) for i in tuple(indices or ()) if 0 <= int(i) < len(obj.data.vertices))
 
 
 def _select_if_found(context, obj):
@@ -339,6 +338,14 @@ def _selected_proxy_vertices():
     except ImportError:
         from core.scp_proxy import selected_proxy_vertices
     return selected_proxy_vertices
+
+
+def _mesh_signature():
+    try:
+        from ...core.scp_proxy.signature import mesh_topology_signature
+    except ImportError:
+        from core.scp_proxy.signature import mesh_topology_signature
+    return mesh_topology_signature
 
 
 def _notify_selection_changed():

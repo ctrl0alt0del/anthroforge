@@ -5,7 +5,7 @@ from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..deps.conflict_resolver import resolve_conflict
 from ..vcp.fiber_modes import is_derived_loop, is_open_fiber
 from ..utils import depsgraph_for_scene, get_af_root, scene_for_id
-from ..attachment_codec import encode_fiber_mesh_anchor
+from ..attachment_codec import encode_fiber_mesh_anchor, is_fiber_vertex_attach
 from .control_runtime import active_entity_id
 
 
@@ -190,6 +190,12 @@ def _compute_attach_raw(sync, parent_obj, moved_world):
     return None if local_pt is None else encode_fiber_mesh_anchor(local_pt)
 
 
+def _compute_touch_attach_raw(sync, parent_obj, moved_world, current):
+    if not is_fiber_vertex_attach(current):
+        return _compute_attach_raw(sync, parent_obj, moved_world)
+    return sync._nearest_parent_mesh_vertex_attach(parent_obj, moved_world)
+
+
 def _resolved_parent_obj(sync, scene, root, parent_id):
     return None if not parent_id else sync._get_scp_proxy(scene, root.name, parent_id)
 
@@ -233,7 +239,8 @@ def _update_touch_handle(sync, root, scene, obj, changed_ids):
     if fiber is None or touch_index < 0 or touch_index >= len(fiber.mid_touches):
         return False
     tp = fiber.mid_touches[touch_index]
-    raw = _resolved_attachment(sync, _resolved_parent_obj(sync, scene, root, tp.parent_id), obj.location.copy())
+    parent = _resolved_parent_obj(sync, scene, root, tp.parent_id)
+    raw = _compute_touch_attach_raw(sync, parent, obj.location.copy(), str(tp.attach_param or ""))
     if raw is None:
         return False
     current = str(tp.attach_param or "")

@@ -2,6 +2,7 @@ import bpy
 from ...app.queries.root import root_for_context
 from ...app.queries.scp import scp_label
 from ...app.queries.vcp import active_fiber_from_context, has_active_entity
+from ...core.attachment_codec import is_fiber_vertex_attach
 from ...core.vcp.fiber_modes import is_derived_loop, is_loop_fiber, is_solved_loop
 from ...core.vcp.runtime_state import (
     fiber_active_colliders,
@@ -77,10 +78,6 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         solver_box.prop(fiber, "iterations_interactive")
         solver_box.prop(fiber, "iterations_bake")
         solver_box.prop(fiber, "bend_stiffness")
-        solver_box.prop(fiber, "collision_margin")
-        solver_box.prop(fiber, "damping")
-        if hasattr(fiber, "guide_stiffness"):
-            solver_box.prop(fiber, "guide_stiffness")
 
     def _draw_loop_solver(self, layout, fiber):
         self._draw_solver(layout, fiber)
@@ -95,16 +92,27 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         op = touch_box.operator("af.add_fiber_touch_point", icon="ADD")
         op.fiber_id = fiber.id
         for i, tp in enumerate(fiber.mid_touches):
-            row = touch_box.row(align=True)
-            row.label(text=f"{i + 1}. {scp_label(root, tp.parent_id)}")
-            op = row.operator("af.remove_fiber_touch_point", text="", icon="X")
-            op.fiber_id = fiber.id
-            op.touch_index = i
+            self._draw_touch_point(touch_box, root, fiber, i, tp)
+
+    def _draw_touch_point(self, layout, root, fiber, index, touch):
+        row = layout.row(align=True)
+        row.label(text=f"{index + 1}. {scp_label(root, touch.parent_id)}")
+        op = row.operator("af.remove_fiber_touch_point", text="", icon="X")
+        op.fiber_id, op.touch_index = fiber.id, index
+        self._draw_touch_offset(layout, touch)
+
+    def _draw_touch_offset(self, layout, touch):
+        row = layout.row(align=True)
+        if is_fiber_vertex_attach(getattr(touch, "attach_param", "")):
+            row.prop(touch, "normal_offset", text="Offset")
+            return
+        row.enabled = False
+        row.prop(touch, "normal_offset", text="Offset")
+        row.label(text="Vertex touch required")
 
     def _draw_derived_display(self, layout, fiber):
         box = layout.box()
         box.label(text="Display")
-        box.prop(fiber, "collision_margin")
         box.prop(fiber, "thickness")
 
     def _draw_status(self, layout, fiber):

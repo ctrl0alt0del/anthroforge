@@ -5,7 +5,7 @@ from bpy_extras import view3d_utils
 
 from ..deps.control_lifecycle import mark_dynamic_control_object
 from ..scp_runtime.object_colors import apply_object_color
-from ..attachment_codec import fiber_attach_signature, parse_fiber_attach_param
+from ..attachment_codec import encode_fiber_vertex_index, fiber_attach_signature, is_fiber_vertex_attach, parse_fiber_attach_param
 from ..scp_proxy.signature import mesh_topology_signature
 from ..utils import depsgraph_for_scene, scene_for_id
 from ..scp_runtime.common import find_geometry_scp_obj
@@ -232,6 +232,19 @@ def _mesh_local_point_from_vertex_index(parent_obj, payload, raw):
         obj_eval.to_mesh_clear()
 
 
+def _mesh_world_normal_from_vertex_index(parent_obj, payload, raw):
+    obj_eval, mesh_eval = _open_eval_mesh(parent_obj)
+    if mesh_eval is None:
+        return None
+    try:
+        if not _vertex_signature_ok(mesh_eval, raw):
+            return None
+        index = max(0, min(len(mesh_eval.vertices) - 1, int(payload)))
+        return _world_normal(parent_obj, mesh_eval.vertices[index].normal.copy())
+    finally:
+        obj_eval.to_mesh_clear()
+
+
 def _local_from_attach(proxy, mode, payload, raw):
     if mode == "mesh_anchor":
         return payload
@@ -240,6 +253,24 @@ def _local_from_attach(proxy, mode, payload, raw):
     if mode == "mesh_vertex_v1":
         return _mesh_local_point_from_vertex_index(proxy, payload, raw)
     return None
+
+
+def _world_normal(parent_obj, normal):
+    if Vector(normal).length <= 1.0e-8:
+        return None
+    matrix = parent_obj.matrix_world.to_3x3().inverted().transposed()
+    return (matrix @ Vector(normal)).normalized()
+
+
+def attach_world_normal(root, scene, runtime_registry, parent_id, attach_param_raw):
+    _ = runtime_registry
+    if not parent_id or not is_fiber_vertex_attach(attach_param_raw):
+        return None
+    proxy = get_scp_proxy(scene, root.name, parent_id)
+    if proxy is None:
+        return None
+    _mode, payload = parse_fiber_attach_param(attach_param_raw)
+    return _mesh_world_normal_from_vertex_index(proxy, payload, attach_param_raw)
 
 
 def endpoint_world(root, scene, runtime_registry, parent_id, attach_param_raw):
@@ -256,13 +287,22 @@ def endpoint_world(root, scene, runtime_registry, parent_id, attach_param_raw):
     return proxy.matrix_world @ local
 
 
+def touch_world(root, scene, runtime_registry, touch):
+    world = endpoint_world(root, scene, runtime_registry, touch.parent_id, touch.attach_param)
+    offset = float(getattr(touch, "normal_offset", 0.0))
+    if world is None or abs(offset) <= 1.0e-9:
+        return world
+    normal = attach_world_normal(root, scene, runtime_registry, touch.parent_id, touch.attach_param)
+    return world if normal is None else world + normal * offset
+
+
 def _nearest_eval_vertex(parent_proxy, moved_world):
     obj_eval, mesh_eval = _open_eval_mesh(parent_proxy)
     if mesh_eval is None:
-        return None, 0, 0
+        return None, 0, 0, ""
     try:
         best = min(mesh_eval.vertices, key=lambda v: ((parent_proxy.matrix_world @ v.co) - moved_world).length_squared)
-        return best.co.copy(), best.index, len(mesh_eval.vertices)
+        return best.co.copy(), best.index, len(mesh_eval.vertices), mesh_topology_signature(mesh_eval)
     finally:
         obj_eval.to_mesh_clear()
 
@@ -271,7 +311,7 @@ def nearest_param(parent_scp, parent_proxy, moved_world):
     _ = parent_scp
     if not _is_mesh_obj(parent_proxy):
         return 0.0
-    _local, index, count = _nearest_eval_vertex(parent_proxy, moved_world)
+    _local, index, count, _signature = _nearest_eval_vertex(parent_proxy, moved_world)
     if count == 0:
         return 0.0
     if count <= 1:
@@ -282,8 +322,15 @@ def nearest_param(parent_scp, parent_proxy, moved_world):
 def nearest_parent_mesh_vertex_local_point(parent_proxy, moved_world):
     if not _is_mesh_obj(parent_proxy):
         return None
-    local, _index, _count = _nearest_eval_vertex(parent_proxy, moved_world)
+    local, _index, _count, _signature = _nearest_eval_vertex(parent_proxy, moved_world)
     return local
+
+
+def nearest_parent_mesh_vertex_attach(parent_proxy, moved_world):
+    if not _is_mesh_obj(parent_proxy):
+        return None
+    _local, index, _count, signature = _nearest_eval_vertex(parent_proxy, moved_world)
+    return None if signature == "" else encode_fiber_vertex_index(index, signature)
 
 
 def _first_window_manager():

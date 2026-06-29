@@ -134,6 +134,14 @@ def parse_fiber_attach_param(raw):
     return _fiber_mode_payload(_json_data(raw))
 
 
+def fiber_attach_mode(raw):
+    return parse_fiber_attach_param(raw)[0]
+
+
+def is_fiber_vertex_attach(raw):
+    return fiber_attach_mode(raw) == "mesh_vertex_v1"
+
+
 def fiber_attach_signature(raw):
     data = _json_data(raw)
     return "" if not isinstance(data, dict) else str(data.get("topology_signature", "") or "")

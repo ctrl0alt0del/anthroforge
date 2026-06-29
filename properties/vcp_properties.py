@@ -109,6 +109,7 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
 class AF_FiberTouchPoint_Property(bpy.types.PropertyGroup):
     parent_id: bpy.props.StringProperty(name="Touch SCP ID", default="", update=_sync_vcp_scene)
     attach_param: bpy.props.StringProperty(name="Touch Attach Param JSON", default="0.0", update=_sync_vcp_scene)
+    normal_offset: bpy.props.FloatProperty(name="Normal Offset", default=0.0, update=_sync_vcp_scene)
 
 
 class AF_FiberLoopAnchor_Property(bpy.types.PropertyGroup):
@@ -150,7 +151,6 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     loop_profile_keys: bpy.props.CollectionProperty(type=AF_FiberLoopProfileKey_Property)
     loop_base_offset_u: bpy.props.FloatProperty(name="Base Offset U", default=0.0, update=_on_fiber_prop_update)
     loop_base_offset_v: bpy.props.FloatProperty(name="Base Offset V", default=0.0, update=_on_fiber_prop_update)
-    guide_stiffness: bpy.props.FloatProperty(name="Guide Stiffness", default=1.0, min=0.0, max=1.0, update=_on_fiber_prop_update)
 
     muscle_id: bpy.props.StringProperty(name="Muscle ID", default="", update=_on_fiber_prop_update)
 
@@ -160,8 +160,6 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     iterations_bake: bpy.props.IntProperty(name="Iterations (Bake)", default=120, min=1, max=1000, update=_on_fiber_prop_update)
 
     bend_stiffness: bpy.props.FloatProperty(name="Bend Stiffness", default=0.15, min=0.0, max=1.0, update=_on_fiber_prop_update)
-    collision_margin: bpy.props.FloatProperty(name="Collision Margin", default=0.002, min=0.0, max=1.0, update=_on_fiber_prop_update)
-    damping: bpy.props.FloatProperty(name="Damping", default=0.10, min=0.0, max=1.0, update=_on_fiber_prop_update)
 
     stretch_stiffness: bpy.props.FloatProperty(name="Shorten Strength", default=0.9, min=0.0, max=1.0, update=_on_fiber_prop_update)
 
