@@ -111,12 +111,55 @@ def _loop_mesh_object(name, location=(0.0, 0.0, 0.0)):
     return obj
 
 
+def _acute_loop_mesh_object(name, location=(0.0, 0.0, 0.0)):
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata([(-1.5, 0.0, 0.0), (0.0, 1.2, 0.0), (3.0, 0.0, 0.0), (0.0, -1.2, 0.0)], [], [(0, 1, 2, 3)])
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.location = location
+    return obj
+
+
 def _loop_setup():
     root_obj = root()
     loop = scp_with_object(root_obj, "Loop", _loop_mesh_object("Loop"))
     _edit_select_vertex(loop.geometry_object_ref, 0, 1, 2, 3)
     bpy.ops.af.create_loop_fiber_from_selected_vertices()
     return root_obj, root_obj.af_vcp_system.fibers[0], loop
+
+
+def _derived_loop_setup(mesh_factory, offset):
+    root_obj = root()
+    loop = scp_with_object(root_obj, "Loop", mesh_factory("Loop"))
+    _edit_select_vertex(loop.geometry_object_ref, 0, 1, 2, 3)
+    bpy.ops.af.create_loop_fiber_from_selected_vertices()
+    solved = root_obj.af_vcp_system.fibers[0]
+    bpy.ops.af.add_dependent_loop_fiber(fiber_id=solved.id)
+    child = root_obj.af_vcp_system.fibers[1]
+    child.loop_base_offset_u = offset
+    register_fiber_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+    return child
+
+
+def _orient2(a, b, c):
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+def _segments_cross(a0, a1, b0, b1, eps=1.0e-6):
+    o1, o2 = _orient2(a0, a1, b0), _orient2(a0, a1, b1)
+    o3, o4 = _orient2(b0, b1, a0), _orient2(b0, b1, a1)
+    return o1 * o2 < -eps and o3 * o4 < -eps
+
+
+def _self_intersects(points):
+    count = len(points)
+    for i in range(count):
+        for j in range(i + 1, count):
+            if abs(i - j) <= 1 or (i == 0 and j == count - 1):
+                continue
+            if _segments_cross(points[i], points[(i + 1) % count], points[j], points[(j + 1) % count]):
+                return True
+    return False
 
 
 class FiberVcpWorkflowTests(BlenderTestCase):
@@ -276,6 +319,11 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         proxy = find_flagged("af_fiber_proxy", child.id, "af_fiber_id")
         self.assertEqual((child.topology_mode, child.generation_mode, child.driver_fiber_id, len(child.loop_profile_keys)), ("LOOP", "DERIVED", fiber.id, 4))
         self.assertEqual((_handle_count(child.id), proxy.data.splines[0].use_cyclic_u), (0, True))
+
+    def test_dependent_loop_offset_keeps_acute_loop_simple(self):
+        child = _derived_loop_setup(_acute_loop_mesh_object, 0.35)
+        points = [(item[0], item[1]) for item in _fiber_points_world(child)]
+        self.assertFalse(_self_intersects(points))
 
     def test_delete_loop_root_cascades_to_derived_children(self):
         root_obj, fiber, _loop = _loop_setup()

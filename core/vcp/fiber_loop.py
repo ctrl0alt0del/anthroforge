@@ -90,6 +90,63 @@ def loop_frames(points):
     return tangents, *_twist_closed_frames(tangents, normals, binormals)
 
 
+def derived_loop_targets(points, fiber):
+    plane = loop_plane(points)
+    flat = _flat_points(points, plane)
+    plan = _planar_targets(flat, _profile_lists(fiber, len(points)))
+    return [] if not plan else _lift_targets(points, flat, plan, plane)
+
+
+def loop_plane(points):
+    normal = _best_fit_normal(points)
+    axis_u = _plane_axis(points, normal)
+    axis_v = _safe_dir(normal.cross(axis_u), Vector((0.0, 1.0, 0.0)))
+    return loop_center(points), axis_u, axis_v, normal
+
+
+def _plane_axis(points, normal):
+    for i in range(len(points)):
+        edge = points[(i + 1) % len(points)] - points[i]
+        axis = edge - normal * edge.dot(normal)
+        if axis.length > 1.0e-8:
+            return axis.normalized()
+    return _fallback_axis(normal)
+
+
+def _flat_points(points, plane):
+    origin, axis_u, axis_v, _normal = plane
+    return [Vector(((point - origin).dot(axis_u), (point - origin).dot(axis_v))) for point in points]
+
+
+def _profile_lists(fiber, count):
+    pairs = [profile_offsets(fiber, i / float(max(1, count))) for i in range(count)]
+    return [pair[0] for pair in pairs], [pair[1] for pair in pairs]
+
+
+def _planar_targets(flat, offsets):
+    values, lifts = offsets
+    if len(flat) < 3:
+        return []
+    center = _flat_center(flat)
+    return [_radial_target(flat, values, center, i) for i in range(len(flat))], lifts
+
+
+def _flat_center(points):
+    return sum((point for point in points), Vector((0.0, 0.0))) / float(max(1, len(points)))
+
+
+def _radial_target(flat, offsets, center, index):
+    fallback = flat[index] - flat[index - 1]
+    direction = _safe_dir(center - flat[index], fallback)
+    return flat[index] + direction * offsets[index]
+
+
+def _lift_targets(points, flat, plan, plane):
+    shifted, lifts = plan
+    _origin, axis_u, axis_v, normal = plane
+    return [points[i] + axis_u * (shifted[i].x - flat[i].x) + axis_v * (shifted[i].y - flat[i].y) + normal * lifts[i] for i in range(len(points))]
+
+
 def _best_fit_normal(points):
     center = loop_center(points)
     normal = sum(((points[i] - center).cross(points[(i + 1) % len(points)] - center) for i in range(len(points))), Vector())

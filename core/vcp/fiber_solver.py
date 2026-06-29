@@ -4,7 +4,7 @@ from mathutils import Vector
 
 from ..visualization.fiber_sync_helpers import endpoint_world as resolve_fiber_endpoint_world
 from .fiber_collision import CollisionOracle
-from .fiber_loop import loop_frames, loop_pin_targets, profile_offsets, resample_closed
+from .fiber_loop import derived_loop_targets, loop_frames, loop_pin_targets, profile_offsets, resample_closed
 from .fiber_modes import DERIVED_GENERATION, fiber_root, fibers_by_id, is_derived_loop, is_loop_fiber, loop_anchor_specs
 from .fiber_planner import DIRECT, LOCAL_FALLBACK, PlannerAnchor, plan_route
 from .runtime_state import (
@@ -276,6 +276,10 @@ class FiberSolver:
         return self._smooth_derived_loop(target, oracle)
 
     def _derived_target_points(self, driver_points, fiber_prop):
+        target = derived_loop_targets(driver_points, fiber_prop)
+        return target or self._frame_target_points(driver_points, fiber_prop)
+
+    def _frame_target_points(self, driver_points, fiber_prop):
         tangents, normals, binormals = loop_frames(driver_points)
         count = float(max(1, len(driver_points)))
         return [self._derived_point(driver_points[i], normals[i], binormals[i], fiber_prop, i / count) for i in range(len(driver_points))]
