@@ -63,6 +63,16 @@ def fiber(root_obj, a_id, b_id):
     return item
 
 
+def capture_mesh_attachment(root_obj, scp, index):
+    from core.vcp.attachment_backend import capture_attachment_from_mesh_vertex
+    return capture_attachment_from_mesh_vertex(root_obj, bpy.context.scene, scp.id, index)
+
+
+def capture_world_attachment(root_obj, scp_id, point):
+    from core.vcp.attachment_backend import capture_attachment_from_world
+    return capture_attachment_from_world(root_obj, bpy.context.scene, scp_id, point)
+
+
 def select_only(obj):
     for other in tuple(bpy.context.selected_objects):
         other.select_set(False)

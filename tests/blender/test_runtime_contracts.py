@@ -12,7 +12,7 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 
 import bpy
 
-from _helpers import BlenderTestCase, add_shortcut, empty_object, fiber, mesh_object, root, scp_with_object, temp_blend_path
+from _helpers import BlenderTestCase, add_shortcut, capture_mesh_attachment, empty_object, fiber, mesh_object, root, scp_with_object, temp_blend_path
 from app.context import AddonContext
 from app.runtime_requests import RuntimeRequest
 from core.deps.drivers import DependencyDriver
@@ -48,7 +48,7 @@ def _save_load_fixture():
     child = scp_with_object(root_obj, "Child", mesh_object("Child", (1.0, 0.0, 0.0)))
     set_parent_relation(child.transform_object_ref, child, parent.transform_object_ref)
     _configure_scp(parent, child)
-    fib, muscle, blob = _configure_vcps(root_obj, parent.id, child.id)
+    fib, muscle, blob = _configure_vcps(root_obj, parent, child)
     add_shortcut(root_obj, "Child X", "SCP", child.id, "location[0]")
     return temp_blend_path(), (parent.id, child.id, fib.id, muscle.id, blob.id)
 
@@ -60,11 +60,12 @@ def _configure_scp(parent, child):
     child.attach_follow_rotation, child.attach_tangent_strategy = False, "STABLE_SURFACE"
 
 
-def _configure_vcps(root_obj, parent_id, child_id):
-    fib = fiber(root_obj, parent_id, child_id)
-    fib.a_attach_param, fib.b_attach_param = "A", "B"
+def _configure_vcps(root_obj, parent, child):
+    fib = fiber(root_obj, parent.id, child.id)
+    fib.a_attach_param = capture_mesh_attachment(root_obj, parent, 0)
+    fib.b_attach_param = capture_mesh_attachment(root_obj, child, 0)
     fib.node_count, fib.thickness = 24, 0.02
-    fib.mid_touches.add().parent_id, fib.mid_touches[0].attach_param = parent_id, "T1"
+    fib.mid_touches.add().parent_id, fib.mid_touches[0].attach_param = parent.id, capture_mesh_attachment(root_obj, parent, 1)
     set_fiber_recompute_status(fib, "CONVERGED")
     set_fiber_recompute_ms(fib, 12.3)
     muscle = _new_muscle(root_obj, fib.id)

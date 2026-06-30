@@ -7,6 +7,7 @@ _FIBER_ROUTE = "_af_rt_fiber_last_route_mode"
 _FIBER_PLAN = "_af_rt_fiber_last_planner_ms"
 _FIBER_REFINE = "_af_rt_fiber_last_refine_ms"
 _FIBER_ACTIVE = "_af_rt_fiber_last_active_colliders"
+_FIBER_INVALID = "_af_rt_fiber_last_invalid_reason"
 _BLOB_OK = "_af_rt_blob_last_solve_converged"
 _BLOB_DISP = "_af_rt_blob_last_solve_max_disp"
 _BLOB_ITERS = "_af_rt_blob_last_solve_iterations"
@@ -85,6 +86,14 @@ def set_fiber_active_colliders(fiber, value):
     _write(fiber, _FIBER_ACTIVE, int(value))
 
 
+def fiber_invalid_reason(fiber):
+    return str(_read(fiber, _FIBER_INVALID, "") or "")
+
+
+def set_fiber_invalid_reason(fiber, value):
+    _write(fiber, _FIBER_INVALID, str(value or ""))
+
+
 def reset_fiber_runtime(fiber):
     set_fiber_not_converged(fiber, False)
     set_fiber_recompute_ms(fiber, 0.0)
@@ -95,6 +104,7 @@ def reset_fiber_runtime(fiber):
     set_fiber_planner_ms(fiber, 0.0)
     set_fiber_refine_ms(fiber, 0.0)
     set_fiber_active_colliders(fiber, 0)
+    set_fiber_invalid_reason(fiber, "")
 
 
 def blob_solve_converged(blob):

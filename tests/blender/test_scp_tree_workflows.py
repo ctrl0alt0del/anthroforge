@@ -9,7 +9,7 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 
 import bpy
 
-from _helpers import BlenderTestCase, add_shortcut, empty_object, fiber, mesh_object, root, scp_with_object, select_only
+from _helpers import BlenderTestCase, add_shortcut, capture_mesh_attachment, empty_object, fiber, mesh_object, root, scp_with_object, select_only
 from core.id_utils import next_prefixed_id
 from core.scp_runtime.attachment_runtime import capture_attachment_from_link
 from core.scp_runtime.copy import copy_scp_subtree
@@ -51,7 +51,8 @@ def _copy_fixture(root_obj):
     child = scp_with_object(root_obj, "Child", mesh_object("Child", (1.0, 0.0, 0.0)))
     set_parent_relation(child.transform_object_ref, child, parent.transform_object_ref)
     fib = fiber(root_obj, parent.id, child.id)
-    fib.a_attach_param, fib.b_attach_param = "A", "B"
+    fib.a_attach_param = capture_mesh_attachment(root_obj, parent, 0)
+    fib.b_attach_param = capture_mesh_attachment(root_obj, child, 0)
     muscle = _new_muscle(root_obj, fib.id)
     fib.muscle_id = muscle.id
     return parent, child, fib, muscle, _new_blob(root_obj, muscle.id)

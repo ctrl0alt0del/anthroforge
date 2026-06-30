@@ -1,7 +1,5 @@
 import bpy
 
-from mathutils import Vector
-
 from ..queries.root import root_for_context
 from .results import failure, success
 
@@ -28,7 +26,7 @@ def create_fiber_from_proxy_vertices(context):
     if root is None:
         return failure("No AF_ROOT found.")
     picks, error = _selected_proxy_vertices()(context)
-    return failure(error) if error else _create_fiber(context, root, _resolved_proxy_inputs(picks), "Select at least two proxy vertices.")
+    return failure(error) if error else _create_fiber(context, root, _resolved_proxy_inputs(root, context.scene, picks), "Select at least two proxy vertices.")
 
 
 def create_loop_fiber_from_selected_vertices(context):
@@ -64,47 +62,47 @@ def _resolved_inputs(context, root):
     return None if origin_raw is None or insert_raw is None else _fiber_spec(origin_id, insert_id, origin_raw, insert_raw)
 
 
-def _resolved_proxy_inputs(picks):
+def _resolved_proxy_inputs(root, scene, picks):
     picks = tuple(picks or ())
     if len(picks) < 2:
         return None
     a, b = picks[0], picks[-1]
-    encode = _encode_fiber_vertex_index()
-    return _fiber_spec(a.scp_id, b.scp_id, encode(a.vertex_index, a.signature), encode(b.vertex_index, b.signature), _proxy_touch_specs(picks[1:-1]))
+    a_raw = _proxy_attach(root, scene, a)
+    b_raw = _proxy_attach(root, scene, b)
+    return None if a_raw is None or b_raw is None else _fiber_spec(a.scp_id, b.scp_id, a_raw, b_raw, _proxy_touch_specs(root, scene, picks[1:-1]))
 
 
 def _fiber_spec(origin_id, insert_id, origin_raw, insert_raw, touch_specs=()):
     return origin_id, insert_id, origin_raw, insert_raw, tuple(touch_specs or ())
 
 
-def _proxy_touch_specs(picks):
-    encode = _encode_fiber_vertex_index()
-    return tuple((pick.scp_id, encode(pick.vertex_index, pick.signature)) for pick in tuple(picks or ()))
+def _proxy_touch_specs(root, scene, picks):
+    return tuple(spec for spec in (_proxy_spec(root, scene, pick) for pick in tuple(picks or ())) if spec is not None)
 
 
 def _resolved_loop_specs(context, root):
     if _proxy_edit_target(context):
-        return _proxy_loop_specs(context)
+        return _proxy_loop_specs(context, root)
     if _geometry_edit_target(context, root.name):
-        return _mesh_loop_specs(context)
+        return _mesh_loop_specs(context, root)
     return None, "Select ordered mesh/proxy vertices in Edit Mode."
 
 
-def _proxy_loop_specs(context):
+def _proxy_loop_specs(context, root):
     picks, error = _selected_proxy_vertices()(context)
-    return (None, error) if error else (_proxy_specs_from_picks(picks), "")
+    return (None, error) if error else (_proxy_specs_from_picks(root, context.scene, picks), "")
 
 
-def _proxy_specs_from_picks(picks):
-    encode = _encode_fiber_vertex_index()
+def _proxy_specs_from_picks(root, scene, picks):
     items = tuple(picks or ())
-    return None if len(items) < 3 else tuple((pick.scp_id, encode(pick.vertex_index, pick.signature)) for pick in items)
+    specs = _proxy_touch_specs(root, scene, items)
+    return None if len(items) < 3 or len(specs) != len(items) else specs
 
 
-def _mesh_loop_specs(context):
+def _mesh_loop_specs(context, root):
     obj = getattr(context, "active_object", None)
     indices = _selected_mesh_indices(obj)
-    return (None, "Select at least three mesh vertices.") if len(indices) < 3 else (_mesh_specs(obj, indices), "")
+    return (None, "Select at least three mesh vertices.") if len(indices) < 3 else (_mesh_specs(root, context.scene, obj, indices), "")
 
 
 def _endpoint_ids(context):
@@ -116,12 +114,7 @@ def _endpoint_ids(context):
 
 
 def _first_attach_param(scene, root, parent_id):
-    parent = _find_geometry_mesh_scp_obj()(scene, root.name, parent_id)
-    if parent is None:
-        return None
-    point = _nearest_parent_vertex()(parent, scene.cursor.location.copy())
-    point = Vector((0.0, 0.0, 0.0)) if point is None else point
-    return _encode_fiber_anchor()(point)
+    return _capture_attachment_from_world()(root, scene, parent_id, scene.cursor.location.copy())
 
 
 def _new_fiber(root, origin_id, insert_id, origin_raw, insert_raw, touch_specs=()):
@@ -236,11 +229,23 @@ def _ordered_mesh_indices(bm):
     return history + [vert.index for vert in bm.verts if vert.select and vert.index not in seen]
 
 
-def _mesh_specs(obj, indices):
+def _mesh_specs(root, scene, obj, indices):
+    return tuple(spec for spec in (_mesh_spec(root, scene, obj, index) for index in tuple(indices or ())) if spec is not None)
+
+
+def _mesh_spec(root, scene, obj, index):
     scp_id = str(obj.get("af_scp_id", "") or "")
-    encode = _encode_fiber_vertex_index()
-    signature = _mesh_signature()(obj.data)
-    return tuple((scp_id, encode(i, signature)) for i in tuple(indices or ()) if 0 <= int(i) < len(obj.data.vertices))
+    raw = None if not scp_id else _capture_attachment_from_mesh_vertex()(root, scene, scp_id, index)
+    return None if raw is None else (scp_id, raw)
+
+
+def _proxy_spec(root, scene, pick):
+    raw = _proxy_attach(root, scene, pick)
+    return None if raw is None else (pick.scp_id, raw)
+
+
+def _proxy_attach(root, scene, pick):
+    return _capture_attachment_from_proxy_vertex()(root, scene, pick.scp_id, pick.vertex_index, pick.signature)
 
 
 def _history_mesh_indices(bm):
@@ -300,30 +305,6 @@ def _find_proxy(scene, root_name, fiber_id):
     return None
 
 
-def _nearest_parent_vertex():
-    try:
-        from ...core.visualization.fiber_sync_helpers import nearest_parent_mesh_vertex_local_point
-    except ImportError:
-        from core.visualization.fiber_sync_helpers import nearest_parent_mesh_vertex_local_point
-    return nearest_parent_mesh_vertex_local_point
-
-
-def _encode_fiber_anchor():
-    try:
-        from ...core.attachment_codec import encode_fiber_mesh_anchor
-    except ImportError:
-        from core.attachment_codec import encode_fiber_mesh_anchor
-    return encode_fiber_mesh_anchor
-
-
-def _encode_fiber_vertex_index():
-    try:
-        from ...core.attachment_codec import encode_fiber_vertex_index
-    except ImportError:
-        from core.attachment_codec import encode_fiber_vertex_index
-    return encode_fiber_vertex_index
-
-
 def _is_geometry_scp_obj():
     try:
         from ...core.scp_runtime.common import is_geometry_scp_obj
@@ -340,12 +321,28 @@ def _selected_proxy_vertices():
     return selected_proxy_vertices
 
 
-def _mesh_signature():
+def _capture_attachment_from_world():
     try:
-        from ...core.scp_proxy.signature import mesh_topology_signature
+        from ...core.vcp.attachment_backend import capture_attachment_from_world
     except ImportError:
-        from core.scp_proxy.signature import mesh_topology_signature
-    return mesh_topology_signature
+        from core.vcp.attachment_backend import capture_attachment_from_world
+    return capture_attachment_from_world
+
+
+def _capture_attachment_from_mesh_vertex():
+    try:
+        from ...core.vcp.attachment_backend import capture_attachment_from_mesh_vertex
+    except ImportError:
+        from core.vcp.attachment_backend import capture_attachment_from_mesh_vertex
+    return capture_attachment_from_mesh_vertex
+
+
+def _capture_attachment_from_proxy_vertex():
+    try:
+        from ...core.vcp.attachment_backend import capture_attachment_from_proxy_vertex
+    except ImportError:
+        from core.vcp.attachment_backend import capture_attachment_from_proxy_vertex
+    return capture_attachment_from_proxy_vertex
 
 
 def _notify_selection_changed():

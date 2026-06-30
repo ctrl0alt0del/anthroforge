@@ -3,6 +3,7 @@ import bpy
 from ..vcp.fiber_modes import is_loop_fiber
 from ..vcp.fiber_solver import FiberSolver
 from .fiber_sync_helpers import (
+    clear_curve_points,
     get_vis_collection,
     find_fiber_proxy,
     find_endpoint_handle,
@@ -14,11 +15,10 @@ from .fiber_sync_helpers import (
     update_curve_points,
     get_scp_proxy,
     endpoint_world,
-    nearest_parent_mesh_vertex_attach,
     nearest_param,
-    nearest_parent_mesh_vertex_local_point,
     world_units_per_pixel,
 )
+from ..vcp.attachment_backend import capture_attachment_from_object
 from .fiber_sync_runtime import (
     sync_handles as _sync_handles_runtime,
     apply_selection_highlight as _apply_selection_highlight_runtime,
@@ -81,6 +81,9 @@ class FiberSceneSync:
     def _update_curve_points(self, obj, points, thickness, bake=False, cyclic=False):
         update_curve_points(obj, points, thickness, bake=bake, cyclic=cyclic)
 
+    def _clear_curve_points(self, obj):
+        clear_curve_points(obj)
+
     def _fiber_cyclic(self, fiber):
         return is_loop_fiber(fiber)
 
@@ -93,11 +96,8 @@ class FiberSceneSync:
     def _nearest_param(self, parent_scp, parent_proxy, moved_world):
         return nearest_param(parent_scp, parent_proxy, moved_world)
 
-    def _nearest_parent_mesh_vertex_local_point(self, parent_proxy, moved_world):
-        return nearest_parent_mesh_vertex_local_point(parent_proxy, moved_world)
-
-    def _nearest_parent_mesh_vertex_attach(self, parent_proxy, moved_world):
-        return nearest_parent_mesh_vertex_attach(parent_proxy, moved_world)
+    def _capture_attachment_from_world(self, parent_proxy, moved_world, runtime=None):
+        return capture_attachment_from_object(parent_proxy, moved_world, runtime)
 
     def _world_units_per_pixel(self, world_loc, window_manager=None):
         return world_units_per_pixel(world_loc, window_manager)

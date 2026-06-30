@@ -10,6 +10,7 @@ from ..deps.control_lifecycle import should_remove_control_object_on_load, shoul
 from ..deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 from ..scp_runtime.common import is_bound_scp_obj
 from ..scp_runtime.runtime_state import reset_scp_runtime_state
+from ..selection_order import update_selection_order
 from ..utils import depsgraph_for_scene, get_af_root, view_layer_for_scene
 from ..vcp.runtime_state import reset_vcp_runtime_state
 
@@ -193,6 +194,7 @@ class ControlRuntimeOrchestrator:
         self._last_active = ("NONE", "")
 
     def _sync_state(self, scene, force, active_object=None):
+        update_selection_order(scene, active_object=active_object)
         root, current = _root_and_current(scene, active_object)
         if root is None:
             self._clear_last_active()

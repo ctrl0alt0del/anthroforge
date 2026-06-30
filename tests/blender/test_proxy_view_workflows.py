@@ -211,18 +211,18 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         self.assertFalse(scp.geometry_object_ref.hide_get())
         self.assertIsNone(bpy.data.objects.get(proxy_name))
 
-    def test_mesh_vertex_attach_returns_none_after_topology_change(self):
+    def test_surface_attach_survives_proxy_topology_change(self):
         root_obj, scp, mod = _subd_setup()
         self.assertEqual(_switch(scp.geometry_object_ref), {"FINISHED"})
         proxy = _session_proxy(root_obj, "original")
         _edit_select(proxy, 0, 1)
         self.assertEqual(bpy.ops.af.connect_proxy_vertices_with_fiber(), {"FINISHED"})
         fiber = root_obj.af_vcp_system.fibers[0]
-        self.assertIsNotNone(endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param))
+        self.assertEqual(parse_fiber_attach_param(fiber.a_attach_param)[0], "surface_param_v2")
         mod.levels = 2
-        self.assertIsNone(endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param))
+        self.assertIsNotNone(endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param))
 
-    def test_connect_proxy_vertices_with_fiber_uses_mesh_vertex_mode(self):
+    def test_connect_proxy_vertices_with_fiber_writes_surface_mode(self):
         root_obj, parent, left, right = _proxy_setup()
         self.assertEqual(_switch(parent.transform_object_ref), {"FINISHED"})
         proxy = _session_proxy(root_obj, "original")
@@ -232,7 +232,7 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         self.assertEqual((bpy.context.mode, bpy.context.active_object), ("EDIT_MESH", proxy))
         self.assertEqual((fiber.a_parent_id, fiber.b_parent_id), (left.id, right.id))
         self.assertEqual((fiber_proxy is not None, len(fiber_proxy.data.splines) if fiber_proxy else 0), (True, 1))
-        self.assertEqual((parse_fiber_attach_param(fiber.a_attach_param), parse_fiber_attach_param(fiber.b_attach_param)), (("mesh_vertex_v1", 1), ("mesh_vertex_v1", 2)))
+        self.assertEqual((parse_fiber_attach_param(fiber.a_attach_param)[0], parse_fiber_attach_param(fiber.b_attach_param)[0]), ("surface_param_v2", "surface_param_v2"))
         self.assertNotEqual(*_assert_attach_moves(root_obj, fiber, left, 1))
 
     def test_connect_proxy_vertices_with_fiber_uses_middle_vertices_as_touch_points(self):
@@ -245,7 +245,7 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         self.assertEqual(bpy.ops.af.connect_proxy_vertices_with_fiber(), {"FINISHED"})
         fiber = root_obj.af_vcp_system.fibers[0]
         self.assertEqual((fiber.a_parent_id, fiber.b_parent_id, len(fiber.mid_touches)), (left.id, right.id, 1))
-        self.assertEqual((fiber.mid_touches[0].parent_id, parse_fiber_attach_param(fiber.mid_touches[0].attach_param)), (middle.id, ("mesh_vertex_v1", 0)))
+        self.assertEqual((fiber.mid_touches[0].parent_id, parse_fiber_attach_param(fiber.mid_touches[0].attach_param)[0]), (middle.id, "surface_param_v2"))
 
     def test_add_fiber_touch_point_uses_selected_proxy_vertex(self):
         root_obj, parent, left, right = _proxy_setup()
@@ -258,7 +258,7 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         _edit_select(proxy, _proxy_vertex_index(proxy, left.id, 0))
         self.assertEqual(bpy.ops.af.add_fiber_touch_point(fiber_id=fiber.id), {"FINISHED"})
         self.assertEqual((len(fiber.mid_touches), fiber.mid_touches[0].parent_id), (1, left.id))
-        self.assertEqual(parse_fiber_attach_param(fiber.mid_touches[0].attach_param), ("mesh_vertex_v1", 0))
+        self.assertEqual(parse_fiber_attach_param(fiber.mid_touches[0].attach_param)[0], "surface_param_v2")
 
     def test_mirrored_proxy_selection_maps_back_to_target_scp(self):
         root_obj, source, target = _mirror_setup()
@@ -273,4 +273,4 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         register_fiber_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
         sync_vcp_mirrors(root=root_obj, scene=bpy.context.scene, target_fiber_ids={fiber.id})
         mirror = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_mirror_proxy") and obj.get("af_source_fiber_id") == fiber.id)
-        self.assertEqual((fiber.a_parent_id, fiber.b_parent_id, parse_fiber_attach_param(fiber.a_attach_param)[0], mirror is not None), (target.id, target.id, "mesh_vertex_v1", True))
+        self.assertEqual((fiber.a_parent_id, fiber.b_parent_id, parse_fiber_attach_param(fiber.a_attach_param)[0], mirror is not None), (target.id, target.id, "surface_param_v2", True))

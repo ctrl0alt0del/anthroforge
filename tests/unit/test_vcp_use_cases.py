@@ -72,6 +72,7 @@ def scene(*objects):
     return SimpleNamespace(
         objects=list(objects),
         cursor=SimpleNamespace(location=(0.0, 0.0, 0.0)),
+        af_selection_order_json="[]",
         af_new_fiber_origin_obj=None,
         af_new_fiber_insertion_obj=None,
         af_new_blob_target_obj=None,
@@ -135,6 +136,21 @@ class VcpUseCaseTests(unittest.TestCase):
         self.assertEqual(muscle.inflation_mode, "CTRL_POINT")
         self.assertEqual((fiber1.muscle_id, fiber2.muscle_id), (muscle.id, muscle.id))
         self.assertEqual(len(old.fiber_refs), 0)
+
+    def test_create_muscle_vcp_uses_tracked_selection_order(self):
+        fibers = [Bag(id=f"F{i}", node_count=8, mid_touches=[], muscle_id="") for i in range(1, 4)]
+        root_obj = root(fibers=fibers)
+        root_obj.af_vcp_system.muscles = FakeCollection()
+        proxies = [FakeSelectable(f"P{i}", af_fiber_proxy=True, af_root_name="ROOT", af_fiber_id=f"F{i}") for i in range(1, 4)]
+        for obj in proxies:
+            obj.select_set(True)
+        scn = scene(root_obj, *proxies)
+        scn.af_selection_order_json = '["P1","P2","P3"]'
+        ctx = context(scn, active_object=proxies[2], selected_objects=[proxies[2], proxies[0], proxies[1]])
+        with patch("app.use_cases.muscle_create._sync_entity", return_value=None), patch("app.use_cases.muscle_create._find_ctrl", return_value=None):
+            result = create_muscle_vcp(ctx)
+        self.assertTrue(result.ok)
+        self.assertEqual([ref.fiber_id for ref in root_obj.af_vcp_system.muscles[0].fiber_refs], ["F1", "F2", "F3"])
 
     def test_create_muscle_vcp_rejects_incompatible_fibers(self):
         fiber1 = Bag(id="F1", node_count=8, mid_touches=[], muscle_id="")

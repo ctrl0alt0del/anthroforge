@@ -10,8 +10,7 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 
 import bpy
 
-from _helpers import BlenderTestCase, add_shortcut, fiber, find_flagged, mesh_object, reset_scene, root, scp_with_object, select_only, temp_blend_path
-from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor
+from _helpers import BlenderTestCase, add_shortcut, capture_mesh_attachment, fiber, find_flagged, mesh_object, reset_scene, root, scp_with_object, select_only, temp_blend_path
 from anthroforge.core.id_utils import next_prefixed_id
 from anthroforge.core.importing.extract import root_snapshot
 from anthroforge.core.importing.service import import_package_from_blend
@@ -48,10 +47,11 @@ def _source_snapshot():
     set_mirror_source_id(right, left.id)
     set_mirror_effective_axis(right, "Y")
     item = fiber(root_obj, left.id, right.id)
-    item.a_attach_param, item.b_attach_param = "A", "B"
+    item.a_attach_param = capture_mesh_attachment(root_obj, left, 0)
+    item.b_attach_param = capture_mesh_attachment(root_obj, right, 0)
     touch = item.mid_touches.add()
     touch.parent_id = left.id
-    touch.attach_param = encode_fiber_mesh_anchor(left.geometry_object_ref.data.vertices[0].co.copy())
+    touch.attach_param = capture_mesh_attachment(root_obj, left, 0)
     touch.normal_offset = 0.125
     set_fiber_not_converged(item, True)
     muscle = _muscle(root_obj, item.id)

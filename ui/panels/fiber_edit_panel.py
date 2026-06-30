@@ -2,12 +2,12 @@ import bpy
 from ...app.queries.root import root_for_context
 from ...app.queries.scp import scp_label
 from ...app.queries.vcp import active_fiber_from_context, has_active_entity
-from ...core.attachment_codec import is_fiber_vertex_attach
 from ...core.vcp.fiber_modes import is_derived_loop, is_loop_fiber, is_solved_loop
 from ...core.vcp.runtime_state import (
     fiber_active_colliders,
     fiber_eps_disp,
     fiber_eps_pen,
+    fiber_invalid_reason,
     fiber_planner_ms,
     fiber_recompute_ms,
     fiber_recompute_status,
@@ -103,12 +103,15 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
 
     def _draw_touch_offset(self, layout, touch):
         row = layout.row(align=True)
-        if is_fiber_vertex_attach(getattr(touch, "attach_param", "")):
-            row.prop(touch, "normal_offset", text="Offset")
-            return
-        row.enabled = False
         row.prop(touch, "normal_offset", text="Offset")
-        row.label(text="Vertex touch required")
+
+    def _draw_invalid_status(self, status_box, fiber):
+        reason = fiber_invalid_reason(fiber)
+        if not reason:
+            return False
+        status_box.label(text="Status: Invalid Attachment", icon="ERROR")
+        status_box.label(text=reason)
+        return True
 
     def _draw_derived_display(self, layout, fiber):
         box = layout.box()
@@ -121,6 +124,8 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         self._draw_status_metrics(status_box, fiber)
 
     def _draw_status_header(self, status_box, fiber):
+        if self._draw_invalid_status(status_box, fiber):
+            return
         status = fiber_recompute_status(fiber)
         if status == "CONVERGED":
             status_box.label(text="Status: Converged", icon="CHECKMARK")

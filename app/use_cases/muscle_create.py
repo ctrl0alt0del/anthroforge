@@ -38,27 +38,27 @@ def _creation_payload(context, root):
 
 
 def _selected_fiber_ids(context, root):
-    ids, seen = [], set()
-    active_id = _active_selected_fiber_id(context, root)
-    for obj in getattr(context, "selected_objects", ()):
+    seen, out = set(), []
+    items = _ordered_selected_objects()(context.scene, getattr(context, "selected_objects", ()), getattr(context, "active_object", None))
+    for obj in items:
         fiber_id = _selected_proxy_fiber_id(obj, root.name)
-        if not fiber_id or fiber_id in seen or fiber_id == active_id:
-            continue
-        ids.append(fiber_id)
-        seen.add(fiber_id)
-    return ids + ([active_id] if active_id and active_id not in seen else [])
-
-
-def _active_selected_fiber_id(context, root):
-    active = getattr(context, "active_object", None)
-    valid = active and active.get("af_fiber_proxy") and active.get("af_root_name") == root.name
-    valid = valid and active.get("af_fiber_id") and active.select_get()
-    return active.get("af_fiber_id") if valid else None
+        if fiber_id and fiber_id not in seen:
+            seen.add(fiber_id)
+            out.append(fiber_id)
+    return out
 
 
 def _selected_proxy_fiber_id(obj, root_name):
     valid = obj.get("af_fiber_proxy") and obj.get("af_root_name") == root_name
     return obj.get("af_fiber_id") if valid else None
+
+
+def _ordered_selected_objects():
+    try:
+        from ...core.selection_order import ordered_selected_objects
+    except ImportError:
+        from core.selection_order import ordered_selected_objects
+    return ordered_selected_objects
 
 
 def _resolved_fibers(vcp, fiber_ids):

@@ -130,7 +130,7 @@ def encode_scp_mesh_anchor(parent_local_point, child_local_point, behavior=None)
 def parse_fiber_attach_param(raw):
     raw = (raw or "").strip()
     if not raw:
-        return "shape_param_v1", 0.0
+        return "invalid", None
     return _fiber_mode_payload(_json_data(raw))
 
 
@@ -142,6 +142,19 @@ def is_fiber_vertex_attach(raw):
     return fiber_attach_mode(raw) == "mesh_vertex_v1"
 
 
+def is_fiber_surface_attach(raw):
+    return fiber_attach_mode(raw) == "surface_param_v2"
+
+
+def is_fiber_legacy_attach(raw):
+    return fiber_attach_mode(raw) in {"shape_param_v1", "mesh_anchor", "mesh_vertex_v1"}
+
+
+def fiber_surface_param(raw):
+    mode, payload = parse_fiber_attach_param(raw)
+    return payload if mode == "surface_param_v2" else None
+
+
 def fiber_attach_signature(raw):
     data = _json_data(raw)
     return "" if not isinstance(data, dict) else str(data.get("topology_signature", "") or "")
@@ -149,13 +162,21 @@ def fiber_attach_signature(raw):
 
 def _fiber_mode_payload(data):
     mode = "" if not isinstance(data, dict) else str(data.get("mode", "") or "")
+    if mode == "surface_param_v2":
+        return "surface_param_v2", _fiber_surface_param(data)
     if mode == "shape_param_v1":
         return "shape_param_v1", data.get("parent_param", 0.0)
     if mode == "mesh_anchor":
         return _fiber_mesh_anchor(data)
     if mode == "mesh_vertex_v1":
         return "mesh_vertex_v1", int(data.get("vertex_index", -1))
-    return "shape_param_v1", 0.0
+    return "invalid", None
+
+
+def _fiber_surface_param(data):
+    tri = tuple(int(v) for v in data.get("tri_vidx", (-1, -1, -1)))
+    weights = tuple(float(v) for v in data.get("tri_weights", (1.0, 0.0, 0.0)))
+    return {"tri_vidx": tri, "tri_weights": weights} if len(tri) == 3 and len(weights) == 3 else None
 
 
 def _fiber_mesh_anchor(data):
@@ -172,6 +193,12 @@ def _json_data(raw):
 
 def encode_fiber_shape_param(parent_param):
     return json.dumps({"mode": "shape_param_v1", "parent_param": parent_param})
+
+
+def encode_fiber_surface_param(parent_param):
+    tri = tuple(int(v) for v in dict(parent_param or {}).get("tri_vidx", (-1, -1, -1)))
+    weights = tuple(float(v) for v in dict(parent_param or {}).get("tri_weights", (1.0, 0.0, 0.0)))
+    return json.dumps({"mode": "surface_param_v2", "tri_vidx": list(tri), "tri_weights": list(weights)})
 
 
 def encode_fiber_mesh_anchor(parent_local_point):

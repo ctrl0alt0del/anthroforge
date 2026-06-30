@@ -9,7 +9,7 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 
 import bpy
 
-from _helpers import BlenderTestCase, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
+from _helpers import BlenderTestCase, capture_mesh_attachment, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
 from core.id_utils import next_prefixed_id
 from core.vcp.runtime_state import muscle_inflation_ctrl_world
 from core.visualization.fiber_sync import register_fiber_sync
@@ -202,7 +202,8 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
     def test_fibers_with_different_mid_touch_counts_still_build_muscle(self):
         root_obj, first, second = _muscle_setup()
         touch = root_obj.af_vcp_system.fibers[1].mid_touches.add()
-        touch.parent_id, touch.attach_param = root_obj.af_scp_system.scps[2].id, "RAW"
+        touch.parent_id = root_obj.af_scp_system.scps[2].id
+        touch.attach_param = capture_mesh_attachment(root_obj, root_obj.af_scp_system.scps[2], 0)
         select_only(first); second.select_set(True); bpy.ops.af.add_muscle_vcp()
         register_muscle_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
         muscle = root_obj.af_vcp_system.muscles[0]
@@ -237,6 +238,17 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         second_muscle = root_obj.af_vcp_system.muscles[1]
         self.assertEqual([ref.fiber_id for ref in first_muscle.fiber_refs], [root_obj.af_vcp_system.fibers[0].id])
         self.assertEqual({ref.fiber_id for ref in second_muscle.fiber_refs}, {root_obj.af_vcp_system.fibers[1].id, root_obj.af_vcp_system.fibers[2].id})
+
+    def test_add_muscle_uses_tracked_selection_order(self):
+        root_obj, proxies = _three_fiber_setup()
+        bpy.context.scene.af_selection_order_json = f'["{proxies[0].name}","{proxies[1].name}","{proxies[2].name}"]'
+        select_only(proxies[2])
+        proxies[0].select_set(True)
+        proxies[1].select_set(True)
+        bpy.ops.af.add_muscle_vcp()
+        refs = [ref.fiber_id for ref in root_obj.af_vcp_system.muscles[0].fiber_refs]
+        want = [fiber.id for fiber in root_obj.af_vcp_system.fibers[:3]]
+        self.assertEqual(refs, want)
 
     def test_missing_fiber_points_clear_muscle_surface(self):
         root_obj, first, second = _muscle_setup()

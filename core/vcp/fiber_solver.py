@@ -3,17 +3,21 @@ from time import perf_counter
 from mathutils import Vector
 
 from ..visualization.fiber_sync_helpers import endpoint_world as resolve_fiber_endpoint_world, touch_world as resolve_fiber_touch_world
+from .attachment_backend import attachment_issue, attachment_runtime
 from .fiber_collision import CollisionOracle
 from .fiber_loop import derived_loop_targets, loop_frames, loop_pin_targets, profile_offsets, resample_closed
 from .fiber_modes import DERIVED_GENERATION, fiber_root, fibers_by_id, is_derived_loop, is_loop_fiber, loop_anchor_specs
 from .fiber_planner import DIRECT, LOCAL_FALLBACK, PlannerAnchor, plan_route
 from .runtime_state import (
+    fiber_recompute_status,
     fiber_planner_ms,
     set_fiber_active_colliders,
     set_fiber_eps_disp,
     set_fiber_eps_pen,
+    set_fiber_invalid_reason,
     set_fiber_not_converged,
     set_fiber_planner_ms,
+    set_fiber_recompute_status,
     set_fiber_refine_ms,
     set_fiber_route_mode,
 )
@@ -113,11 +117,9 @@ class FiberSolver:
         return self._solve_open_fiber(root, fiber_prop, scene, depsgraph, bake)
 
     def _solve_open_fiber(self, root, fiber_prop, scene, depsgraph, bake):
-        runtime = self._runtime_registry(root)
-        anchors = self._route_anchors(root, scene, runtime, fiber_prop)
-        if anchors is None:
-            self._mark_failed(fiber_prop)
-            return []
+        runtime, anchors, issue = self._open_anchors(root, scene, depsgraph, fiber_prop)
+        if issue:
+            return self._invalid_result(fiber_prop, issue)
         params = self._runtime_params(fiber_prop, bake)
         oracle = CollisionOracle(root, scene, depsgraph, params["margin"], self.surface_offset)
         seed, mode, planner_ms, planned = self._plan_seed(oracle, anchors, bake)
@@ -134,11 +136,9 @@ class FiberSolver:
         return nodes, converged, max_disp, max_pen, active_count, (perf_counter() - t0) * 1000.0
 
     def _solve_solved_loop(self, root, fiber_prop, scene, depsgraph, bake):
-        runtime = self._runtime_registry(root)
-        anchors = self._loop_route_anchors(root, scene, runtime, fiber_prop)
-        if anchors is None:
-            self._mark_failed(fiber_prop)
-            return []
+        runtime, anchors, issue = self._loop_anchors(root, scene, depsgraph, fiber_prop)
+        if issue:
+            return self._invalid_result(fiber_prop, issue)
         params = self._runtime_params(fiber_prop, bake)
         oracle = CollisionOracle(root, scene, depsgraph, params["margin"], self.surface_offset)
         route, mode, planner_ms, planned = self._loop_seed_route(oracle, anchors, bake)
@@ -154,8 +154,7 @@ class FiberSolver:
         driver = fiber_root(fiber_prop, fiber_map)
         points = self._driver_loop_points(root, driver, scene, depsgraph, bake)
         if not points:
-            self._mark_failed(fiber_prop)
-            return []
+            return self._failed_derived_loop(fiber_prop)
         self._sync_derived_node_count(fiber_prop, len(points))
         params = self._runtime_params(fiber_prop, False)
         oracle = CollisionOracle(root, scene, depsgraph, params["margin"], self.surface_offset)
@@ -165,6 +164,11 @@ class FiberSolver:
         self._store_metrics(fiber_prop, DERIVED_GENERATION, 0.0, (perf_counter() - t0) * 1000.0, active_count)
         self._cache[fiber_prop.id] = [p.copy() for p in nodes]
         return nodes
+
+    def _failed_derived_loop(self, fiber_prop):
+        self._clear_invalid_state(fiber_prop)
+        self._mark_failed(fiber_prop)
+        return []
 
     def _loop_route_anchors(self, root, scene, runtime_registry, fiber_prop):
         pairs = loop_anchor_specs(fiber_prop)
@@ -297,15 +301,55 @@ class FiberSolver:
         for i in range(len(nodes)):
             nodes[i] = nodes[i].lerp(targets[i], max(0.0, min(1.0, strength)))
 
-    def _runtime_registry(self, root):
-        _ = root
-        return {}
+    def _runtime_registry(self, scene, depsgraph):
+        return attachment_runtime(scene, depsgraph)
+
+    def _open_anchors(self, root, scene, depsgraph, fiber_prop):
+        runtime = self._runtime_registry(scene, depsgraph)
+        anchors = self._route_anchors(root, scene, runtime, fiber_prop)
+        issue = "" if anchors is not None else self._open_attachment_issue(root, scene, runtime, fiber_prop)
+        return runtime, anchors, issue
+
+    def _loop_anchors(self, root, scene, depsgraph, fiber_prop):
+        runtime = self._runtime_registry(scene, depsgraph)
+        anchors = self._loop_route_anchors(root, scene, runtime, fiber_prop)
+        issue = "" if anchors is not None else self._loop_attachment_issue(root, scene, runtime, fiber_prop)
+        return runtime, anchors, issue
+
+    def _invalid_result(self, fiber_prop, issue):
+        self._mark_invalid(fiber_prop, issue)
+        return []
 
     def _mark_failed(self, fiber_prop):
         set_fiber_not_converged(fiber_prop, True)
         set_fiber_eps_disp(fiber_prop, 0.0)
         set_fiber_eps_pen(fiber_prop, 0.0)
         self._store_metrics(fiber_prop, LOCAL_FALLBACK, 0.0, 0.0, 0)
+
+    def _mark_invalid(self, fiber_prop, issue):
+        set_fiber_invalid_reason(fiber_prop, str(issue or "Invalid attachment."))
+        set_fiber_recompute_status(fiber_prop, "INVALID_ATTACHMENT")
+        self._mark_failed(fiber_prop)
+
+    def _clear_invalid_state(self, fiber_prop):
+        set_fiber_invalid_reason(fiber_prop, "")
+        if fiber_recompute_status(fiber_prop) == "INVALID_ATTACHMENT":
+            set_fiber_recompute_status(fiber_prop, "UNKNOWN")
+
+    def _open_attachment_issue(self, root, scene, runtime_registry, fiber_prop):
+        specs = [(fiber_prop.a_parent_id, fiber_prop.a_attach_param), (fiber_prop.b_parent_id, fiber_prop.b_attach_param)]
+        specs[1:1] = [(tp.parent_id, tp.attach_param) for tp in getattr(fiber_prop, "mid_touches", ())]
+        return self._first_attachment_issue(root, scene, runtime_registry, specs)
+
+    def _loop_attachment_issue(self, root, scene, runtime_registry, fiber_prop):
+        return self._first_attachment_issue(root, scene, runtime_registry, loop_anchor_specs(fiber_prop))
+
+    def _first_attachment_issue(self, root, scene, runtime_registry, specs):
+        for parent_id, raw in tuple(specs or ()):
+            issue = attachment_issue(root, scene, parent_id, raw, runtime_registry)
+            if issue:
+                return issue
+        return "Invalid attachment payload."
 
     def _route_anchors(self, root, scene, runtime_registry, fiber_prop):
         anchors = [self._route_anchor(root, scene, runtime_registry, fiber_prop.a_parent_id, fiber_prop.a_attach_param)]
@@ -402,6 +446,7 @@ class FiberSolver:
         return converged, max_disp, max_pen
 
     def _store_status(self, fiber_prop, converged, max_disp, max_pen):
+        self._clear_invalid_state(fiber_prop)
         set_fiber_not_converged(fiber_prop, not converged)
         set_fiber_eps_disp(fiber_prop, float(max_disp))
         set_fiber_eps_pen(fiber_prop, float(max_pen))

@@ -5,10 +5,11 @@ from bpy_extras import view3d_utils
 
 from ..deps.control_lifecycle import mark_dynamic_control_object
 from ..scp_runtime.object_colors import apply_object_color
-from ..attachment_codec import encode_fiber_vertex_index, fiber_attach_signature, is_fiber_vertex_attach, parse_fiber_attach_param
+from ..attachment_codec import fiber_attach_signature
 from ..scp_proxy.signature import mesh_topology_signature
 from ..utils import depsgraph_for_scene, scene_for_id
 from ..scp_runtime.common import find_geometry_scp_obj
+from ..vcp.attachment_backend import resolve_attachment_normal, resolve_attachment_world
 
 
 def get_vis_collection(scene, collection_name):
@@ -170,6 +171,14 @@ def update_curve_points(obj, points, thickness, bake=False, cyclic=False):
     obj["af_fiber_points_mode"] = "BAKE" if bake else "INTERACTIVE"
 
 
+def clear_curve_points(obj):
+    curve = obj.data
+    while curve.splines:
+        curve.splines.remove(curve.splines[0])
+    obj["af_fiber_points_world"] = "[]"
+    obj["af_fiber_points_mode"] = "INTERACTIVE"
+
+
 def get_scp_proxy(scene, root_name, scp_id):
     return find_geometry_scp_obj(scene, root_name, scp_id)
 
@@ -263,28 +272,11 @@ def _world_normal(parent_obj, normal):
 
 
 def attach_world_normal(root, scene, runtime_registry, parent_id, attach_param_raw):
-    _ = runtime_registry
-    if not parent_id or not is_fiber_vertex_attach(attach_param_raw):
-        return None
-    proxy = get_scp_proxy(scene, root.name, parent_id)
-    if proxy is None:
-        return None
-    _mode, payload = parse_fiber_attach_param(attach_param_raw)
-    return _mesh_world_normal_from_vertex_index(proxy, payload, attach_param_raw)
+    return resolve_attachment_normal(root, scene, parent_id, attach_param_raw, runtime_registry)
 
 
 def endpoint_world(root, scene, runtime_registry, parent_id, attach_param_raw):
-    _ = runtime_registry
-    if not parent_id:
-        return None
-    proxy = get_scp_proxy(scene, root.name, parent_id)
-    if proxy is None:
-        return None
-    mode, payload = parse_fiber_attach_param(attach_param_raw)
-    local = _local_from_attach(proxy, mode, payload, attach_param_raw)
-    if local is None:
-        return None
-    return proxy.matrix_world @ local
+    return resolve_attachment_world(root, scene, parent_id, attach_param_raw, runtime_registry)
 
 
 def touch_world(root, scene, runtime_registry, touch):
@@ -317,20 +309,6 @@ def nearest_param(parent_scp, parent_proxy, moved_world):
     if count <= 1:
         return 0.0
     return float(index) / float(count - 1)
-
-
-def nearest_parent_mesh_vertex_local_point(parent_proxy, moved_world):
-    if not _is_mesh_obj(parent_proxy):
-        return None
-    local, _index, _count, _signature = _nearest_eval_vertex(parent_proxy, moved_world)
-    return local
-
-
-def nearest_parent_mesh_vertex_attach(parent_proxy, moved_world):
-    if not _is_mesh_obj(parent_proxy):
-        return None
-    _local, index, _count, signature = _nearest_eval_vertex(parent_proxy, moved_world)
-    return None if signature == "" else encode_fiber_vertex_index(index, signature)
 
 
 def _first_window_manager():
