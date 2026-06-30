@@ -28,7 +28,7 @@ from core.vcp.runtime_state import (
 )
 from app.use_cases.blob_create import create_blob_vcp
 from app.use_cases.blob_tools import select_blob_control
-from app.use_cases.fiber_create import create_fiber_vcp
+from app.use_cases.fiber_create import create_fiber_from_proxy_vertices, create_fiber_vcp
 from app.use_cases.fiber_tools import _run_bake_passes, add_fiber_touch_point, clear_fiber_warm_start, recompute_fiber, remove_fiber_touch_point
 from app.use_cases.muscle_create import create_muscle_vcp
 from app.use_cases.muscle_tools import flip_muscle_normals, select_muscle_inflation_ctrl
@@ -114,6 +114,19 @@ class VcpUseCaseTests(unittest.TestCase):
         self.assertEqual((fiber.a_parent_id, fiber.b_parent_id), ("S1", "S2"))
         self.assertEqual((root_obj.af_vcp_system.active_vcp_type, root_obj.af_vcp_system.active_vcp_id), ("FIBER", fiber.id))
         self.assertEqual(calls[0][2:], ("FIBER", {fiber.id}))
+
+    def test_create_fiber_from_proxy_vertices_fails_when_mid_capture_fails(self):
+        root_obj = root()
+        root_obj.af_vcp_system.fibers = FakeCollection()
+        picks = [Bag(scp_id="S1", vertex_index=1), Bag(scp_id="S2", vertex_index=2), Bag(scp_id="S3", vertex_index=3)]
+        ctx = context(scene(root_obj))
+        with patch("app.use_cases.fiber_create._selected_proxy_vertices", return_value=lambda _ctx: (picks, "")):
+            with patch("app.use_cases.fiber_create._proxy_attach", side_effect=["A_RAW", "B_RAW", None]):
+                result = create_fiber_from_proxy_vertices(ctx)
+        self.assertFalse(result.ok)
+        self.assertEqual(len(root_obj.af_vcp_system.fibers), 0)
+        self.assertIn("S2", result.message)
+        self.assertIn("vertex 2", result.message)
 
     def test_create_muscle_vcp_assigns_selected_fibers(self):
         fiber1 = Bag(id="F1", node_count=8, mid_touches=[], muscle_id="")

@@ -200,13 +200,33 @@ def surface_bvh_local(mesh_obj, depsgraph=None, cache=None):
 
 
 def _closest_point_barycentric(a, b, c, point):
-    v0 = b - a
-    v1 = c - a
-    v2 = point - a
+    return _exact_hit_weights(a, b, c, point) or _triangle_weights(a, b, c, point)
+
+
+def _exact_hit_weights(a, b, c, point):
+    if _same_point(point, a):
+        return 1.0, 0.0, 0.0
+    if _same_point(point, b):
+        return 0.0, 1.0, 0.0
+    return (0.0, 0.0, 1.0) if _same_point(point, c) else None
+
+
+def _same_point(a, b, eps=_EPS):
+    return (a - b).dot(a - b) <= float(eps) * float(eps)
+
+
+def _triangle_weights(a, b, c, point):
+    v0, v1, v2 = b - a, c - a, point - a
     d00, d01, d11 = v0.dot(v0), v0.dot(v1), v1.dot(v1)
     d20, d21 = v2.dot(v0), v2.dot(v1)
     denom = (d00 * d11) - (d01 * d01)
-    return None if abs(denom) <= _EPS else _normalized_weights(d00, d01, d11, d20, d21, denom)
+    return None if _small_denom(denom, d00, d01, d11) else _normalized_weights(d00, d01, d11, d20, d21, denom)
+
+
+def _small_denom(denom, d00, d01, d11, eps=1.0e-12):
+    scale = max(abs(d00 * d11), abs(d01 * d01))
+    tol = float(eps) if scale <= 0.0 else scale * float(eps)
+    return abs(denom) <= tol
 
 
 def _normalized_weights(d00, d01, d11, d20, d21, denom):

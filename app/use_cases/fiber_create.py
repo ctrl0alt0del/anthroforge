@@ -26,7 +26,10 @@ def create_fiber_from_proxy_vertices(context):
     if root is None:
         return failure("No AF_ROOT found.")
     picks, error = _selected_proxy_vertices()(context)
-    return failure(error) if error else _create_fiber(context, root, _resolved_proxy_inputs(root, context.scene, picks), "Select at least two proxy vertices.")
+    if error:
+        return failure(error)
+    resolved, error = _resolved_proxy_inputs(root, context.scene, picks)
+    return _create_fiber(context, root, resolved, error)
 
 
 def create_loop_fiber_from_selected_vertices(context):
@@ -65,19 +68,31 @@ def _resolved_inputs(context, root):
 def _resolved_proxy_inputs(root, scene, picks):
     picks = tuple(picks or ())
     if len(picks) < 2:
-        return None
+        return None, "Select at least two proxy vertices."
     a, b = picks[0], picks[-1]
     a_raw = _proxy_attach(root, scene, a)
     b_raw = _proxy_attach(root, scene, b)
-    return None if a_raw is None or b_raw is None else _fiber_spec(a.scp_id, b.scp_id, a_raw, b_raw, _proxy_touch_specs(root, scene, picks[1:-1]))
+    if a_raw is None or b_raw is None:
+        return None, "Could not capture selected proxy endpoints."
+    touches, error = _proxy_specs(root, scene, picks[1:-1], "selected proxy mid vertex")
+    return (None, error) if error else (_fiber_spec(a.scp_id, b.scp_id, a_raw, b_raw, touches), "")
 
 
 def _fiber_spec(origin_id, insert_id, origin_raw, insert_raw, touch_specs=()):
     return origin_id, insert_id, origin_raw, insert_raw, tuple(touch_specs or ())
 
 
-def _proxy_touch_specs(root, scene, picks):
-    return tuple(spec for spec in (_proxy_spec(root, scene, pick) for pick in tuple(picks or ())) if spec is not None)
+def _proxy_specs(root, scene, picks, label="selected proxy vertex"):
+    items = tuple(picks or ())
+    specs = tuple(_proxy_spec(root, scene, pick) for pick in items)
+    failed = next((pick for pick, spec in zip(items, specs) if spec is None), None)
+    return (None, _proxy_spec_error(failed, label)) if failed else (specs, "")
+
+
+def _proxy_spec_error(pick, label):
+    if pick is None:
+        return f"Could not capture {label}s."
+    return f"Could not capture {label} on {pick.scp_id} (vertex {int(pick.vertex_index)})."
 
 
 def _resolved_loop_specs(context, root):
@@ -90,13 +105,14 @@ def _resolved_loop_specs(context, root):
 
 def _proxy_loop_specs(context, root):
     picks, error = _selected_proxy_vertices()(context)
-    return (None, error) if error else (_proxy_specs_from_picks(root, context.scene, picks), "")
+    return (None, error) if error else _proxy_specs_from_picks(root, context.scene, picks)
 
 
 def _proxy_specs_from_picks(root, scene, picks):
     items = tuple(picks or ())
-    specs = _proxy_touch_specs(root, scene, items)
-    return None if len(items) < 3 or len(specs) != len(items) else specs
+    if len(items) < 3:
+        return None, "Select at least three ordered vertices."
+    return _proxy_specs(root, scene, items)
 
 
 def _mesh_loop_specs(context, root):
