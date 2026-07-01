@@ -11,10 +11,12 @@ import bpy
 
 from _helpers import BlenderTestCase, capture_mesh_attachment, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
 from core.id_utils import next_prefixed_id
+from core.scp_runtime.lookup import set_parent_relation
 from core.vcp.runtime_state import muscle_inflation_ctrl_world
 from core.visualization.fiber_sync import register_fiber_sync
 from core.visualization.muscle_sync import apply_muscle_control_update, register_muscle_sync
 from core.visualization.muscle_sync_helpers import find_muscle_proxy, mark_inflation_ctrl
+from core.visualization.vcp_mirror_runtime import sync_vcp_mirrors
 
 
 def _add_fiber(origin, insert):
@@ -105,6 +107,20 @@ def _three_fiber_setup():
     scps = root_obj.af_scp_system.scps
     _add_fiber(scps[0], scps[1]), _add_fiber(scps[2], scps[3]), _add_fiber(scps[4], scps[5])
     return root_obj, [find_flagged("af_fiber_proxy", item.id, "af_fiber_id") for item in root_obj.af_vcp_system.fibers]
+
+
+def _mirrored_side_muscle_setup():
+    root_obj = root()
+    source = scp_with_object(root_obj, "MirrorSrc", empty_object("MirrorSrc"), with_geometry=False)
+    source.mirror_enabled = True
+    o1 = scp_with_object(root_obj, "O1", mesh_object("O1", (1.0, 0.0, 0.0)))
+    i1 = scp_with_object(root_obj, "I1", mesh_object("I1", (3.0, 0.0, 0.0)))
+    o2 = scp_with_object(root_obj, "O2", mesh_object("O2", (1.0, 1.0, 0.0)))
+    i2 = scp_with_object(root_obj, "I2", mesh_object("I2", (3.0, 1.0, 0.0)))
+    for scp in (o1, i1, o2, i2):
+        set_parent_relation(scp.transform_object_ref, scp, source.transform_object_ref)
+    _add_fiber(o1, i1), _add_fiber(o2, i2)
+    return root_obj, find_flagged("af_fiber_proxy", root_obj.af_vcp_system.fibers[0].id, "af_fiber_id"), find_flagged("af_fiber_proxy", root_obj.af_vcp_system.fibers[1].id, "af_fiber_id")
 
 
 def _restored_ctrl_state(root_obj, muscle):
@@ -260,6 +276,24 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
         base = find_flagged("af_muscle_proxy", root_obj.af_vcp_system.muscles[0].id, "af_muscle_id")
         self.assertEqual(len(base.data.vertices), 0)
+
+    def test_muscle_can_expand_rows_across_mirror_plane(self):
+        root_obj, first, second = _mirrored_side_muscle_setup()
+        select_only(first); second.select_set(True); bpy.ops.af.add_muscle_vcp()
+        muscle = root_obj.af_vcp_system.muscles[0]
+        sync = register_muscle_sync()
+        sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        before = len(_surface_obj(root_obj, muscle, "BASE").data.vertices)
+        muscle.use_mirrored_rows = True
+        sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        base = _surface_obj(root_obj, muscle, "BASE")
+        xs = [(base.matrix_world @ vert.co).x for vert in base.data.vertices]
+        sync_vcp_mirrors(root=root_obj, scene=bpy.context.scene, target_muscle_ids={muscle.id})
+        mirror = next((obj for obj in bpy.context.scene.objects if obj.get("af_muscle_mirror_proxy") and obj.get("af_source_muscle_id") == muscle.id), None)
+        self.assertGreater(len(base.data.vertices), before)
+        self.assertLess(min(xs), -1.0e-6)
+        self.assertGreater(max(xs), 1.0e-6)
+        self.assertIsNone(mirror)
 
     def test_apply_muscle_control_update_snaps_ctrl_to_surface(self):
         root_obj, first, second = _muscle_setup()

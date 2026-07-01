@@ -22,6 +22,7 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
         row.prop(muscle, "id", text="ID")
         layout.prop(muscle, "name", text="Name")
         layout.prop(muscle, "closed_v", text="Closed Ring (V)")
+        layout.prop(muscle, "use_mirrored_rows", text="Use Mirrored Rows")
 
     def _draw_inflation(self, layout, muscle):
         infl = layout.box()

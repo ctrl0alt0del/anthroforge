@@ -119,7 +119,7 @@ def _fiber_stamp(root):
 
 def _muscle_stamp(root):
     items = getattr(getattr(root, "af_vcp_system", None), "muscles", ())
-    return tuple((str(m.id or ""), tuple(str(ref.fiber_id or "") for ref in getattr(m, "fiber_refs", ()))) for m in items)
+    return tuple((str(m.id or ""), bool(getattr(m, "use_mirrored_rows", False)), tuple(str(ref.fiber_id or "") for ref in getattr(m, "fiber_refs", ()))) for m in items)
 
 
 def _blob_stamp(root):

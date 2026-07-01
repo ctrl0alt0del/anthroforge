@@ -103,6 +103,8 @@ def _fiber_root_parents(fiber, fibers_by_id):
 
 
 def _rule_for_muscle(muscle, fibers_by_id, scp_by_id):
+    if bool(getattr(muscle, "use_mirrored_rows", False)):
+        return None
     for ref in getattr(muscle, "fiber_refs", []):
         fid = _as_id(getattr(ref, "fiber_id", ""))
         if not fid:

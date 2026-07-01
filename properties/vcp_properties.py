@@ -29,6 +29,7 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
     name: bpy.props.StringProperty(name="Name", default="Muscle", update=_on_muscle_prop_update)
 
     closed_v: bpy.props.BoolProperty(name="Closed Ring (V)", default=False, update=_on_muscle_prop_update)
+    use_mirrored_rows: bpy.props.BoolProperty(name="Use Mirrored Rows", default=False, update=_on_muscle_prop_update)
 
     fiber_refs: bpy.props.CollectionProperty(type=AF_MuscleFiberRef_Property)
     active_fiber_ref_index: bpy.props.IntProperty(name="Active Fiber Ref", default=-1)

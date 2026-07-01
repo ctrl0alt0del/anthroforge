@@ -16,6 +16,7 @@ class AF_OT_AddMuscleVCP(bpy.types.Operator):
 
     name: bpy.props.StringProperty(name="Name", default="")
     closed_v: bpy.props.BoolProperty(name="Closed Ring (V)", default=False)
+    use_mirrored_rows: bpy.props.BoolProperty(name="Use Mirrored Rows", default=False)
 
     def execute(self, context):
-        return _finish(self, create_muscle_vcp(context, self.name, self.closed_v))
+        return _finish(self, create_muscle_vcp(context, self.name, self.closed_v, self.use_mirrored_rows))

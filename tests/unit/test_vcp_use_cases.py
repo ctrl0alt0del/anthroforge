@@ -165,6 +165,19 @@ class VcpUseCaseTests(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual([ref.fiber_id for ref in root_obj.af_vcp_system.muscles[0].fiber_refs], ["F1", "F2", "F3"])
 
+    def test_create_muscle_vcp_stores_mirrored_row_mode(self):
+        fiber1 = Bag(id="F1", node_count=8, mid_touches=[], muscle_id="")
+        fiber2 = Bag(id="F2", node_count=8, mid_touches=[], muscle_id="")
+        root_obj = root(fibers=[fiber1, fiber2]); root_obj.af_vcp_system.muscles = FakeCollection()
+        proxy1 = FakeSelectable("P1", af_fiber_proxy=True, af_root_name="ROOT", af_fiber_id="F1")
+        proxy2 = FakeSelectable("P2", af_fiber_proxy=True, af_root_name="ROOT", af_fiber_id="F2")
+        proxy1.select_set(True); proxy2.select_set(True)
+        ctx = context(scene(root_obj, proxy1, proxy2), active_object=proxy1, selected_objects=[proxy1, proxy2])
+        with patch("app.use_cases.muscle_create._sync_entity", return_value=None), patch("app.use_cases.muscle_create._find_ctrl", return_value=None):
+            result = create_muscle_vcp(ctx, use_mirrored_rows=True)
+        self.assertTrue(result.ok)
+        self.assertTrue(root_obj.af_vcp_system.muscles[0].use_mirrored_rows)
+
     def test_create_muscle_vcp_rejects_incompatible_fibers(self):
         fiber1 = Bag(id="F1", node_count=8, mid_touches=[], muscle_id="")
         fiber2 = Bag(id="F2", node_count=9, mid_touches=[], muscle_id="")

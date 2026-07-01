@@ -11,7 +11,7 @@ except ImportError:
     from core.vcp.runtime_state import reset_muscle_runtime
 
 
-def create_muscle_vcp(context, name="", closed_v=False):
+def create_muscle_vcp(context, name="", closed_v=False, use_mirrored_rows=False):
     root = root_for_context(context)
     if root is None:
         return failure("No AF_ROOT found.")
@@ -20,7 +20,7 @@ def create_muscle_vcp(context, name="", closed_v=False):
         return failure("Select at least 2 fiber proxies in viewport (Shift-select).")
     if payload[2]:
         return failure(payload[2])
-    muscle = _new_muscle(root.af_vcp_system, name, closed_v)
+    muscle = _new_muscle(root.af_vcp_system, name, closed_v, use_mirrored_rows)
     fiber_ids, fibers_by_id = payload[0], payload[1]
     _assign_fibers(root.af_vcp_system, muscle, fiber_ids, fibers_by_id)
     _activate(root.af_vcp_system, "MUSCLE", muscle.id)
@@ -91,11 +91,12 @@ def _loop_root_mismatch(root, fibers):
     return len(root_ids) > 1
 
 
-def _new_muscle(vcp, name, closed_v):
+def _new_muscle(vcp, name, closed_v, use_mirrored_rows):
     muscle = vcp.muscles.add()
     muscle.id = next_prefixed_id(vcp.muscles, "MUSCLE")
     muscle.name = str(name or "").strip() or muscle.id
     muscle.closed_v = bool(closed_v)
+    muscle.use_mirrored_rows = bool(use_mirrored_rows)
     _apply_values(muscle, _muscle_defaults())
     reset_muscle_runtime(muscle)
     return muscle

@@ -25,7 +25,7 @@ from .muscle_sync_helpers import (
     collect_fiber_props,
 )
 from .muscle_inflation_modes import muscle_inflation_behavior, uses_inflation_control
-from .muscle_sync_runtime import collect_fiber_points, ensure_inflation_ctrl
+from .muscle_sync_runtime import collect_muscle_rows, ensure_inflation_ctrl
 from .control_runtime import active_entity_id
 
 
@@ -125,8 +125,8 @@ class MuscleSceneSync:
         self._update_mesh(infl_obj, [], [])
         self._set_muscle_active_materials(vcp, muscle_id, base_obj, infl_obj)
 
-    def _collect_points_with_fallback(self, root, scene, ordered_fibers):
-        ordered_points = collect_fiber_points(root, scene, ordered_fibers)
+    def _collect_points_with_fallback(self, root, scene, muscle, ordered_fibers):
+        ordered_points = collect_muscle_rows(root, scene, muscle, ordered_fibers)
         if ordered_points:
             return ordered_points
         # Route fallback updates through dependency runtime so downstream impacts
@@ -138,7 +138,7 @@ class MuscleSceneSync:
             dirty_hints=dirty_hints_for("FIBER", {f.id for f in ordered_fibers}),
             bake=False,
         )
-        return collect_fiber_points(root, scene, ordered_fibers)
+        return collect_muscle_rows(root, scene, muscle, ordered_fibers)
 
     def _build_surface(self, points, closed_v, closed_u):
         try:
@@ -147,13 +147,13 @@ class MuscleSceneSync:
             return None, None
         return verts, faces_raw
 
-    def _surface_base_points(self, root, scene, ordered_fibers, missing):
+    def _surface_base_points(self, root, scene, muscle, ordered_fibers, missing):
         if missing or len(ordered_fibers) < 2:
             return None
         ok, _reason, _count, _anchors = validate_anchor_structure(ordered_fibers)
         if not ok:
             return None
-        points = self._collect_points_with_fallback(root, scene, ordered_fibers)
+        points = self._collect_points_with_fallback(root, scene, muscle, ordered_fibers)
         if not points:
             return None
         return prepare_surface_rows(points, int(ordered_fibers[0].node_count), densify_v=True, closed_u=self._closed_u(ordered_fibers))
@@ -183,7 +183,7 @@ class MuscleSceneSync:
     def _sync_single_muscle(self, vis_col, root, scene, vcp, muscle):
         base_obj, infl_obj = self._ensure_muscle_meshes(vis_col, root, muscle.id)
         ordered_fibers, missing = self._collect_fiber_props(root, muscle)
-        base_points = self._surface_base_points(root, scene, ordered_fibers, missing)
+        base_points = self._surface_base_points(root, scene, muscle, ordered_fibers, missing)
         if base_points is None:
             self._clear_muscle_meshes(vcp, muscle.id, base_obj, infl_obj)
             return
