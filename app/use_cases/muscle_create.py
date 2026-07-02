@@ -4,10 +4,12 @@ from .results import failure, success
 try:
     from ...core.vcp.fiber_modes import fiber_root_id, fibers_by_id, is_loop_fiber
     from ...core.id_utils import next_prefixed_id
+    from ...core.visualization.mirror_rules import effective_rule_for_fiber
     from ...core.vcp.runtime_state import reset_muscle_runtime
 except ImportError:
     from core.vcp.fiber_modes import fiber_root_id, fibers_by_id, is_loop_fiber
     from core.id_utils import next_prefixed_id
+    from core.visualization.mirror_rules import effective_rule_for_fiber
     from core.vcp.runtime_state import reset_muscle_runtime
 
 
@@ -18,11 +20,11 @@ def create_muscle_vcp(context, name="", closed_v=False, use_mirrored_rows=False)
     payload = _creation_payload(context, root)
     if payload is None:
         return failure("Select at least 2 fiber proxies in viewport (Shift-select).")
-    if payload[2]:
-        return failure(payload[2])
-    muscle = _new_muscle(root.af_vcp_system, name, closed_v, use_mirrored_rows)
-    fiber_ids, fibers_by_id = payload[0], payload[1]
-    _assign_fibers(root.af_vcp_system, muscle, fiber_ids, fibers_by_id)
+    fiber_ids, fiber_map, error, auto_mirror = payload
+    if error:
+        return failure(error)
+    muscle = _new_muscle(root.af_vcp_system, name, closed_v, use_mirrored_rows or auto_mirror)
+    _assign_fibers(root.af_vcp_system, muscle, fiber_ids, fiber_map)
     _activate(root.af_vcp_system, "MUSCLE", muscle.id)
     _sync_and_select_ctrl(context, root, muscle.id)
     return success(f"Created {muscle.id} from {len(fiber_ids)} fibers", value=muscle)
@@ -30,11 +32,31 @@ def create_muscle_vcp(context, name="", closed_v=False, use_mirrored_rows=False)
 
 def _creation_payload(context, root):
     fiber_ids = _selected_fiber_ids(context, root)
-    if len(fiber_ids) < 2:
+    auto_mirror = _auto_mirror_rows(root, fiber_ids)
+    if len(fiber_ids) < 2 and not auto_mirror:
         return None
     fibers_by_id, fibers, error = _resolved_fibers(root.af_vcp_system, fiber_ids)
     error = error or _compatibility_error(root, fibers or ())
-    return fiber_ids, fibers_by_id, error
+    return fiber_ids, fibers_by_id, error, auto_mirror
+
+
+def _auto_mirror_rows(root, fiber_ids):
+    fiber = _single_selected_fiber(root, fiber_ids)
+    return fiber is not None and not is_loop_fiber(fiber) and _mirror_rule(root, fiber) is not None
+
+
+def _single_selected_fiber(root, fiber_ids):
+    if len(fiber_ids) != 1:
+        return None
+    return fibers_by_id(root).get(str(fiber_ids[0] or ""))
+
+
+def _mirror_rule(root, fiber):
+    return effective_rule_for_fiber(fiber, _scp_map(root), fibers_by_id(root))
+
+
+def _scp_map(root):
+    return {str(scp.id or ""): scp for scp in getattr(getattr(root, "af_scp_system", None), "scps", ())}
 
 
 def _selected_fiber_ids(context, root):

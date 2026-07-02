@@ -288,6 +288,11 @@ class FiberSolver:
     def _smooth_derived_loop(self, points, oracle):
         nodes = [point.copy() for point in points]
         active = oracle.active_colliders_for_polyline(nodes, padding=oracle.margin * 2.0)
+        if not active:
+            return nodes, 0.0, 0
+        return self._relax_derived_loop(nodes, points, oracle, active)
+
+    def _relax_derived_loop(self, nodes, points, oracle, active):
         max_pen = 0.0
         for _ in range(6):
             prev_nodes = [p.copy() for p in nodes]

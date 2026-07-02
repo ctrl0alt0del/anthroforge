@@ -148,13 +148,12 @@ class MuscleSceneSync:
         return verts, faces_raw
 
     def _surface_base_points(self, root, scene, muscle, ordered_fibers, missing):
-        if missing or len(ordered_fibers) < 2:
-            return None
-        ok, _reason, _count, _anchors = validate_anchor_structure(ordered_fibers)
-        if not ok:
+        if missing or not ordered_fibers:
             return None
         points = self._collect_points_with_fallback(root, scene, muscle, ordered_fibers)
-        if not points:
+        if not points or len(points) < 2:
+            return None
+        if len(ordered_fibers) > 1 and not validate_anchor_structure(ordered_fibers)[0]:
             return None
         return prepare_surface_rows(points, int(ordered_fibers[0].node_count), densify_v=True, closed_u=self._closed_u(ordered_fibers))
 

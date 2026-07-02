@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import bmesh
@@ -17,6 +18,8 @@ from mathutils import Vector
 from _helpers import BlenderTestCase, capture_mesh_attachment, capture_world_attachment, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
 from anthroforge.app.use_cases.fiber_tools import recompute_fiber as recompute_fiber_action
 from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param, encode_fiber_vertex_index, parse_fiber_attach_param
+from anthroforge.core.vcp.fiber_loop import derived_loop_targets
+from anthroforge.core.vcp.fiber_solver import FiberSolver
 from anthroforge.core.vcp.runtime_state import (
     fiber_active_colliders,
     fiber_invalid_reason,
@@ -166,6 +169,17 @@ def _self_intersects(points):
             if _segments_cross(points[i], points[(i + 1) % count], points[j], points[(j + 1) % count]):
                 return True
     return False
+
+
+def _irregular_loop_points():
+    return [Vector((-2.0, 0.0, 0.0)), Vector((-1.5, 1.2, 0.0)), Vector((-0.9, 1.2, 0.0)), Vector((-0.3, 1.2, 0.0)), Vector((0.3, 1.2, 0.0)), Vector((0.9, 1.2, 0.0)), Vector((1.5, 1.2, 0.0)), Vector((2.0, 0.2, 0.0)), Vector((1.0, -1.0, 0.0)), Vector((-1.0, -0.8, 0.0))]
+
+
+def _line_deviation(points):
+    a, b = points[0], points[-1]
+    base = b - a
+    base2 = max(base.length_squared, 1.0e-9)
+    return max(((point - (a + base * ((point - a).dot(base) / base2))).length for point in points[1:-1]), default=0.0)
 
 
 class FiberVcpWorkflowTests(BlenderTestCase):
@@ -416,6 +430,18 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         child = _derived_loop_setup(_acute_loop_mesh_object, 0.35)
         points = [(item[0], item[1]) for item in _fiber_points_world(child)]
         self.assertFalse(_self_intersects(points))
+
+    def test_derived_loop_targets_keep_straight_spans_straight(self):
+        fiber = SimpleNamespace(loop_base_offset_u=0.24, loop_base_offset_v=0.0, loop_profile_keys=[])
+        shifted = derived_loop_targets(_irregular_loop_points(), fiber)
+        self.assertLess(_line_deviation(shifted[2:6]), 1.0e-3)
+
+    def test_derived_loop_without_colliders_keeps_target_shape(self):
+        solver = FiberSolver()
+        oracle = SimpleNamespace(margin=0.0, active_colliders_for_polyline=lambda *_a, **_k: [])
+        nodes, max_pen, active = solver._smooth_derived_loop(_irregular_loop_points(), oracle)
+        self.assertEqual((active, max_pen), (0, 0.0))
+        self.assertTrue(all((node - src).length < 1.0e-8 for node, src in zip(nodes, _irregular_loop_points())))
 
     def test_delete_loop_root_cascades_to_derived_children(self):
         root_obj, fiber, _loop = _loop_setup()

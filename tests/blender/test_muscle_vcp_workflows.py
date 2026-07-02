@@ -206,6 +206,23 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         base = find_flagged("af_muscle_proxy", muscle.id, "af_muscle_id")
         self.assertEqual((len(muscle.fiber_refs), base is not None), (2, True))
 
+    def test_add_muscle_from_single_mirrored_fiber_expands_across_plane(self):
+        root_obj, first, _second = _mirrored_side_muscle_setup()
+        select_only(first)
+        self.assertEqual(bpy.ops.af.add_muscle_vcp(), {"FINISHED"})
+        muscle = root_obj.af_vcp_system.muscles[0]
+        register_muscle_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        base = _surface_obj(root_obj, muscle, "BASE")
+        xs = [(base.matrix_world @ vert.co).x for vert in base.data.vertices]
+        sync_vcp_mirrors(root=root_obj, scene=bpy.context.scene, target_muscle_ids={muscle.id})
+        mirror = next((obj for obj in bpy.context.scene.objects if obj.get("af_muscle_mirror_proxy") and obj.get("af_source_muscle_id") == muscle.id), None)
+        self.assertEqual([ref.fiber_id for ref in muscle.fiber_refs], [root_obj.af_vcp_system.fibers[0].id])
+        self.assertTrue(muscle.use_mirrored_rows)
+        self.assertGreater(len(base.data.vertices), 0)
+        self.assertLess(min(xs), -1.0e-6)
+        self.assertGreater(max(xs), 1.0e-6)
+        self.assertIsNone(mirror)
+
     def test_incompatible_fibers_are_rejected(self):
         root_obj, first, second = _muscle_setup()
         root_obj.af_vcp_system.fibers[1].node_count += 1

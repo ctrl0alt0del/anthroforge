@@ -127,18 +127,68 @@ def _planar_targets(flat, offsets):
     values, lifts = offsets
     if len(flat) < 3:
         return []
-    center = _flat_center(flat)
-    return [_radial_target(flat, values, center, i) for i in range(len(flat))], lifts
+    shifted = _offset_loop(flat, values)
+    return (_radial_loop(flat, values) if _loop_self_intersects(shifted) else shifted), lifts
 
 
 def _flat_center(points):
     return sum((point for point in points), Vector((0.0, 0.0))) / float(max(1, len(points)))
 
 
+def _offset_loop(flat, offsets):
+    sign = _loop_winding(flat)
+    center = _flat_center(flat)
+    return [_offset_vertex(flat, offsets, sign, center, i) for i in range(len(flat))]
+
+
+def _loop_winding(points):
+    area = 0.0
+    for i in range(len(points)):
+        j = (i + 1) % len(points)
+        area += points[i].x * points[j].y - points[j].x * points[i].y
+    return 1.0 if area >= 0.0 else -1.0
+
+
+def _offset_vertex(points, offsets, sign, center, index):
+    prev, cur, nxt = points[index - 1], points[index], points[(index + 1) % len(points)]
+    return cur + _offset_direction(prev, cur, nxt, sign, center) * float(offsets[index])
+
+
+def _offset_direction(prev, cur, nxt, sign, center):
+    n0 = _inward_normal(cur - prev, sign)
+    n1 = _inward_normal(nxt - cur, sign)
+    return _safe_dir(n0 + n1, _safe_dir(n1, center - cur))
+
+
+def _inward_normal(edge, sign):
+    vec = _safe_dir(edge, Vector((1.0, 0.0)))
+    return Vector((-vec.y, vec.x)) * sign
+
+
+def _radial_loop(flat, offsets):
+    center = _flat_center(flat)
+    return [_radial_target(flat, offsets, center, i) for i in range(len(flat))]
+
+
 def _radial_target(flat, offsets, center, index):
     fallback = flat[index] - flat[index - 1]
     direction = _safe_dir(center - flat[index], fallback)
     return flat[index] + direction * offsets[index]
+
+
+def _loop_self_intersects(points):
+    count = len(points)
+    return any(_segments_cross(points[i], points[(i + 1) % count], points[j], points[(j + 1) % count]) for i in range(count) for j in range(i + 1, count) if abs(i - j) > 1 and (i != 0 or j != count - 1))
+
+
+def _segments_cross(a0, a1, b0, b1, eps=1.0e-6):
+    o1, o2 = _orient2(a0, a1, b0), _orient2(a0, a1, b1)
+    o3, o4 = _orient2(b0, b1, a0), _orient2(b0, b1, a1)
+    return o1 * o2 < -eps and o3 * o4 < -eps
+
+
+def _orient2(a, b, c):
+    return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
 
 
 def _lift_targets(points, flat, plan, plane):
