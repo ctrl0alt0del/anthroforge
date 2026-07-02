@@ -90,11 +90,18 @@ def loop_frames(points):
     return tangents, *_twist_closed_frames(tangents, normals, binormals)
 
 
-def derived_loop_targets(points, fiber):
+def derived_loop_targets(points, fiber, include_v=True):
     plane = loop_plane(points)
     flat = _flat_points(points, plane)
-    plan = _planar_targets(flat, _profile_lists(fiber, len(points)))
+    plan = _planar_targets(flat, _profile_lists(fiber, len(points), include_v))
     return [] if not plan else _lift_targets(points, flat, plan, plane)
+
+
+def planar_loop_targets(points, fiber, include_v=True):
+    plane = loop_plane(points)
+    flat = _flat_points(points, plane)
+    plan = _planar_targets(flat, _profile_lists(fiber, len(points), include_v))
+    return [] if not plan else _lift_plan(plan, plane)
 
 
 def loop_plane(points):
@@ -118,9 +125,10 @@ def _flat_points(points, plane):
     return [Vector(((point - origin).dot(axis_u), (point - origin).dot(axis_v))) for point in points]
 
 
-def _profile_lists(fiber, count):
+def _profile_lists(fiber, count, include_v=True):
     pairs = [profile_offsets(fiber, i / float(max(1, count))) for i in range(count)]
-    return [pair[0] for pair in pairs], [pair[1] for pair in pairs]
+    lifts = [pair[1] for pair in pairs] if include_v else [0.0] * len(pairs)
+    return [pair[0] for pair in pairs], lifts
 
 
 def _planar_targets(flat, offsets):
@@ -249,6 +257,12 @@ def _lift_targets(points, flat, plan, plane):
     shifted, lifts = plan
     _origin, axis_u, axis_v, normal = plane
     return [points[i] + axis_u * (shifted[i].x - flat[i].x) + axis_v * (shifted[i].y - flat[i].y) + normal * lifts[i] for i in range(len(points))]
+
+
+def _lift_plan(plan, plane):
+    shifted, lifts = plan
+    origin, axis_u, axis_v, normal = plane
+    return [origin + axis_u * point.x + axis_v * point.y + normal * lifts[i] for i, point in enumerate(shifted)]
 
 
 def _best_fit_normal(points):

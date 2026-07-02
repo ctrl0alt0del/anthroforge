@@ -4,8 +4,9 @@ from mathutils import Vector
 
 from ..visualization.fiber_sync_helpers import endpoint_world as resolve_fiber_endpoint_world, touch_world as resolve_fiber_touch_world
 from .attachment_backend import attachment_issue, attachment_runtime
+from .dependent_loop_surface import surface_target_points
 from .fiber_collision import CollisionOracle
-from .fiber_loop import derived_loop_targets, loop_frames, loop_pin_targets, profile_offsets, resample_closed
+from .fiber_loop import derived_loop_targets, loop_frames, loop_pin_targets, planar_loop_targets, profile_offsets, resample_closed
 from .fiber_modes import DERIVED_GENERATION, fiber_root, fibers_by_id, is_derived_loop, is_loop_fiber, loop_anchor_specs
 from .fiber_planner import DIRECT, LOCAL_FALLBACK, PlannerAnchor, plan_route
 from .runtime_state import (
@@ -156,10 +157,11 @@ class FiberSolver:
         if not points:
             return self._failed_derived_loop(fiber_prop)
         self._sync_derived_node_count(fiber_prop, len(points))
+        runtime = self._runtime_registry(scene, depsgraph)
         params = self._runtime_params(fiber_prop, False)
         oracle = CollisionOracle(root, scene, depsgraph, params["margin"], self.surface_offset)
         t0 = perf_counter()
-        nodes, max_pen, active_count = self._build_derived_loop(fiber_prop, points, oracle)
+        nodes, max_pen, active_count = self._build_derived_loop(root, scene, depsgraph, runtime, driver, fiber_prop, points, oracle)
         self._store_status(fiber_prop, True, 0.0, max_pen)
         self._store_metrics(fiber_prop, DERIVED_GENERATION, 0.0, (perf_counter() - t0) * 1000.0, active_count)
         self._cache[fiber_prop.id] = [p.copy() for p in nodes]
@@ -268,22 +270,42 @@ class FiberSolver:
         if int(getattr(fiber_prop, "node_count", 0)) != int(node_count):
             fiber_prop.node_count = int(node_count)
 
-    def _build_derived_loop(self, fiber_prop, driver_points, oracle):
-        target = self._derived_target_points(driver_points, fiber_prop)
+    def _build_derived_loop(self, root, scene, depsgraph, runtime, driver, fiber_prop, driver_points, oracle):
+        target = self._derived_target_points(root, scene, depsgraph, runtime, driver, driver_points, fiber_prop)
         return self._smooth_derived_loop(target, oracle)
 
-    def _derived_target_points(self, driver_points, fiber_prop):
-        target = derived_loop_targets(driver_points, fiber_prop)
-        return target or self._frame_target_points(driver_points, fiber_prop)
+    def _derived_target_points(self, root, scene, depsgraph, runtime, driver, driver_points, fiber_prop):
+        target = surface_target_points(root, scene, depsgraph, driver, driver_points, fiber_prop, runtime)
+        if target:
+            return self._blended_surface_targets(driver_points, fiber_prop, target)
+        return self._shape_target_points(driver_points, fiber_prop, include_v=True)
 
-    def _frame_target_points(self, driver_points, fiber_prop):
+    def _shape_target_points(self, driver_points, fiber_prop, include_v):
+        target = derived_loop_targets(driver_points, fiber_prop, include_v=include_v)
+        return target or self._frame_target_points(driver_points, fiber_prop, include_v=include_v)
+
+    def _blended_surface_targets(self, driver_points, fiber_prop, surface_nodes):
+        shape = self._shape_target_points(driver_points, fiber_prop, include_v=False)
+        flat = self._planar_target_points(driver_points, fiber_prop)
+        return [self._surface_target_point(shape[i], flat[i], surface_nodes[i], fiber_prop, i, len(surface_nodes)) for i in range(len(surface_nodes))]
+
+    def _surface_target_point(self, shape_point, flat_point, node, fiber_prop, index, count):
+        _offset_u, offset_v = profile_offsets(fiber_prop, index / float(max(1, count)))
+        base = shape_point.lerp(flat_point, float(node.get("bias", 0.0)))
+        return base + node["normal"] * offset_v
+
+    def _planar_target_points(self, driver_points, fiber_prop):
+        target = planar_loop_targets(driver_points, fiber_prop, include_v=False)
+        return target or self._shape_target_points(driver_points, fiber_prop, include_v=False)
+
+    def _frame_target_points(self, driver_points, fiber_prop, include_v=True):
         tangents, normals, binormals = loop_frames(driver_points)
         count = float(max(1, len(driver_points)))
-        return [self._derived_point(driver_points[i], normals[i], binormals[i], fiber_prop, i / count) for i in range(len(driver_points))]
+        return [self._derived_point(driver_points[i], normals[i], binormals[i], fiber_prop, i / count, include_v) for i in range(len(driver_points))]
 
-    def _derived_point(self, point, normal, binormal, fiber_prop, t):
+    def _derived_point(self, point, normal, binormal, fiber_prop, t, include_v=True):
         offset_u, offset_v = profile_offsets(fiber_prop, t)
-        return point + normal * offset_u + binormal * offset_v
+        return point + normal * offset_u + (binormal * offset_v if include_v else Vector())
 
     def _smooth_derived_loop(self, points, oracle):
         nodes = [point.copy() for point in points]
