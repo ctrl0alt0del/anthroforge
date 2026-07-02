@@ -116,7 +116,7 @@ class AF_DataShortcut_Property(bpy.types.PropertyGroup):
     owner_id: bpy.props.StringProperty(name="Owner ID", default="")
     data_path: bpy.props.StringProperty(name="Data Path", default="")
     vector_mode: bpy.props.EnumProperty(name="Vector Mode", items=(("DEFAULT", "Default", ""), ("UNIFORM", "Uniform", "")), default="DEFAULT")
-    owner_backsolve: bpy.props.BoolProperty(name="Owner Back-Solve", default=True)
+    owner_backsolve: bpy.props.BoolProperty(name="Owner Back-Solve", default=False)
     overrides: bpy.props.CollectionProperty(type=AF_DataShortcutOverride_Property)
     proxy_sync_lock: bpy.props.BoolProperty(default=False, options={"SKIP_SAVE"})
     proxy_bool: bpy.props.BoolProperty(get=_bool_get, set=_bool_set, options={"SKIP_SAVE"})

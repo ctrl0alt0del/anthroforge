@@ -2,6 +2,7 @@ import re
 
 from ..id_utils import next_prefixed_id
 from ..shortcuts import remap_overrides
+from ..shortcuts.owner_backsolve import owner_backsolve_enabled
 from ..shortcuts.owners import remapped_shortcut_owner
 from ..vcp.fiber_modes import driver_fiber_id, fiber_parent_ids, is_derived_loop
 from .bound_objects import clear_scp_tags, iter_bound_objects
@@ -246,7 +247,7 @@ def _add_shortcut(root, shortcut, data_path, owner_type, owner_id, scp_map):
     item.name, item.data_path = str(shortcut.name or item.id), data_path
     item.owner_type, item.owner_id = owner_type, owner_id
     item.vector_mode = str(getattr(shortcut, "vector_mode", "DEFAULT") or "DEFAULT")
-    item.owner_backsolve = bool(getattr(shortcut, "owner_backsolve", True))
+    item.owner_backsolve = owner_backsolve_enabled(shortcut)
     remap_overrides(item, shortcut, scp_map)
 
 

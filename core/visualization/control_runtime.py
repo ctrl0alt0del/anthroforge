@@ -10,6 +10,7 @@ from ..deps.control_lifecycle import should_remove_control_object_on_load, shoul
 from ..deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 from ..scp_runtime.common import is_bound_scp_obj
 from ..scp_runtime.runtime_state import reset_scp_runtime_state
+from ..shortcuts.owner_backsolve import retrofit_owner_backsolve_defaults
 from ..selection_order import update_selection_order
 from ..utils import depsgraph_for_scene, get_af_root, view_layer_for_scene
 from ..vcp.runtime_state import reset_vcp_runtime_state
@@ -255,6 +256,7 @@ def _load_scene():
 
 
 def _hydrate_load_state(root, scene, current):
+    retrofit_owner_backsolve_defaults(root)
     _sync_active_scp_state(root, scene, current)
     _hydrate_runtime_state(root, scene)
     _ensure_runtime_handlers()

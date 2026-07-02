@@ -1,4 +1,5 @@
 from ..id_utils import next_prefixed_id
+from ..shortcuts.owner_backsolve import init_owner_backsolve
 from ..shortcuts.path_codec import make_shortcut_path
 
 
@@ -54,6 +55,7 @@ def _add_shortcut(root, name, data_path, owner_type, owner_id):
     item.owner_type = str(owner_type or "NONE")
     item.owner_id = str(owner_id or "")
     item.data_path = str(data_path or "")
+    init_owner_backsolve(item, False)
 
 
 def _owner_from_object(obj):

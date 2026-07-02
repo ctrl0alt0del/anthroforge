@@ -2,9 +2,11 @@ from dataclasses import dataclass, field
 
 try:
     from ...core.shortcuts import has_override, resolve_shortcut
+    from ...core.shortcuts.owner_backsolve import owner_backsolve_is_custom
     from ...core.shortcuts.owners import current_shortcut_owner, matches_shortcut_owner, selected_scp_id, shortcut_relation
 except ImportError:
     from core.shortcuts import has_override, resolve_shortcut
+    from core.shortcuts.owner_backsolve import owner_backsolve_is_custom
     from core.shortcuts.owners import current_shortcut_owner, matches_shortcut_owner, selected_scp_id, shortcut_relation
 
 from .root import root_for_context, scene_from_context
@@ -52,7 +54,7 @@ def _show_settings(shortcut):
 
 
 def _has_settings(shortcut):
-    return bool(getattr(shortcut, "overrides", ())) or not bool(getattr(shortcut, "owner_backsolve", True))
+    return bool(getattr(shortcut, "overrides", ())) or owner_backsolve_is_custom(shortcut)
 
 
 def shortcut_panel_state(context):

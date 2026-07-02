@@ -2,10 +2,12 @@ from ..queries.root import root_for_context
 
 try:
     from ...core.id_utils import next_prefixed_id
+    from ...core.shortcuts.owner_backsolve import init_owner_backsolve
     from ...core.shortcuts import normalize_shortcut_path, resolve_shortcut
     from ...core.shortcuts.owners import current_shortcut_owner
 except ImportError:
     from core.id_utils import next_prefixed_id
+    from core.shortcuts.owner_backsolve import init_owner_backsolve
     from core.shortcuts import normalize_shortcut_path, resolve_shortcut
     from core.shortcuts.owners import current_shortcut_owner
 
@@ -59,6 +61,7 @@ def _append_shortcut(shortcuts, name, path, owner):
     item.name, item.data_path = name, path
     item.vector_mode = "DEFAULT"
     item.owner_type, item.owner_id = owner
+    init_owner_backsolve(item, False)
 
 
 def _draft_value(scene, key):

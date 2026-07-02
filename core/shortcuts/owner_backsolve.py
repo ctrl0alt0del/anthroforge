@@ -4,6 +4,67 @@ from ..utils import depsgraph_for_scene
 from ..scp_runtime.common import as_id, as_vec3, find_scp_by_id, indexed_geometry_mesh_scp_obj, indexed_transform_scp_obj, mark_applied_matrix, scp_object_maps
 from ..scp_runtime.runtime_state import attach_child_anchor_index, attach_child_origin_local, attach_initialized
 
+_MIGRATION_KEY = "af_owner_backsolve_default_false"
+
+
+def owner_backsolve_enabled(shortcut):
+    if shortcut is None:
+        return False
+    return bool(getattr(shortcut, "owner_backsolve", False)) if _owner_backsolve_set(shortcut) else True
+
+
+def owner_backsolve_is_custom(shortcut):
+    return _owner_backsolve_set(shortcut) and owner_backsolve_enabled(shortcut)
+
+
+def init_owner_backsolve(shortcut, enabled=False):
+    if shortcut is not None:
+        shortcut.owner_backsolve = bool(enabled)
+
+
+def _owner_backsolve_set(shortcut):
+    check = getattr(shortcut, "is_property_set", None)
+    return _checked_property_set(check) if callable(check) else hasattr(shortcut, "owner_backsolve")
+
+
+def _checked_property_set(check):
+    try:
+        return bool(check("owner_backsolve"))
+    except Exception:
+        return False
+
+
+def retrofit_owner_backsolve_defaults(root):
+    if root is None or _retrofit_done(root):
+        return False
+    changed = any(_retrofit_shortcut(item) for item in _shortcut_rows(root))
+    _mark_retrofit(root)
+    return changed
+
+
+def _retrofit_done(root):
+    getter = getattr(root, "get", None)
+    return False if getter is None else bool(getter(_MIGRATION_KEY))
+
+
+def _shortcut_rows(root):
+    system = getattr(root, "af_shortcut_system", None)
+    return tuple(getattr(system, "shortcuts", ()) or ())
+
+
+def _retrofit_shortcut(shortcut):
+    if _owner_backsolve_set(shortcut):
+        return False
+    shortcut.owner_backsolve = False
+    return True
+
+
+def _mark_retrofit(root):
+    try:
+        root[_MIGRATION_KEY] = True
+    except Exception:
+        return
+
 
 def capture_owner_backsolve_snapshot(root, scene, owner_id):
     try:

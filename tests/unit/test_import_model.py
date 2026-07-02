@@ -37,6 +37,11 @@ class ImportModelTests(unittest.TestCase):
         self.assertEqual((snap.fibers[0].driver_fiber_id, snap.fibers[0].loop_anchors[0].parent_id, snap.fibers[0].loop_profile_keys[0].props["delta_u"]), ("F0", "S1", 0.1))
         self.assertEqual(snap.fibers[0].touches[0].props["normal_offset"], 0.25)
 
+    def test_package_snapshot_defaults_missing_owner_backsolve_to_true(self):
+        data = _snapshot_dict()
+        data["shortcuts"][0].pop("owner_backsolve")
+        self.assertTrue(PackageSnapshot.from_dict(data).shortcuts[0].owner_backsolve)
+
 
 def _snapshot_dict():
     return {

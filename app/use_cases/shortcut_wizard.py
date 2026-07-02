@@ -3,12 +3,14 @@ from ..queries.root import root_for_context
 try:
     from ...core.id_utils import next_prefixed_id
     from ...core.shortcuts import canonical_shortcut_path, normalize_shortcut_path
+    from ...core.shortcuts.owner_backsolve import init_owner_backsolve
     from ...core.shortcuts.owners import current_shortcut_owner, matches_shortcut_owner
     from ...core.scp_runtime.common import find_scp_by_id
     from ...core.shortcuts.wizard_scan import collect_shortcut_fields
 except ImportError:
     from core.id_utils import next_prefixed_id
     from core.shortcuts import canonical_shortcut_path, normalize_shortcut_path
+    from core.shortcuts.owner_backsolve import init_owner_backsolve
     from core.shortcuts.owners import current_shortcut_owner, matches_shortcut_owner
     from core.scp_runtime.common import find_scp_by_id
     from core.shortcuts.wizard_scan import collect_shortcut_fields
@@ -157,6 +159,7 @@ def _expanded_name(name, wildcard):
 def _create_shortcut(shortcuts, item, owner, name):
     shortcut = shortcuts.add()
     shortcut.id = next_prefixed_id(shortcuts, "SHORTCUT")
+    init_owner_backsolve(shortcut, False)
     _write_shortcut(shortcut, item, owner, name)
     return ""
 

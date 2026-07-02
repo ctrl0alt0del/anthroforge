@@ -96,6 +96,7 @@ def add_shortcut(root_obj, name, owner_type, owner_id, data_path):
     item.owner_type = owner_type
     item.owner_id = owner_id
     item.data_path = data_path
+    item.owner_backsolve = False
     return item
 
 

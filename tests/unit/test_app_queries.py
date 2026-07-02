@@ -182,6 +182,18 @@ class AppQueryTests(unittest.TestCase):
         self.assertEqual((data["K2"].owner_relation, data["K2"].show_override), ("SELF", False))
         self.assertEqual((data["K3"].owner_relation, data["K3"].show_override), ("UNRELATED", False))
 
+    def test_shortcut_panel_state_only_marks_explicit_owner_backsolve_true(self):
+        obj = FakeObject("bound", af_root_name="ROOT", af_scp_id="S1")
+        obj.rna_type.properties["location"] = SimpleNamespace(type="FLOAT", array_length=3)
+        bpy.data.objects[obj.name] = obj
+        legacy = shortcut("K1", "Legacy", "SCP", "S1", 'af://object_rna/bound/location[0]')
+        fresh = shortcut("K2", "Fresh", "SCP", "S1", 'af://object_rna/bound/location[1]')
+        fresh.owner_backsolve = False
+        custom = shortcut("K3", "Custom", "SCP", "S1", 'af://object_rna/bound/location[2]')
+        custom.owner_backsolve = True
+        rows = shortcut_panel_state(context(scene(root(scps=[scp("S1")], shortcuts=[legacy, fresh, custom]), obj), active_object=obj)).rows
+        self.assertEqual({row.shortcut.id: row.has_settings for row in rows}, {"K1": False, "K2": False, "K3": True})
+
     def test_create_root_use_case_syncs_only_when_missing(self):
         calls = []
         scene_obj = scene()
@@ -226,7 +238,7 @@ class AppQueryTests(unittest.TestCase):
         ctx = context(scn)
         self.assertEqual(add_shortcut_from_context(ctx), (True, ""))
         row = root_obj.af_shortcut_system.shortcuts[0]
-        self.assertEqual((row.name, row.owner_type, row.owner_id), ("Arm X", "SCP", "S1"))
+        self.assertEqual((row.name, row.owner_type, row.owner_id, row.owner_backsolve), ("Arm X", "SCP", "S1", False))
         self.assertEqual((scn.af_new_shortcut_name, scn.af_new_shortcut_path), ("", ""))
         self.assertTrue(delete_shortcut_from_context(ctx, row.id))
         self.assertEqual(len(root_obj.af_shortcut_system.shortcuts), 0)

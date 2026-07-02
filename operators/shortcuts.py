@@ -89,7 +89,7 @@ class AF_OT_EditShortcutOverride(bpy.types.Operator):
 
     shortcut_id: bpy.props.StringProperty(default="")
     target_scp_id: bpy.props.StringProperty(default="")
-    owner_backsolve: bpy.props.BoolProperty(name="Owner Back-Solve", default=True)
+    owner_backsolve: bpy.props.BoolProperty(name="Owner Back-Solve", default=False)
     parent_anchor_mode: bpy.props.EnumProperty(name="Parent Anchor", items=_parent_items)
     child_anchor_mode: bpy.props.EnumProperty(name="Child Anchor", items=_child_items)
     follow_rotation_mode: bpy.props.EnumProperty(name="Follow Rotation", items=_follow_items)

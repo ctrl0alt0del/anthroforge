@@ -289,6 +289,15 @@ def _unregister_runtime_hooks():
     unregister_sync()
 
 
+def _retrofit_loaded_shortcuts():
+    from .core.shortcuts.owner_backsolve import retrofit_owner_backsolve_defaults
+    from .core.utils import get_af_root
+    for scene in bpy.data.scenes:
+        root = get_af_root(scene)
+        if root is not None:
+            retrofit_owner_backsolve_defaults(root)
+
+
 def register():
     global __addon_enabled__
     for cls in classes:
@@ -298,6 +307,7 @@ def register():
     if __addon_enabled__:
         return
     _register_runtime_hooks()
+    _retrofit_loaded_shortcuts()
     __addon_enabled__ = True
 
 

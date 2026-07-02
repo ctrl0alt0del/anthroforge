@@ -4,7 +4,7 @@ from ..queries.root import root_for_context
 
 try:
     from ...core.shortcuts import override_values, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
-    from ...core.shortcuts.owner_backsolve import capture_owner_backsolve_snapshot
+    from ...core.shortcuts.owner_backsolve import capture_owner_backsolve_snapshot, owner_backsolve_enabled
     from ...core.shortcuts.proxy_props import shortcut_prop_name
     from ...core.shortcuts.vector_modes import is_uniform_vector_shortcut
     from ...core.shortcuts.owners import shortcut_relation
@@ -13,7 +13,7 @@ try:
     from ...core.scp_runtime.runtime_state import restore_attachment_runtime, snapshot_attachment_runtime
 except ImportError:
     from core.shortcuts import override_values, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
-    from core.shortcuts.owner_backsolve import capture_owner_backsolve_snapshot
+    from core.shortcuts.owner_backsolve import capture_owner_backsolve_snapshot, owner_backsolve_enabled
     from core.shortcuts.proxy_props import shortcut_prop_name
     from core.shortcuts.vector_modes import is_uniform_vector_shortcut
     from core.shortcuts.owners import shortcut_relation
@@ -94,7 +94,7 @@ def _owner_backsolve_snapshot(root, scene, shortcut):
 
 
 def _owner_backsolve_enabled(shortcut):
-    return bool(getattr(shortcut, "owner_backsolve", True))
+    return owner_backsolve_enabled(shortcut)
 
 
 def _run_scp_session(context, root, shortcut, target, value, plan, session, authored):

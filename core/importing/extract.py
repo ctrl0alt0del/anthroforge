@@ -4,6 +4,7 @@ from dataclasses import asdict
 
 import bpy
 
+from ..shortcuts.owner_backsolve import owner_backsolve_enabled
 from ..shortcuts.path_codec import make_bound_entity_id, make_shortcut_path, parse_shortcut_path
 from ..utils import get_af_root
 from .model import (
@@ -103,7 +104,7 @@ def _blob_snapshot(root, blob):
 
 
 def _shortcut_snapshot(root, shortcut):
-    return ShortcutSnapshot(str(shortcut.name or ""), str(shortcut.owner_type or "NONE"), str(shortcut.owner_id or ""), _canonical_path(root, shortcut.data_path), str(getattr(shortcut, "vector_mode", "DEFAULT") or "DEFAULT"), bool(getattr(shortcut, "owner_backsolve", True)), _shortcut_overrides(shortcut))
+    return ShortcutSnapshot(str(shortcut.name or ""), str(shortcut.owner_type or "NONE"), str(shortcut.owner_id or ""), _canonical_path(root, shortcut.data_path), str(getattr(shortcut, "vector_mode", "DEFAULT") or "DEFAULT"), owner_backsolve_enabled(shortcut), _shortcut_overrides(shortcut))
 
 
 def _shortcut_overrides(shortcut):
