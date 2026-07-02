@@ -290,21 +290,22 @@ class FiberSolver:
         active = oracle.active_colliders_for_polyline(nodes, padding=oracle.margin * 2.0)
         if not active:
             return nodes, 0.0, 0
-        return self._relax_derived_loop(nodes, points, oracle, active)
+        return self._project_derived_loop(nodes, oracle, active)
 
-    def _relax_derived_loop(self, nodes, points, oracle, active):
+    def _project_derived_loop(self, nodes, oracle, active):
         max_pen = 0.0
-        for _ in range(6):
-            prev_nodes = [p.copy() for p in nodes]
-            self._apply_cyclic_shortening(nodes, set(), 0.12)
-            self._apply_spring_to_targets(nodes, points, 0.35)
-            max_pen = max(max_pen, self._apply_cyclic_collision_constraints(nodes, set(), oracle, active, oracle.margin))
-            self._apply_spring_to_targets(nodes, prev_nodes, 0.05)
+        for _ in range(2):
+            nodes, pen = self._project_derived_pass(nodes, oracle, active)
+            max_pen = max(max_pen, pen)
         return nodes, max_pen, len(active)
 
-    def _apply_spring_to_targets(self, nodes, targets, strength):
-        for i in range(len(nodes)):
-            nodes[i] = nodes[i].lerp(targets[i], max(0.0, min(1.0, strength)))
+    def _project_derived_pass(self, nodes, oracle, active):
+        out, max_pen = [], 0.0
+        for point in nodes:
+            pushed, pen = oracle.push_out_point(point, active)
+            out.append(pushed.copy())
+            max_pen = max(max_pen, pen)
+        return out, max_pen
 
     def _runtime_registry(self, scene, depsgraph):
         return attachment_runtime(scene, depsgraph)

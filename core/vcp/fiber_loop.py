@@ -128,7 +128,8 @@ def _planar_targets(flat, offsets):
     if len(flat) < 3:
         return []
     shifted = _offset_loop(flat, values)
-    return (_radial_loop(flat, values) if _loop_self_intersects(shifted) else shifted), lifts
+    simple = _simple_loop(shifted, len(flat))
+    return (simple or _radial_loop(flat, values)), lifts
 
 
 def _flat_center(points):
@@ -181,10 +182,63 @@ def _loop_self_intersects(points):
     return any(_segments_cross(points[i], points[(i + 1) % count], points[j], points[(j + 1) % count]) for i in range(count) for j in range(i + 1, count) if abs(i - j) > 1 and (i != 0 or j != count - 1))
 
 
+def _simple_loop(points, count):
+    loop = [point.copy() for point in points]
+    for _ in range(max(1, len(loop) * 2)):
+        trimmed = _trim_self_intersection(loop)
+        if trimmed is None:
+            return [] if len(loop) < 3 or _loop_self_intersects(loop) else resample_closed(loop, count)
+        loop = trimmed
+    return []
+
+
+def _trim_self_intersection(points):
+    for i in range(len(points)):
+        hit = _crossing_at(points, i)
+        if hit is not None:
+            return _resolve_crossing(points, i, *hit)
+    return None
+
+
+def _crossing_at(points, index):
+    a0, a1 = points[index], points[(index + 1) % len(points)]
+    for j in range(index + 2, len(points)):
+        if index == 0 and j == len(points) - 1:
+            continue
+        hit = _segment_hit(a0, a1, points[j], points[(j + 1) % len(points)])
+        if hit is not None:
+            return j, hit
+    return None
+
+
+def _resolve_crossing(points, first, second, hit):
+    loops = (_loop_slice(points, first + 1, second + 1, hit), _loop_slice(points, second + 1, first + 1 + len(points), hit))
+    valid = [loop for loop in loops if len(loop) >= 3]
+    return None if not valid else max(valid, key=_loop_area_abs)
+
+
+def _loop_slice(points, start, end, hit):
+    return [hit.copy()] + [points[i % len(points)].copy() for i in range(start, end)]
+
+
+def _loop_area_abs(points):
+    return abs(sum(points[i].x * points[(i + 1) % len(points)].y - points[(i + 1) % len(points)].x * points[i].y for i in range(len(points))))
+
+
 def _segments_cross(a0, a1, b0, b1, eps=1.0e-6):
     o1, o2 = _orient2(a0, a1, b0), _orient2(a0, a1, b1)
     o3, o4 = _orient2(b0, b1, a0), _orient2(b0, b1, a1)
     return o1 * o2 < -eps and o3 * o4 < -eps
+
+
+def _segment_hit(a0, a1, b0, b1, eps=1.0e-6):
+    den = _orient2(Vector((0.0, 0.0)), a1 - a0, b1 - b0)
+    if abs(den) <= eps:
+        return None
+    diff = b0 - a0
+    t = _orient2(Vector((0.0, 0.0)), diff, b1 - b0) / den
+    u = _orient2(Vector((0.0, 0.0)), diff, a1 - a0) / den
+    return None if min(t, u) <= eps or max(t, u) >= 1.0 - eps else a0.lerp(a1, t)
 
 
 def _orient2(a, b, c):

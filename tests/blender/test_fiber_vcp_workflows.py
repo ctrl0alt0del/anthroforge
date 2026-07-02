@@ -436,11 +436,23 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         shifted = derived_loop_targets(_irregular_loop_points(), fiber)
         self.assertLess(_line_deviation(shifted[2:6]), 1.0e-3)
 
+    def test_derived_loop_targets_keep_irregular_loop_simple(self):
+        fiber = SimpleNamespace(loop_base_offset_u=0.15, loop_base_offset_v=0.0, loop_profile_keys=[])
+        shifted = derived_loop_targets(_irregular_loop_points(), fiber)
+        self.assertFalse(_self_intersects([(point.x, point.y) for point in shifted]))
+
     def test_derived_loop_without_colliders_keeps_target_shape(self):
         solver = FiberSolver()
         oracle = SimpleNamespace(margin=0.0, active_colliders_for_polyline=lambda *_a, **_k: [])
         nodes, max_pen, active = solver._smooth_derived_loop(_irregular_loop_points(), oracle)
         self.assertEqual((active, max_pen), (0, 0.0))
+        self.assertTrue(all((node - src).length < 1.0e-8 for node, src in zip(nodes, _irregular_loop_points())))
+
+    def test_derived_loop_with_inactive_push_keeps_target_shape(self):
+        solver = FiberSolver()
+        oracle = SimpleNamespace(margin=0.0, active_colliders_for_polyline=lambda *_a, **_k: ["S1"], push_out_point=lambda point, _cols: (point.copy(), 0.0))
+        nodes, max_pen, active = solver._smooth_derived_loop(_irregular_loop_points(), oracle)
+        self.assertEqual((active, max_pen), (1, 0.0))
         self.assertTrue(all((node - src).length < 1.0e-8 for node, src in zip(nodes, _irregular_loop_points())))
 
     def test_delete_loop_root_cascades_to_derived_children(self):
