@@ -1,8 +1,6 @@
 from pathlib import Path
 import sys
 import json
-from math import cos, sin
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import bmesh
@@ -19,9 +17,6 @@ from mathutils import Vector
 from _helpers import BlenderTestCase, capture_mesh_attachment, capture_world_attachment, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
 from anthroforge.app.use_cases.fiber_tools import recompute_fiber as recompute_fiber_action
 from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param, encode_fiber_vertex_index, parse_fiber_attach_param
-from anthroforge.core.vcp.dependent_loop_surface import reference_surface_parent_id
-from anthroforge.core.vcp.fiber_loop import derived_loop_targets
-from anthroforge.core.vcp.fiber_solver import FiberSolver
 from anthroforge.core.vcp.runtime_state import (
     fiber_active_colliders,
     fiber_invalid_reason,
@@ -38,7 +33,6 @@ from anthroforge.core.vcp.runtime_state import (
 from anthroforge.core.visualization import fiber_sync_runtime as fiber_runtime
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
 from anthroforge.core.visualization.fiber_sync_helpers import endpoint_world, mark_endpoint_handle, mark_touch_handle, touch_world
-from anthroforge.core.visualization.muscle_sync_helpers import nearest_on_mesh_surface
 
 
 def _fiber_setup():
@@ -123,37 +117,6 @@ def _loop_mesh_object(name, location=(0.0, 0.0, 0.0)):
     return obj
 
 
-def _acute_loop_mesh_object(name, location=(0.0, 0.0, 0.0)):
-    mesh = bpy.data.meshes.new(name)
-    mesh.from_pydata([(-1.5, 0.0, 0.0), (0.0, 1.2, 0.0), (3.0, 0.0, 0.0), (0.0, -1.2, 0.0)], [], [(0, 1, 2, 3)])
-    obj = bpy.data.objects.new(name, mesh)
-    bpy.context.scene.collection.objects.link(obj)
-    obj.location = location
-    return obj
-
-
-def _cylinder_patch_object(name, location=(0.0, 0.0, 0.0), cols=5, rows=5, radius=1.0):
-    mesh = bpy.data.meshes.new(name)
-    verts = [_patch_vertex(col, row, cols, rows, radius) for row in range(rows) for col in range(cols)]
-    faces = [_patch_face(col, row, cols) for row in range(rows - 1) for col in range(cols - 1)]
-    mesh.from_pydata(verts, [], faces)
-    obj = bpy.data.objects.new(name, mesh)
-    bpy.context.scene.collection.objects.link(obj)
-    obj.location = location
-    return obj
-
-
-def _patch_vertex(col, row, cols, rows, radius):
-    theta = -0.8 + (1.6 * col / float(max(1, cols - 1)))
-    z = -0.8 + (1.6 * row / float(max(1, rows - 1)))
-    return radius * cos(theta), radius * sin(theta), z
-
-
-def _patch_face(col, row, cols):
-    i = row * cols + col
-    return i, i + 1, i + cols + 1, i + cols
-
-
 def _loop_setup():
     root_obj = root()
     loop = scp_with_object(root_obj, "Loop", _loop_mesh_object("Loop"))
@@ -162,71 +125,8 @@ def _loop_setup():
     return root_obj, root_obj.af_vcp_system.fibers[0], loop
 
 
-def _derived_loop_setup(mesh_factory, offset):
-    root_obj = root()
-    loop = scp_with_object(root_obj, "Loop", mesh_factory("Loop"))
-    _edit_select_vertex(loop.geometry_object_ref, 0, 1, 2, 3)
-    bpy.ops.af.create_loop_fiber_from_selected_vertices()
-    solved = root_obj.af_vcp_system.fibers[0]
-    bpy.ops.af.add_dependent_loop_fiber(fiber_id=solved.id)
-    child = root_obj.af_vcp_system.fibers[1]
-    child.loop_base_offset_u = offset
-    register_fiber_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
-    return child
-
-
-def _curved_loop_setup(offset_u, offset_v=0.0):
-    root_obj = root()
-    patch = scp_with_object(root_obj, "Curved", _cylinder_patch_object("Curved"))
-    _edit_select_vertex(patch.geometry_object_ref, 6, 8, 18, 16)
-    bpy.ops.af.create_loop_fiber_from_selected_vertices()
-    solved = root_obj.af_vcp_system.fibers[0]
-    bpy.ops.af.add_dependent_loop_fiber(fiber_id=solved.id)
-    child = root_obj.af_vcp_system.fibers[1]
-    child.loop_base_offset_u, child.loop_base_offset_v = offset_u, offset_v
-    register_fiber_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
-    return root_obj, solved, child, patch
-
-
 def _fiber_world_vectors(fiber):
     return [Vector(value) for value in _fiber_points_world(fiber)]
-
-
-def _surface_distance(mesh_obj, point):
-    snapped = nearest_on_mesh_surface(mesh_obj, point)
-    return 1.0e9 if snapped is None else (point - snapped).length
-
-
-def _orient2(a, b, c):
-    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-
-
-def _segments_cross(a0, a1, b0, b1, eps=1.0e-6):
-    o1, o2 = _orient2(a0, a1, b0), _orient2(a0, a1, b1)
-    o3, o4 = _orient2(b0, b1, a0), _orient2(b0, b1, a1)
-    return o1 * o2 < -eps and o3 * o4 < -eps
-
-
-def _self_intersects(points):
-    count = len(points)
-    for i in range(count):
-        for j in range(i + 1, count):
-            if abs(i - j) <= 1 or (i == 0 and j == count - 1):
-                continue
-            if _segments_cross(points[i], points[(i + 1) % count], points[j], points[(j + 1) % count]):
-                return True
-    return False
-
-
-def _irregular_loop_points():
-    return [Vector((-2.0, 0.0, 0.0)), Vector((-1.5, 1.2, 0.0)), Vector((-0.9, 1.2, 0.0)), Vector((-0.3, 1.2, 0.0)), Vector((0.3, 1.2, 0.0)), Vector((0.9, 1.2, 0.0)), Vector((1.5, 1.2, 0.0)), Vector((2.0, 0.2, 0.0)), Vector((1.0, -1.0, 0.0)), Vector((-1.0, -0.8, 0.0))]
-
-
-def _line_deviation(points):
-    a, b = points[0], points[-1]
-    base = b - a
-    base2 = max(base.length_squared, 1.0e-9)
-    return max(((point - (a + base * ((point - a).dot(base) / base2))).length for point in points[1:-1]), default=0.0)
 
 
 class FiberVcpWorkflowTests(BlenderTestCase):
@@ -444,7 +344,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
         anchors = [endpoint_world(root_obj, bpy.context.scene, {}, item.parent_id, item.attach_param) for item in fiber.loop_anchors]
         expected = [loop.geometry_object_ref.matrix_world @ loop.geometry_object_ref.data.vertices[i].co for i in (0, 1, 2, 3)]
-        self.assertEqual((fiber.topology_mode, fiber.generation_mode, len(fiber.loop_anchors)), ("LOOP", "SOLVED", 4))
+        self.assertEqual((fiber.topology_mode, len(fiber.loop_anchors)), ("LOOP", 4))
         self.assertEqual((proxy.data.splines[0].use_cyclic_u, fiber_route_mode(fiber)), (True, "DIRECT"))
         self.assertTrue(all((anchors[i] - expected[i]).length < 1.0e-6 for i in range(4)))
 
@@ -464,80 +364,3 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         select_only(other)
         self.assertEqual(bpy.ops.af.select_vcp_in_tree(node_id=fiber.id, node_type="FIBER"), {"FINISHED"})
         self.assertEqual(before, _fiber_points_world(fiber))
-
-    def test_add_dependent_loop_creates_child_without_handles(self):
-        root_obj, fiber, _loop = _loop_setup()
-        self.assertEqual(bpy.ops.af.add_dependent_loop_fiber(fiber_id=fiber.id), {"FINISHED"})
-        child = root_obj.af_vcp_system.fibers[1]
-        proxy = find_flagged("af_fiber_proxy", child.id, "af_fiber_id")
-        self.assertEqual((child.topology_mode, child.generation_mode, child.driver_fiber_id, len(child.loop_profile_keys)), ("LOOP", "DERIVED", fiber.id, 4))
-        self.assertEqual((_handle_count(child.id), proxy.data.splines[0].use_cyclic_u), (0, True))
-
-    def test_dependent_loop_offset_keeps_acute_loop_simple(self):
-        child = _derived_loop_setup(_acute_loop_mesh_object, 0.35)
-        points = [(item[0], item[1]) for item in _fiber_points_world(child)]
-        self.assertFalse(_self_intersects(points))
-
-    def test_derived_loop_targets_keep_straight_spans_straight(self):
-        fiber = SimpleNamespace(loop_base_offset_u=0.24, loop_base_offset_v=0.0, loop_profile_keys=[])
-        shifted = derived_loop_targets(_irregular_loop_points(), fiber)
-        self.assertLess(_line_deviation(shifted[2:6]), 1.0e-3)
-
-    def test_derived_loop_targets_keep_irregular_loop_simple(self):
-        fiber = SimpleNamespace(loop_base_offset_u=0.15, loop_base_offset_v=0.0, loop_profile_keys=[])
-        shifted = derived_loop_targets(_irregular_loop_points(), fiber)
-        self.assertFalse(_self_intersects([(point.x, point.y) for point in shifted]))
-
-    def test_dependent_loop_curved_surface_branch_keeps_points_on_parent_surface(self):
-        _root_obj, solved, child, patch = _curved_loop_setup(0.3, 0.0)
-        self.assertEqual(reference_surface_parent_id(solved), patch.id)
-        distances = [_surface_distance(patch.geometry_object_ref, point) for point in _fiber_world_vectors(child)]
-        self.assertLess(max(distances), 1.0e-4)
-
-    def test_dependent_loop_curved_surface_branch_lifts_along_surface_normals(self):
-        root_obj, _solved, child, patch = _curved_loop_setup(0.3, 0.0)
-        base = _fiber_world_vectors(child)
-        child.loop_base_offset_v = 0.08
-        register_fiber_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
-        lifted = _fiber_world_vectors(child)
-        snapped = [nearest_on_mesh_surface(patch.geometry_object_ref, point) for point in lifted]
-        self.assertLess(max((snap - base[i]).length for i, snap in enumerate(snapped)), 2.0e-3)
-        self.assertGreater(sum((lifted[i] - snapped[i]).length for i in range(len(lifted))) / float(len(lifted)), 0.05)
-
-    def test_dependent_loop_mixed_parent_root_falls_back_without_crash(self):
-        root_obj = root()
-        patch = scp_with_object(root_obj, "Curved", _cylinder_patch_object("Curved"))
-        other = scp_with_object(root_obj, "Other", _cylinder_patch_object("Other"))
-        _edit_select_vertex(patch.geometry_object_ref, 6, 8, 18, 16)
-        bpy.ops.af.create_loop_fiber_from_selected_vertices()
-        solved = root_obj.af_vcp_system.fibers[0]
-        solved.loop_anchors[0].parent_id = other.id
-        solved.loop_anchors[0].attach_param = capture_mesh_attachment(root_obj, other, 6)
-        bpy.ops.af.add_dependent_loop_fiber(fiber_id=solved.id)
-        child = root_obj.af_vcp_system.fibers[1]
-        child.loop_base_offset_u = 0.3
-        register_fiber_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
-        self.assertEqual(reference_surface_parent_id(solved), "")
-        self.assertEqual(len(_fiber_points_world(child)), int(child.node_count))
-
-    def test_derived_loop_without_colliders_keeps_target_shape(self):
-        solver = FiberSolver()
-        oracle = SimpleNamespace(margin=0.0, active_colliders_for_polyline=lambda *_a, **_k: [])
-        nodes, max_pen, active = solver._smooth_derived_loop(_irregular_loop_points(), oracle)
-        self.assertEqual((active, max_pen), (0, 0.0))
-        self.assertTrue(all((node - src).length < 1.0e-8 for node, src in zip(nodes, _irregular_loop_points())))
-
-    def test_derived_loop_with_inactive_push_keeps_target_shape(self):
-        solver = FiberSolver()
-        oracle = SimpleNamespace(margin=0.0, active_colliders_for_polyline=lambda *_a, **_k: ["S1"], push_out_point=lambda point, _cols: (point.copy(), 0.0))
-        nodes, max_pen, active = solver._smooth_derived_loop(_irregular_loop_points(), oracle)
-        self.assertEqual((active, max_pen), (1, 0.0))
-        self.assertTrue(all((node - src).length < 1.0e-8 for node, src in zip(nodes, _irregular_loop_points())))
-
-    def test_delete_loop_root_cascades_to_derived_children(self):
-        root_obj, fiber, _loop = _loop_setup()
-        bpy.ops.af.add_dependent_loop_fiber(fiber_id=fiber.id)
-        child_id = root_obj.af_vcp_system.fibers[1].id
-        self.assertEqual(bpy.ops.af.delete_vcp_in_tree(node_id=fiber.id, node_type="FIBER"), {"FINISHED"})
-        self.assertEqual((len(root_obj.af_vcp_system.fibers), find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")), (0, None))
-        self.assertIsNone(find_flagged("af_fiber_proxy", child_id, "af_fiber_id"))

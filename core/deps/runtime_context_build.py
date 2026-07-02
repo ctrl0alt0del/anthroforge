@@ -108,13 +108,9 @@ def _loop_anchor_stamp(fiber):
     return tuple((str(getattr(item, "parent_id", "") or ""), str(getattr(item, "attach_param", "") or "")) for item in getattr(fiber, "loop_anchors", ()))
 
 
-def _loop_profile_stamp(fiber):
-    return tuple((round(float(getattr(item, "t", 0.0)), 5), round(float(getattr(item, "delta_u", 0.0)), 5), round(float(getattr(item, "delta_v", 0.0)), 5)) for item in getattr(fiber, "loop_profile_keys", ()))
-
-
 def _fiber_stamp(root):
     items = getattr(getattr(root, "af_vcp_system", None), "fibers", ())
-    return tuple((str(f.id or ""), str(getattr(f, "topology_mode", "OPEN") or "OPEN"), str(getattr(f, "generation_mode", "SOLVED") or "SOLVED"), str(f.a_parent_id or ""), str(f.b_parent_id or ""), _touch_stamp(f), _loop_anchor_stamp(f), str(getattr(f, "driver_fiber_id", "") or ""), round(float(getattr(f, "loop_base_offset_u", 0.0)), 5), round(float(getattr(f, "loop_base_offset_v", 0.0)), 5), _loop_profile_stamp(f)) for f in items)
+    return tuple((str(f.id or ""), str(getattr(f, "topology_mode", "OPEN") or "OPEN"), str(f.a_parent_id or ""), str(f.b_parent_id or ""), _touch_stamp(f), _loop_anchor_stamp(f)) for f in items)
 
 
 def _muscle_stamp(root):

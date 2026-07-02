@@ -1,7 +1,6 @@
 import time
 
 try:
-    from ...core.id_utils import next_prefixed_id
     from ...core.vcp.fiber_modes import is_solved_loop
     from ...core.vcp.runtime_state import (
         fiber_eps_disp,
@@ -14,7 +13,6 @@ try:
         set_fiber_recompute_status,
     )
 except ImportError:
-    from core.id_utils import next_prefixed_id
     from core.vcp.fiber_modes import is_solved_loop
     from core.vcp.runtime_state import (
         fiber_eps_disp,
@@ -77,40 +75,6 @@ def remove_fiber_touch_point(context, fiber_id="", touch_index=-1):
     fiber.mid_touches.remove(index)
     _set_prefer_bake(fiber, False)
     _fiber_sync().clear_solver_cache(fiber.id)
-    _sync_entity(root, context.scene, "FIBER", {fiber.id}, bake=False)
-    return success(value=fiber)
-
-
-def add_dependent_loop(context, fiber_id=""):
-    root = root_for_context(context)
-    fiber, error = _resolved_fiber(root, fiber_id)
-    if fiber is None or not is_solved_loop(fiber):
-        return failure(error or "Select a solved loop fiber.")
-    child = _new_dependent_loop(root, fiber)
-    root.af_vcp_system.active_vcp_type, root.af_vcp_system.active_vcp_id = "FIBER", child.id
-    _sync_entity(root, context.scene, "FIBER", {fiber.id, child.id}, bake=False)
-    return success(value=child)
-
-
-def add_loop_profile_key(context, fiber_id="", t=0.0):
-    root = root_for_context(context)
-    fiber, error = _resolved_fiber(root, fiber_id)
-    if fiber is None:
-        return failure(error)
-    key = fiber.loop_profile_keys.add()
-    key.t, key.delta_u, key.delta_v = _wrapped_t(t), 0.0, 0.0
-    _sync_entity(root, context.scene, "FIBER", {fiber.id}, bake=False)
-    return success(value=fiber)
-
-
-def remove_loop_profile_key(context, fiber_id="", key_index=-1):
-    root = root_for_context(context)
-    fiber, error = _resolved_fiber(root, fiber_id)
-    if fiber is None:
-        return failure(error)
-    if key_index < 0 or key_index >= len(fiber.loop_profile_keys):
-        return failure("Invalid profile key index.")
-    fiber.loop_profile_keys.remove(int(key_index))
     _sync_entity(root, context.scene, "FIBER", {fiber.id}, bake=False)
     return success(value=fiber)
 
@@ -218,37 +182,6 @@ def _append_touch_specs(fiber, touch_specs):
 def _append_touch(fiber, scp_id, attach_param):
     touch = fiber.mid_touches.add()
     touch.parent_id, touch.attach_param = scp_id, attach_param
-
-
-def _new_dependent_loop(root, fiber):
-    child = root.af_vcp_system.fibers.add()
-    child.id = next_prefixed_id(root.af_vcp_system.fibers, "FIBER")
-    child.name = child.id
-    _apply_derived_defaults(child, fiber)
-    reset_fiber_runtime(child)
-    return child
-
-
-def _apply_derived_defaults(child, fiber):
-    child.topology_mode, child.generation_mode = "LOOP", "DERIVED"
-    child.driver_fiber_id, child.node_count = fiber.id, int(fiber.node_count)
-    _copy_loop_settings(child, fiber)
-    _apply_profile_defaults(child)
-
-
-def _copy_loop_settings(child, fiber):
-    for key in ("thickness", "bend_stiffness", "stretch_stiffness", "iterations_interactive", "iterations_bake"):
-        setattr(child, key, getattr(fiber, key))
-
-
-def _apply_profile_defaults(fiber):
-    for value in (0.0, 0.25, 0.5, 0.75):
-        key = fiber.loop_profile_keys.add()
-        key.t, key.delta_u, key.delta_v = value, 0.0, 0.0
-
-
-def _wrapped_t(value):
-    return float(value) % 1.0
 
 
 def _selected_touch_specs(context, root):

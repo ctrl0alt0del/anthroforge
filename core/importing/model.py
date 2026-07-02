@@ -50,15 +50,6 @@ class FiberLoopAnchorSnapshot:
 
 
 @dataclass
-class FiberLoopProfileKeySnapshot:
-    props: dict
-
-    @classmethod
-    def from_dict(cls, data):
-        return cls(**dict(data or {}))
-
-
-@dataclass
 class FiberSnapshot:
     source_id: str
     name: str
@@ -66,18 +57,17 @@ class FiberSnapshot:
     a_parent_id: str
     b_parent_id: str
     muscle_id: str
-    driver_fiber_id: str = ""
     touches: list[FiberTouchSnapshot] = field(default_factory=list)
     loop_anchors: list[FiberLoopAnchorSnapshot] = field(default_factory=list)
-    loop_profile_keys: list[FiberLoopProfileKeySnapshot] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data):
         data = dict(data or {})
         touches = [FiberTouchSnapshot.from_dict(x) for x in data.pop("touches", ())]
         anchors = [FiberLoopAnchorSnapshot.from_dict(x) for x in data.pop("loop_anchors", ())]
-        keys = [FiberLoopProfileKeySnapshot.from_dict(x) for x in data.pop("loop_profile_keys", ())]
-        return cls(touches=touches, loop_anchors=anchors, loop_profile_keys=keys, **data)
+        data.pop("driver_fiber_id", None)
+        data.pop("loop_profile_keys", None)
+        return cls(touches=touches, loop_anchors=anchors, **data)
 
 
 @dataclass

@@ -2,12 +2,12 @@ from ..queries.root import root_for_context
 from .results import failure, success
 
 try:
-    from ...core.vcp.fiber_modes import fiber_root_id, fibers_by_id, is_loop_fiber
+    from ...core.vcp.fiber_modes import is_loop_fiber
     from ...core.id_utils import next_prefixed_id
     from ...core.visualization.mirror_rules import effective_rule_for_fiber
     from ...core.vcp.runtime_state import reset_muscle_runtime
 except ImportError:
-    from core.vcp.fiber_modes import fiber_root_id, fibers_by_id, is_loop_fiber
+    from core.vcp.fiber_modes import is_loop_fiber
     from core.id_utils import next_prefixed_id
     from core.visualization.mirror_rules import effective_rule_for_fiber
     from core.vcp.runtime_state import reset_muscle_runtime
@@ -48,15 +48,19 @@ def _auto_mirror_rows(root, fiber_ids):
 def _single_selected_fiber(root, fiber_ids):
     if len(fiber_ids) != 1:
         return None
-    return fibers_by_id(root).get(str(fiber_ids[0] or ""))
+    return _fiber_map(root).get(str(fiber_ids[0] or ""))
 
 
 def _mirror_rule(root, fiber):
-    return effective_rule_for_fiber(fiber, _scp_map(root), fibers_by_id(root))
+    return effective_rule_for_fiber(fiber, _scp_map(root))
 
 
 def _scp_map(root):
     return {str(scp.id or ""): scp for scp in getattr(getattr(root, "af_scp_system", None), "scps", ())}
+
+
+def _fiber_map(root):
+    return {str(fiber.id or ""): fiber for fiber in getattr(getattr(root, "af_vcp_system", None), "fibers", ())}
 
 
 def _selected_fiber_ids(context, root):
@@ -91,10 +95,9 @@ def _resolved_fibers(vcp, fiber_ids):
 
 
 def _compatibility_error(root, fibers):
+    _ = root
     if _mixed_topology(fibers):
         return "Do not mix open and loop fibers in one muscle."
-    if _loop_root_mismatch(root, fibers):
-        return "Loop muscles require fibers from the same solved loop root."
     node_count = int(fibers[0].node_count)
     for fiber in fibers[1:]:
         if int(fiber.node_count) != node_count:
@@ -104,13 +107,6 @@ def _compatibility_error(root, fibers):
 
 def _mixed_topology(fibers):
     return any(is_loop_fiber(fiber) != is_loop_fiber(fibers[0]) for fiber in fibers[1:])
-
-
-def _loop_root_mismatch(root, fibers):
-    if not fibers or not is_loop_fiber(fibers[0]):
-        return False
-    root_ids = {fiber_root_id(fiber, fibers_by_id(root)) for fiber in fibers}
-    return len(root_ids) > 1
 
 
 def _new_muscle(vcp, name, closed_v, use_mirrored_rows):

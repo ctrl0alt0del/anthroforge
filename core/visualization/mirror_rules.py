@@ -1,6 +1,6 @@
 from mathutils import Matrix, Vector
 
-from ..vcp.fiber_modes import fiber_parent_ids, fiber_root
+from ..vcp.fiber_modes import fiber_parent_ids
 
 
 def axis_to_scale(axis: str):
@@ -57,11 +57,9 @@ def _first_scp_rule(parent_ids, scp_map):
 
 
 def effective_rule_for_fiber(fiber_prop, scp_map, fibers_by_id=None):
+    _ = fibers_by_id
     parent_ids = fiber_parent_ids(fiber_prop)
-    if parent_ids:
-        return _first_scp_rule(parent_ids, scp_map)
-    root = None if fibers_by_id is None else fiber_root(fiber_prop, fibers_by_id)
-    return None if root is None or root == fiber_prop else _first_scp_rule(fiber_parent_ids(root), scp_map)
+    return _first_scp_rule(parent_ids, scp_map) if parent_ids else None
 
 
 def effective_rule_for_muscle(muscle_prop, fibers_by_id, scp_map):

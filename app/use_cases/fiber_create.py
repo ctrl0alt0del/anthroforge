@@ -148,10 +148,9 @@ def _new_fiber(root, origin_id, insert_id, origin_raw, insert_raw, touch_specs=(
 
 def _new_loop_fiber(root, anchor_specs):
     fiber = _new_fiber(root, "", "", "0.0", "0.0")
-    fiber.topology_mode, fiber.generation_mode = "LOOP", "SOLVED"
+    fiber.topology_mode = "LOOP"
     fiber.a_parent_id, fiber.a_attach_param = "", ""
     fiber.b_parent_id, fiber.b_attach_param = "", ""
-    fiber.driver_fiber_id = ""
     _apply_loop_anchor_specs(fiber, anchor_specs)
     return fiber
 

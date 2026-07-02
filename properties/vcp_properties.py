@@ -118,12 +118,6 @@ class AF_FiberLoopAnchor_Property(bpy.types.PropertyGroup):
     attach_param: bpy.props.StringProperty(name="Loop Attach Param JSON", default="0.0", update=_sync_vcp_scene)
 
 
-class AF_FiberLoopProfileKey_Property(bpy.types.PropertyGroup):
-    t: bpy.props.FloatProperty(name="T", default=0.0, min=0.0, max=0.9999, update=_sync_vcp_scene)
-    delta_u: bpy.props.FloatProperty(name="Delta U", default=0.0, update=_sync_vcp_scene)
-    delta_v: bpy.props.FloatProperty(name="Delta V", default=0.0, update=_sync_vcp_scene)
-
-
 class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="", update=_on_fiber_prop_update)
@@ -134,14 +128,6 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
         default="OPEN",
         update=_on_fiber_prop_update,
     )
-    generation_mode: bpy.props.EnumProperty(
-        name="Generation",
-        items=(("SOLVED", "Solved", ""), ("DERIVED", "Derived", "")),
-        default="SOLVED",
-        update=_on_fiber_prop_update,
-    )
-    driver_fiber_id: bpy.props.StringProperty(name="Driver Fiber ID", default="", update=_on_fiber_prop_update)
-
     a_parent_id: bpy.props.StringProperty(name="Origin SCP ID", update=_on_fiber_prop_update)
     a_attach_param: bpy.props.StringProperty(name="Origin Attach Param JSON", update=_on_fiber_prop_update)
     b_parent_id: bpy.props.StringProperty(name="Insertion SCP ID", update=_on_fiber_prop_update)
@@ -149,9 +135,6 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
 
     mid_touches: bpy.props.CollectionProperty(type=AF_FiberTouchPoint_Property)
     loop_anchors: bpy.props.CollectionProperty(type=AF_FiberLoopAnchor_Property)
-    loop_profile_keys: bpy.props.CollectionProperty(type=AF_FiberLoopProfileKey_Property)
-    loop_base_offset_u: bpy.props.FloatProperty(name="Base Offset U", default=0.0, update=_on_fiber_prop_update)
-    loop_base_offset_v: bpy.props.FloatProperty(name="Base Offset V", default=0.0, update=_on_fiber_prop_update)
 
     muscle_id: bpy.props.StringProperty(name="Muscle ID", default="", update=_on_fiber_prop_update)
 

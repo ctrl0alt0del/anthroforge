@@ -41,10 +41,7 @@ from .operators.fiber_tools import (
     AF_OT_ClearFiberWarmStart,
     AF_OT_RecomputeFiber,
     AF_OT_AddFiberTouchPoint,
-    AF_OT_AddDependentLoopFiber,
-    AF_OT_AddLoopProfileKey,
     AF_OT_RemoveFiberTouchPoint,
-    AF_OT_RemoveLoopProfileKey,
 )
 from .operators.muscle_tools import (
     AF_OT_FlipMuscleNormals,
@@ -104,7 +101,6 @@ from .properties.vcp_properties import (
     AF_MuscleVCP_Property,
     AF_FiberTouchPoint_Property,
     AF_FiberLoopAnchor_Property,
-    AF_FiberLoopProfileKey_Property,
     AF_FiberVCP_Property,
     AF_BlobVCP_Property,
     AF_VCP_System_Property,
@@ -166,10 +162,7 @@ classes = (
     AF_OT_ClearFiberWarmStart,
     AF_OT_RecomputeFiber,
     AF_OT_AddFiberTouchPoint,
-    AF_OT_AddDependentLoopFiber,
-    AF_OT_AddLoopProfileKey,
     AF_OT_RemoveFiberTouchPoint,
-    AF_OT_RemoveLoopProfileKey,
 
     AF_PT_FiberEditPanel,
     AF_PT_FiberCreatePanel,
@@ -178,7 +171,6 @@ classes = (
     AF_MuscleVCP_Property,
     AF_FiberTouchPoint_Property,
     AF_FiberLoopAnchor_Property,
-    AF_FiberLoopProfileKey_Property,
     AF_FiberVCP_Property,
     AF_BlobVCP_Property,
     AF_VCP_System_Property,

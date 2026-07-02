@@ -1,13 +1,10 @@
 from time import perf_counter
 
-from mathutils import Vector
-
 from ..visualization.fiber_sync_helpers import endpoint_world as resolve_fiber_endpoint_world, touch_world as resolve_fiber_touch_world
 from .attachment_backend import attachment_issue, attachment_runtime
-from .dependent_loop_surface import surface_target_points
 from .fiber_collision import CollisionOracle
-from .fiber_loop import derived_loop_targets, loop_frames, loop_pin_targets, planar_loop_targets, profile_offsets, resample_closed
-from .fiber_modes import DERIVED_GENERATION, fiber_root, fibers_by_id, is_derived_loop, is_loop_fiber, loop_anchor_specs
+from .fiber_loop import loop_pin_targets, resample_closed
+from .fiber_modes import is_loop_fiber, loop_anchor_specs
 from .fiber_planner import DIRECT, LOCAL_FALLBACK, PlannerAnchor, plan_route
 from .runtime_state import (
     fiber_recompute_status,
@@ -111,8 +108,6 @@ class FiberSolver:
             nodes[idx] = pt.copy()
 
     def solve_points(self, root, fiber_prop, scene, depsgraph, bake=False):
-        if is_derived_loop(fiber_prop):
-            return self._solve_derived_loop(root, fiber_prop, scene, depsgraph)
         if is_loop_fiber(fiber_prop):
             return self._solve_solved_loop(root, fiber_prop, scene, depsgraph, bake)
         return self._solve_open_fiber(root, fiber_prop, scene, depsgraph, bake)
@@ -149,28 +144,6 @@ class FiberSolver:
             self._store_metrics(fiber_prop, mode, planner_ms, refine_ms, max(active_count, len(planned)))
         self._cache[fiber_prop.id] = [p.copy() for p in nodes]
         return nodes
-
-    def _solve_derived_loop(self, root, fiber_prop, scene, depsgraph, bake=False):
-        fiber_map = fibers_by_id(root)
-        driver = fiber_root(fiber_prop, fiber_map)
-        points = self._driver_loop_points(root, driver, scene, depsgraph, bake)
-        if not points:
-            return self._failed_derived_loop(fiber_prop)
-        self._sync_derived_node_count(fiber_prop, len(points))
-        runtime = self._runtime_registry(scene, depsgraph)
-        params = self._runtime_params(fiber_prop, False)
-        oracle = CollisionOracle(root, scene, depsgraph, params["margin"], self.surface_offset)
-        t0 = perf_counter()
-        nodes, max_pen, active_count = self._build_derived_loop(root, scene, depsgraph, runtime, driver, fiber_prop, points, oracle)
-        self._store_status(fiber_prop, True, 0.0, max_pen)
-        self._store_metrics(fiber_prop, DERIVED_GENERATION, 0.0, (perf_counter() - t0) * 1000.0, active_count)
-        self._cache[fiber_prop.id] = [p.copy() for p in nodes]
-        return nodes
-
-    def _failed_derived_loop(self, fiber_prop):
-        self._clear_invalid_state(fiber_prop)
-        self._mark_failed(fiber_prop)
-        return []
 
     def _loop_route_anchors(self, root, scene, runtime_registry, fiber_prop):
         pairs = loop_anchor_specs(fiber_prop)
@@ -259,75 +232,6 @@ class FiberSolver:
             nodes[i], pen = oracle.push_out_point(nodes[i], colliders)
             max_pen = max(max_pen, pen)
         return max_pen
-
-    def _driver_loop_points(self, root, fiber_prop, scene, depsgraph, bake):
-        if fiber_prop is None or is_derived_loop(fiber_prop):
-            return []
-        cached = self._cache.get(fiber_prop.id)
-        return [p.copy() for p in cached] if cached and not bake else self.solve_points(root, fiber_prop, scene, depsgraph, bake=bake)
-
-    def _sync_derived_node_count(self, fiber_prop, node_count):
-        if int(getattr(fiber_prop, "node_count", 0)) != int(node_count):
-            fiber_prop.node_count = int(node_count)
-
-    def _build_derived_loop(self, root, scene, depsgraph, runtime, driver, fiber_prop, driver_points, oracle):
-        target = self._derived_target_points(root, scene, depsgraph, runtime, driver, driver_points, fiber_prop)
-        return self._smooth_derived_loop(target, oracle)
-
-    def _derived_target_points(self, root, scene, depsgraph, runtime, driver, driver_points, fiber_prop):
-        target = surface_target_points(root, scene, depsgraph, driver, driver_points, fiber_prop, runtime)
-        if target:
-            return self._blended_surface_targets(driver_points, fiber_prop, target)
-        return self._shape_target_points(driver_points, fiber_prop, include_v=True)
-
-    def _shape_target_points(self, driver_points, fiber_prop, include_v):
-        target = derived_loop_targets(driver_points, fiber_prop, include_v=include_v)
-        return target or self._frame_target_points(driver_points, fiber_prop, include_v=include_v)
-
-    def _blended_surface_targets(self, driver_points, fiber_prop, surface_nodes):
-        shape = self._shape_target_points(driver_points, fiber_prop, include_v=False)
-        flat = self._planar_target_points(driver_points, fiber_prop)
-        return [self._surface_target_point(shape[i], flat[i], surface_nodes[i], fiber_prop, i, len(surface_nodes)) for i in range(len(surface_nodes))]
-
-    def _surface_target_point(self, shape_point, flat_point, node, fiber_prop, index, count):
-        _offset_u, offset_v = profile_offsets(fiber_prop, index / float(max(1, count)))
-        base = shape_point.lerp(flat_point, float(node.get("bias", 0.0)))
-        return base + node["normal"] * offset_v
-
-    def _planar_target_points(self, driver_points, fiber_prop):
-        target = planar_loop_targets(driver_points, fiber_prop, include_v=False)
-        return target or self._shape_target_points(driver_points, fiber_prop, include_v=False)
-
-    def _frame_target_points(self, driver_points, fiber_prop, include_v=True):
-        tangents, normals, binormals = loop_frames(driver_points)
-        count = float(max(1, len(driver_points)))
-        return [self._derived_point(driver_points[i], normals[i], binormals[i], fiber_prop, i / count, include_v) for i in range(len(driver_points))]
-
-    def _derived_point(self, point, normal, binormal, fiber_prop, t, include_v=True):
-        offset_u, offset_v = profile_offsets(fiber_prop, t)
-        return point + normal * offset_u + (binormal * offset_v if include_v else Vector())
-
-    def _smooth_derived_loop(self, points, oracle):
-        nodes = [point.copy() for point in points]
-        active = oracle.active_colliders_for_polyline(nodes, padding=oracle.margin * 2.0)
-        if not active:
-            return nodes, 0.0, 0
-        return self._project_derived_loop(nodes, oracle, active)
-
-    def _project_derived_loop(self, nodes, oracle, active):
-        max_pen = 0.0
-        for _ in range(2):
-            nodes, pen = self._project_derived_pass(nodes, oracle, active)
-            max_pen = max(max_pen, pen)
-        return nodes, max_pen, len(active)
-
-    def _project_derived_pass(self, nodes, oracle, active):
-        out, max_pen = [], 0.0
-        for point in nodes:
-            pushed, pen = oracle.push_out_point(point, active)
-            out.append(pushed.copy())
-            max_pen = max(max_pen, pen)
-        return out, max_pen
 
     def _runtime_registry(self, scene, depsgraph):
         return attachment_runtime(scene, depsgraph)

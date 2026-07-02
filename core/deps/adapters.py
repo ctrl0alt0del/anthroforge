@@ -13,9 +13,9 @@ from .types import (
 )
 
 try:
-    from ..vcp.fiber_modes import driver_fiber_id, fiber_parent_ids, is_derived_loop
+    from ..vcp.fiber_modes import fiber_parent_ids
 except ImportError:
-    from core.vcp.fiber_modes import driver_fiber_id, fiber_parent_ids, is_derived_loop
+    from core.vcp.fiber_modes import fiber_parent_ids
 
 
 def _add_dependency_edge(graph, src_entity, dst_entity):
@@ -59,10 +59,6 @@ def _add_fiber_entities(root, graph, entity_sets):
             sp = graph.add_port(PortRef("SCP", sid, "probe", PHASE_PROBES, MUT_PROBE))
             graph.add_edge(Edge(sp, fp_local, EDGE_ATTACHMENT))
             _add_dependency_edge(graph, ("SCP", sid), ("FIBER", fid))
-        if is_derived_loop(f) and driver_fiber_id(f):
-            dp = graph.add_port(PortRef("FIBER", driver_fiber_id(f), "probe", PHASE_PROBES, MUT_PROBE))
-            graph.add_edge(Edge(dp, fp_local, EDGE_EVAL))
-            _add_dependency_edge(graph, ("FIBER", driver_fiber_id(f)), ("FIBER", fid))
 
 
 def _add_muscle_entities(root, graph, entity_sets):

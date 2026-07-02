@@ -3,7 +3,7 @@ import bpy
 from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..deps.conflict_resolver import resolve_conflict
-from ..vcp.fiber_modes import is_derived_loop, is_open_fiber
+from ..vcp.fiber_modes import is_open_fiber
 from ..utils import depsgraph_for_scene, get_af_root, scene_for_id
 from .control_runtime import active_entity_id
 
@@ -104,7 +104,7 @@ def _fibers_to_sync(root, target_fiber_ids):
 
 
 def _ordered_fibers(fibers):
-    return sorted(tuple(fibers or ()), key=lambda fiber: (1 if is_derived_loop(fiber) else 0, str(fiber.id or "")))
+    return sorted(tuple(fibers or ()), key=lambda fiber: str(fiber.id or ""))
 
 
 def _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake):

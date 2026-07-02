@@ -64,43 +64,6 @@ def _source_snapshot():
     return root_snapshot(root_obj), right
 
 
-def _loop_mesh_object(name, location=(0.0, 0.0, 0.0)):
-    mesh = bpy.data.meshes.new(name)
-    mesh.from_pydata([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)], [], [(0, 1, 2, 3)])
-    obj = bpy.data.objects.new(name, mesh)
-    bpy.context.scene.collection.objects.link(obj)
-    obj.location = location
-    return obj
-
-
-def _edit_select(obj, *indices):
-    import bmesh
-
-    select_only(obj)
-    bpy.ops.object.mode_set(mode="EDIT")
-    bm = bmesh.from_edit_mesh(obj.data)
-    bm.verts.ensure_lookup_table()
-    for vert in bm.verts:
-        vert.select_set(False)
-    bm.select_history.clear()
-    for index in indices:
-        vert = bm.verts[int(index)]
-        vert.select_set(True)
-        bm.select_history.add(vert)
-    bmesh.update_edit_mesh(obj.data)
-
-
-def _loop_snapshot():
-    root_obj = root()
-    loop = scp_with_object(root_obj, "Loop", _loop_mesh_object("Loop"))
-    _edit_select(loop.geometry_object_ref, 0, 1, 2, 3)
-    bpy.ops.af.create_loop_fiber_from_selected_vertices()
-    solved = root_obj.af_vcp_system.fibers[0]
-    bpy.ops.af.add_dependent_loop_fiber(fiber_id=solved.id)
-    child = root_obj.af_vcp_system.fibers[1]
-    child.loop_base_offset_u = 0.2
-    child.loop_profile_keys[1].delta_v = -0.1
-    return root_snapshot(root_obj)
 
 
 class ImportPackageE2ETests(BlenderTestCase):
@@ -137,15 +100,3 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertIsNotNone(find_flagged("af_muscle_proxy", root_obj.af_vcp_system.muscles[-1].id, "af_muscle_id"))
         self.assertIsNotNone(find_flagged("af_blob_proxy", root_obj.af_vcp_system.blobs[-1].id, "af_blob_id"))
 
-    def test_import_package_preserves_loop_family_relationships(self):
-        snapshot = _loop_snapshot()
-        path = temp_blend_path()
-        self.addCleanup(lambda: os.remove(path) if os.path.exists(path) else None)
-        bpy.ops.wm.save_as_mainfile(filepath=path)
-        reset_scene()
-        result = import_package_from_blend(path, bpy.context)
-        root_obj = get_af_root(bpy.context.scene)
-        solved, child = root_obj.af_vcp_system.fibers[-2], root_obj.af_vcp_system.fibers[-1]
-        self.assertEqual((result.fiber_count, solved.topology_mode, child.generation_mode), (2, "LOOP", "DERIVED"))
-        self.assertEqual((len(solved.loop_anchors), child.driver_fiber_id == solved.id), (4, True))
-        self.assertEqual((round(child.loop_base_offset_u, 4), round(child.loop_profile_keys[1].delta_v, 4)), (0.2, -0.1))

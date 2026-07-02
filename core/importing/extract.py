@@ -11,7 +11,6 @@ from .model import (
     BlobSnapshot,
     BoundObjectSnapshot,
     FiberLoopAnchorSnapshot,
-    FiberLoopProfileKeySnapshot,
     FiberSnapshot,
     FiberTouchSnapshot,
     MuscleSnapshot,
@@ -24,7 +23,7 @@ from .rna import scalar_dict
 
 _FULL_OBJECT_RE = re.compile(r"^bpy\.data\.objects\[(['\"])(.+?)\1\](.+)$")
 _SCP_SKIP = {"id", "name", "parent_id", "bound_objects", "transform_object_ref", "geometry_object_ref"}
-_FIBER_SKIP = {"id", "name", "a_parent_id", "b_parent_id", "driver_fiber_id", "mid_touches", "loop_anchors", "loop_profile_keys", "muscle_id", "not_converged", "last_recompute_ms", "last_recompute_status", "last_eps_disp", "last_eps_pen"}
+_FIBER_SKIP = {"id", "name", "a_parent_id", "b_parent_id", "mid_touches", "loop_anchors", "muscle_id", "not_converged", "last_recompute_ms", "last_recompute_status", "last_eps_disp", "last_eps_pen"}
 _MUSCLE_SKIP = {"id", "name", "fiber_refs"}
 _BLOB_SKIP = {"id", "name", "attach_target_type", "attach_target_id", "attach_target_object_name", "last_solve_converged", "last_solve_max_disp", "last_solve_iterations"}
 
@@ -90,8 +89,7 @@ def _scp_snapshot(scp):
 def _fiber_snapshot(fiber):
     touches = [FiberTouchSnapshot(str(tp.parent_id or ""), scalar_dict(tp, {"parent_id"})) for tp in fiber.mid_touches]
     anchors = [FiberLoopAnchorSnapshot(str(item.parent_id or ""), scalar_dict(item, {"parent_id"})) for item in getattr(fiber, "loop_anchors", ())]
-    keys = [FiberLoopProfileKeySnapshot(scalar_dict(item)) for item in getattr(fiber, "loop_profile_keys", ())]
-    return FiberSnapshot(str(fiber.id or ""), str(fiber.name or ""), scalar_dict(fiber, _FIBER_SKIP), str(fiber.a_parent_id or ""), str(fiber.b_parent_id or ""), str(fiber.muscle_id or ""), str(getattr(fiber, "driver_fiber_id", "") or ""), touches, anchors, keys)
+    return FiberSnapshot(str(fiber.id or ""), str(fiber.name or ""), scalar_dict(fiber, _FIBER_SKIP), str(fiber.a_parent_id or ""), str(fiber.b_parent_id or ""), str(fiber.muscle_id or ""), touches, anchors)
 
 
 def _muscle_snapshot(muscle):

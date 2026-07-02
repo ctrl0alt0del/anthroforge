@@ -2,9 +2,7 @@ import json
 
 
 def _fiber_mode(fiber):
-    topo = str(getattr(fiber, "topology_mode", "OPEN") or "OPEN")
-    gen = str(getattr(fiber, "generation_mode", "SOLVED") or "SOLVED")
-    return topo if topo != "LOOP" else ("DERIVED" if gen == "DERIVED" else "LOOP")
+    return str(getattr(fiber, "topology_mode", "OPEN") or "OPEN")
 
 
 def _is_collapsed(scene, key):
@@ -63,8 +61,6 @@ def _draw_right_hint(row, text):
 
 
 def _fiber_hint(fiber):
-    if _fiber_mode(fiber) == "DERIVED":
-        return f"driver {fiber.driver_fiber_id or '?'}"
     if _fiber_mode(fiber) == "LOOP":
         return f"{len(getattr(fiber, 'loop_anchors', ())) or 0} anchors"
     a = fiber.a_parent_id if fiber.a_parent_id else "?"

@@ -2,7 +2,7 @@ import bpy
 from ...app.queries.root import root_for_context
 from ...app.queries.scp import scp_label
 from ...app.queries.vcp import active_fiber_from_context, has_active_entity
-from ...core.vcp.fiber_modes import is_derived_loop, is_loop_fiber, is_solved_loop
+from ...core.vcp.fiber_modes import is_loop_fiber, is_solved_loop
 from ...core.vcp.runtime_state import (
     fiber_active_colliders,
     fiber_eps_disp,
@@ -41,32 +41,6 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         for i, anchor in enumerate(fiber.loop_anchors):
             box.label(text=f"{i + 1}. {scp_label(root, anchor.parent_id)}")
 
-    def _draw_derived_loop(self, layout, fiber):
-        box = layout.box()
-        box.label(text="Derived Loop")
-        box.label(text=f"Driver: {fiber.driver_fiber_id or 'Missing'}")
-        row = box.row()
-        row.enabled = False
-        row.prop(fiber, "node_count")
-        box.prop(fiber, "loop_base_offset_u")
-        box.prop(fiber, "loop_base_offset_v")
-        self._draw_profile_keys(box, fiber)
-
-    def _draw_profile_keys(self, layout, fiber):
-        row = layout.row(align=True)
-        op = row.operator("af.add_loop_profile_key", icon="ADD", text="Add Profile Key")
-        op.fiber_id = fiber.id
-        for i, key in enumerate(fiber.loop_profile_keys):
-            self._draw_profile_key(layout, fiber, i, key)
-
-    def _draw_profile_key(self, layout, fiber, index, key):
-        row = layout.row(align=True)
-        row.prop(key, "t", text="T")
-        row.prop(key, "delta_u", text="dU")
-        row.prop(key, "delta_v", text="dV")
-        op = row.operator("af.remove_loop_profile_key", text="", icon="X")
-        op.fiber_id, op.key_index = fiber.id, index
-
     def _draw_solver(self, layout, fiber):
         solver_box = layout.box()
         solver_box.label(text="Solver")
@@ -78,12 +52,6 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         solver_box.prop(fiber, "iterations_interactive")
         solver_box.prop(fiber, "iterations_bake")
         solver_box.prop(fiber, "bend_stiffness")
-
-    def _draw_loop_solver(self, layout, fiber):
-        self._draw_solver(layout, fiber)
-        row = layout.row()
-        op = row.operator("af.add_dependent_loop_fiber", icon="DUPLICATE")
-        op.fiber_id = fiber.id
 
     def _draw_touch_points(self, layout, root, fiber):
         touch_box = layout.box()
@@ -112,11 +80,6 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         status_box.label(text="Status: Invalid Attachment", icon="ERROR")
         status_box.label(text=reason)
         return True
-
-    def _draw_derived_display(self, layout, fiber):
-        box = layout.box()
-        box.label(text="Display")
-        box.prop(fiber, "thickness")
 
     def _draw_status(self, layout, fiber):
         status_box = layout.box()
@@ -153,27 +116,17 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
 
     def _draw_header(self, layout, fiber):
         suffix = "Loop" if is_loop_fiber(fiber) else "Open"
-        if is_derived_loop(fiber):
-            suffix = "Derived Loop"
         layout.label(text=f"{fiber.id} ({suffix})", icon="CURVE_DATA")
 
     def _draw_mode_layout(self, layout, root, fiber):
-        if is_derived_loop(fiber):
-            self._draw_derived_mode(layout, fiber)
-            return
         if is_solved_loop(fiber):
             self._draw_solved_loop_mode(layout, root, fiber)
             return
         self._draw_open_mode(layout, root, fiber)
 
-    def _draw_derived_mode(self, layout, fiber):
-        self._draw_derived_loop(layout, fiber)
-        self._draw_status(layout, fiber)
-        self._draw_derived_display(layout, fiber)
-
     def _draw_solved_loop_mode(self, layout, root, fiber):
         self._draw_loop_anchors(layout, root, fiber)
-        self._draw_loop_solver(layout, fiber)
+        self._draw_solver(layout, fiber)
         self._draw_status(layout, fiber)
         self._draw_display(layout, fiber)
 
