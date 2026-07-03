@@ -140,6 +140,7 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
 
     use_warm_start: bpy.props.BoolProperty(name="Use Warm Start", default=True, update=_on_fiber_prop_update)
     use_segment_collisions: bpy.props.BoolProperty(name="Segment Collisions", default=False, update=_on_fiber_prop_update)
+    preview_planner_route: bpy.props.BoolProperty(name="Preview Planner Route", default=False, update=_on_fiber_prop_update)
     node_count: bpy.props.IntProperty(name="Node Count", default=64, min=8, max=512, update=_on_fiber_prop_update)
     iterations_interactive: bpy.props.IntProperty(name="Iterations (Interactive)", default=12, min=1, max=200, update=_on_fiber_prop_update)
     iterations_bake: bpy.props.IntProperty(name="Iterations (Bake)", default=120, min=1, max=1000, update=_on_fiber_prop_update)

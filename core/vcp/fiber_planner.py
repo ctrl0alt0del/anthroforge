@@ -115,7 +115,7 @@ def _append_edge(oracle, nodes, active, graph, i, j):
 
 
 def _a_star(nodes, graph):
-    goal, heap, came, dist, seen = len(nodes) - 1, [(0.0, 0)], {}, {0: 0.0}, set()
+    goal, heap, came, dist, seen = 1, [(0.0, 0)], {}, {0: 0.0}, set()
     while heap:
         _score, node = heappop(heap)
         if node == goal:

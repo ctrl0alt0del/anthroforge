@@ -153,6 +153,16 @@ class _RollbackOracle:
         return point.copy(), 1.0 if _rollback_hit(point) else 0.0
 
 
+def _sticky_hit(point):
+    return abs(point.x - 1.0) < 0.2 and abs(point.z) < 0.07
+
+
+class _StickyRollbackOracle:
+    def push_out_point(self, point, colliders):
+        _ = colliders
+        return point.copy(), 1.0 if _sticky_hit(point) else 0.0
+
+
 class FiberVcpWorkflowTests(BlenderTestCase):
     def test_fiber_proxy_object_color_matches_material(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
@@ -234,6 +244,21 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(fiber_route_mode(fiber), "LOCAL_FALLBACK")
         self.assertEqual(fiber_planner_ms(fiber), 0.0)
 
+    def test_interactive_planner_preview_renders_raw_planner_route(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        fiber.preview_planner_route = True
+        _cube_scp(root_obj, "Blocker", (1.0, 0.0, 0.0), 0.8)
+        register_fiber_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene, bake=False)
+        points = _fiber_world_vectors(fiber)
+        a_world = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
+        b_world = endpoint_world(root_obj, bpy.context.scene, {}, fiber.b_parent_id, fiber.b_attach_param)
+        self.assertEqual(fiber_route_mode(fiber), "ROADMAP")
+        self.assertGreater(fiber_planner_ms(fiber), 0.0)
+        self.assertLess(len(points), fiber.node_count)
+        self.assertLess((points[0] - a_world).length, 1.0e-6)
+        self.assertLess((points[-1] - b_world).length, 1.0e-6)
+        self.assertTrue(any(abs(p.y) > 1.0e-4 or abs(p.z) > 1.0e-4 for p in points[1:-1]))
+
     def test_segment_collision_toggle_catches_thin_blocker_in_interactive_mode(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
         fiber.node_count, fiber.iterations_interactive = 8, 20
@@ -256,6 +281,13 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         FiberSolver()._solver_iteration(nodes, [point.copy() for point in prev], [True, False, False, True], {0: prev[0], 3: prev[3]}, _RollbackOracle(), (), params, 0)
         self.assertLess(nodes[1].z, prev[1].z)
         self.assertEqual(tuple(round(v, 4) for v in nodes[2]), tuple(round(v, 4) for v in prev[2]))
+
+    def test_segment_collision_fallback_restores_last_clear_state(self):
+        prev = [Vector((0.0, 0.0, 0.0)), Vector((0.7, 0.0, 0.08)), Vector((1.3, 0.0, 0.08)), Vector((2.0, 0.0, 0.0))]
+        nodes = [point.copy() for point in prev]
+        params = {"shorten_strength": 1.0, "bend_strength": 0.0, "margin": 0.0, "segment_collisions": True, "iterations": 1, "min_iters": 0, "eps_disp": 0.0, "eps_pen": 0.0}
+        FiberSolver()._run_iterations(nodes, [point.copy() for point in prev], [True, False, False, True], {0: prev[0], 3: prev[3]}, _StickyRollbackOracle(), (), params)
+        self.assertEqual([tuple(round(v, 4) for v in point) for point in nodes], [tuple(round(v, 4) for v in point) for point in prev])
 
     def test_recompute_fiber_preserves_mid_touch_anchor(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
@@ -282,6 +314,8 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertTrue(fiber.use_warm_start)
         self.assertTrue(hasattr(fiber, "use_segment_collisions"))
         self.assertFalse(fiber.use_segment_collisions)
+        self.assertTrue(hasattr(fiber, "preview_planner_route"))
+        self.assertFalse(fiber.preview_planner_route)
 
     def test_new_fiber_defaults_remove_legacy_solver_knobs(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup()

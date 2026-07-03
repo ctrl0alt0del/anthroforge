@@ -46,6 +46,7 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         solver_box.label(text="Solver")
         solver_box.prop(fiber, "use_warm_start")
         solver_box.prop(fiber, "use_segment_collisions")
+        solver_box.prop(fiber, "preview_planner_route")
         op = solver_box.operator("af.clear_fiber_warm_start", icon="TRASH")
         op.fiber_id = fiber.id
         layout.prop(fiber, "name", text="Name")

@@ -127,7 +127,9 @@ class FiberSolver:
         params = self._runtime_params(fiber_prop, bake)
         oracle = CollisionOracle(root, scene, depsgraph, params["margin"], self.surface_offset)
         guides = self._planner_guides(oracle, anchors)
-        seed, mode, planner_ms, planned = self._plan_seed(oracle, anchors, bake)
+        seed, mode, planner_ms, planned = self._plan_seed(fiber_prop, oracle, anchors, bake)
+        if self._preview_planner_route(fiber_prop):
+            return self._planner_preview_result(fiber_prop, seed, mode, planner_ms, planned)
         nodes, converged, max_disp, max_pen, active_count, refine_ms = self._refine_solve(fiber_prop, anchors, guides, oracle, params, seed)
         self._store_status(fiber_prop, converged, max_disp, max_pen)
         if not self._preserve_metrics(fiber_prop, bake):
@@ -192,13 +194,15 @@ class FiberSolver:
         return None if not cached else resample_closed(cached, node_count)
 
     def _run_cyclic_iterations(self, nodes, pin_targets, oracle, colliders, params):
-        prev_nodes = [p.copy() for p in nodes]
-        pinned = set(pin_targets)
+        prev_nodes, pinned = [p.copy() for p in nodes], set(pin_targets)
+        safe = self._safe_snapshot(nodes, oracle, colliders, params, cyclic=True)
         for it in range(params["iterations"]):
             max_disp, max_pen = self._cyclic_iteration(nodes, prev_nodes, pinned, pin_targets, oracle, colliders, params, it)
             prev_nodes = [p.copy() for p in nodes]
+            safe = self._refresh_safe_snapshot(safe, nodes, oracle, colliders, params, cyclic=True)
             if it >= params["min_iters"] and max_disp < params["eps_disp"] and max_pen < params["eps_pen"]:
                 return True, max_disp, max_pen
+        self._restore_safe_snapshot(nodes, safe, oracle, colliders, params, cyclic=True)
         return False, max_disp, max_pen
 
     def _cyclic_iteration(self, nodes, prev_nodes, pinned, pin_targets, oracle, colliders, params, it):
@@ -347,12 +351,22 @@ class FiberSolver:
                 return int(vidx)
         return -1
 
-    def _plan_seed(self, oracle, anchors, bake):
-        if not bake:
+    def _plan_seed(self, fiber_prop, oracle, anchors, bake):
+        if not (bake or self._preview_planner_route(fiber_prop)):
             return None, LOCAL_FALLBACK, 0.0, ()
         t0 = perf_counter()
         result = plan_route(oracle, anchors)
         return result.points, result.mode, (perf_counter() - t0) * 1000.0, result.active_ids
+
+    def _preview_planner_route(self, fiber_prop):
+        return bool(getattr(fiber_prop, "preview_planner_route", False))
+
+    def _planner_preview_result(self, fiber_prop, seed, mode, planner_ms, planned):
+        points = [] if seed is None else [p.copy() for p in seed]
+        self._store_status(fiber_prop, True, 0.0, 0.0)
+        self._store_metrics(fiber_prop, mode, planner_ms, 0.0, len(planned))
+        self._cache[fiber_prop.id] = [p.copy() for p in points]
+        return points
 
     def _store_metrics(self, fiber_prop, mode, planner_ms, refine_ms, active_count):
         set_fiber_route_mode(fiber_prop, mode)
@@ -415,16 +429,34 @@ class FiberSolver:
         return local
 
     def _run_iterations(self, nodes, prev_nodes, pinned, pin_targets, oracle, colliders, params):
-        converged = False
-        max_disp = 0.0
-        max_pen = 0.0
+        converged, max_disp, max_pen = False, 0.0, 0.0
+        safe = self._safe_snapshot(nodes, oracle, colliders, params)
         for it in range(params["iterations"]):
             max_disp, max_pen = self._solver_iteration(nodes, prev_nodes, pinned, pin_targets, oracle, colliders, params, it)
             prev_nodes = [p.copy() for p in nodes]
+            safe = self._refresh_safe_snapshot(safe, nodes, oracle, colliders, params)
             if it >= params["min_iters"] and max_disp < params["eps_disp"] and max_pen < params["eps_pen"]:
                 converged = True
                 break
+        self._restore_safe_snapshot(nodes, safe, oracle, colliders, params)
         return converged, max_disp, max_pen
+
+    def _safe_snapshot(self, nodes, oracle, colliders, params, cyclic=False):
+        return [p.copy() for p in nodes] if self._segments_clear(nodes, oracle, colliders, params, cyclic) else None
+
+    def _refresh_safe_snapshot(self, safe, nodes, oracle, colliders, params, cyclic=False):
+        return [p.copy() for p in nodes] if self._segments_clear(nodes, oracle, colliders, params, cyclic) else safe
+
+    def _restore_safe_snapshot(self, nodes, safe, oracle, colliders, params, cyclic=False):
+        if safe is None or self._segments_clear(nodes, oracle, colliders, params, cyclic):
+            return
+        for i, point in enumerate(safe):
+            nodes[i] = point.copy()
+
+    def _segments_clear(self, nodes, oracle, colliders, params, cyclic=False):
+        if not params["segment_collisions"]:
+            return True
+        return all(self._segment_penetration(nodes[a], nodes[b], oracle, colliders) <= 0.0 for a, b in self._segment_pairs(len(nodes), cyclic))
 
     def _store_status(self, fiber_prop, converged, max_disp, max_pen):
         self._clear_invalid_state(fiber_prop)
