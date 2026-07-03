@@ -10,6 +10,7 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 
 import bmesh
 import bpy
+from mathutils import Vector
 
 from _helpers import BlenderTestCase, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only, temp_blend_path
 from anthroforge.app.use_cases.proxy_view import switch_to_proxy_view
@@ -60,6 +61,14 @@ def _subd_setup():
     return root_obj, scp, mod
 
 
+def _cube_proxy_setup():
+    root_obj = root()
+    bpy.ops.mesh.primitive_cube_add(size=2.0, location=(0.0, 0.0, 0.0))
+    scp = scp_with_object(root_obj, "Cube", bpy.context.active_object)
+    _switch(scp.geometry_object_ref)
+    return root_obj, scp, _session_proxy(root_obj, "original")
+
+
 def _switch(obj):
     select_only(obj)
     return bpy.ops.af.switch_to_proxy_view()
@@ -105,6 +114,20 @@ def _scp_named(root_obj, name):
 
 def _attr(obj, name, index):
     return int(obj.data.attributes[name].data[index].value)
+
+
+def _fiber_points_world(fiber_id):
+    obj = find_flagged("af_fiber_proxy", fiber_id, "af_fiber_id")
+    return [] if obj is None else [Vector(point) for point in json.loads(obj["af_fiber_points_world"])]
+
+
+def _polyline_has_interior_samples(points, limit=1.0, steps=4):
+    for i in range(len(points) - 1):
+        for step in range(1, steps + 1):
+            point = points[i].lerp(points[i + 1], step / float(steps + 1))
+            if all(-limit < value < limit for value in (point.x, point.y, point.z)):
+                return True
+    return False
 
 
 def _edit_select(obj, *indices):
@@ -259,6 +282,16 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         self.assertEqual(bpy.ops.af.add_fiber_touch_point(fiber_id=fiber.id), {"FINISHED"})
         self.assertEqual((len(fiber.mid_touches), fiber.mid_touches[0].parent_id), (1, left.id))
         self.assertEqual(parse_fiber_attach_param(fiber.mid_touches[0].attach_param)[0], "surface_param_v2")
+
+    def test_connect_proxy_vertices_with_fiber_keeps_cube_body_diagonal_on_surface(self):
+        root_obj, cube, proxy = _cube_proxy_setup()
+        _edit_select(proxy, _proxy_vertex_index(proxy, cube.id, 0), _proxy_vertex_index(proxy, cube.id, 7))
+        self.assertEqual(bpy.ops.af.connect_proxy_vertices_with_fiber(), {"FINISHED"})
+        fiber = root_obj.af_vcp_system.fibers[0]
+        self.assertFalse(_polyline_has_interior_samples(_fiber_points_world(fiber.id)))
+        _object_mode()
+        self.assertEqual(bpy.ops.af.recompute_fiber(fiber_id=fiber.id), {"FINISHED"})
+        self.assertFalse(_polyline_has_interior_samples(_fiber_points_world(fiber.id)))
 
     def test_mirrored_proxy_selection_maps_back_to_target_scp(self):
         root_obj, source, target = _mirror_setup()

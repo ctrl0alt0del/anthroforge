@@ -178,6 +178,7 @@ def _append_loop_anchor(fiber, parent_id, attach_param):
 def _fiber_defaults():
     return {
         "use_warm_start": True,
+        "use_segment_collisions": False,
         "node_count": 64,
         "iterations_interactive": 12,
         "iterations_bake": 180,

@@ -1,5 +1,8 @@
 from time import perf_counter
 
+from mathutils import Vector
+
+from ..attachment_codec import fiber_surface_param
 from ..visualization.fiber_sync_helpers import endpoint_world as resolve_fiber_endpoint_world, touch_world as resolve_fiber_touch_world
 from .attachment_backend import attachment_issue, attachment_runtime
 from .fiber_collision import CollisionOracle
@@ -54,7 +57,10 @@ class FiberSolver:
 
     def _base_params(self, fiber_prop, node_count, iterations):
         shorten, bend = self._strengths(fiber_prop)
-        return {"node_count": node_count, "iterations": iterations, "margin": self._default_margin(), "shorten_strength": shorten, "bend_strength": bend, "eps_disp": 1e-5, "eps_pen": 1e-5}
+        return {
+            "node_count": node_count, "iterations": iterations, "margin": self._default_margin(), "shorten_strength": shorten,
+            "bend_strength": bend, "segment_collisions": bool(getattr(fiber_prop, "use_segment_collisions", False)), "eps_disp": 1e-5, "eps_pen": 1e-5,
+        }
 
     def _strengths(self, fiber_prop):
         shorten = max(0.0, min(1.0, float(getattr(fiber_prop, "stretch_stiffness", 0.9))))
@@ -100,6 +106,8 @@ class FiberSolver:
         if params["bend_strength"] > 0.0 and (it % 2) == 0:
             self._apply_bend_smoothing(nodes, pinned, params["bend_strength"])
         max_pen = self._apply_collision_constraints(nodes=nodes, pinned=pinned, oracle=oracle, colliders=colliders, margin=params["margin"])
+        max_pen = self._apply_segment_penalties(max_pen, nodes, pinned, oracle, colliders, params)
+        self._rollback_segment_introductions(nodes, prev_nodes, pinned, oracle, colliders, params)
         self._restore_pins(nodes, pin_targets)
         return self._max_displacement(nodes, prev_nodes), max_pen
 
@@ -118,17 +126,18 @@ class FiberSolver:
             return self._invalid_result(fiber_prop, issue)
         params = self._runtime_params(fiber_prop, bake)
         oracle = CollisionOracle(root, scene, depsgraph, params["margin"], self.surface_offset)
+        guides = self._planner_guides(oracle, anchors)
         seed, mode, planner_ms, planned = self._plan_seed(oracle, anchors, bake)
-        nodes, converged, max_disp, max_pen, active_count, refine_ms = self._refine_solve(fiber_prop, anchors, oracle, params, seed)
+        nodes, converged, max_disp, max_pen, active_count, refine_ms = self._refine_solve(fiber_prop, anchors, guides, oracle, params, seed)
         self._store_status(fiber_prop, converged, max_disp, max_pen)
         if not self._preserve_metrics(fiber_prop, bake):
             self._store_metrics(fiber_prop, mode, planner_ms, refine_ms, max(active_count, len(planned)))
         self._cache[fiber_prop.id] = [p.copy() for p in nodes]
         return nodes
 
-    def _refine_solve(self, fiber_prop, anchors, oracle, params, seed):
+    def _refine_solve(self, fiber_prop, anchors, guides, oracle, params, seed):
         t0 = perf_counter()
-        nodes, converged, max_disp, max_pen, active_count = self._solve_multilevel(fiber_prop, anchors, oracle, params, seed)
+        nodes, converged, max_disp, max_pen, active_count = self._solve_multilevel(fiber_prop, anchors, guides, oracle, params, seed)
         return nodes, converged, max_disp, max_pen, active_count, (perf_counter() - t0) * 1000.0
 
     def _solve_solved_loop(self, root, fiber_prop, scene, depsgraph, bake):
@@ -197,6 +206,8 @@ class FiberSolver:
         if params["bend_strength"] > 0.0 and (it % 2) == 0:
             self._apply_cyclic_bend(nodes, pinned, params["bend_strength"])
         max_pen = self._apply_cyclic_collision_constraints(nodes, pinned, oracle, colliders, params["margin"])
+        max_pen = self._apply_segment_penalties(max_pen, nodes, pinned, oracle, colliders, params, cyclic=True)
+        self._rollback_segment_introductions(nodes, prev_nodes, pinned, oracle, colliders, params, cyclic=True)
         self._restore_pins(nodes, pin_targets)
         return self._max_displacement(nodes, prev_nodes), max_pen
 
@@ -291,11 +302,50 @@ class FiberSolver:
 
     def _touch_anchor(self, root, scene, runtime_registry, touch):
         point = resolve_fiber_touch_world(root, scene, runtime_registry, touch)
-        return None if point is None else PlannerAnchor(point.copy(), str(touch.parent_id or ""))
+        return None if point is None else PlannerAnchor(point.copy(), str(touch.parent_id or ""), str(touch.attach_param or ""))
 
     def _route_anchor(self, root, scene, runtime_registry, parent_id, attach_param_raw):
         point = self._endpoint_world(root, scene, runtime_registry, parent_id, attach_param_raw)
-        return None if point is None else PlannerAnchor(point.copy(), str(parent_id or ""))
+        return None if point is None else PlannerAnchor(point.copy(), str(parent_id or ""), str(attach_param_raw or ""))
+
+    def _planner_guides(self, oracle, anchors):
+        guides, last = [], max(0, len(anchors) - 2)
+        for i in range(len(anchors) - 1):
+            guides.extend(self._segment_guides(oracle, anchors[i], anchors[i + 1]))
+            if i < last:
+                guides.append(anchors[i + 1].point.copy())
+        return guides
+
+    def _segment_guides(self, oracle, start, end):
+        route = self._surface_route(oracle, start, end)
+        return [] if route is None else [point.copy() for point in route[1:-1]]
+
+    def _surface_route(self, oracle, start, end):
+        verts = self._surface_route_vertices(start, end)
+        if verts is None:
+            return None
+        return oracle.surface_path(start.owner_id, verts[0], verts[1])
+
+    def _surface_route_vertices(self, start, end):
+        if not start.owner_id or start.owner_id != end.owner_id:
+            return None
+        verts = self._anchor_vertex(start), self._anchor_vertex(end)
+        return None if -1 in verts else verts
+
+    def _anchor_vertex(self, anchor):
+        param = fiber_surface_param(anchor.attach_raw)
+        return -1 if param is None else self._param_vertex(param)
+
+    def _param_vertex(self, param):
+        tri = tuple(dict(param or {}).get("tri_vidx", ()))
+        weights = tuple(dict(param or {}).get("tri_weights", ()))
+        return self._weighted_vertex(tri, weights)
+
+    def _weighted_vertex(self, tri, weights, eps=1.0e-6):
+        for vidx, weight in zip(tuple(tri or ()), tuple(weights or ())):
+            if abs(float(weight) - 1.0) <= eps:
+                return int(vidx)
+        return -1
 
     def _plan_seed(self, oracle, anchors, bake):
         if not bake:
@@ -319,9 +369,8 @@ class FiberSolver:
         except Exception:
             return False
 
-    def _solve_multilevel(self, fiber_prop, anchors, oracle, params, seed):
+    def _solve_multilevel(self, fiber_prop, anchors, guide_worlds, oracle, params, seed):
         a_world, b_world = anchors[0].point, anchors[-1].point
-        guide_worlds = [anchor.point.copy() for anchor in anchors[1:-1]]
         counts = self._level_counts(params["node_count"], len(guide_worlds) + 2)
         iters = self._split_iterations(params["iterations"], len(counts))
         converged, max_disp, max_pen, max_active = False, 0.0, 0.0, 0
@@ -502,6 +551,93 @@ class FiberSolver:
             nodes[i] = x
 
         return max_pen
+
+    def _apply_segment_penalties(self, max_pen, nodes, pinned, oracle, colliders, params, cyclic=False):
+        if not params["segment_collisions"]:
+            return max_pen
+        pen = self._apply_segment_collision_constraints(nodes, pinned, oracle, colliders, cyclic=cyclic)
+        return max(max_pen, pen)
+
+    def _rollback_segment_introductions(self, nodes, prev_nodes, pinned, oracle, colliders, params, cyclic=False):
+        if not params["segment_collisions"]:
+            return
+        for a_idx, b_idx in self._segment_pairs(len(nodes), cyclic):
+            self._rollback_segment_pair(nodes, prev_nodes, pinned, oracle, colliders, a_idx, b_idx)
+
+    def _rollback_segment_pair(self, nodes, prev_nodes, pinned, oracle, colliders, a_idx, b_idx):
+        if self._segment_introduced_collision(nodes, prev_nodes, oracle, colliders, a_idx, b_idx):
+            self._restore_iteration_node(nodes, prev_nodes, pinned, b_idx)
+
+    def _segment_introduced_collision(self, nodes, prev_nodes, oracle, colliders, a_idx, b_idx):
+        before = self._segment_penetration(prev_nodes[a_idx], prev_nodes[b_idx], oracle, colliders)
+        after = self._segment_penetration(nodes[a_idx], nodes[b_idx], oracle, colliders)
+        return before <= 0.0 and after > 0.0
+
+    def _apply_segment_collision_constraints(self, nodes, pinned, oracle, colliders, cyclic=False):
+        pairs = self._segment_pairs(len(nodes), cyclic)
+        max_pen = 0.0
+        for a_idx, b_idx in pairs:
+            max_pen = max(max_pen, self._segment_penalty(nodes, pinned, oracle, colliders, a_idx, b_idx))
+        return max_pen
+
+    def _segment_pairs(self, count, cyclic):
+        pairs = [(i, i + 1) for i in range(max(0, count - 1))]
+        return pairs + ([(count - 1, 0)] if cyclic and count > 2 else [])
+
+    def _segment_penalty(self, nodes, pinned, oracle, colliders, a_idx, b_idx):
+        move_a, move_b, max_pen = self._zero_vec(), self._zero_vec(), 0.0
+        for t in self._segment_samples():
+            da, db, pen = self._segment_sample_correction(nodes[a_idx], nodes[b_idx], pinned, oracle, colliders, a_idx, b_idx, t)
+            move_a, move_b = move_a + da, move_b + db
+            max_pen = max(max_pen, pen)
+        self._apply_segment_moves(nodes, pinned, a_idx, b_idx, move_a, move_b)
+        return max_pen
+
+    def _segment_samples(self):
+        return (0.25, 0.5, 0.75)
+
+    def _segment_penetration(self, a, b, oracle, colliders):
+        return max(self._sample_penetration(a.lerp(b, t), oracle, colliders) for t in self._segment_samples())
+
+    def _sample_penetration(self, point, oracle, colliders):
+        _pushed, pen = oracle.push_out_point(point, colliders)
+        return float(pen)
+
+    def _segment_sample_correction(self, a, b, pinned, oracle, colliders, a_idx, b_idx, t):
+        point = a.lerp(b, t)
+        pushed, pen = oracle.push_out_point(point, colliders)
+        delta = pushed - point
+        if pen <= 0.0 or delta.length_squared <= 1.0e-18:
+            return self._zero_vec(), self._zero_vec(), 0.0
+        move_a, move_b = self._sample_endpoint_moves(delta, t, pinned, a_idx, b_idx)
+        return move_a, move_b, pen
+
+    def _sample_endpoint_moves(self, delta, t, pinned, a_idx, b_idx):
+        if self._is_pinned(pinned, a_idx) and self._is_pinned(pinned, b_idx):
+            return self._zero_vec(), self._zero_vec()
+        if self._is_pinned(pinned, a_idx):
+            return self._zero_vec(), delta / max(1.0e-6, t)
+        if self._is_pinned(pinned, b_idx):
+            return delta / max(1.0e-6, 1.0 - t), self._zero_vec()
+        scale = (1.0 - t) ** 2 + t ** 2
+        return delta * ((1.0 - t) / scale), delta * (t / scale)
+
+    def _apply_segment_moves(self, nodes, pinned, a_idx, b_idx, move_a, move_b):
+        if not self._is_pinned(pinned, a_idx):
+            nodes[a_idx] = nodes[a_idx] + move_a
+        if not self._is_pinned(pinned, b_idx):
+            nodes[b_idx] = nodes[b_idx] + move_b
+
+    def _restore_iteration_node(self, nodes, prev_nodes, pinned, index):
+        if self._is_pinned(pinned, index):
+            return
+        nodes[index] = prev_nodes[index].copy()
+
+    def _is_pinned(self, pinned, index):
+        return (index in pinned) if isinstance(pinned, set) else bool(pinned[index])
+
+    def _zero_vec(self):
+        return Vector((0.0, 0.0, 0.0))
 
     def _resample_polyline(self, src, count):
         if not src or count <= 0:

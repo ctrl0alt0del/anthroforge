@@ -1,3 +1,5 @@
+from heapq import heappop, heappush
+
 from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
@@ -166,7 +168,34 @@ def _surface_payload_data(obj_eval, mesh_eval, verts_local, verts_world, triangl
     bvh_world = None if not triangles else BVHTree.FromPolygons(verts_world, triangles, all_triangles=True)
     if bvh_local is None or bvh_world is None:
         return None
-    return {"bvh_local": bvh_local, "bvh_world": bvh_world, "face_centers": _face_centers(obj_eval, mesh_eval), "triangles": triangles, "verts_world": verts_world, "bounds_world": _world_bounds(verts_world)}
+    return {
+        "bvh_local": bvh_local, "bvh_world": bvh_world, "face_centers": _face_centers(obj_eval, mesh_eval),
+        "triangles": triangles, "verts_world": verts_world, "bounds_world": _world_bounds(verts_world),
+        "route_graph": _surface_route_graph(verts_world, triangles),
+    }
+
+
+def _surface_route_graph(verts_world, triangles):
+    graph = {i: [] for i in range(len(verts_world))}
+    seen = set()
+    for tri in triangles:
+        _link_surface_edges(graph, verts_world, tri, seen)
+    return graph
+
+
+def _link_surface_edges(graph, verts_world, tri, seen):
+    for a, b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
+        _link_surface_edge(graph, verts_world, seen, a, b)
+
+
+def _link_surface_edge(graph, verts_world, seen, a, b):
+    edge = tuple(sorted((int(a), int(b))))
+    if edge in seen:
+        return
+    seen.add(edge)
+    cost = (verts_world[edge[1]] - verts_world[edge[0]]).length
+    graph[edge[0]].append((edge[1], cost))
+    graph[edge[1]].append((edge[0], cost))
 
 
 def _face_centers(obj_eval, mesh_eval):
@@ -189,6 +218,50 @@ def build_face_centers(mesh_obj, depsgraph, cache=None):
 def build_vertex_points(mesh_obj, depsgraph, cache=None):
     surface = build_mesh_surface_data(mesh_obj, depsgraph, cache=cache)
     return None if not surface else surface["verts_world"]
+
+
+def surface_shortest_vertex_path(surface, start_vertex, end_vertex):
+    if not _route_vertices_ok(surface, start_vertex, end_vertex):
+        return None
+    path = _route_vertex_path(surface["route_graph"], surface["verts_world"], start_vertex, end_vertex)
+    return None if path is None else [surface["verts_world"][i].copy() for i in path]
+
+
+def _route_vertices_ok(surface, start_vertex, end_vertex):
+    graph = None if surface is None else surface.get("route_graph")
+    size = 0 if graph is None else len(graph)
+    return 0 <= int(start_vertex) < size and 0 <= int(end_vertex) < size
+
+
+def _route_vertex_path(graph, verts_world, start_vertex, end_vertex):
+    heap, came, dist, seen = [(0.0, int(start_vertex))], {}, {int(start_vertex): 0.0}, set()
+    while heap:
+        _score, node = heappop(heap)
+        if node == int(end_vertex):
+            return _route_reconstruct(came, node)
+        if node in seen:
+            continue
+        seen.add(node)
+        for nxt, cost in graph.get(node, ()):
+            _push_route_neighbor(heap, came, dist, verts_world, node, nxt, cost, end_vertex)
+    return None
+
+
+def _push_route_neighbor(heap, came, dist, verts_world, node, nxt, cost, end_vertex):
+    cand = dist[node] + cost
+    if cand >= dist.get(nxt, 1.0e18):
+        return
+    dist[nxt], came[nxt] = cand, node
+    goal = verts_world[int(end_vertex)]
+    heappush(heap, (cand + (goal - verts_world[int(nxt)]).length, int(nxt)))
+
+
+def _route_reconstruct(came, goal):
+    node, out = int(goal), [int(goal)]
+    while node in came:
+        node = came[node]
+        out.append(node)
+    return list(reversed(out))
 
 
 def surface_bvh_local(mesh_obj, depsgraph=None, cache=None):

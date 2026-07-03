@@ -17,6 +17,7 @@ from mathutils import Vector
 from _helpers import BlenderTestCase, capture_mesh_attachment, capture_world_attachment, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
 from anthroforge.app.use_cases.fiber_tools import recompute_fiber as recompute_fiber_action
 from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param, encode_fiber_vertex_index, parse_fiber_attach_param
+from anthroforge.core.vcp.fiber_solver import FiberSolver
 from anthroforge.core.vcp.runtime_state import (
     fiber_active_colliders,
     fiber_invalid_reason,
@@ -129,6 +130,29 @@ def _fiber_world_vectors(fiber):
     return [Vector(value) for value in _fiber_points_world(fiber)]
 
 
+def _point_in_box(point, center, half_extent):
+    return all(abs(point[i] - center[i]) < float(half_extent) for i in range(3))
+
+
+def _polyline_hits_box(points, center, half_extent, steps=6):
+    for i in range(len(points) - 1):
+        for step in range(steps + 2):
+            point = points[i].lerp(points[i + 1], step / float(steps + 1))
+            if _point_in_box(point, center, half_extent):
+                return True
+    return False
+
+
+def _rollback_hit(point):
+    return abs(point.x - 1.0) < 0.2 and abs(point.z) < 0.05
+
+
+class _RollbackOracle:
+    def push_out_point(self, point, colliders):
+        _ = colliders
+        return point.copy(), 1.0 if _rollback_hit(point) else 0.0
+
+
 class FiberVcpWorkflowTests(BlenderTestCase):
     def test_fiber_proxy_object_color_matches_material(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
@@ -210,6 +234,29 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(fiber_route_mode(fiber), "LOCAL_FALLBACK")
         self.assertEqual(fiber_planner_ms(fiber), 0.0)
 
+    def test_segment_collision_toggle_catches_thin_blocker_in_interactive_mode(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        fiber.node_count, fiber.iterations_interactive = 8, 20
+        _cube_scp(root_obj, "ThinBlocker", (1.0, 0.0, 0.0), 0.1)
+        sync = register_fiber_sync()
+        sync.clear_solver_cache(fiber.id)
+        sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene, bake=False)
+        points_off = _fiber_world_vectors(fiber)
+        fiber.use_segment_collisions = True
+        sync.clear_solver_cache(fiber.id)
+        sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene, bake=False)
+        points_on = _fiber_world_vectors(fiber)
+        self.assertTrue(_polyline_hits_box(points_off, Vector((1.0, 0.0, 0.0)), 0.05))
+        self.assertFalse(_polyline_hits_box(points_on, Vector((1.0, 0.0, 0.0)), 0.05))
+
+    def test_segment_collision_rollback_restores_i_plus_one_node(self):
+        prev = [Vector((0.0, 0.0, 0.0)), Vector((0.7, 0.0, 0.08)), Vector((1.3, 0.0, 0.08)), Vector((2.0, 0.0, 0.0))]
+        nodes = [point.copy() for point in prev]
+        params = {"shorten_strength": 1.0, "bend_strength": 0.0, "margin": 0.0, "segment_collisions": True}
+        FiberSolver()._solver_iteration(nodes, [point.copy() for point in prev], [True, False, False, True], {0: prev[0], 3: prev[3]}, _RollbackOracle(), (), params, 0)
+        self.assertLess(nodes[1].z, prev[1].z)
+        self.assertEqual(tuple(round(v, 4) for v in nodes[2]), tuple(round(v, 4) for v in prev[2]))
+
     def test_recompute_fiber_preserves_mid_touch_anchor(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
         blocker, blocker_obj = _cube_scp(root_obj, "TouchBlocker", (1.0, 0.0, 0.0), 0.8)
@@ -233,6 +280,8 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         _root_obj, fiber, _origin, _insert = _fiber_setup()
         self.assertTrue(hasattr(fiber, "use_warm_start"))
         self.assertTrue(fiber.use_warm_start)
+        self.assertTrue(hasattr(fiber, "use_segment_collisions"))
+        self.assertFalse(fiber.use_segment_collisions)
 
     def test_new_fiber_defaults_remove_legacy_solver_knobs(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup()

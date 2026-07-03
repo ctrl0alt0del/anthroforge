@@ -3,7 +3,7 @@ from math import floor
 from mathutils import Vector
 
 from ..scp_runtime.common import iter_geometry_mesh_scp_objects
-from ..scp_runtime.surface import build_mesh_surface_data
+from ..scp_runtime.surface import build_mesh_surface_data, surface_shortest_vertex_path
 from ..utils import scene_cache_get, scene_cache_set
 
 
@@ -35,6 +35,11 @@ class CollisionOracle:
     def shell_nodes(self, collider, dense=False):
         return _shell_nodes(self.scene, collider, self.margin, dense)
 
+    def surface_path(self, owner_id, start_vertex, end_vertex):
+        collider = _collider_by_id(self.colliders(), owner_id)
+        surface = None if collider is None else collider.get("surface")
+        return None if surface is None else surface_shortest_vertex_path(surface, start_vertex, end_vertex)
+
 
 def _build_colliders(root, scene, depsgraph):
     items = []
@@ -50,9 +55,14 @@ def _collider_entry(obj, surface):
         return None
     return {
         "sid": str(obj.get("af_scp_id", "") or ""), "obj": obj, "bvh": surface["bvh_local"],
+        "surface": surface,
         "m_inv": obj.matrix_world.inverted(), "m": obj.matrix_world.copy(), "m3": obj.matrix_world.to_3x3(),
         "mn": surface["bounds_world"][0], "mx": surface["bounds_world"][1], "stamp": _collider_stamp(obj),
     }
+
+
+def _collider_by_id(colliders, owner_id):
+    return next((collider for collider in colliders if collider["sid"] == str(owner_id or "")), None)
 
 
 def _collider_stamp(obj):

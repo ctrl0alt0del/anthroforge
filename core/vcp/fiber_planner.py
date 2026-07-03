@@ -11,6 +11,7 @@ LOCAL_FALLBACK = "LOCAL_FALLBACK"
 class PlannerAnchor:
     point: object
     owner_id: str = ""
+    attach_raw: str = ""
 
 
 @dataclass(frozen=True)
