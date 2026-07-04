@@ -166,7 +166,7 @@ class _RollbackOracle:
 
 
 def _sticky_hit(point):
-    return abs(point.x - 1.0) < 0.2 and abs(point.z) < 0.07
+    return abs(point.x - 1.0) < 0.4 and abs(point.z) <= 0.079
 
 
 class _StickyRollbackOracle:
@@ -179,6 +179,49 @@ class _ClearOracle:
     def push_out_point(self, point, colliders):
         _ = colliders
         return point.copy(), 0.0
+
+
+def _node_band_hit(point):
+    return abs(point.x - 1.0) < 0.2 and point.z < 0.6
+
+
+class _NodeBandOracle:
+    def push_out_point(self, point, colliders):
+        _ = colliders
+        return point.copy(), 1.0 if _node_band_hit(point) else 0.0
+
+
+def _wide_band_hit(point):
+    return abs(point.x - 1.0) < 0.35 and point.z < 0.55
+
+
+class _WideBandPushOracle:
+    def push_out_point(self, point, colliders):
+        _ = colliders
+        if not _wide_band_hit(point):
+            return point.copy(), 0.0
+        return Vector((point.x, point.y, 0.8)), 1.0
+
+
+def _owner_zone_hit(point, sid):
+    if sid == "START":
+        return point.x < 0.25
+    if sid == "END":
+        return point.x > 1.75
+    return sid == "BLOCK" and abs(point.x - 1.0) < 0.2 and point.z < 0.25
+
+
+class _OwnerZoneOracle:
+    margin, clearance = 0.0, 0.01
+    _colliders = ({"sid": "START"}, {"sid": "BLOCK"}, {"sid": "END"})
+
+    def active_colliders_for_polyline(self, points, padding=0.0):
+        _ = points, padding
+        return self._colliders
+
+    def push_out_point(self, point, colliders):
+        hit = any(_owner_zone_hit(point, c["sid"]) for c in colliders)
+        return point.copy(), 1.0 if hit else 0.0
 
 
 class FiberVcpWorkflowTests(BlenderTestCase):
@@ -339,6 +382,30 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         params = {"shorten_strength": 1.0, "bend_strength": 0.0, "margin": 0.0, "segment_collisions": True, "iterations": 1, "min_iters": 0, "eps_disp": 0.0, "eps_pen": 0.0}
         FiberSolver()._run_iterations(nodes, [point.copy() for point in prev], [True, False, False, True], {0: prev[0], 3: prev[3]}, _StickyRollbackOracle(), (), params)
         self.assertEqual([tuple(round(v, 4) for v in point) for point in nodes], [tuple(round(v, 4) for v in point) for point in prev])
+
+    def test_valid_planner_seed_backtracks_unsafe_first_step(self):
+        prev = [Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 1.0)), Vector((2.0, 0.0, 0.0))]
+        nodes = [point.copy() for point in prev]
+        params = {"shorten_strength": 1.0, "bend_strength": 0.0, "margin": 0.0, "segment_collisions": True, "iterations": 1, "min_iters": 0, "eps_disp": 0.0, "eps_pen": 0.0}
+        FiberSolver()._run_iterations(nodes, [point.copy() for point in prev], [True, False, True], {0: prev[0], 2: prev[2]}, _NodeBandOracle(), (), params)
+        self.assertGreaterEqual(nodes[1].z, 0.6)
+        self.assertLess(nodes[1].z, prev[1].z)
+
+    def test_invalid_planner_seed_can_accept_first_clear_projection(self):
+        prev = [Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.4)), Vector((2.0, 0.0, 0.0))]
+        nodes = [point.copy() for point in prev]
+        params = {"shorten_strength": 1.0, "bend_strength": 0.0, "margin": 0.0, "segment_collisions": True, "iterations": 1, "min_iters": 0, "eps_disp": 0.0, "eps_pen": 0.0}
+        FiberSolver()._run_iterations(nodes, [point.copy() for point in prev], [True, False, True], {0: prev[0], 2: prev[2]}, _WideBandPushOracle(), (), params)
+        self.assertAlmostEqual(nodes[1].z, 0.8, places=4)
+
+    def test_seed_restore_ignores_only_local_endpoint_owner_zones(self):
+        solver, oracle = FiberSolver(), _OwnerZoneOracle()
+        params = {"margin": 0.0, "segment_collisions": True, "endpoint_owners": ("START", "END")}
+        seed = [Vector((0.0, 0.0, 0.0)), Vector((0.2, 0.0, 0.0)), Vector((0.8, 0.0, 1.0)), Vector((1.2, 0.0, 1.0)), Vector((1.8, 0.0, 0.0)), Vector((2.0, 0.0, 0.0))]
+        nodes = [Vector((0.0, 0.0, 0.0)), Vector((0.2, 0.0, 0.0)), Vector((0.8, 0.0, 0.0)), Vector((1.2, 0.0, 0.0)), Vector((1.8, 0.0, 0.0)), Vector((2.0, 0.0, 0.0))]
+        solver._restore_seed_if_needed(nodes, seed, oracle, params)
+        self.assertGreater(min(nodes[2].z, nodes[3].z), 0.5)
+        self.assertTrue(solver._segments_clear(nodes, oracle, oracle._colliders, params, skip_ends=True))
 
     def test_recompute_fiber_preserves_mid_touch_anchor(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
