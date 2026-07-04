@@ -28,12 +28,16 @@ class CollisionOracle:
         cols = colliders or self.active_colliders_for_segment(a, b, owners=owners)
         return all(_segment_clear(self, c, a, b, owners) for c in cols)
 
+    def segment_hit_samples(self, a, b, colliders=None):
+        cols = colliders or self.active_colliders_for_segment(a, b)
+        return _segment_hit_samples(cols, a, b, max(1.0e-5, self.margin * 0.25))
+
     def push_out_point(self, point, colliders=None):
         cols = colliders or self.active_colliders_for_polyline((point,))
         return _push_out_world(self, point, cols)
 
     def shell_nodes(self, collider, dense=False):
-        return _shell_nodes(self.scene, collider, self.margin, dense)
+        return _shell_nodes(self.scene, collider, max(self.margin, self.clearance), dense)
 
     def surface_path(self, owner_id, start_vertex, end_vertex):
         collider = _collider_by_id(self.colliders(), owner_id)
@@ -138,13 +142,40 @@ def _trim_t(enabled, clearance, length):
 
 
 def _segment_ray_hit(collider, a, b):
+    return _segment_ray_world_hit(collider, a, b) is not None
+
+
+def _segment_ray_world_hit(collider, a, b):
     local_a, local_b = collider["m_inv"] @ a, collider["m_inv"] @ b
     delta = local_b - local_a
     length = delta.length
     if length <= 1.0e-9:
-        return False
+        return None
     hit = collider["bvh"].ray_cast(local_a, delta.normalized(), length)
-    return bool(hit and hit[0] is not None)
+    return None if not hit or hit[0] is None else collider["m"] @ hit[0]
+
+
+def _segment_hit_samples(colliders, a, b, trim):
+    hits = []
+    for collider in colliders:
+        t = _segment_hit_t(collider, a, b, trim)
+        if t is not None:
+            hits.append(t)
+    return tuple(hits)
+
+
+def _segment_hit_t(collider, a, b, trim):
+    delta = b - a
+    if delta.length <= 1.0e-9:
+        return None
+    t0 = min(0.45, max(0.0, trim / delta.length))
+    hit = _segment_ray_world_hit(collider, a.lerp(b, t0), a.lerp(b, 1.0 - t0))
+    return None if hit is None else _world_hit_t(a, b, hit)
+
+
+def _world_hit_t(a, b, hit):
+    delta = b - a
+    return max(0.0, min(1.0, (hit - a).dot(delta) / max(delta.length_squared, 1.0e-12)))
 
 
 def _segment_sample_hit(oracle, collider, a, b):
@@ -198,10 +229,16 @@ def _push_out_world(oracle, point, colliders):
 def _push_out_one(oracle, collider, point, max_pen):
     if not _aabb_overlap(*_line_bounds((point,), oracle.margin * 2.0), collider["mn"], collider["mx"], 0.0):
         return point, max_pen
-    if _voxel_signed_distance(oracle.scene, collider, point, oracle.margin) >= oracle.margin:
+    if not _point_needs_push(oracle, collider, point):
         return point, max_pen
     pushed, pen = _nearest_push(collider, point, oracle.margin)
     return (pushed, max(max_pen, pen)) if pen > 0.0 else (point, max_pen)
+
+
+def _point_needs_push(oracle, collider, point):
+    if _voxel_signed_distance(oracle.scene, collider, point, oracle.margin) < oracle.margin:
+        return True
+    return _sample_pen(collider, point, oracle.margin) > 0.0
 
 
 def _nearest_push(collider, point, margin):
@@ -308,8 +345,63 @@ def _shell_nodes(scene, collider, margin, dense):
 
 
 def _build_shell_nodes(collider, margin, dense):
+    nodes = _mesh_shell_nodes(collider, margin, dense)
+    nodes.extend(_bounds_shell_nodes(collider, margin, dense))
+    return tuple(nodes)
+
+
+def _mesh_shell_nodes(collider, margin, dense):
+    surface = collider.get("surface") or {}
+    verts = [Vector(v) for v in surface.get("verts_world", ())]
+    if not verts:
+        return []
+    center = _points_center(verts)
+    nodes = [_offset_shell_point(v, center, margin) for v in verts]
+    nodes.extend(_boundary_shell_points(surface, center, margin, dense))
+    return nodes
+
+
+def _bounds_shell_nodes(collider, margin, dense):
     mn, mx = _inflate_bounds(collider["mn"], collider["mx"], margin)
     return tuple(_corner_points(mn, mx) + _face_points(mn, mx) + ([] if not dense else _edge_points(mn, mx)))
+
+
+def _points_center(points):
+    total = Vector((0.0, 0.0, 0.0))
+    for point in points:
+        total += point
+    return total / max(1, len(points))
+
+
+def _offset_shell_point(point, center, margin):
+    delta = Vector(point) - center
+    if delta.length <= 1.0e-9:
+        return Vector(point)
+    return Vector(point) + delta.normalized() * max(0.002, margin * 4.0)
+
+
+def _boundary_shell_points(surface, center, margin, dense):
+    edges = _boundary_edges(surface.get("triangles", ()))
+    samples = (0.5,) if not dense else (0.25, 0.5, 0.75)
+    return [_offset_shell_point(verts[a].lerp(verts[b], t), center, margin) for a, b, verts in _edge_verts(surface, edges) for t in samples]
+
+
+def _edge_verts(surface, edges):
+    verts = [Vector(v) for v in surface.get("verts_world", ())]
+    return [(a, b, verts) for a, b in edges if 0 <= a < len(verts) and 0 <= b < len(verts)]
+
+
+def _boundary_edges(triangles):
+    counts = {}
+    for tri in tuple(triangles or ()):
+        for edge in _tri_edges(tri):
+            counts[edge] = counts.get(edge, 0) + 1
+    return tuple(edge for edge, count in counts.items() if count == 1)
+
+
+def _tri_edges(tri):
+    vals = tuple(int(v) for v in tri)
+    return tuple(tuple(sorted(edge)) for edge in ((vals[0], vals[1]), (vals[1], vals[2]), (vals[2], vals[0])))
 
 
 def _corner_points(mn, mx):

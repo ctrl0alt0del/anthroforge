@@ -17,6 +17,7 @@ from mathutils import Vector
 from _helpers import BlenderTestCase, capture_mesh_attachment, capture_world_attachment, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
 from anthroforge.app.use_cases.fiber_tools import recompute_fiber as recompute_fiber_action
 from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param, encode_fiber_vertex_index, parse_fiber_attach_param
+from anthroforge.core.vcp.fiber_collision import CollisionOracle
 from anthroforge.core.vcp.fiber_solver import FiberSolver
 from anthroforge.core.vcp.runtime_state import (
     fiber_active_colliders,
@@ -75,6 +76,17 @@ def _sync_active_fiber(root_obj, fiber):
 def _cube_scp(root_obj, name, location=(0.0, 0.0, 0.0), size=1.0):
     bpy.ops.mesh.primitive_cube_add(size=size, location=location)
     return scp_with_object(root_obj, name, bpy.context.active_object), bpy.context.active_object
+
+
+def _plane_scp(root_obj, name, location=(0.0, 0.0, 0.0), size=1.0):
+    half = float(size) * 0.5
+    mesh = bpy.data.meshes.new(name)
+    verts = [(0.0, -half, -half), (0.0, half, -half), (0.0, half, half), (0.0, -half, half)]
+    mesh.from_pydata(verts, [], [(0, 1, 2, 3)])
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.location = location
+    return scp_with_object(root_obj, name, obj), obj
 
 
 def _fiber_points_world(fiber):
@@ -161,6 +173,12 @@ class _StickyRollbackOracle:
     def push_out_point(self, point, colliders):
         _ = colliders
         return point.copy(), 1.0 if _sticky_hit(point) else 0.0
+
+
+class _ClearOracle:
+    def push_out_point(self, point, colliders):
+        _ = colliders
+        return point.copy(), 0.0
 
 
 class FiberVcpWorkflowTests(BlenderTestCase):
@@ -274,6 +292,29 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertTrue(_polyline_hits_box(points_off, Vector((1.0, 0.0, 0.0)), 0.05))
         self.assertFalse(_polyline_hits_box(points_on, Vector((1.0, 0.0, 0.0)), 0.05))
 
+    def test_segment_collision_oracle_samples_zero_thickness_plane_hit(self):
+        root_obj = root()
+        blocker, _obj = _plane_scp(root_obj, "PlaneBlocker", (1.0, 0.0, 0.0), 0.8)
+        oracle = CollisionOracle(root_obj, bpy.context.scene, bpy.context.evaluated_depsgraph_get(), 0.002, 0.002)
+        colliders = [c for c in oracle.colliders() if c["sid"] == blocker.id]
+        samples = oracle.segment_hit_samples(Vector((0.0, 0.0, 0.0)), Vector((2.0, 0.0, 0.0)), colliders)
+        pushed, pen = oracle.push_out_point(Vector((1.0, 0.0, 0.0)), colliders)
+        self.assertTrue(samples)
+        self.assertAlmostEqual(samples[0], 0.5, places=4)
+        self.assertGreater(pen, 0.0)
+        self.assertGreater((pushed - Vector((1.0, 0.0, 0.0))).length, 0.0)
+
+    def test_planner_shell_nodes_follow_rotated_mesh_boundary(self):
+        root_obj = root()
+        blocker, obj = _plane_scp(root_obj, "RotatedPlane", (1.0, 0.0, 0.0), 2.0)
+        obj.rotation_euler = (0.0, 0.65, 0.55)
+        bpy.context.view_layer.update()
+        oracle = CollisionOracle(root_obj, bpy.context.scene, bpy.context.evaluated_depsgraph_get(), 0.002, 0.002)
+        collider = next(c for c in oracle.colliders() if c["sid"] == blocker.id)
+        shell = tuple(oracle.shell_nodes(collider))
+        verts = tuple(obj.matrix_world @ vert.co for vert in obj.data.vertices)
+        self.assertTrue(all(min((node - vert).length for node in shell) < 0.08 for vert in verts))
+
     def test_segment_collision_rollback_restores_i_plus_one_node(self):
         prev = [Vector((0.0, 0.0, 0.0)), Vector((0.7, 0.0, 0.08)), Vector((1.3, 0.0, 0.08)), Vector((2.0, 0.0, 0.0))]
         nodes = [point.copy() for point in prev]
@@ -281,6 +322,16 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         FiberSolver()._solver_iteration(nodes, [point.copy() for point in prev], [True, False, False, True], {0: prev[0], 3: prev[3]}, _RollbackOracle(), (), params, 0)
         self.assertLess(nodes[1].z, prev[1].z)
         self.assertEqual(tuple(round(v, 4) for v in nodes[2]), tuple(round(v, 4) for v in prev[2]))
+
+    def test_segment_guard_node_becomes_next_iteration_phantom_pin(self):
+        prev = [Vector((0.0, 0.0, 0.0)), Vector((0.7, 0.0, 0.08)), Vector((1.3, 0.0, 0.08)), Vector((2.0, 0.0, 0.0))]
+        nodes, solver, guards = [point.copy() for point in prev], FiberSolver(), {}
+        pins, targets = [True, False, False, True], {0: prev[0], 3: prev[3]}
+        params = {"shorten_strength": 1.0, "bend_strength": 0.0, "margin": 0.0, "segment_collisions": True}
+        solver._solver_iteration(nodes, [point.copy() for point in prev], pins, targets, _RollbackOracle(), (), params, 0, next_guards=guards)
+        locked = guards[2].copy()
+        solver._solver_iteration(nodes, [point.copy() for point in nodes], pins, targets, _ClearOracle(), (), dict(params, segment_collisions=False), 1, guards, {})
+        self.assertEqual(tuple(round(v, 4) for v in nodes[2]), tuple(round(v, 4) for v in locked))
 
     def test_segment_collision_fallback_restores_last_clear_state(self):
         prev = [Vector((0.0, 0.0, 0.0)), Vector((0.7, 0.0, 0.08)), Vector((1.3, 0.0, 0.08)), Vector((2.0, 0.0, 0.0))]
