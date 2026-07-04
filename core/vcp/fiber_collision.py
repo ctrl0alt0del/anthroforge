@@ -7,12 +7,23 @@ from ..scp_runtime.surface import build_mesh_surface_data, surface_shortest_vert
 from ..utils import scene_cache_get, scene_cache_set
 
 
+_SPATIAL_INDEX_THRESHOLD = 32
+_SPATIAL_CELL_LIMIT = 96
+_SPATIAL_QUERY_CELL_LIMIT = 512
+_SHELL_VERTEX_LIMIT = 32
+_SHELL_VERTEX_LIMIT_DENSE = 128
+_SHELL_BOUNDARY_LIMIT = 32
+_SHELL_BOUNDARY_LIMIT_DENSE = 128
+
+
 class CollisionOracle:
     def __init__(self, root, scene, depsgraph, margin=0.0, surface_offset=0.002):
         self.root, self.scene, self.depsgraph = root, scene, depsgraph
         self.margin = max(0.0, float(margin))
         self.clearance = max(0.01, self.margin * 2.0, float(surface_offset) * 4.0)
         self._colliders = None
+        self._segment_hit_cache = {}
+        self._push_cache = {}
 
     def colliders(self):
         self._colliders = self._colliders or _build_colliders(self.root, self.scene, self.depsgraph)
@@ -30,11 +41,19 @@ class CollisionOracle:
 
     def segment_hit_samples(self, a, b, colliders=None):
         cols = colliders or self.active_colliders_for_segment(a, b)
-        return _segment_hit_samples(cols, a, b, max(1.0e-5, self.margin * 0.25))
+        trim = max(1.0e-5, self.margin * 0.25)
+        key = _segment_query_key(a, b, cols, trim)
+        if key not in self._segment_hit_cache:
+            self._segment_hit_cache[key] = _segment_hit_samples(cols, a, b, trim)
+        return self._segment_hit_cache[key]
 
     def push_out_point(self, point, colliders=None):
         cols = colliders or self.active_colliders_for_polyline((point,))
-        return _push_out_world(self, point, cols)
+        key = _point_query_key(point, cols)
+        if key not in self._push_cache:
+            self._push_cache[key] = _cached_push_result(_push_out_world(self, point, cols))
+        pushed, pen = self._push_cache[key]
+        return Vector(pushed), pen
 
     def shell_nodes(self, collider, dense=False):
         return _shell_nodes(self.scene, collider, max(self.margin, self.clearance), dense)
@@ -74,6 +93,27 @@ def _collider_stamp(obj):
     return (int(data.as_pointer()) if data else 0, len(getattr(data, "vertices", ())), tuple(float(v) for row in obj.matrix_world for v in row))
 
 
+def _segment_query_key(a, b, colliders, trim):
+    return ("seg", _vec_key(a), _vec_key(b), round(float(trim), 9), _collider_query_key(colliders))
+
+
+def _point_query_key(point, colliders):
+    return ("pt", _vec_key(point), _collider_query_key(colliders))
+
+
+def _vec_key(point):
+    return tuple(float(v) for v in point)
+
+
+def _collider_query_key(colliders):
+    return tuple((str(c["sid"]), c["stamp"]) for c in tuple(colliders or ()))
+
+
+def _cached_push_result(result):
+    pushed, pen = result
+    return _vec_key(pushed), float(pen)
+
+
 def _active_segment(scene, colliders, a, b, margin, padding):
     return _active_for_bounds(scene, colliders, _line_bounds((a, b), margin + padding))
 
@@ -88,9 +128,20 @@ def _active_for_bounds(scene, colliders, bounds):
 
 
 def _store_active(scene, colliders, bounds):
-    hits = [c for c in colliders if _aabb_overlap(bounds[0], bounds[1], c["mn"], c["mx"], 0.0)]
+    hits = _active_hits(scene, tuple(colliders or ()), bounds)
     scene_cache_set(scene, _active_key(colliders, bounds), tuple(c["sid"] for c in hits))
     return hits
+
+
+def _active_hits(scene, colliders, bounds):
+    if len(colliders) < _SPATIAL_INDEX_THRESHOLD:
+        return _linear_active_hits(colliders, bounds)
+    index = _spatial_index(scene, colliders)
+    return _spatial_active_hits(colliders, bounds, index)
+
+
+def _linear_active_hits(colliders, bounds):
+    return [c for c in colliders if _aabb_overlap(bounds[0], bounds[1], c["mn"], c["mx"], 0.0)]
 
 
 def _active_key(colliders, bounds):
@@ -104,6 +155,85 @@ def _round_bounds(bounds):
 def _colliders_from_ids(colliders, ids):
     index = {c["sid"]: c for c in colliders}
     return [index[sid] for sid in tuple(ids or ()) if sid in index]
+
+
+def _spatial_index(scene, colliders):
+    key = ("fiber_spatial_index", tuple((c["sid"], c["stamp"]) for c in colliders))
+    cached = scene_cache_get(scene, key)
+    return cached if cached is not None else scene_cache_set(scene, key, _build_spatial_index(colliders))
+
+
+def _build_spatial_index(colliders):
+    origin, cell = _spatial_origin(colliders), _spatial_cell_size(colliders)
+    out = {"origin": origin, "cell": cell, "cells": {}, "large": [], "lookup": {}}
+    for i, collider in enumerate(colliders):
+        out["lookup"][collider["sid"]] = i
+        _insert_spatial_collider(out, collider)
+    return out
+
+
+def _spatial_origin(colliders):
+    xs, ys, zs = [c["mn"].x for c in colliders], [c["mn"].y for c in colliders], [c["mn"].z for c in colliders]
+    return Vector((min(xs), min(ys), min(zs)))
+
+
+def _spatial_cell_size(colliders):
+    spans = sorted(max((c["mx"] - c["mn"]).x, (c["mx"] - c["mn"]).y, (c["mx"] - c["mn"]).z) for c in colliders)
+    return max(1.0e-6, spans[len(spans) // 2])
+
+
+def _insert_spatial_collider(index, collider):
+    ranges = _spatial_ranges(index, collider["mn"], collider["mx"])
+    if _spatial_cell_count(ranges) > _SPATIAL_CELL_LIMIT:
+        index["large"].append(collider["sid"])
+        return
+    for cell in _spatial_cells_from_ranges(ranges):
+        index["cells"].setdefault(cell, []).append(collider["sid"])
+
+
+def _spatial_cells_for(index, mn, mx):
+    return _spatial_cells_from_ranges(_spatial_ranges(index, mn, mx))
+
+
+def _spatial_cells_from_ranges(ranges):
+    return ((x, y, z) for x in ranges[0] for y in ranges[1] for z in ranges[2])
+
+
+def _spatial_ranges(index, mn, mx):
+    low = _cell_coord(index, mn)
+    high = _cell_coord(index, mx)
+    return tuple(range(low[i], high[i] + 1) for i in range(3))
+
+
+def _spatial_cell_count(ranges):
+    out = 1
+    for values in ranges:
+        out *= len(values)
+    return out
+
+
+def _cell_coord(index, point):
+    origin, cell = index["origin"], index["cell"]
+    return tuple(int(floor((point[i] - origin[i]) / cell)) for i in range(3))
+
+
+def _spatial_active_hits(colliders, bounds, index):
+    ids = _spatial_query_ids(index, bounds)
+    candidates = tuple(colliders[index["lookup"][sid]] for sid in ids if sid in index["lookup"])
+    return _linear_active_hits(candidates, bounds)
+
+
+def _spatial_query_ids(index, bounds):
+    ranges = _spatial_ranges(index, bounds[0], bounds[1])
+    if _spatial_cell_count(ranges) > _SPATIAL_QUERY_CELL_LIMIT:
+        ids = tuple(index["large"]) + tuple(sid for bucket in index["cells"].values() for sid in bucket)
+        return _dedupe_ids(ids)
+    cells = tuple(_spatial_cells_from_ranges(ranges))
+    return _dedupe_ids(tuple(index["large"]) + tuple(sid for cell in cells for sid in index["cells"].get(cell, ())))
+
+
+def _dedupe_ids(ids):
+    return tuple(dict.fromkeys(ids))
 
 
 def _line_bounds(points, pad):
@@ -157,11 +287,16 @@ def _segment_ray_world_hit(collider, a, b):
 
 def _segment_hit_samples(colliders, a, b, trim):
     hits = []
-    for collider in colliders:
+    for collider in _segment_hit_candidates(colliders, a, b, trim):
         t = _segment_hit_t(collider, a, b, trim)
         if t is not None:
             hits.append(t)
     return tuple(hits)
+
+
+def _segment_hit_candidates(colliders, a, b, trim):
+    bounds = _line_bounds((a, b), max(0.0, trim))
+    return tuple(c for c in tuple(colliders or ()) if _aabb_overlap(bounds[0], bounds[1], c["mn"], c["mx"], 0.0))
 
 
 def _segment_hit_t(collider, a, b, trim):
@@ -352,13 +487,29 @@ def _build_shell_nodes(collider, margin, dense):
 
 def _mesh_shell_nodes(collider, margin, dense):
     surface = collider.get("surface") or {}
-    verts = [Vector(v) for v in surface.get("verts_world", ())]
+    verts = [Vector(v) for v in _sample_even(surface.get("verts_world", ()), _shell_vertex_limit(dense))]
     if not verts:
         return []
     center = _points_center(verts)
     nodes = [_offset_shell_point(v, center, margin) for v in verts]
     nodes.extend(_boundary_shell_points(surface, center, margin, dense))
     return nodes
+
+
+def _shell_vertex_limit(dense):
+    return _SHELL_VERTEX_LIMIT_DENSE if dense else _SHELL_VERTEX_LIMIT
+
+
+def _shell_boundary_limit(dense):
+    return _SHELL_BOUNDARY_LIMIT_DENSE if dense else _SHELL_BOUNDARY_LIMIT
+
+
+def _sample_even(items, limit):
+    values = tuple(items or ())
+    if len(values) <= int(limit):
+        return values
+    last = len(values) - 1
+    return tuple(values[min(last, round(i * last / float(max(1, int(limit) - 1))))] for i in range(int(limit)))
 
 
 def _bounds_shell_nodes(collider, margin, dense):
@@ -381,7 +532,7 @@ def _offset_shell_point(point, center, margin):
 
 
 def _boundary_shell_points(surface, center, margin, dense):
-    edges = _boundary_edges(surface.get("triangles", ()))
+    edges = _sample_even(_boundary_edges(surface.get("triangles", ())), _shell_boundary_limit(dense))
     samples = (0.5,) if not dense else (0.25, 0.5, 0.75)
     return [_offset_shell_point(verts[a].lerp(verts[b], t), center, margin) for a, b, verts in _edge_verts(surface, edges) for t in samples]
 

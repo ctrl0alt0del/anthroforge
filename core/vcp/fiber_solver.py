@@ -219,11 +219,12 @@ class FiberSolver:
         safe = first_safe = self._safe_snapshot(nodes, oracle, colliders, params, cyclic=True, pinned=pinned)
         guards = {}
         for it in range(params["iterations"]):
+            local = self._collision_context_params(params)
             colliders = self._active_colliders(oracle, nodes, params["margin"])
             next_guards = {}
-            max_disp, max_pen, alpha = self._cyclic_step(nodes, prev_nodes, pinned, pin_targets, oracle, colliders, params, it, guards, next_guards)
+            max_disp, max_pen, alpha = self._cyclic_step(nodes, prev_nodes, pinned, pin_targets, oracle, colliders, local, it, guards, next_guards)
             guards = next_guards if alpha >= 0.999999 else {}
-            prev_nodes, colliders, safe = self._post_iteration_state(nodes, oracle, params, safe, cyclic=True, pinned=pinned)
+            prev_nodes, colliders, safe = self._post_iteration_state(nodes, oracle, local, safe, cyclic=True, pinned=pinned)
             if self._iteration_converged(it, max_disp, max_pen, params):
                 return True, max_disp, max_pen
             if self._blocked_clear(alpha, max_pen, params):
@@ -390,7 +391,7 @@ class FiberSolver:
         if not (bake or self._preview_planner_route(fiber_prop) or self._interactive_collision_plan(fiber_prop)):
             return None, LOCAL_FALLBACK, 0.0, ()
         t0 = perf_counter()
-        result = plan_route(oracle, anchors)
+        result = plan_route(oracle, anchors, allow_dense=bool(bake))
         return result.points, result.mode, (perf_counter() - t0) * 1000.0, result.active_ids
 
     def _interactive_collision_plan(self, fiber_prop):
@@ -490,13 +491,17 @@ class FiberSolver:
         safe = first_safe = self._safe_snapshot(nodes, oracle, colliders, params, skip_ends=True, pinned=pinned)
         guards = {}
         for it in range(params["iterations"]):
+            local = self._collision_context_params(params)
             colliders = self._active_colliders(oracle, nodes, params["margin"])
             next_guards = {}
-            max_disp, max_pen, alpha = self._open_step(nodes, prev_nodes, pinned, pin_targets, oracle, colliders, params, it, guards, next_guards)
+            max_disp, max_pen, alpha = self._open_step(nodes, prev_nodes, pinned, pin_targets, oracle, colliders, local, it, guards, next_guards)
             guards = next_guards if alpha >= 0.999999 else {}
-            prev_nodes, colliders, safe = self._post_iteration_state(nodes, oracle, params, safe, skip_ends=True, pinned=pinned)
+            prev_nodes, colliders, safe = self._post_iteration_state(nodes, oracle, local, safe, skip_ends=True, pinned=pinned)
             if self._iteration_converged(it, max_disp, max_pen, params): converged = True; break
             if self._blocked_clear(alpha, max_pen, params): converged = True; break
+        return self._finish_open_iterations(nodes, safe, first_safe, oracle, colliders, params, converged, max_disp, max_pen)
+
+    def _finish_open_iterations(self, nodes, safe, first_safe, oracle, colliders, params, converged, max_disp, max_pen):
         safe = self._restore_choice(safe, first_safe, oracle, colliders, params, skip_ends=True)
         self._restore_safe_snapshot(nodes, safe, oracle, colliders, params, skip_ends=True)
         return converged, max_disp, max_pen
@@ -511,6 +516,11 @@ class FiberSolver:
 
     def _blocked_clear(self, alpha, max_pen, params):
         return alpha <= 0.0 and max_pen < params["eps_pen"]
+
+    def _collision_context_params(self, params):
+        local = dict(params)
+        local["_collision_context"] = {"colliders": {}, "hits": {}, "pen": {}, "zones": {}}
+        return local
 
     def _open_step(self, nodes, prev_nodes, pinned, pin_targets, oracle, colliders, params, it, guards, next_guards):
         _ = prev_nodes
@@ -564,7 +574,8 @@ class FiberSolver:
         if not params["segment_collisions"]:
             return True
         indices = self._free_node_indices(len(nodes), pinned, cyclic, skip_ends)
-        return all(self._sample_penetration(nodes[i], oracle, self._node_colliders(nodes, i, oracle, colliders, params)) <= 0.0 for i in indices)
+        zones = self._owner_zone_limits(nodes, oracle, colliders, params)
+        return all(self._sample_penetration(nodes[i], oracle, self._node_colliders(nodes, i, oracle, colliders, params, zones)) <= 0.0 for i in indices)
 
     def _free_node_indices(self, count, pinned, cyclic, skip_ends):
         for i in range(count):
@@ -599,15 +610,31 @@ class FiberSolver:
         colliders = self._candidate_colliders(oracle, start, candidate, params)
         start_pen = self._state_penetration(start, oracle, colliders, params, cyclic, skip_ends)
         best = (start_pen, 0.0, start)
+        high = 1.0
         for alpha in self._backtrack_alphas():
             trial = self._interpolate_nodes(start, candidate, alpha)
             if self._candidate_clear(start, trial, oracle, colliders, params, cyclic, skip_ends):
-                self._copy_nodes(nodes, trial)
-                return alpha, 0.0
+                return self._accept_refined_alpha(nodes, start, candidate, alpha, high, oracle, colliders, params, cyclic, skip_ends)
             best = self._best_penalty_choice(best, trial, alpha, oracle, colliders, params, cyclic, skip_ends)
+            high = alpha
         return self._use_best_candidate(nodes, best, start_pen)
 
+    def _accept_refined_alpha(self, nodes, start, candidate, alpha, high, oracle, colliders, params, cyclic, skip_ends):
+        alpha = self._refined_clear_alpha(start, candidate, alpha, high, oracle, colliders, params, cyclic, skip_ends)
+        trial = self._interpolate_nodes(start, candidate, alpha)
+        self._copy_nodes(nodes, trial)
+        return alpha, 0.0
+
+    def _refined_clear_alpha(self, start, candidate, low, high, oracle, colliders, params, cyclic, skip_ends):
+        mid = (low + high) * 0.5
+        trial = self._interpolate_nodes(start, candidate, mid)
+        if self._candidate_clear(start, trial, oracle, colliders, params, cyclic, skip_ends):
+            return mid
+        return low
+
     def _best_penalty_choice(self, best, trial, alpha, oracle, colliders, params, cyclic, skip_ends):
+        if best[0] <= 0.0:
+            return best
         pen = self._state_penetration(trial, oracle, colliders, params, cyclic, skip_ends)
         return (pen, alpha, trial) if pen < best[0] else best
 
@@ -634,17 +661,19 @@ class FiberSolver:
     def _node_paths_clear(self, start, candidate, oracle, colliders, params, cyclic, skip_ends):
         if not params["segment_collisions"]:
             return True
-        return all(self._node_path_clear(start, candidate, i, oracle, colliders, params) for i in self._moving_node_indices(start, candidate, cyclic, skip_ends))
+        zones = self._owner_zone_limits(candidate, oracle, colliders, params)
+        return all(self._node_path_clear(start, candidate, i, oracle, colliders, params, zones) for i in self._moving_node_indices(start, candidate, cyclic, skip_ends))
 
-    def _node_path_clear(self, start, candidate, index, oracle, colliders, params):
-        cols = self._node_colliders(candidate, index, oracle, colliders, params)
-        return self._segment_penetration(start[index], candidate[index], oracle, cols) <= 0.0
+    def _node_path_clear(self, start, candidate, index, oracle, colliders, params, zones):
+        cols = self._node_colliders(candidate, index, oracle, colliders, params, zones)
+        return self._segment_penetration_cached(start[index], candidate[index], oracle, cols, params) <= 0.0
 
     def _moved_points_clear(self, points, start, candidate, oracle, colliders, params, cyclic, skip_ends):
         if not params["segment_collisions"]:
             return True
         values = self._moving_node_indices(start, candidate, cyclic, skip_ends)
-        return all(self._sample_penetration(points[i], oracle, self._node_colliders(points, i, oracle, colliders, params)) <= 0.0 for i in values)
+        zones = self._owner_zone_limits(points, oracle, colliders, params)
+        return all(self._sample_penetration(points[i], oracle, self._node_colliders(points, i, oracle, colliders, params, zones)) <= 0.0 for i in values)
 
     def _moving_node_indices(self, start, candidate, cyclic, skip_ends):
         last = len(start) - 1
@@ -658,25 +687,64 @@ class FiberSolver:
         if not params["segment_collisions"]:
             return True
         pairs = self._clear_segment_pairs(len(nodes), cyclic, skip_ends)
-        return all(self._pair_penetration(nodes, a, b, oracle, colliders, params) <= 0.0 for a, b in pairs)
+        zones = self._owner_zone_limits(nodes, oracle, colliders, params)
+        return all(not self._pair_blocked(nodes, a, b, oracle, colliders, params, zones) for a, b in pairs)
 
     def _state_penetration(self, nodes, oracle, colliders, params, cyclic=False, skip_ends=False):
         if not params["segment_collisions"]:
             return 0.0
+        key = self._state_penetration_key(nodes, colliders, params, cyclic, skip_ends)
+        ctx = self._collision_context(params)
+        if ctx is None:
+            return self._state_penetration_uncached(nodes, oracle, colliders, params, cyclic, skip_ends)
+        cache = ctx.setdefault("pen", {})
+        if key not in cache:
+            cache[key] = self._state_penetration_uncached(nodes, oracle, colliders, params, cyclic, skip_ends)
+        return cache[key]
+
+    def _state_penetration_uncached(self, nodes, oracle, colliders, params, cyclic, skip_ends):
         pairs = self._clear_segment_pairs(len(nodes), cyclic, skip_ends)
-        return max((self._pair_penetration(nodes, a, b, oracle, colliders, params) for a, b in pairs), default=0.0)
+        zones = self._owner_zone_limits(nodes, oracle, colliders, params)
+        return max((self._pair_penetration(nodes, a, b, oracle, colliders, params, zones) for a, b in pairs), default=0.0)
 
-    def _pair_penetration(self, nodes, a_idx, b_idx, oracle, colliders, params):
-        cols = self._pair_colliders(nodes, a_idx, b_idx, oracle, colliders, params)
-        return self._segment_penetration(nodes[a_idx], nodes[b_idx], oracle, cols)
+    def _state_penetration_key(self, nodes, colliders, params, cyclic, skip_ends):
+        owners = tuple(params.get("endpoint_owners", ("", "")) or ("", ""))
+        return self._nodes_key(nodes), self._colliders_key(colliders), owners, bool(cyclic), bool(skip_ends)
 
-    def _pair_colliders(self, nodes, a_idx, b_idx, oracle, colliders, params):
-        start, end = self._owner_zone_limits(nodes, oracle, colliders, params)
-        return tuple(c for c in colliders if self._pair_collider_allowed(c, a_idx, b_idx, start, end))
+    def _pair_blocked(self, nodes, a_idx, b_idx, oracle, colliders, params, zones):
+        cols = self._pair_colliders(nodes, a_idx, b_idx, oracle, colliders, params, zones)
+        return self._segment_blocked_cached(nodes[a_idx], nodes[b_idx], oracle, cols, params)
 
-    def _node_colliders(self, nodes, index, oracle, colliders, params):
-        start, end = self._owner_zone_limits(nodes, oracle, colliders, params)
-        return tuple(c for c in colliders if self._node_collider_allowed(c, index, start, end))
+    def _pair_penetration(self, nodes, a_idx, b_idx, oracle, colliders, params, zones=None):
+        cols = self._pair_colliders(nodes, a_idx, b_idx, oracle, colliders, params, zones)
+        return self._segment_penetration_cached(nodes[a_idx], nodes[b_idx], oracle, cols, params)
+
+    def _pair_colliders(self, nodes, a_idx, b_idx, oracle, colliders, params, zones=None):
+        start, end = zones or self._owner_zone_limits(nodes, oracle, colliders, params)
+        bounds = self._query_bounds((nodes[a_idx], nodes[b_idx]), params)
+        key = self._collider_cache_key("pair", bounds, a_idx, b_idx, start, end)
+        return self._cached_colliders(params, key, self._filter_pair_colliders, colliders, a_idx, b_idx, start, end, bounds)
+
+    def _node_colliders(self, nodes, index, oracle, colliders, params, zones=None):
+        start, end = zones or self._owner_zone_limits(nodes, oracle, colliders, params)
+        bounds = self._query_bounds((nodes[index],), params)
+        key = self._collider_cache_key("node", bounds, index, start, end)
+        return self._cached_colliders(params, key, self._filter_node_colliders, colliders, index, start, end, bounds)
+
+    def _cached_colliders(self, params, key, factory, *args):
+        ctx = self._collision_context(params)
+        if ctx is None:
+            return factory(*args)
+        cache = ctx.setdefault("colliders", {})
+        if key not in cache:
+            cache[key] = factory(*args)
+        return cache[key]
+
+    def _filter_pair_colliders(self, colliders, a_idx, b_idx, start, end, bounds):
+        return tuple(c for c in colliders if self._pair_collider_allowed(c, a_idx, b_idx, start, end) and self._collider_overlaps(c, bounds))
+
+    def _filter_node_colliders(self, colliders, index, start, end, bounds):
+        return tuple(c for c in colliders if self._node_collider_allowed(c, index, start, end) and self._collider_overlaps(c, bounds))
 
     def _pair_collider_allowed(self, collider, a_idx, b_idx, start, end):
         sid, low, high = str(collider["sid"]), min(a_idx, b_idx), max(a_idx, b_idx)
@@ -692,9 +760,22 @@ class FiberSolver:
 
     def _owner_zone_limits(self, nodes, oracle, colliders, params):
         owners = tuple(params.get("endpoint_owners", ("", "")) or ("", ""))
+        key = self._owner_zone_key(nodes, colliders, owners)
+        ctx = self._collision_context(params)
+        if ctx is None:
+            return self._compute_owner_zone_limits(nodes, oracle, colliders, owners)
+        cache = ctx.setdefault("zones", {})
+        if key not in cache:
+            cache[key] = self._compute_owner_zone_limits(nodes, oracle, colliders, owners)
+        return cache[key]
+
+    def _compute_owner_zone_limits(self, nodes, oracle, colliders, owners):
         start = self._owner_start_limit(nodes, oracle, self._collider_by_sid(colliders, owners[0]))
         end = self._owner_end_limit(nodes, oracle, self._collider_by_sid(colliders, owners[1]))
         return (owners[0], start), (owners[1], end)
+
+    def _owner_zone_key(self, nodes, colliders, owners):
+        return tuple(owners), self._nodes_key(nodes), self._colliders_key(colliders)
 
     def _owner_start_limit(self, nodes, oracle, collider):
         index = 0
@@ -713,6 +794,34 @@ class FiberSolver:
 
     def _point_hits_collider(self, point, oracle, collider):
         return self._sample_penetration(point, oracle, (collider,)) > 0.0
+
+    def _query_bounds(self, points, params):
+        pad = max(0.0, float(params.get("margin", 0.0)) * 2.0)
+        xs, ys, zs = [p.x for p in points], [p.y for p in points], [p.z for p in points]
+        return Vector((min(xs) - pad, min(ys) - pad, min(zs) - pad)), Vector((max(xs) + pad, max(ys) + pad, max(zs) + pad))
+
+    def _collider_overlaps(self, collider, bounds):
+        if "mn" not in collider or "mx" not in collider:
+            return True
+        return self._bounds_overlap(bounds[0], bounds[1], collider["mn"], collider["mx"])
+
+    def _bounds_overlap(self, a_mn, a_mx, b_mn, b_mx):
+        return not (a_mx.x < b_mn.x or b_mx.x < a_mn.x or a_mx.y < b_mn.y or b_mx.y < a_mn.y or a_mx.z < b_mn.z or b_mx.z < a_mn.z)
+
+    def _collision_context(self, params):
+        return params.get("_collision_context") if isinstance(params, dict) else None
+
+    def _collider_cache_key(self, kind, bounds, *parts):
+        return kind, self._bounds_key(bounds), tuple(parts)
+
+    def _bounds_key(self, bounds):
+        return tuple(round(v, 5) for p in bounds for v in (p.x, p.y, p.z))
+
+    def _nodes_key(self, nodes):
+        return tuple(self._point_key(point) for point in nodes)
+
+    def _colliders_key(self, colliders):
+        return tuple((str(c["sid"]), c.get("stamp")) for c in tuple(colliders or ()))
 
     def _copy_nodes(self, nodes, source):
         for i, point in enumerate(source):
@@ -887,18 +996,27 @@ class FiberSolver:
     def _apply_segment_collision_constraints(self, nodes, pinned, oracle, colliders, params, cyclic=False):
         pairs = self._segment_pairs(len(nodes), cyclic)
         max_pen = 0.0
+        zones = self._owner_zone_limits(nodes, oracle, colliders, params)
         for a_idx, b_idx in pairs:
-            cols = self._pair_colliders(nodes, a_idx, b_idx, oracle, colliders, params)
-            max_pen = max(max_pen, self._segment_penalty(nodes, pinned, oracle, cols, a_idx, b_idx))
+            cols = self._pair_colliders(nodes, a_idx, b_idx, oracle, colliders, params, zones)
+            if self._pair_needs_segment_penalty(nodes, a_idx, b_idx, oracle, cols, params):
+                max_pen = max(max_pen, self._segment_penalty(nodes, pinned, oracle, cols, a_idx, b_idx, params))
         return max_pen
+
+    def _pair_needs_segment_penalty(self, nodes, a_idx, b_idx, oracle, colliders, params):
+        if self._no_real_colliders(oracle, colliders):
+            return False
+        if not hasattr(oracle, "segment_hit_samples"):
+            return True
+        return self._cached_segment_ray(nodes[a_idx], nodes[b_idx], oracle, colliders, params)
 
     def _segment_pairs(self, count, cyclic):
         pairs = [(i, i + 1) for i in range(max(0, count - 1))]
         return pairs + ([(count - 1, 0)] if cyclic and count > 2 else [])
 
-    def _segment_penalty(self, nodes, pinned, oracle, colliders, a_idx, b_idx):
+    def _segment_penalty(self, nodes, pinned, oracle, colliders, a_idx, b_idx, params):
         move_a, move_b, max_pen = self._zero_vec(), self._zero_vec(), 0.0
-        for t in self._segment_samples_for(nodes[a_idx], nodes[b_idx], oracle, colliders):
+        for t in self._segment_samples_for_cached(nodes[a_idx], nodes[b_idx], oracle, colliders, params):
             da, db, pen = self._segment_sample_correction(nodes[a_idx], nodes[b_idx], pinned, oracle, colliders, a_idx, b_idx, t)
             move_a, move_b = move_a + da, move_b + db
             max_pen = max(max_pen, pen)
@@ -913,17 +1031,79 @@ class FiberSolver:
             return self._segment_samples()
         return self._merged_segment_samples(self._segment_samples(), oracle.segment_hit_samples(a, b, colliders))
 
+    def _segment_samples_for_cached(self, a, b, oracle, colliders, params):
+        if not hasattr(oracle, "segment_hit_samples"):
+            return self._segment_samples()
+        return self._merged_segment_samples(self._segment_samples(), self._cached_segment_hits(a, b, oracle, colliders, params))
+
     def _merged_segment_samples(self, base, hits):
         values = {round(float(t), 6) for t in base}
         values.update(round(float(t), 6) for t in tuple(hits or ()) if 0.0 < float(t) < 1.0)
         return tuple(sorted(values))
 
     def _segment_penetration(self, a, b, oracle, colliders):
+        if self._no_real_colliders(oracle, colliders):
+            return 0.0
         return max(self._sample_penetration(a.lerp(b, t), oracle, colliders) for t in self._segment_samples_for(a, b, oracle, colliders))
 
+    def _segment_penetration_cached(self, a, b, oracle, colliders, params):
+        if self._no_real_colliders(oracle, colliders):
+            return 0.0
+        samples = self._segment_samples_for_cached(a, b, oracle, colliders, params)
+        return max(self._sample_penetration(a.lerp(b, t), oracle, colliders) for t in samples)
+
+    def _segment_blocked(self, a, b, oracle, colliders):
+        if self._no_real_colliders(oracle, colliders):
+            return False
+        if self._segment_ray_blocked(a, b, oracle, colliders):
+            return True
+        return self._segment_sample_blocked(a, b, oracle, colliders)
+
+    def _segment_blocked_cached(self, a, b, oracle, colliders, params):
+        if self._no_real_colliders(oracle, colliders):
+            return False
+        if self._cached_segment_ray(a, b, oracle, colliders, params):
+            return True
+        return self._segment_sample_blocked(a, b, oracle, colliders)
+
+    def _segment_sample_blocked(self, a, b, oracle, colliders):
+        return any(self._sample_penetration(a.lerp(b, t), oracle, colliders) > 0.0 for t in self._segment_samples())
+
+    def _segment_ray_blocked(self, a, b, oracle, colliders):
+        if not hasattr(oracle, "segment_hit_samples"):
+            return False
+        return bool(tuple(oracle.segment_hit_samples(a, b, colliders)))
+
+    def _cached_segment_ray(self, a, b, oracle, colliders, params):
+        return bool(self._cached_segment_hits(a, b, oracle, colliders, params))
+
+    def _cached_segment_hits(self, a, b, oracle, colliders, params):
+        if not hasattr(oracle, "segment_hit_samples"):
+            return ()
+        ctx = self._collision_context(params)
+        if ctx is None:
+            return tuple(oracle.segment_hit_samples(a, b, colliders))
+        key = self._segment_ray_key(a, b, colliders)
+        cache = ctx.setdefault("hits", {})
+        if key not in cache:
+            cache[key] = tuple(oracle.segment_hit_samples(a, b, colliders))
+        return cache[key]
+
+    def _segment_ray_key(self, a, b, colliders):
+        coll_key = tuple((str(c["sid"]), c.get("stamp")) for c in tuple(colliders or ()))
+        return self._point_key(a), self._point_key(b), coll_key
+
+    def _point_key(self, point):
+        return tuple(round(float(v), 6) for v in point)
+
     def _sample_penetration(self, point, oracle, colliders):
+        if self._no_real_colliders(oracle, colliders):
+            return 0.0
         _pushed, pen = oracle.push_out_point(point, colliders)
         return float(pen)
+
+    def _no_real_colliders(self, oracle, colliders):
+        return not tuple(colliders or ()) and hasattr(oracle, "active_colliders_for_polyline")
 
     def _segment_sample_correction(self, a, b, pinned, oracle, colliders, a_idx, b_idx, t):
         point = a.lerp(b, t)

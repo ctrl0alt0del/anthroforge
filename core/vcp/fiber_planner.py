@@ -5,6 +5,8 @@ from heapq import heappop, heappush
 DIRECT = "DIRECT"
 ROADMAP = "ROADMAP"
 LOCAL_FALLBACK = "LOCAL_FALLBACK"
+_ROADMAP_NODE_LIMIT = 96
+_ROADMAP_NODE_LIMIT_DENSE = 240
 
 
 @dataclass(frozen=True)
@@ -33,8 +35,8 @@ class PlannerResult:
     active_ids: tuple
 
 
-def plan_route(oracle, anchors):
-    results = [_plan_segment(oracle, seg) for seg in _segments(anchors)]
+def plan_route(oracle, anchors, allow_dense=True):
+    results = [_plan_segment(oracle, seg, allow_dense) for seg in _segments(anchors)]
     return PlannerResult(_merge_paths(results), _merge_mode(results), _merge_active_ids(results))
 
 
@@ -42,11 +44,18 @@ def _segments(anchors):
     return [PlannerSegment(anchors[i], anchors[i + 1]) for i in range(max(0, len(anchors) - 1))]
 
 
-def _plan_segment(oracle, segment):
+def _plan_segment(oracle, segment, allow_dense=True):
     active = oracle.active_colliders_for_segment(segment.start.point, segment.end.point, padding=_corridor_pad(oracle))
     if oracle.segment_visible(segment.start.point, segment.end.point, _owners(segment), active):
         return PlannerResult(_segment_points(segment), DIRECT, _active_ids(active))
-    return _roadmap_result(oracle, segment, active, False) or _roadmap_result(oracle, segment, active, True) or _fallback_result(segment, active)
+    sparse = _roadmap_result(oracle, segment, active, False)
+    return sparse or _dense_or_fallback(oracle, segment, active, allow_dense)
+
+
+def _dense_or_fallback(oracle, segment, active, allow_dense):
+    if allow_dense:
+        return _roadmap_result(oracle, segment, active, True) or _fallback_result(segment, active)
+    return _fallback_result(segment, active)
 
 
 def _corridor_pad(oracle):
@@ -62,7 +71,7 @@ def _segment_points(segment):
 
 
 def _roadmap_result(oracle, segment, active, dense):
-    path = _roadmap_path(oracle, segment, active, dense)
+    path = _roadmap_path(oracle, segment, _roadmap_shell_colliders(oracle, segment, active), active, dense)
     return None if path is None else PlannerResult(_shortcut_path(oracle, path, active), ROADMAP, _active_ids(active))
 
 
@@ -70,8 +79,13 @@ def _fallback_result(segment, active):
     return PlannerResult(_segment_points(segment), LOCAL_FALLBACK, _active_ids(active))
 
 
-def _roadmap_path(oracle, segment, active, dense):
-    nodes = _roadmap_nodes(oracle, segment, active, dense)
+def _roadmap_shell_colliders(oracle, segment, active):
+    blockers = tuple(c for c in active if not oracle.segment_visible(segment.start.point, segment.end.point, _owners(segment), (c,)))
+    return blockers or active
+
+
+def _roadmap_path(oracle, segment, shell_colliders, active, dense):
+    nodes = _roadmap_nodes(oracle, segment, shell_colliders, dense)
     graph = _visible_graph(oracle, nodes, active)
     path = _a_star(nodes, graph)
     return None if path is None else [nodes[i].point.copy() for i in path]
@@ -81,7 +95,22 @@ def _roadmap_nodes(oracle, segment, active, dense):
     nodes = [RoadmapNode(segment.start.point.copy(), segment.start.owner_id), RoadmapNode(segment.end.point.copy(), segment.end.owner_id)]
     for collider in active:
         nodes.extend(RoadmapNode(point.copy(), "") for point in oracle.shell_nodes(collider, dense=dense))
-    return _dedupe_nodes(nodes)
+    return _limit_roadmap_nodes(_dedupe_nodes(nodes), dense)
+
+
+def _limit_roadmap_nodes(nodes, dense):
+    limit = _ROADMAP_NODE_LIMIT_DENSE if dense else _ROADMAP_NODE_LIMIT
+    if len(nodes) <= limit:
+        return nodes
+    return nodes[:2] + _sample_even(nodes[2:], limit - 2)
+
+
+def _sample_even(items, limit):
+    values = list(items or ())
+    if len(values) <= int(limit):
+        return values
+    last = len(values) - 1
+    return [values[min(last, round(i * last / float(max(1, int(limit) - 1))))] for i in range(int(limit))]
 
 
 def _dedupe_nodes(nodes):

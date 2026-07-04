@@ -17,7 +17,8 @@ from mathutils import Vector
 from _helpers import BlenderTestCase, capture_mesh_attachment, capture_world_attachment, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
 from anthroforge.app.use_cases.fiber_tools import recompute_fiber as recompute_fiber_action
 from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param, encode_fiber_vertex_index, parse_fiber_attach_param
-from anthroforge.core.vcp.fiber_collision import CollisionOracle
+from anthroforge.core.vcp import fiber_planner
+from anthroforge.core.vcp.fiber_collision import CollisionOracle, _active_for_bounds, _mesh_shell_nodes
 from anthroforge.core.vcp.fiber_solver import FiberSolver
 from anthroforge.core.vcp.runtime_state import (
     fiber_active_colliders,
@@ -155,6 +156,18 @@ def _polyline_hits_box(points, center, half_extent, steps=6):
     return False
 
 
+def _fake_collider(index):
+    x = float(index * 10)
+    bounds = Vector((x, -1.0, -1.0)), Vector((x + 1.0, 1.0, 1.0))
+    return {"sid": f"C{index}", "stamp": (index,), "mn": bounds[0], "mx": bounds[1]}
+
+
+def _fake_tiny_collider(index):
+    x, eps = float(index * 10), 1.0e-6
+    bounds = Vector((x, -eps, -eps)), Vector((x + eps, eps, eps))
+    return {"sid": f"T{index}", "stamp": ("tiny", index), "mn": bounds[0], "mx": bounds[1]}
+
+
 def _rollback_hit(point):
     return abs(point.x - 1.0) < 0.2 and abs(point.z) < 0.05
 
@@ -222,6 +235,51 @@ class _OwnerZoneOracle:
     def push_out_point(self, point, colliders):
         hit = any(_owner_zone_hit(point, c["sid"]) for c in colliders)
         return point.copy(), 1.0 if hit else 0.0
+
+
+class _RayHitOnlyOracle:
+    def segment_hit_samples(self, a, b, colliders):
+        _ = a, b, colliders
+        return (0.5,)
+
+    def push_out_point(self, point, colliders):
+        raise AssertionError("ray-hit clear checks should not sample penetration")
+
+
+class _EmptyRealOracle:
+    def active_colliders_for_polyline(self, points, padding=0.0):
+        raise AssertionError("empty filtered real collider sets must not requery active colliders")
+
+    def push_out_point(self, point, colliders):
+        raise AssertionError("empty filtered real collider sets must not push out")
+
+
+class _NoRayPushOracle:
+    def segment_hit_samples(self, a, b, colliders):
+        _ = a, b, colliders
+        return ()
+
+    def push_out_point(self, point, colliders):
+        raise AssertionError("clear ray pairs should not push out")
+
+
+class _RayPushOracle:
+    def __init__(self):
+        self.pushes = 0
+
+    def segment_hit_samples(self, a, b, colliders):
+        _ = a, b, colliders
+        return (0.5,)
+
+    def push_out_point(self, point, colliders):
+        self.pushes += 1
+        return point + Vector((0.0, 0.0, 0.1)), 0.1
+
+
+class _ManyShellOracle:
+    def shell_nodes(self, collider, dense=False):
+        _ = collider, dense
+        return [Vector((float(i), 0.0, 0.0)) for i in range(500)]
 
 
 class FiberVcpWorkflowTests(BlenderTestCase):
@@ -342,10 +400,18 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         colliders = [c for c in oracle.colliders() if c["sid"] == blocker.id]
         samples = oracle.segment_hit_samples(Vector((0.0, 0.0, 0.0)), Vector((2.0, 0.0, 0.0)), colliders)
         pushed, pen = oracle.push_out_point(Vector((1.0, 0.0, 0.0)), colliders)
+        push_delta = (pushed - Vector((1.0, 0.0, 0.0))).length
+        hit_cache_size, push_cache_size = len(oracle._segment_hit_cache), len(oracle._push_cache)
+        pushed.x = 99.0
+        samples_again = oracle.segment_hit_samples(Vector((0.0, 0.0, 0.0)), Vector((2.0, 0.0, 0.0)), colliders)
+        pushed_again, _pen_again = oracle.push_out_point(Vector((1.0, 0.0, 0.0)), colliders)
+        self.assertEqual((len(oracle._segment_hit_cache), len(oracle._push_cache)), (hit_cache_size, push_cache_size))
         self.assertTrue(samples)
+        self.assertEqual(samples_again, samples)
         self.assertAlmostEqual(samples[0], 0.5, places=4)
         self.assertGreater(pen, 0.0)
-        self.assertGreater((pushed - Vector((1.0, 0.0, 0.0))).length, 0.0)
+        self.assertLess(pushed_again.x, 10.0)
+        self.assertGreater(push_delta, 0.0)
 
     def test_planner_shell_nodes_follow_rotated_mesh_boundary(self):
         root_obj = root()
@@ -398,6 +464,15 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         FiberSolver()._run_iterations(nodes, [point.copy() for point in prev], [True, False, True], {0: prev[0], 2: prev[2]}, _WideBandPushOracle(), (), params)
         self.assertAlmostEqual(nodes[1].z, 0.8, places=4)
 
+    def test_backtracking_refines_to_larger_safe_alpha(self):
+        start = [Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 1.0)), Vector((2.0, 0.0, 0.0))]
+        candidate = [start[0].copy(), Vector((1.0, 0.0, 0.0)), start[2].copy()]
+        nodes = [point.copy() for point in start]
+        params = {"margin": 0.0, "segment_collisions": True}
+        alpha, _pen = FiberSolver()._accept_candidate(nodes, start, candidate, _NodeBandOracle(), params, skip_ends=True)
+        self.assertGreater(alpha, 0.25)
+        self.assertGreater(nodes[1].z, 0.5)
+
     def test_seed_restore_ignores_only_local_endpoint_owner_zones(self):
         solver, oracle = FiberSolver(), _OwnerZoneOracle()
         params = {"margin": 0.0, "segment_collisions": True, "endpoint_owners": ("START", "END")}
@@ -406,6 +481,51 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         solver._restore_seed_if_needed(nodes, seed, oracle, params)
         self.assertGreater(min(nodes[2].z, nodes[3].z), 0.5)
         self.assertTrue(solver._segments_clear(nodes, oracle, oracle._colliders, params, skip_ends=True))
+
+    def test_segment_blocked_early_out_uses_ray_hit_without_pushout(self):
+        blocked = FiberSolver()._segment_blocked(Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.0)), _RayHitOnlyOracle(), ({"sid": "A"},))
+        self.assertTrue(blocked)
+
+    def test_empty_real_collider_filter_short_circuits_penetration(self):
+        pen = FiberSolver()._sample_penetration(Vector((0.0, 0.0, 0.0)), _EmptyRealOracle(), ())
+        self.assertEqual(pen, 0.0)
+
+    def test_active_collider_spatial_index_filters_many_aabbs(self):
+        colliders = tuple(_fake_collider(i) for i in range(40))
+        bounds = Vector((100.2, -0.2, -0.2)), Vector((100.8, 0.2, 0.2))
+        active = _active_for_bounds(bpy.context.scene, colliders, bounds)
+        self.assertEqual([c["sid"] for c in active], ["C10"])
+
+    def test_active_collider_spatial_index_caps_huge_query_cells(self):
+        colliders = tuple(_fake_tiny_collider(i) for i in range(40))
+        bounds = Vector((-1.0, -0.1, -0.1)), Vector((400.0, 0.1, 0.1))
+        active = _active_for_bounds(bpy.context.scene, colliders, bounds)
+        self.assertEqual(len(active), 40)
+
+    def test_shell_nodes_sample_large_mesh_vertices(self):
+        verts = [Vector((float(i), 0.0, 0.0)) for i in range(300)]
+        nodes = _mesh_shell_nodes({"surface": {"verts_world": verts, "triangles": ()}}, 0.0, False)
+        self.assertEqual(len(nodes), 32)
+
+    def test_roadmap_nodes_cap_many_shell_points(self):
+        start = fiber_planner.PlannerAnchor(Vector((0.0, 0.0, 0.0)))
+        end = fiber_planner.PlannerAnchor(Vector((1.0, 0.0, 0.0)))
+        segment = fiber_planner.PlannerSegment(start, end)
+        nodes = fiber_planner._roadmap_nodes(_ManyShellOracle(), segment, ({"sid": "A"},), False)
+        self.assertEqual(len(nodes), 96)
+
+    def test_segment_penalty_skips_pushout_without_ray_hit(self):
+        nodes = [Vector((0.1, 0.0, 0.0)), Vector((0.9, 0.0, 0.0))]
+        params = {"margin": 0.0, "segment_collisions": True}
+        pen = FiberSolver()._apply_segment_collision_constraints(nodes, [False, False], _NoRayPushOracle(), (_fake_collider(0),), params)
+        self.assertEqual(pen, 0.0)
+
+    def test_segment_penalty_samples_pushout_after_ray_hit(self):
+        nodes, oracle = [Vector((0.1, 0.0, 0.0)), Vector((0.9, 0.0, 0.0))], _RayPushOracle()
+        params = {"margin": 0.0, "segment_collisions": True}
+        pen = FiberSolver()._apply_segment_collision_constraints(nodes, [False, False], oracle, (_fake_collider(0),), params)
+        self.assertGreater(pen, 0.0)
+        self.assertGreater(oracle.pushes, 0)
 
     def test_recompute_fiber_preserves_mid_touch_anchor(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
