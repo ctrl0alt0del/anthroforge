@@ -64,6 +64,17 @@ def add_fiber_touch_point(context, fiber_id=""):
     return _append_touch_result(context, root, *resolved)
 
 
+def add_fiber_touch_point_at_world(context, fiber_id, scp_id, point):
+    root = root_for_context(context)
+    fiber, error = _resolved_fiber(root, fiber_id)
+    if fiber is None:
+        return failure(error)
+    spec = _world_touch_spec(root, context.scene, scp_id, point)
+    if spec is None:
+        return failure("Click a valid SCP geometry surface.")
+    return _append_touch_result(context, root, fiber, (spec,))
+
+
 def remove_fiber_touch_point(context, fiber_id="", touch_index=-1):
     root = root_for_context(context)
     fiber, error = _resolved_fiber(root, fiber_id)
@@ -271,6 +282,12 @@ def _mesh_spec(root, scene, obj, index):
     scp_id = str(obj.get("af_scp_id", "") or "")
     raw = None if not scp_id else _capture_attachment_from_mesh_vertex()(root, scene, scp_id, index)
     return None if raw is None else (scp_id, raw)
+
+
+def _world_touch_spec(root, scene, scp_id, point):
+    sid = str(scp_id or "")
+    raw = None if not sid else _capture_attachment_from_world()(root, scene, sid, point)
+    return None if raw is None else (sid, raw)
 
 
 def _proxy_spec(root, scene, pick):

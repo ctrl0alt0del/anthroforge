@@ -24,6 +24,7 @@ from anthroforge.core.visualization.fiber_sync import register_fiber_sync
 from anthroforge.core.visualization.fiber_sync_helpers import endpoint_world
 from anthroforge.core.visualization.mirror_rules import mirror_matrix
 from anthroforge.core.visualization.vcp_mirror_runtime import sync_vcp_mirrors
+from anthroforge.operators import fiber_tools as fiber_tool_ops
 
 
 def _object_mode():
@@ -114,6 +115,18 @@ def _scp_named(root_obj, name):
 
 def _attr(obj, name, index):
     return int(obj.data.attributes[name].data[index].value)
+
+
+def _poly_center_world(obj, face_index=0):
+    poly = obj.data.polygons[int(face_index)]
+    verts = [obj.matrix_world @ obj.data.vertices[int(i)].co.copy() for i in poly.vertices]
+    return sum(verts, Vector()) / float(len(verts))
+
+
+def _modal_proxy_hit(root_obj, obj, face_index=0):
+    center = _poly_center_world(obj, face_index)
+    row = fiber_tool_ops._candidate_row(root_obj, obj)
+    return fiber_tool_ops._object_scp_hit(row, center + Vector((0.0, 0.0, 2.0)), Vector((0.0, 0.0, -1.0)))
 
 
 def _fiber_points_world(fiber_id):
@@ -282,6 +295,22 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         self.assertEqual(bpy.ops.af.add_fiber_touch_point(fiber_id=fiber.id), {"FINISHED"})
         self.assertEqual((len(fiber.mid_touches), fiber.mid_touches[0].parent_id), (1, left.id))
         self.assertEqual(parse_fiber_attach_param(fiber.mid_touches[0].attach_param)[0], "surface_param_v2")
+
+    def test_modal_touch_picker_accepts_original_proxy_surface(self):
+        root_obj, parent, left, _right = _proxy_setup()
+        self.assertEqual(_switch(parent.transform_object_ref), {"FINISHED"})
+        proxy = _session_proxy(root_obj, "original")
+        self.assertTrue(any(row[1] == proxy for row in fiber_tool_ops._pick_candidates(bpy.context)))
+        hit = _modal_proxy_hit(root_obj, proxy)
+        self.assertEqual(hit[0], left.id)
+        self.assertLess((hit[1] - _poly_center_world(left.geometry_object_ref)).length, 1.0e-6)
+
+    def test_modal_touch_picker_unmirrors_mirrored_proxy_surface(self):
+        root_obj, source, target = _mirror_setup()
+        self.assertEqual(_switch(source.transform_object_ref), {"FINISHED"})
+        hit = _modal_proxy_hit(root_obj, _session_proxy(root_obj, "mirrored"))
+        self.assertEqual(hit[0], target.id)
+        self.assertLess((hit[1] - _poly_center_world(target.geometry_object_ref)).length, 1.0e-6)
 
     def test_connect_proxy_vertices_with_fiber_keeps_cube_body_diagonal_on_surface(self):
         root_obj, cube, proxy = _cube_proxy_setup()

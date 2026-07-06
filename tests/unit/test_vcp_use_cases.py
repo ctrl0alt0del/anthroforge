@@ -29,7 +29,7 @@ from core.vcp.runtime_state import (
 from app.use_cases.blob_create import create_blob_vcp
 from app.use_cases.blob_tools import select_blob_control
 from app.use_cases.fiber_create import create_fiber_from_proxy_vertices, create_fiber_vcp
-from app.use_cases.fiber_tools import _run_bake_passes, add_fiber_touch_point, clear_fiber_warm_start, recompute_fiber, remove_fiber_touch_point
+from app.use_cases.fiber_tools import _run_bake_passes, add_fiber_touch_point, add_fiber_touch_point_at_world, clear_fiber_warm_start, recompute_fiber, remove_fiber_touch_point
 from app.use_cases.muscle_create import create_muscle_vcp
 from app.use_cases.muscle_tools import flip_muscle_normals, select_muscle_inflation_ctrl
 from app.use_cases.vcp_delete import delete_vcp_in_tree
@@ -289,6 +289,17 @@ class VcpUseCaseTests(unittest.TestCase):
                     self.assertTrue(remove_fiber_touch_point(ctx, touch_index=0).ok)
         self.assertEqual((len(fiber.mid_touches), cleared), (0, ["F1", "F1"]))
         self.assertEqual(len(synced), 2)
+
+    def test_add_fiber_touch_point_at_world_captures_pick(self):
+        fiber = Bag(id="F1", mid_touches=FakeCollection())
+        root_obj = root(fibers=[fiber], active_type="FIBER", active_id="F1")
+        ctx = context(scene(root_obj))
+        with patch("app.use_cases.fiber_tools._capture_attachment_from_world", return_value=lambda *_args: "RAW"):
+            with patch("app.use_cases.fiber_tools._fiber_sync", return_value=SimpleNamespace(clear_solver_cache=lambda *_a: None)):
+                with patch("app.use_cases.fiber_tools._sync_entity", return_value=None):
+                    result = add_fiber_touch_point_at_world(ctx, "F1", "S1", (1.0, 2.0, 3.0))
+        self.assertTrue(result.ok)
+        self.assertEqual((fiber.mid_touches[0].parent_id, fiber.mid_touches[0].attach_param), ("S1", "RAW"))
 
     def test_flip_muscle_normals_toggles_and_syncs(self):
         muscle = Bag(id="M1", flip_normals=False)

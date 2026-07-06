@@ -10,6 +10,7 @@ from .control_objects import (
 from .fiber_create import create_fiber_vcp
 from .proxy_view import exit_proxy_view, switch_to_proxy_view
 from .fiber_tools import (
+    add_fiber_touch_point_at_world,
     add_fiber_touch_point,
     clear_fiber_warm_start,
     recompute_fiber,
@@ -23,6 +24,7 @@ from .tree_state import toggle_scp_tree_node, toggle_vcp_tree_node
 
 __all__ = [
     "add_shortcut_from_context",
+    "add_fiber_touch_point_at_world",
     "add_fiber_touch_point",
     "can_edit_control_objects",
     "clear_fiber_warm_start",
