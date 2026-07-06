@@ -465,6 +465,17 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertGreaterEqual(nodes[1].z, 0.6)
         self.assertLess(nodes[1].z, prev[1].z)
 
+    def test_surface_route_guides_seed_without_becoming_pins(self):
+        solver = FiberSolver()
+        fiber = type("Fiber", (), {"id": "F", "use_warm_start": False})()
+        anchors = [fiber_planner.PlannerAnchor(Vector((0.0, 0.0, 0.0))), fiber_planner.PlannerAnchor(Vector((1.0, 0.0, 0.0))), fiber_planner.PlannerAnchor(Vector((2.0, 0.0, 0.0)))]
+        guides = [Vector((0.5, 1.0, 0.0)), anchors[1].point.copy(), Vector((1.5, -1.0, 0.0))]
+        nodes, pinned, targets = solver._build_level_nodes(fiber, anchors, guides, 9, None)
+        pinned_indices = [i for i, value in enumerate(pinned) if value]
+        self.assertEqual(pinned_indices, [0, 4, 8])
+        self.assertEqual(set(targets), {0, 4, 8})
+        self.assertGreater(nodes[2].y, 0.0)
+
     def test_invalid_planner_seed_can_accept_first_clear_projection(self):
         prev = [Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.4)), Vector((2.0, 0.0, 0.0))]
         nodes = [point.copy() for point in prev]

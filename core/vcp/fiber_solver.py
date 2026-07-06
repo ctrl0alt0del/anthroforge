@@ -430,7 +430,7 @@ class FiberSolver:
         iters = self._split_iterations(params["iterations"], len(counts))
         converged, max_disp, max_pen, max_active = False, 0.0, 0.0, 0
         for i, count in enumerate(counts):
-            nodes, pinned, targets = self._build_level_nodes(fiber_prop, a_world, b_world, guide_worlds, count, seed)
+            nodes, pinned, targets = self._build_level_nodes(fiber_prop, anchors, guide_worlds, count, seed)
             active = self._active_colliders(oracle, nodes, params["margin"])
             local = self._level_params(params, iters[i])
             converged, max_disp, max_pen = self._run_iterations(nodes, [p.copy() for p in nodes], pinned, targets, oracle, active, local)
@@ -470,14 +470,51 @@ class FiberSolver:
         out[-1] += max(0, total - sum(out))
         return out
 
-    def _build_level_nodes(self, fiber_prop, a_world, b_world, guide_worlds, node_count, seed):
-        nodes_init, targets = self._build_chain_with_anchors(a_world, b_world, guide_worlds, node_count)
+    def _build_level_nodes(self, fiber_prop, anchors, guide_worlds, node_count, seed):
+        route = self._route_seed_points(anchors, guide_worlds)
+        nodes_init = self._resample_polyline(route, node_count)
+        targets = self._anchor_pin_targets(route, anchors, node_count)
         seed_nodes = None if seed is None else self._resample_polyline(seed, node_count)
         nodes = self._seed_or_cache_nodes(fiber_prop, nodes_init, node_count, seed_nodes)
         pinned = [False] * node_count
         for idx, pt in targets.items():
             nodes[idx], pinned[idx] = pt.copy(), True
         return nodes, pinned, targets
+
+    def _route_seed_points(self, anchors, guide_worlds):
+        points = [anchors[0].point.copy()]
+        points.extend(point.copy() for point in tuple(guide_worlds or ()))
+        points.append(anchors[-1].point.copy())
+        return points
+
+    def _anchor_pin_targets(self, route, anchors, count):
+        indices = self._anchor_pin_indices(route, anchors, count)
+        return {idx: anchors[i].point.copy() for i, idx in enumerate(indices)}
+
+    def _anchor_pin_indices(self, route, anchors, count):
+        spans, _total = self._polyline_spans(route)
+        raw = [self._anchor_pin_index(route, spans, i, len(anchors), anchors[i].point, count) for i in range(len(anchors))]
+        return self._spread_pin_indices(raw, count)
+
+    def _anchor_pin_index(self, route, spans, order, anchor_count, point, count):
+        if order <= 0:
+            return 0
+        if order >= anchor_count - 1:
+            return count - 1
+        total = max(spans[-1], 1.0e-9)
+        return round(self._route_point_distance(route, spans, point) * (count - 1) / total)
+
+    def _route_point_distance(self, route, spans, point):
+        best = min(range(len(route)), key=lambda i: (route[i] - point).length_squared)
+        return spans[best]
+
+    def _spread_pin_indices(self, raw, count):
+        out, prev, last = [], -1, max(0, count - 1)
+        for i, value in enumerate(tuple(raw or ())):
+            high = last - (len(raw) - 1 - i)
+            out.append(max(prev + 1, min(high, int(value))))
+            prev = out[-1]
+        return out
 
     def _level_params(self, params, iterations):
         local = dict(params)
