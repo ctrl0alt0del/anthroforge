@@ -227,6 +227,78 @@ def surface_shortest_vertex_path(surface, start_vertex, end_vertex):
     return None if path is None else [surface["verts_world"][i].copy() for i in path]
 
 
+def surface_shortest_param_path(surface, start_param, end_param):
+    setup = _param_route_setup(surface, start_param, end_param)
+    if setup is None:
+        return None
+    points, start, end, extra = setup
+    path = _route_path(surface["route_graph"], points, start, end, extra)
+    return None if path is None else [points[i].copy() for i in path]
+
+
+def _param_route_setup(surface, start_param, end_param):
+    verts = tuple(surface.get("verts_world", ())) if surface else ()
+    endpoints = (_route_param_endpoint(verts, start_param), _route_param_endpoint(verts, end_param))
+    if not verts or any(endpoint is None for endpoint in endpoints):
+        return None
+    points = verts + tuple(endpoint["point"] for endpoint in endpoints if endpoint["vertex"] < 0)
+    nodes = _endpoint_node_indices(endpoints, len(verts))
+    extra = _temp_route_edges(verts, endpoints, nodes)
+    _add_direct_param_edge(extra, endpoints, nodes)
+    return points, nodes[0], nodes[1], extra
+
+
+def _route_param_endpoint(verts, param):
+    tri = tuple(dict(param or {}).get("tri_vidx", (-1, -1, -1)))
+    weights = tuple(dict(param or {}).get("tri_weights", (1.0, 0.0, 0.0)))
+    abc = _tri_points(verts, tri) if len(tri) == 3 and len(weights) == 3 else None
+    if abc is None:
+        return None
+    point = _weighted_point(abc, weights)
+    return {"tri": tuple(int(v) for v in tri), "weights": weights, "point": point, "vertex": _weighted_vertex(tri, weights)}
+
+
+def _weighted_vertex(tri, weights, eps=1.0e-6):
+    for vidx, weight in zip(tuple(tri or ()), tuple(weights or ())):
+        if abs(float(weight) - 1.0) <= eps:
+            return int(vidx)
+    return -1
+
+
+def _endpoint_node_indices(endpoints, base):
+    out, temp = [], 0
+    for endpoint in endpoints:
+        if endpoint["vertex"] >= 0:
+            out.append(endpoint["vertex"])
+        else:
+            out.append(base + temp); temp += 1
+    return tuple(out)
+
+
+def _temp_route_edges(verts, endpoints, nodes):
+    extra = {}
+    for endpoint, node in zip(endpoints, nodes):
+        if endpoint["vertex"] < 0:
+            _link_temp_route_node(extra, verts, endpoint, node)
+    return extra
+
+
+def _link_temp_route_node(extra, verts, endpoint, node):
+    extra.setdefault(node, [])
+    for vidx in endpoint["tri"]:
+        cost = (endpoint["point"] - verts[int(vidx)]).length
+        extra[node].append((int(vidx), cost))
+        extra.setdefault(int(vidx), []).append((node, cost))
+
+
+def _add_direct_param_edge(extra, endpoints, nodes):
+    if nodes[0] == nodes[1] or endpoints[0]["tri"] != endpoints[1]["tri"]:
+        return
+    cost = (endpoints[0]["point"] - endpoints[1]["point"]).length
+    extra.setdefault(nodes[0], []).append((nodes[1], cost))
+    extra.setdefault(nodes[1], []).append((nodes[0], cost))
+
+
 def _route_vertices_ok(surface, start_vertex, end_vertex):
     graph = None if surface is None else surface.get("route_graph")
     size = 0 if graph is None else len(graph)
@@ -234,17 +306,25 @@ def _route_vertices_ok(surface, start_vertex, end_vertex):
 
 
 def _route_vertex_path(graph, verts_world, start_vertex, end_vertex):
-    heap, came, dist, seen = [(0.0, int(start_vertex))], {}, {int(start_vertex): 0.0}, set()
+    return _route_path(graph, verts_world, int(start_vertex), int(end_vertex), {})
+
+
+def _route_path(graph, points, start, end, extra):
+    heap, came, dist, seen = [(0.0, int(start))], {}, {int(start): 0.0}, set()
     while heap:
         _score, node = heappop(heap)
-        if node == int(end_vertex):
+        if node == int(end):
             return _route_reconstruct(came, node)
         if node in seen:
             continue
         seen.add(node)
-        for nxt, cost in graph.get(node, ()):
-            _push_route_neighbor(heap, came, dist, verts_world, node, nxt, cost, end_vertex)
+        for nxt, cost in _route_neighbors(graph, extra, node):
+            _push_route_neighbor(heap, came, dist, points, node, nxt, cost, end)
     return None
+
+
+def _route_neighbors(graph, extra, node):
+    return tuple(graph.get(node, ())) + tuple(extra.get(node, ()))
 
 
 def _push_route_neighbor(heap, came, dist, verts_world, node, nxt, cost, end_vertex):

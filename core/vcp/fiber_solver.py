@@ -361,10 +361,21 @@ class FiberSolver:
         return [] if route is None else [point.copy() for point in route[1:-1]]
 
     def _surface_route(self, oracle, start, end):
+        params = self._surface_route_params(start, end)
+        if params is not None and hasattr(oracle, "surface_param_path"):
+            route = oracle.surface_param_path(start.owner_id, params[0], params[1])
+            if route is not None:
+                return route
         verts = self._surface_route_vertices(start, end)
         if verts is None:
             return None
         return oracle.surface_path(start.owner_id, verts[0], verts[1])
+
+    def _surface_route_params(self, start, end):
+        if not start.owner_id or start.owner_id != end.owner_id:
+            return None
+        params = fiber_surface_param(start.attach_raw), fiber_surface_param(end.attach_raw)
+        return None if any(param is None for param in params) else params
 
     def _surface_route_vertices(self, start, end):
         if not start.owner_id or start.owner_id != end.owner_id:

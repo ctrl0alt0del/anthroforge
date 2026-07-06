@@ -3,7 +3,7 @@ from math import floor
 from mathutils import Vector
 
 from ..scp_runtime.common import iter_geometry_mesh_scp_objects
-from ..scp_runtime.surface import build_mesh_surface_data, surface_shortest_vertex_path
+from ..scp_runtime.surface import build_mesh_surface_data, surface_shortest_param_path, surface_shortest_vertex_path
 from ..utils import scene_cache_get, scene_cache_set
 
 
@@ -62,6 +62,11 @@ class CollisionOracle:
         collider = _collider_by_id(self.colliders(), owner_id)
         surface = None if collider is None else collider.get("surface")
         return None if surface is None else surface_shortest_vertex_path(surface, start_vertex, end_vertex)
+
+    def surface_param_path(self, owner_id, start_param, end_param):
+        collider = _collider_by_id(self.colliders(), owner_id)
+        surface = None if collider is None else collider.get("surface")
+        return None if surface is None else surface_shortest_param_path(surface, start_param, end_param)
 
 
 def _build_colliders(root, scene, depsgraph):

@@ -17,6 +17,7 @@ from mathutils import Vector
 from _helpers import BlenderTestCase, capture_mesh_attachment, capture_world_attachment, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
 from anthroforge.app.use_cases.fiber_tools import recompute_fiber as recompute_fiber_action
 from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param, encode_fiber_vertex_index, parse_fiber_attach_param
+from anthroforge.core.scp_runtime.surface import _surface_route_graph, surface_shortest_param_path
 from anthroforge.core.vcp import fiber_planner
 from anthroforge.core.vcp.fiber_collision import CollisionOracle, _active_for_bounds, _mesh_shell_nodes
 from anthroforge.core.vcp.fiber_solver import FiberSolver
@@ -475,6 +476,18 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(pinned_indices, [0, 4, 8])
         self.assertEqual(set(targets), {0, 4, 8})
         self.assertGreater(nodes[2].y, 0.0)
+
+    def test_surface_param_path_accepts_barycentric_endpoints(self):
+        verts = [Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.0)), Vector((1.0, 1.0, 0.0)), Vector((0.0, 1.0, 0.0))]
+        surface = {"verts_world": verts, "route_graph": _surface_route_graph(verts, ((0, 1, 2), (0, 2, 3)))}
+        start = {"tri_vidx": (0, 1, 2), "tri_weights": (0.2, 0.7, 0.1)}
+        end = {"tri_vidx": (0, 2, 3), "tri_weights": (0.1, 0.2, 0.7)}
+        path = surface_shortest_param_path(surface, start, end)
+        expected_start = verts[0] * 0.2 + verts[1] * 0.7 + verts[2] * 0.1
+        expected_end = verts[0] * 0.1 + verts[2] * 0.2 + verts[3] * 0.7
+        self.assertGreater(len(path), 2)
+        self.assertLess((path[0] - expected_start).length, 1.0e-6)
+        self.assertLess((path[-1] - expected_end).length, 1.0e-6)
 
     def test_invalid_planner_seed_can_accept_first_clear_projection(self):
         prev = [Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.4)), Vector((2.0, 0.0, 0.0))]
