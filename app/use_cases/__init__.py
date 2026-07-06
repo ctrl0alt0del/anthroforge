@@ -13,6 +13,7 @@ from .fiber_tools import (
     add_fiber_touch_point_at_world,
     add_fiber_touch_point,
     clear_fiber_warm_start,
+    move_fiber_touch_point,
     recompute_fiber,
     remove_fiber_touch_point,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "flip_muscle_normals",
     "mark_selected_control",
     "mark_active_mesh_as_scp",
+    "move_fiber_touch_point",
     "recompute_fiber",
     "reparent_scp",
     "remove_fiber_touch_point",

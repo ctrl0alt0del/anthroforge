@@ -67,9 +67,17 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
     def _draw_touch_point(self, layout, root, fiber, index, touch):
         row = layout.row(align=True)
         row.label(text=f"{index + 1}. {scp_label(root, touch.parent_id)}")
+        self._draw_touch_move_button(row, fiber, index, -1, "TRIA_UP", index > 0)
+        self._draw_touch_move_button(row, fiber, index, 1, "TRIA_DOWN", index < len(fiber.mid_touches) - 1)
         op = row.operator("af.remove_fiber_touch_point", text="", icon="X")
         op.fiber_id, op.touch_index = fiber.id, index
         self._draw_touch_offset(layout, touch)
+
+    def _draw_touch_move_button(self, row, fiber, index, direction, icon, enabled):
+        slot = row.row(align=True)
+        slot.enabled = bool(enabled)
+        op = slot.operator("af.move_fiber_touch_point", text="", icon=icon)
+        op.fiber_id, op.touch_index, op.direction = fiber.id, index, direction
 
     def _draw_touch_offset(self, layout, touch):
         row = layout.row(align=True)

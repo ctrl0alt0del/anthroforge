@@ -10,6 +10,7 @@ from ..app.use_cases.fiber_tools import (
     add_fiber_touch_point,
     add_fiber_touch_point_at_world,
     clear_fiber_warm_start,
+    move_fiber_touch_point,
     recompute_fiber,
     remove_fiber_touch_point,
 )
@@ -356,3 +357,16 @@ class AF_OT_RemoveFiberTouchPoint(bpy.types.Operator):
 
     def execute(self, context):
         return _finish(self, remove_fiber_touch_point(context, self.fiber_id, self.touch_index))
+
+
+class AF_OT_MoveFiberTouchPoint(bpy.types.Operator):
+    bl_idname = "af.move_fiber_touch_point"
+    bl_label = "Move Mid Touch Point"
+    bl_options = {"REGISTER", "UNDO"}
+
+    fiber_id: bpy.props.StringProperty(default="")
+    touch_index: bpy.props.IntProperty(default=-1)
+    direction: bpy.props.IntProperty(default=0)
+
+    def execute(self, context):
+        return _finish(self, move_fiber_touch_point(context, self.fiber_id, self.touch_index, self.direction))

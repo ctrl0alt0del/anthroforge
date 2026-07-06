@@ -79,6 +79,14 @@ def _cube_scp(root_obj, name, location=(0.0, 0.0, 0.0), size=1.0):
     return scp_with_object(root_obj, name, bpy.context.active_object), bpy.context.active_object
 
 
+def _append_touch(root_obj, fiber, name, location):
+    scp = scp_with_object(root_obj, name, mesh_object(name, location))
+    touch = fiber.mid_touches.add()
+    touch.parent_id = scp.id
+    touch.attach_param = capture_mesh_attachment(root_obj, scp, 0)
+    return scp
+
+
 def _plane_scp(root_obj, name, location=(0.0, 0.0, 0.0), size=1.0):
     half = float(size) * 0.5
     mesh = bpy.data.meshes.new(name)
@@ -538,6 +546,19 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         target_world = blocker_obj.matrix_world @ target_local
         points = [Vector(value) for value in _fiber_points_world(fiber)]
         self.assertLess(min((point - target_world).length for point in points), 1.0e-6)
+
+    def test_move_fiber_touch_point_reorders_handles_in_viewport(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        first = _append_touch(root_obj, fiber, "FirstMid", (0.75, 1.0, 0.0))
+        second = _append_touch(root_obj, fiber, "SecondMid", (1.25, -1.0, 0.0))
+        _sync_active_fiber(root_obj, fiber)
+        select_only(find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id"))
+        before = [_touch_handle(fiber.id, i).location.copy() for i in range(2)]
+        self.assertEqual(bpy.ops.af.move_fiber_touch_point(fiber_id=fiber.id, touch_index=1, direction=-1), {"FINISHED"})
+        after = [_touch_handle(fiber.id, i).location.copy() for i in range(2)]
+        self.assertEqual([tp.parent_id for tp in fiber.mid_touches], [second.id, first.id])
+        self.assertLess((after[0] - before[1]).length, 1.0e-6)
+        self.assertLess((after[1] - before[0]).length, 1.0e-6)
 
     def test_recompute_fiber_active_collider_metric_filters_far_blockers(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()

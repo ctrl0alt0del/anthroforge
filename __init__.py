@@ -42,6 +42,7 @@ from .operators.fiber_tools import (
     AF_OT_RecomputeFiber,
     AF_OT_AddFiberTouchPoint,
     AF_OT_RemoveFiberTouchPoint,
+    AF_OT_MoveFiberTouchPoint,
 )
 from .operators.muscle_tools import (
     AF_OT_FlipMuscleNormals,
@@ -163,6 +164,7 @@ classes = (
     AF_OT_RecomputeFiber,
     AF_OT_AddFiberTouchPoint,
     AF_OT_RemoveFiberTouchPoint,
+    AF_OT_MoveFiberTouchPoint,
 
     AF_PT_FiberEditPanel,
     AF_PT_FiberCreatePanel,

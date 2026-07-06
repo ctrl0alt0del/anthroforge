@@ -90,6 +90,19 @@ def remove_fiber_touch_point(context, fiber_id="", touch_index=-1):
     return success(value=fiber)
 
 
+def move_fiber_touch_point(context, fiber_id="", touch_index=-1, direction=0):
+    root = root_for_context(context)
+    fiber, error = _resolved_fiber(root, fiber_id)
+    index, target = int(touch_index), int(touch_index) + int(direction)
+    if fiber is None:
+        return failure(error)
+    if not _valid_touch_move(fiber, index, target):
+        return failure("Invalid touch move.")
+    _remove_fiber_touch_handles(context.scene, root.name, fiber.id)
+    fiber.mid_touches.move(index, target)
+    return _touch_order_changed(context, root, fiber)
+
+
 def _resolved_fiber(root, fiber_id):
     if root is None:
         return None, ""
@@ -179,10 +192,32 @@ def _resolved_touch(context, root, fiber_id=""):
 
 def _append_touch_result(context, root, fiber, touch_specs):
     _append_touch_specs(fiber, touch_specs)
+    return _touch_order_changed(context, root, fiber)
+
+
+def _touch_order_changed(context, root, fiber):
     _set_prefer_bake(fiber, False)
     _fiber_sync().clear_solver_cache(fiber.id)
     _sync_entity(root, context.scene, "FIBER", {fiber.id}, bake=False)
     return success(value=fiber)
+
+
+def _valid_touch_move(fiber, index, target):
+    count = len(fiber.mid_touches)
+    return 0 <= index < count and 0 <= target < count and index != target
+
+
+def _remove_fiber_touch_handles(scene, root_name, fiber_id):
+    import bpy
+
+    for obj in tuple(getattr(scene, "objects", ()) or ()):
+        if _is_fiber_touch_handle(obj, root_name, fiber_id):
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+
+def _is_fiber_touch_handle(obj, root_name, fiber_id):
+    valid = obj.get("af_fiber_touch_handle") and obj.get("af_root_name") == root_name
+    return bool(valid and obj.get("af_fiber_id") == fiber_id)
 
 
 def _append_touch_specs(fiber, touch_specs):

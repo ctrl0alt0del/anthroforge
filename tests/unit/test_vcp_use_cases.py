@@ -29,7 +29,7 @@ from core.vcp.runtime_state import (
 from app.use_cases.blob_create import create_blob_vcp
 from app.use_cases.blob_tools import select_blob_control
 from app.use_cases.fiber_create import create_fiber_from_proxy_vertices, create_fiber_vcp
-from app.use_cases.fiber_tools import _run_bake_passes, add_fiber_touch_point, add_fiber_touch_point_at_world, clear_fiber_warm_start, recompute_fiber, remove_fiber_touch_point
+from app.use_cases.fiber_tools import _run_bake_passes, add_fiber_touch_point, add_fiber_touch_point_at_world, clear_fiber_warm_start, move_fiber_touch_point, recompute_fiber, remove_fiber_touch_point
 from app.use_cases.muscle_create import create_muscle_vcp
 from app.use_cases.muscle_tools import flip_muscle_normals, select_muscle_inflation_ctrl
 from app.use_cases.vcp_delete import delete_vcp_in_tree
@@ -49,6 +49,9 @@ class FakeCollection(list):
 
     def remove(self, index):
         self.pop(index)
+
+    def move(self, old_index, new_index):
+        self.insert(int(new_index), self.pop(int(old_index)))
 
 
 class FakeSelectable(Bag):
@@ -300,6 +303,18 @@ class VcpUseCaseTests(unittest.TestCase):
                     result = add_fiber_touch_point_at_world(ctx, "F1", "S1", (1.0, 2.0, 3.0))
         self.assertTrue(result.ok)
         self.assertEqual((fiber.mid_touches[0].parent_id, fiber.mid_touches[0].attach_param), ("S1", "RAW"))
+
+    def test_move_fiber_touch_point_reorders_and_syncs(self):
+        touches = FakeCollection([Bag(parent_id="A"), Bag(parent_id="B")])
+        fiber = Bag(id="F1", mid_touches=touches)
+        ctx = context(scene(root(fibers=[fiber], active_type="FIBER", active_id="F1")))
+        synced = []
+        with patch("app.use_cases.fiber_tools._fiber_sync", return_value=SimpleNamespace(clear_solver_cache=lambda *_a: None)):
+            with patch("app.use_cases.fiber_tools._sync_entity", side_effect=lambda *args, **kwargs: synced.append((args, kwargs))):
+                result = move_fiber_touch_point(ctx, "F1", 1, -1)
+        self.assertTrue(result.ok)
+        self.assertEqual([touch.parent_id for touch in fiber.mid_touches], ["B", "A"])
+        self.assertEqual(len(synced), 1)
 
     def test_flip_muscle_normals_toggles_and_syncs(self):
         muscle = Bag(id="M1", flip_normals=False)
