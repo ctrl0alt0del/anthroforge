@@ -294,3 +294,10 @@ class RuntimeContractTests(BlenderTestCase):
         with patch.object(builtin_drivers, "register_fiber_sync", return_value=sync):
             driver.sync(root(), bpy.context.scene, False, {"FIBER": {"F1"}}, False, gate_meta={"event_type": "SELECTION"})
         self.assertEqual((sync.refresh_selection.call_count, sync.sync_root_to_scene.call_count), (1, 0))
+
+    def test_fiber_sync_driver_skips_load_geometry_sync(self):
+        driver = builtin_drivers.FiberSyncDriver()
+        sync = SimpleNamespace(refresh_selection=Mock(), sync_root_to_scene=Mock())
+        with patch.object(builtin_drivers, "register_fiber_sync", return_value=sync):
+            driver.sync(root(), bpy.context.scene, True, {"FIBER": {"F1"}}, False, gate_meta={"event_type": "LOAD"})
+        self.assertEqual((sync.refresh_selection.call_count, sync.sync_root_to_scene.call_count), (1, 0))

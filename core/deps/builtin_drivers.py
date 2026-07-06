@@ -72,6 +72,10 @@ def _selection_event(meta):
     return str(dict(meta or {}).get("event_type", "") or "").upper() == "SELECTION"
 
 
+def _load_event(meta):
+    return str(dict(meta or {}).get("event_type", "") or "").upper() == "LOAD"
+
+
 def _sync_scp_scene(root, scene, ids, is_full, meta):
     parent_ids = _scp_parent_ids(meta) or (_all_scp_parent_ids(root) if is_full else set())
     target_ids = _scp_target_ids(meta, ids)
@@ -166,7 +170,7 @@ class FiberSyncDriver(DependencyDriver):
         return ("FIBER",)
 
     def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
-        if _selection_event(gate_meta):
+        if _selection_event(gate_meta) or _load_event(gate_meta):
             register_fiber_sync().refresh_selection(root=root, scene=scene)
             return
         ids = set(impacted.get("FIBER", set()) or set())

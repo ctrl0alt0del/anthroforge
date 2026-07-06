@@ -291,6 +291,19 @@ class _ManyShellOracle:
         return [Vector((float(i), 0.0, 0.0)) for i in range(500)]
 
 
+class _SurfaceShortcutOracle:
+    margin, clearance = 0.0, 0.01
+
+    def active_colliders_for_segment(self, a, b, owners=(), padding=0.0):
+        _ = a, b, owners, padding
+        return ("active",)
+
+    def segment_visible(self, a, b, owners=(), colliders=None):
+        _ = owners, colliders
+        key = tuple(round(v, 4) for v in (a.x, a.y, b.x, b.y))
+        return key in {(0.0, 0.0, 1.0, 1.0), (1.0, 1.0, 1.0, 0.0)}
+
+
 class FiberVcpWorkflowTests(BlenderTestCase):
     def test_fiber_proxy_object_color_matches_material(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
@@ -488,6 +501,13 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertGreater(len(path), 2)
         self.assertLess((path[0] - expected_start).length, 1.0e-6)
         self.assertLess((path[-1] - expected_end).length, 1.0e-6)
+
+    def test_surface_route_shortcuts_visible_detour(self):
+        route = [Vector((0.0, 0.0, 0.0)), Vector((0.0, 1.0, 0.0)), Vector((1.0, 1.0, 0.0)), Vector((1.0, 0.0, 0.0))]
+        start = type("Anchor", (), {"point": route[0], "owner_id": "S"})()
+        end = type("Anchor", (), {"point": route[-1], "owner_id": "S"})()
+        short = FiberSolver()._shortcut_surface_route(_SurfaceShortcutOracle(), start, end, route)
+        self.assertEqual([tuple(point) for point in short], [tuple(route[0]), tuple(route[2]), tuple(route[3])])
 
     def test_invalid_planner_seed_can_accept_first_clear_projection(self):
         prev = [Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.4)), Vector((2.0, 0.0, 0.0))]

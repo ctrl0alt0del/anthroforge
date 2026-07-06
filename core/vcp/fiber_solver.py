@@ -361,11 +361,17 @@ class FiberSolver:
         return [] if route is None else [point.copy() for point in route[1:-1]]
 
     def _surface_route(self, oracle, start, end):
+        route = self._surface_param_route(oracle, start, end)
+        route = self._surface_vertex_route(oracle, start, end) if route is None else route
+        return None if route is None else self._shortcut_surface_route(oracle, start, end, route)
+
+    def _surface_param_route(self, oracle, start, end):
         params = self._surface_route_params(start, end)
         if params is not None and hasattr(oracle, "surface_param_path"):
-            route = oracle.surface_param_path(start.owner_id, params[0], params[1])
-            if route is not None:
-                return route
+            return oracle.surface_param_path(start.owner_id, params[0], params[1])
+        return None
+
+    def _surface_vertex_route(self, oracle, start, end):
         verts = self._surface_route_vertices(start, end)
         if verts is None:
             return None
@@ -376,6 +382,31 @@ class FiberSolver:
             return None
         params = fiber_surface_param(start.attach_raw), fiber_surface_param(end.attach_raw)
         return None if any(param is None for param in params) else params
+
+    def _shortcut_surface_route(self, oracle, start, end, route):
+        if len(route) <= 2 or not hasattr(oracle, "segment_visible"):
+            return route
+        active = self._surface_route_colliders(oracle, start, end)
+        return self._surface_shortcut_walk(oracle, route, start.owner_id, active)
+
+    def _surface_route_colliders(self, oracle, start, end):
+        if not hasattr(oracle, "active_colliders_for_segment"):
+            return None
+        pad = max(0.05, getattr(oracle, "clearance", 0.0), getattr(oracle, "margin", 0.0) * 4.0)
+        return oracle.active_colliders_for_segment(start.point, end.point, owners=(start.owner_id, end.owner_id), padding=pad)
+
+    def _surface_shortcut_walk(self, oracle, route, owner_id, active):
+        out, i = [route[0].copy()], 0
+        while i < len(route) - 1:
+            i = self._furthest_surface_visible(oracle, route, owner_id, active, i)
+            out.append(route[i].copy())
+        return out
+
+    def _furthest_surface_visible(self, oracle, route, owner_id, active, index):
+        for j in range(len(route) - 1, index, -1):
+            if oracle.segment_visible(route[index], route[j], (owner_id, owner_id), active):
+                return j
+        return index + 1
 
     def _surface_route_vertices(self, start, end):
         if not start.owner_id or start.owner_id != end.owner_id:
