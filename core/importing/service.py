@@ -8,8 +8,16 @@ import bpy
 from ..utils import ensure_af_root, get_af_root
 from .merge import apply_snapshot
 from .model import PackageSnapshot
-from .stage import append_stage_root, expand_stage_keep, link_stage_keep, remove_stage_root, remove_unused_stage_objects
+from .stage import (
+    append_stage_root,
+    expand_stage_keep,
+    link_stage_keep,
+    remove_stage_root,
+    remove_unused_stage_objects,
+)
 from .vcp import apply_vcp_snapshot
+
+_SNAPSHOT_TIMEOUT_SEC = 120
 
 
 def _module_name():
@@ -26,7 +34,12 @@ def _snapshot_cmd(filepath, outpath):
 
 
 def _run_snapshot_dump(filepath, outpath):
-    return subprocess.run(_snapshot_cmd(filepath, outpath), capture_output=True, text=True, check=False)
+    try:
+        return subprocess.run(
+            _snapshot_cmd(filepath, outpath), capture_output=True, text=True, check=False, timeout=_SNAPSHOT_TIMEOUT_SEC
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Snapshot dump timed out after {_SNAPSHOT_TIMEOUT_SEC} seconds.") from exc
 
 
 def _load_snapshot(filepath):
@@ -73,8 +86,4 @@ def import_vcp_from_blend(filepath, context):
     root = get_af_root(context.scene)
     if root is None:
         raise RuntimeError("No AnthroForge root found in target file.")
-    stage = _stage_snapshot(filepath, snapshot)
-    try:
-        return apply_vcp_snapshot(snapshot, stage.root, root, context)
-    finally:
-        _cleanup_stage(stage, (), context.scene)
+    return apply_vcp_snapshot(snapshot, root, context)

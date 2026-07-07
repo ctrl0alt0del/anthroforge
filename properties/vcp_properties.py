@@ -2,21 +2,30 @@ import bpy
 
 from ..app.runtime_api import sync_context
 from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
+from ..core.vcp.prop_update_guard import vcp_prop_updates_suppressed
 
 
 def _sync_vcp_scene(_self, context):
+    if vcp_prop_updates_suppressed():
+        return
     sync_context(context, dirty_hints=empty_dirty_hints())
 
 
 def _on_muscle_prop_update(self, context):
+    if vcp_prop_updates_suppressed():
+        return
     sync_context(context, dirty_hints=dirty_hints_for("MUSCLE", {self.id}))
 
 
 def _on_blob_prop_update(self, context):
+    if vcp_prop_updates_suppressed():
+        return
     sync_context(context, dirty_hints=dirty_hints_for("BLOB", {self.id}))
 
 
 def _on_fiber_prop_update(self, context):
+    if vcp_prop_updates_suppressed():
+        return
     sync_context(context, dirty_hints=dirty_hints_for("FIBER", {self.id}))
 
 

@@ -45,6 +45,18 @@ def _role_bound_id(scp, attr):
     return ""
 
 
+def _mesh_topology(obj):
+    mesh = getattr(obj, "data", None)
+    if obj is None or getattr(obj, "type", "") != "MESH" or mesh is None:
+        return None
+    return {
+        "vertices": len(mesh.vertices),
+        "edges": len(mesh.edges),
+        "faces": len(mesh.polygons),
+        "loops": len(mesh.loops),
+    }
+
+
 def _object_tail(raw):
     match = _FULL_OBJECT_RE.match(str(raw or "").strip())
     if match is None:
@@ -82,6 +94,7 @@ def _scp_snapshot(scp):
         props=scalar_dict(scp, _SCP_SKIP),
         transform_bound_id=_role_bound_id(scp, "transform_object_ref"),
         geometry_bound_id=_role_bound_id(scp, "geometry_object_ref"),
+        topology=_mesh_topology(getattr(scp, "geometry_object_ref", None)),
         bound_objects=_bound_objects(scp),
     )
 

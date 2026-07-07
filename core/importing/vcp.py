@@ -2,8 +2,9 @@ from dataclasses import dataclass, field
 
 from ..deps.dirty_hints import empty_dirty_hints
 from ..id_utils import next_prefixed_id
+from ..vcp.prop_update_guard import suppress_vcp_prop_updates
 from ..visualization.delete_reconcile import cleanup_scp_dependents
-from ..visualization.sync_runner import sync_from_dirty_hints
+from ..visualization.sync_runner import schedule_sync_from_dirty_hints
 from .model import ImportResult
 from .rna import apply_scalar_dict
 
@@ -24,24 +25,31 @@ def _scp_map(root):
     return {str(scp.id or ""): scp for scp in root.af_scp_system.scps if str(scp.id or "")}
 
 
+def _snapshot_scp_map(snapshot):
+    return {str(scp.source_id or ""): scp for scp in snapshot.scps if str(scp.source_id or "")}
+
+
 def _mesh_topology(obj):
     mesh = getattr(obj, "data", None)
     if obj is None or getattr(obj, "type", "") != "MESH" or mesh is None:
         return None
-    edges = tuple(tuple(edge.vertices) for edge in mesh.edges)
-    faces = tuple(tuple(poly.vertices) for poly in mesh.polygons)
-    return len(mesh.vertices), edges, faces
+    return {
+        "vertices": len(mesh.vertices),
+        "edges": len(mesh.edges),
+        "faces": len(mesh.polygons),
+        "loops": len(mesh.loops),
+    }
 
 
-def _same_topology(source_scp, target_scp):
-    source = _mesh_topology(getattr(source_scp, "geometry_object_ref", None))
+def _same_topology(source_snap, target_scp):
+    source = getattr(source_snap, "topology", None)
     target = _mesh_topology(getattr(target_scp, "geometry_object_ref", None))
     return source is not None and source == target
 
 
-def _compatible_scp_ids(stage_root, root):
-    source, target = _scp_map(stage_root), _scp_map(root)
-    return {sid for sid, scp in source.items() if sid in target and _same_topology(scp, target[sid])}
+def _compatible_scp_ids(snapshot, root):
+    source, target = _snapshot_scp_map(snapshot), _scp_map(root)
+    return {sid for sid, snap in source.items() if sid in target and _same_topology(snap, target[sid])}
 
 
 def _new_vcp_item(collection, prefix):
@@ -174,6 +182,10 @@ def _create_blobs(state):
         _create_one_blob(state, snap)
 
 
+def _result(state):
+    return ImportResult(0, len(state.fibers), len(state.muscles), len(state.blobs), 0, state.warnings, [])
+
+
 def _dirty_for_imported(state):
     dirty = empty_dirty_hints()
     dirty["FIBER"] = set(state.fibers.values())
@@ -186,21 +198,18 @@ def _has_dirty(dirty):
     return any(bool(values) for values in dict(dirty or {}).values())
 
 
-def _sync_imported(state):
+def _schedule_imported_sync(state):
     dirty = _dirty_for_imported(state)
     if _has_dirty(dirty):
-        sync_from_dirty_hints(root=state.root, scene=state.scene, dirty_hints=dirty, source="operator", event_type="IMPORT")
+        schedule_sync_from_dirty_hints(root=state.root, scene=state.scene, dirty_hints=dirty, source="operator", event_type="IMPORT")
 
 
-def _result(state):
-    return ImportResult(0, len(state.fibers), len(state.muscles), len(state.blobs), 0, state.warnings, [])
-
-
-def apply_vcp_snapshot(snapshot, stage_root, root, context):
-    state = VcpImportState(root, context.scene, snapshot, _compatible_scp_ids(stage_root, root))
-    _create_fibers(state)
-    _create_muscles(state)
-    _create_blobs(state)
+def apply_vcp_snapshot(snapshot, root, context):
+    state = VcpImportState(root, context.scene, snapshot, _compatible_scp_ids(snapshot, root))
+    with suppress_vcp_prop_updates():
+        _create_fibers(state)
+        _create_muscles(state)
+        _create_blobs(state)
     cleanup_scp_dependents(root)
-    _sync_imported(state)
+    _schedule_imported_sync(state)
     return _result(state)

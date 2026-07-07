@@ -8,6 +8,7 @@ from ..scp_runtime.prop_update_guard import set_parent_id_raw
 from ..scp_runtime.object_roles import add_bound_object_to_scp, create_scp, set_geometry_object, set_transform_object
 from ..shortcuts import upsert_override
 from ..shortcuts.path_codec import make_bound_entity_id, make_shortcut_path, parse_shortcut_path, split_bound_entity_id
+from ..vcp.prop_update_guard import suppress_vcp_prop_updates
 from ..visualization.delete_reconcile import cleanup_scp_dependents
 from ..visualization.sync_runner import sync_from_dirty_hints
 from .model import ImportResult
@@ -241,6 +242,13 @@ def _create_shortcuts(state):
         _add_shortcut(state, snap)
 
 
+def _create_vcps(state):
+    with suppress_vcp_prop_updates():
+        _create_fibers(state)
+        _create_muscles(state)
+        _create_blobs(state)
+
+
 def _result(state):
     return ImportResult(len(state.snapshot.scps), len(state.snapshot.fibers), len(state.snapshot.muscles), len(state.snapshot.blobs), len(state.snapshot.shortcuts), state.warnings, state.kept_objects)
 
@@ -249,9 +257,7 @@ def apply_snapshot(snapshot, stage_root, root, context):
     state = MergeState(root, context.scene, _target_collection(context), snapshot, stage_root, stage_bound_map(stage_root))
     _create_scps(state)
     _set_scp_parents(state)
-    _create_fibers(state)
-    _create_muscles(state)
-    _create_blobs(state)
+    _create_vcps(state)
     _create_shortcuts(state)
     sync_all_scp_roles(root)
     cleanup_scp_dependents(root)

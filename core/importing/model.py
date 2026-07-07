@@ -20,6 +20,7 @@ class ScpSnapshot:
     props: dict
     transform_bound_id: str = ""
     geometry_bound_id: str = ""
+    topology: object = None
     bound_objects: list[BoundObjectSnapshot] = field(default_factory=list)
 
     @classmethod

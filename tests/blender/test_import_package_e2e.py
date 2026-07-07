@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import sys
+from unittest.mock import patch
 
 TEST_ROOT = Path(__file__).resolve().parents[1]
 ADDON_ROOT = Path(__file__).resolve().parents[2]
@@ -128,7 +129,10 @@ class ImportPackageE2ETests(BlenderTestCase):
         reset_scene()
         root_obj, left, right = _matching_target()
         existing = fiber(root_obj, left.id, right.id)
-        result = import_vcp_from_blend(path, bpy.context)
+        with patch("anthroforge.core.importing.service.append_stage_root", side_effect=AssertionError("append")), patch(
+            "anthroforge.core.importing.vcp.schedule_sync_from_dirty_hints"
+        ) as schedule:
+            result = import_vcp_from_blend(path, bpy.context)
         imported_fiber = root_obj.af_vcp_system.fibers[-1]
         imported_muscle = root_obj.af_vcp_system.muscles[-1]
         self.assertEqual((left.id, right.id), source_ids)
@@ -137,6 +141,8 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertEqual((imported_fiber.a_parent_id, imported_fiber.b_parent_id), source_ids)
         self.assertEqual((imported_muscle.fiber_refs[0].fiber_id, imported_fiber.muscle_id), (imported_fiber.id, imported_muscle.id))
         self.assertEqual(root_obj.af_vcp_system.blobs[-1].attach_target_id, imported_muscle.id)
+        self.assertEqual(schedule.call_count, 1)
+        self.assertIn(imported_fiber.id, schedule.call_args.kwargs["dirty_hints"]["FIBER"])
 
     def test_import_vcp_skips_mismatched_scp_topology(self):
         path, _source_ids = _source_vcp_file()
