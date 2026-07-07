@@ -49,7 +49,7 @@ from .operators.muscle_tools import (
     AF_OT_SelectMuscleInflationCtrl,
 )
 from .operators.blob_tools import AF_OT_SelectBlobControl
-from .operators.import_package import AF_OT_ImportPackage, AF_OT_ImportVCP
+from .operators.import_package import AF_OT_ImportPackage, AF_OT_ImportSCPDiff, AF_OT_ImportVCP
 from .operators.proxy_view import AF_OT_ExitProxyView, AF_OT_SwitchToProxyView
 from .operators.shortcuts import (
     AF_OT_AddDataShortcut,
@@ -192,6 +192,7 @@ classes = (
     AF_PT_BlobCreatePanel,
     AF_PT_BlobEditPanel,
     AF_OT_ImportPackage,
+    AF_OT_ImportSCPDiff,
     AF_OT_ImportVCP,
     AF_OT_SwitchToProxyView,
     AF_OT_ExitProxyView,

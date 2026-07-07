@@ -6,7 +6,7 @@ import tempfile
 import bpy
 
 from ..utils import ensure_af_root, get_af_root
-from .merge import apply_snapshot
+from .merge import apply_scp_diff_snapshot, apply_snapshot
 from .model import PackageSnapshot
 from .stage import (
     append_stage_root,
@@ -76,6 +76,18 @@ def import_package_from_blend(filepath, context):
     result = None
     try:
         result = apply_snapshot(snapshot, stage.root, root, context)
+        return result
+    finally:
+        _cleanup_stage(stage, getattr(result, "kept_objects", ()), context.scene)
+
+
+def import_scp_diff_from_blend(filepath, context):
+    snapshot = _load_snapshot(filepath)
+    root = ensure_af_root(context.scene)
+    stage = _stage_snapshot(filepath, snapshot)
+    result = None
+    try:
+        result = apply_scp_diff_snapshot(snapshot, stage.root, root, context)
         return result
     finally:
         _cleanup_stage(stage, getattr(result, "kept_objects", ()), context.scene)

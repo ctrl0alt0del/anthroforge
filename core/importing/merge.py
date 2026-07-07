@@ -4,13 +4,13 @@ from ..deps.dirty_hints import empty_dirty_hints
 from ..id_utils import next_prefixed_id
 from ..scp_runtime.bound_objects import find_bound_entry_by_object, sync_all_scp_roles
 from ..scp_runtime.common import set_prop_raw
-from ..scp_runtime.prop_update_guard import set_parent_id_raw
+from ..scp_runtime.prop_update_guard import set_parent_id_raw, suppress_scp_prop_updates
 from ..scp_runtime.object_roles import add_bound_object_to_scp, create_scp, set_geometry_object, set_transform_object
 from ..shortcuts import upsert_override
 from ..shortcuts.path_codec import make_bound_entity_id, make_shortcut_path, parse_shortcut_path, split_bound_entity_id
 from ..vcp.prop_update_guard import suppress_vcp_prop_updates
 from ..visualization.delete_reconcile import cleanup_scp_dependents
-from ..visualization.sync_runner import sync_from_dirty_hints
+from ..visualization.sync_runner import schedule_sync_from_dirty_hints, sync_from_dirty_hints
 from .model import ImportResult
 from .rna import apply_scalar_dict
 from .stage import stage_bound_map
@@ -29,6 +29,8 @@ class MergeState:
     fibers: dict = field(default_factory=dict)
     muscles: dict = field(default_factory=dict)
     blobs: dict = field(default_factory=dict)
+    imported_scps: set[str] = field(default_factory=set)
+    shortcut_count: int = 0
     kept_objects: list[object] = field(default_factory=list)
 
 
@@ -106,14 +108,26 @@ def _apply_roles(state, scp, snap, local):
     set_geometry_object(state.root, scp, _role_object(local, snap.geometry_bound_id))
 
 
-def _create_one_scp(state, snap):
-    scp = create_scp(state.root, snap.name)
-    state.scps[str(snap.source_id or "")] = str(scp.id or "")
-    apply_scalar_dict(scp, snap.props)
-    local = {}
-    for bound in snap.bound_objects:
-        _add_bound(state, scp, snap.source_id, bound, local)
-    _apply_roles(state, scp, snap, local)
+def _source_id(snap):
+    return str(getattr(snap, "source_id", "") or "")
+
+
+def _set_preserved_scp_id(scp, snap, preserve_id):
+    if preserve_id and _source_id(snap):
+        set_prop_raw(scp, "id", _source_id(snap))
+
+
+def _create_one_scp(state, snap, preserve_id=False):
+    with suppress_scp_prop_updates():
+        scp = create_scp(state.root, snap.name)
+        _set_preserved_scp_id(scp, snap, preserve_id)
+        state.scps[_source_id(snap)] = str(scp.id or "")
+        apply_scalar_dict(scp, snap.props)
+        local = {}
+        for bound in snap.bound_objects:
+            _add_bound(state, scp, snap.source_id, bound, local)
+        _apply_roles(state, scp, snap, local)
+        state.imported_scps.add(_source_id(snap))
 
 
 def _create_scps(state):
@@ -125,6 +139,36 @@ def _set_scp_parents(state):
     for snap in state.snapshot.scps:
         scp = next(x for x in state.root.af_scp_system.scps if str(x.id) == _remap(state.scps, snap.source_id))
         set_parent_id_raw(scp, _remap(state.scps, snap.parent_id))
+
+
+def _scp_by_id(root, scp_id):
+    return next((scp for scp in root.af_scp_system.scps if str(scp.id) == str(scp_id)), None)
+
+
+def _target_scp_ids(root):
+    return {str(scp.id or "") for scp in root.af_scp_system.scps if str(scp.id or "")}
+
+
+def _seed_existing_scps(state):
+    existing = _target_scp_ids(state.root)
+    for snap in state.snapshot.scps:
+        if _source_id(snap) in existing:
+            state.scps[_source_id(snap)] = _source_id(snap)
+
+
+def _create_missing_scps(state):
+    for snap in state.snapshot.scps:
+        if _source_id(snap) and _source_id(snap) not in state.scps:
+            _create_one_scp(state, snap, preserve_id=True)
+
+
+def _set_imported_scp_parents(state):
+    for snap in state.snapshot.scps:
+        if _source_id(snap) not in state.imported_scps:
+            continue
+        scp = _scp_by_id(state.root, _remap(state.scps, snap.source_id))
+        if scp is not None:
+            set_parent_id_raw(scp, _remap(state.scps, snap.parent_id))
 
 
 def _copy_touches(dst, snap, state):
@@ -154,6 +198,28 @@ def _create_one_fiber(state, snap):
 def _create_fibers(state):
     for snap in state.snapshot.fibers:
         _create_one_fiber(state, snap)
+
+
+def _fiber_scp_ids(snap):
+    ids = {snap.a_parent_id, snap.b_parent_id}
+    ids |= {touch.parent_id for touch in snap.touches}
+    ids |= {anchor.parent_id for anchor in getattr(snap, "loop_anchors", ())}
+    return {str(sid or "") for sid in ids if str(sid or "")}
+
+
+def _all_scps_mapped(state, ids):
+    return all(_remap(state.scps, sid) for sid in set(ids or ()))
+
+
+def _diff_fiber_snap(state, snap):
+    ids = _fiber_scp_ids(snap)
+    return bool(ids & state.imported_scps) and _all_scps_mapped(state, ids)
+
+
+def _create_diff_fibers(state):
+    for snap in state.snapshot.fibers:
+        if _diff_fiber_snap(state, snap):
+            _create_one_fiber(state, snap)
 
 
 def _fiber_by_id(root, fiber_id):
@@ -187,6 +253,17 @@ def _create_muscles(state):
         _create_one_muscle(state, snap)
 
 
+def _muscle_refs_mapped(state, snap):
+    ids = [str(fid or "") for fid in snap.fiber_ids if str(fid or "")]
+    return bool(ids) and all(_remap(state.fibers, sid) for sid in ids)
+
+
+def _create_diff_muscles(state):
+    for snap in state.snapshot.muscles:
+        if _muscle_refs_mapped(state, snap):
+            _create_one_muscle(state, snap)
+
+
 def _blob_target_name(state, snap):
     if str(snap.attach_target_type) != "OBJECT" or not snap.attach_object_entity:
         return str(snap.attach_target_object_name or "")
@@ -218,6 +295,26 @@ def _create_blobs(state):
         _create_one_blob(state, snap)
 
 
+def _blob_object_scp_id(snap):
+    scp_id, _bound_id = split_bound_entity_id(getattr(snap, "attach_object_entity", ""))
+    return scp_id
+
+
+def _diff_blob_snap(state, snap):
+    kind = str(snap.attach_target_type or "NONE")
+    if kind == "SCP":
+        return str(snap.attach_target_id or "") in state.imported_scps
+    if kind == "MUSCLE":
+        return bool(_remap(state.muscles, snap.attach_target_id))
+    return kind == "OBJECT" and _blob_object_scp_id(snap) in state.imported_scps
+
+
+def _create_diff_blobs(state):
+    for snap in state.snapshot.blobs:
+        if _diff_blob_snap(state, snap):
+            _create_one_blob(state, snap)
+
+
 def _add_shortcut(state, snap):
     item = state.root.af_shortcut_system.shortcuts.add()
     item.id = next_prefixed_id(state.root.af_shortcut_system.shortcuts, "SHORTCUT")
@@ -228,6 +325,7 @@ def _add_shortcut(state, snap):
     item.vector_mode = str(getattr(snap, "vector_mode", "DEFAULT") or "DEFAULT")
     item.owner_backsolve = bool(getattr(snap, "owner_backsolve", True))
     _copy_shortcut_overrides(state, item, snap)
+    state.shortcut_count += 1
 
 
 def _copy_shortcut_overrides(state, item, snap):
@@ -242,6 +340,41 @@ def _create_shortcuts(state):
         _add_shortcut(state, snap)
 
 
+def _shortcut_owner_imported(state, snap):
+    kind = str(snap.owner_type or "NONE")
+    oid = str(snap.owner_id or "")
+    if kind == "SCP":
+        return oid in state.imported_scps
+    maps = {"FIBER": state.fibers, "MUSCLE": state.muscles, "BLOB": state.blobs}
+    return bool(_remap(maps.get(kind, {}), oid))
+
+
+def _shortcut_path_scp_id(raw):
+    kind, entity_id, _prop_spec = parse_shortcut_path(raw)
+    if kind == "scp_bound_rna":
+        return split_bound_entity_id(entity_id)[0]
+    return entity_id if kind in {"scp_prop", "scp_object"} else ""
+
+
+def _shortcut_override_imported(state, snap):
+    ids = [str(item.target_scp_id or "") for item in getattr(snap, "overrides", ())]
+    return any(sid in state.imported_scps for sid in ids)
+
+
+def _shortcut_diff_snap(state, snap):
+    if _shortcut_owner_imported(state, snap):
+        return True
+    if _shortcut_path_scp_id(snap.data_path) in state.imported_scps:
+        return True
+    return _shortcut_override_imported(state, snap)
+
+
+def _create_diff_shortcuts(state):
+    for snap in state.snapshot.shortcuts:
+        if _shortcut_diff_snap(state, snap):
+            _add_shortcut(state, snap)
+
+
 def _create_vcps(state):
     with suppress_vcp_prop_updates():
         _create_fibers(state)
@@ -249,8 +382,34 @@ def _create_vcps(state):
         _create_blobs(state)
 
 
+def _create_diff_vcps(state):
+    with suppress_vcp_prop_updates():
+        _create_diff_fibers(state)
+        _create_diff_muscles(state)
+        _create_diff_blobs(state)
+
+
 def _result(state):
-    return ImportResult(len(state.snapshot.scps), len(state.snapshot.fibers), len(state.snapshot.muscles), len(state.snapshot.blobs), len(state.snapshot.shortcuts), state.warnings, state.kept_objects)
+    return ImportResult(len(state.imported_scps), len(state.fibers), len(state.muscles), len(state.blobs), state.shortcut_count, state.warnings, state.kept_objects)
+
+
+def _dirty_for_diff(state):
+    dirty = empty_dirty_hints()
+    dirty["SCP"] = {sid for sid in state.imported_scps if sid}
+    dirty["FIBER"] = set(state.fibers.values())
+    dirty["MUSCLE"] = set(state.muscles.values())
+    dirty["BLOB"] = set(state.blobs.values())
+    return dirty
+
+
+def _has_dirty(dirty):
+    return any(bool(values) for values in dict(dirty or {}).values())
+
+
+def _schedule_diff_sync(state):
+    dirty = _dirty_for_diff(state)
+    if _has_dirty(dirty):
+        schedule_sync_from_dirty_hints(root=state.root, scene=state.scene, dirty_hints=dirty, source="operator", event_type="IMPORT")
 
 
 def apply_snapshot(snapshot, stage_root, root, context):
@@ -262,4 +421,17 @@ def apply_snapshot(snapshot, stage_root, root, context):
     sync_all_scp_roles(root)
     cleanup_scp_dependents(root)
     sync_from_dirty_hints(root=root, scene=context.scene, dirty_hints=empty_dirty_hints(), source="operator", event_type="IMPORT")
+    return _result(state)
+
+
+def apply_scp_diff_snapshot(snapshot, stage_root, root, context):
+    state = MergeState(root, context.scene, _target_collection(context), snapshot, stage_root, stage_bound_map(stage_root))
+    _seed_existing_scps(state)
+    _create_missing_scps(state)
+    _set_imported_scp_parents(state)
+    _create_diff_vcps(state)
+    _create_diff_shortcuts(state)
+    sync_all_scp_roles(root)
+    cleanup_scp_dependents(root)
+    _schedule_diff_sync(state)
     return _result(state)

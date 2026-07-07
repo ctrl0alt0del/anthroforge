@@ -2,7 +2,7 @@ import bpy
 from bpy.props import StringProperty
 from bpy_extras.io_utils import ImportHelper
 
-from ..core.importing import import_package_from_blend, import_vcp_from_blend
+from ..core.importing import import_package_from_blend, import_scp_diff_from_blend, import_vcp_from_blend
 
 
 def _summary(result):
@@ -56,4 +56,23 @@ class AF_OT_ImportVCP(bpy.types.Operator, ImportHelper):
             return {"CANCELLED"}
         _report_warnings(self, result)
         self.report({"INFO"}, _vcp_summary(result))
+        return {"FINISHED"}
+
+
+class AF_OT_ImportSCPDiff(bpy.types.Operator, ImportHelper):
+    bl_idname = "af.import_scp_diff"
+    bl_label = "Import AF SCP Diff"
+    bl_options = {"REGISTER", "UNDO"}
+
+    filename_ext = ".blend"
+    filter_glob: StringProperty(default="*.blend", options={"HIDDEN"})
+
+    def execute(self, context):
+        try:
+            result = import_scp_diff_from_blend(self.filepath, context)
+        except Exception as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        _report_warnings(self, result)
+        self.report({"INFO"}, _summary(result))
         return {"FINISHED"}

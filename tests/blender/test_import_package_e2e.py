@@ -14,9 +14,10 @@ import bpy
 from _helpers import BlenderTestCase, add_shortcut, capture_mesh_attachment, fiber, find_flagged, mesh_object, reset_scene, root, scp_with_object, select_only, temp_blend_path
 from anthroforge.core.id_utils import next_prefixed_id
 from anthroforge.core.importing.extract import root_snapshot
-from anthroforge.core.importing.service import import_package_from_blend, import_vcp_from_blend
+from anthroforge.core.importing.service import import_package_from_blend, import_scp_diff_from_blend, import_vcp_from_blend
 from anthroforge.core.shortcuts import upsert_override
 from anthroforge.core.shortcuts.path_codec import make_bound_entity_id, make_shortcut_path
+from anthroforge.core.scp_runtime.prop_update_guard import set_parent_id_raw
 from anthroforge.core.scp_runtime.runtime_state import set_mirror_effective_axis, set_mirror_source_id, set_mirror_status
 from anthroforge.core.utils import get_af_root
 from anthroforge.core.vcp.runtime_state import set_fiber_not_converged, set_muscle_inflation_ctrl_world
@@ -52,6 +53,20 @@ def _source_vcp_file():
     path = temp_blend_path()
     bpy.ops.wm.save_as_mainfile(filepath=path)
     return path, (snapshot.scps[0].source_id, snapshot.scps[1].source_id)
+
+
+def _source_scp_diff_file():
+    root_obj = root()
+    parent = scp_with_object(root_obj, "ParentSource", mesh_object("ParentSource"))
+    child = scp_with_object(root_obj, "ChildSource", mesh_object("ChildSource", (2.0, 0.0, 0.0)))
+    set_parent_id_raw(child, parent.id)
+    item = fiber(root_obj, parent.id, child.id)
+    item.a_attach_param = capture_mesh_attachment(root_obj, parent, 0)
+    item.b_attach_param = capture_mesh_attachment(root_obj, child, 0)
+    add_shortcut(root_obj, "Child X", "SCP", child.id, f'bpy.data.objects["{child.transform_object_ref.name}"].location[0]')
+    path = temp_blend_path()
+    bpy.ops.wm.save_as_mainfile(filepath=path)
+    return path, (parent.id, child.id)
 
 
 def _matching_target():
@@ -122,6 +137,25 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertIsNotNone(find_flagged("af_fiber_proxy", fiber_item.id, "af_fiber_id"))
         self.assertIsNotNone(find_flagged("af_muscle_proxy", root_obj.af_vcp_system.muscles[-1].id, "af_muscle_id"))
         self.assertIsNotNone(find_flagged("af_blob_proxy", root_obj.af_vcp_system.blobs[-1].id, "af_blob_id"))
+
+    def test_import_scp_diff_imports_only_missing_scps(self):
+        path, (parent_id, child_id) = _source_scp_diff_file()
+        self.addCleanup(lambda: os.remove(path) if os.path.exists(path) else None)
+        reset_scene()
+        root_obj = root()
+        parent = scp_with_object(root_obj, "ParentTarget", mesh_object("ParentTarget"))
+        self.assertEqual(parent.id, parent_id)
+        with patch("anthroforge.core.importing.merge.schedule_sync_from_dirty_hints") as schedule:
+            result = import_scp_diff_from_blend(path, bpy.context)
+        child = next(scp for scp in root_obj.af_scp_system.scps if scp.id == child_id)
+        shortcut = root_obj.af_shortcut_system.shortcuts[-1]
+        self.assertEqual((result.scp_count, result.fiber_count, result.shortcut_count), (1, 1, 1))
+        self.assertEqual((child.parent_id, len(root_obj.af_scp_system.scps)), (parent_id, 2))
+        self.assertEqual((root_obj.af_vcp_system.fibers[-1].a_parent_id, root_obj.af_vcp_system.fibers[-1].b_parent_id), (parent_id, child_id))
+        self.assertEqual((shortcut.owner_id, child_id in shortcut.data_path), (child_id, True))
+        self.assertIn(child_id, schedule.call_args.kwargs["dirty_hints"]["SCP"])
+        result = import_scp_diff_from_blend(path, bpy.context)
+        self.assertEqual((result.scp_count, result.fiber_count, result.shortcut_count), (0, 0, 0))
 
     def test_import_vcp_uses_matching_target_scp_ids_and_topology(self):
         path, source_ids = _source_vcp_file()
