@@ -1,0 +1,206 @@
+from dataclasses import dataclass, field
+
+from ..deps.dirty_hints import empty_dirty_hints
+from ..id_utils import next_prefixed_id
+from ..visualization.delete_reconcile import cleanup_scp_dependents
+from ..visualization.sync_runner import sync_from_dirty_hints
+from .model import ImportResult
+from .rna import apply_scalar_dict
+
+
+@dataclass
+class VcpImportState:
+    root: object
+    scene: object
+    snapshot: object
+    compatible_scps: set[str]
+    warnings: list[str] = field(default_factory=list)
+    fibers: dict[str, str] = field(default_factory=dict)
+    muscles: dict[str, str] = field(default_factory=dict)
+    blobs: dict[str, str] = field(default_factory=dict)
+
+
+def _scp_map(root):
+    return {str(scp.id or ""): scp for scp in root.af_scp_system.scps if str(scp.id or "")}
+
+
+def _mesh_topology(obj):
+    mesh = getattr(obj, "data", None)
+    if obj is None or getattr(obj, "type", "") != "MESH" or mesh is None:
+        return None
+    edges = tuple(tuple(edge.vertices) for edge in mesh.edges)
+    faces = tuple(tuple(poly.vertices) for poly in mesh.polygons)
+    return len(mesh.vertices), edges, faces
+
+
+def _same_topology(source_scp, target_scp):
+    source = _mesh_topology(getattr(source_scp, "geometry_object_ref", None))
+    target = _mesh_topology(getattr(target_scp, "geometry_object_ref", None))
+    return source is not None and source == target
+
+
+def _compatible_scp_ids(stage_root, root):
+    source, target = _scp_map(stage_root), _scp_map(root)
+    return {sid for sid, scp in source.items() if sid in target and _same_topology(scp, target[sid])}
+
+
+def _new_vcp_item(collection, prefix):
+    item = collection.add()
+    item.id = next_prefixed_id(collection, prefix)
+    return item
+
+
+def _ids_text(values):
+    return ", ".join(sorted({str(v) for v in values if str(v or "")})) or "unknown"
+
+
+def _warn_skip(state, kind, source_id, missing):
+    state.warnings.append(f"Skipped {kind} {source_id}: incompatible SCP or dependency {_ids_text(missing)}.")
+
+
+def _fiber_scp_ids(snap):
+    ids = {snap.a_parent_id, snap.b_parent_id}
+    ids |= {touch.parent_id for touch in snap.touches}
+    ids |= {anchor.parent_id for anchor in getattr(snap, "loop_anchors", ())}
+    return {str(sid or "") for sid in ids if str(sid or "")}
+
+
+def _incompatible_scps(state, scp_ids):
+    return set(scp_ids or set()) - set(state.compatible_scps or set())
+
+
+def _copy_touches(dst, snap):
+    for touch in snap.touches:
+        item = dst.mid_touches.add()
+        apply_scalar_dict(item, touch.props)
+        item.parent_id = str(touch.parent_id or "")
+
+
+def _copy_loop_anchors(dst, snap):
+    for anchor in getattr(snap, "loop_anchors", ()):
+        item = dst.loop_anchors.add()
+        apply_scalar_dict(item, anchor.props)
+        item.parent_id = str(anchor.parent_id or "")
+
+
+def _create_one_fiber(state, snap):
+    missing = _incompatible_scps(state, _fiber_scp_ids(snap))
+    if missing:
+        return _warn_skip(state, "fiber", snap.source_id, missing)
+    dst = _new_vcp_item(state.root.af_vcp_system.fibers, "FIBER")
+    state.fibers[str(snap.source_id or "")] = str(dst.id or "")
+    dst.name, dst.a_parent_id = str(snap.name or dst.id), str(snap.a_parent_id or "")
+    dst.b_parent_id, dst.muscle_id = str(snap.b_parent_id or ""), ""
+    apply_scalar_dict(dst, snap.props)
+    _copy_touches(dst, snap)
+    _copy_loop_anchors(dst, snap)
+
+
+def _create_fibers(state):
+    for snap in state.snapshot.fibers:
+        _create_one_fiber(state, snap)
+
+
+def _missing_fiber_refs(state, snap):
+    return [fid for fid in snap.fiber_ids if str(fid or "") not in state.fibers]
+
+
+def _copy_refs(dst, snap, state):
+    for source_id in snap.fiber_ids:
+        ref = dst.fiber_refs.add()
+        ref.fiber_id = state.fibers[str(source_id or "")]
+
+
+def _assign_fiber_muscles(state, muscle_id, snap):
+    for source_id in snap.fiber_ids:
+        fiber = _fiber_by_id(state.root, state.fibers[str(source_id or "")])
+        if fiber is not None:
+            fiber.muscle_id = muscle_id
+
+
+def _fiber_by_id(root, fiber_id):
+    return next((item for item in root.af_vcp_system.fibers if str(item.id) == str(fiber_id)), None)
+
+
+def _create_one_muscle(state, snap):
+    missing = _missing_fiber_refs(state, snap)
+    if missing:
+        return _warn_skip(state, "muscle", snap.source_id, missing)
+    dst = _new_vcp_item(state.root.af_vcp_system.muscles, "MUSCLE")
+    state.muscles[str(snap.source_id or "")] = str(dst.id or "")
+    dst.name = str(snap.name or dst.id)
+    apply_scalar_dict(dst, snap.props)
+    _copy_refs(dst, snap, state)
+    _assign_fiber_muscles(state, dst.id, snap)
+
+
+def _create_muscles(state):
+    for snap in state.snapshot.muscles:
+        _create_one_muscle(state, snap)
+
+
+def _blob_missing(state, snap):
+    target = str(snap.attach_target_type or "NONE")
+    if target == "SCP":
+        return _incompatible_scps(state, {snap.attach_target_id})
+    if target == "MUSCLE":
+        return set() if str(snap.attach_target_id or "") in state.muscles else {snap.attach_target_id}
+    return set() if target == "NONE" else {target}
+
+
+def _blob_target_id(state, snap):
+    if str(snap.attach_target_type) == "SCP":
+        return str(snap.attach_target_id or "")
+    if str(snap.attach_target_type) == "MUSCLE":
+        return state.muscles[str(snap.attach_target_id or "")]
+    return ""
+
+
+def _create_one_blob(state, snap):
+    missing = _blob_missing(state, snap)
+    if missing:
+        return _warn_skip(state, "blob", snap.source_id, missing)
+    dst = _new_vcp_item(state.root.af_vcp_system.blobs, "BLOB")
+    state.blobs[str(snap.source_id or "")] = str(dst.id or "")
+    dst.name = str(snap.name or dst.id)
+    apply_scalar_dict(dst, snap.props)
+    dst.attach_target_type = str(snap.attach_target_type or "NONE")
+    dst.attach_target_id = _blob_target_id(state, snap)
+    dst.attach_target_object_name = ""
+
+
+def _create_blobs(state):
+    for snap in state.snapshot.blobs:
+        _create_one_blob(state, snap)
+
+
+def _dirty_for_imported(state):
+    dirty = empty_dirty_hints()
+    dirty["FIBER"] = set(state.fibers.values())
+    dirty["MUSCLE"] = set(state.muscles.values())
+    dirty["BLOB"] = set(state.blobs.values())
+    return dirty
+
+
+def _has_dirty(dirty):
+    return any(bool(values) for values in dict(dirty or {}).values())
+
+
+def _sync_imported(state):
+    dirty = _dirty_for_imported(state)
+    if _has_dirty(dirty):
+        sync_from_dirty_hints(root=state.root, scene=state.scene, dirty_hints=dirty, source="operator", event_type="IMPORT")
+
+
+def _result(state):
+    return ImportResult(0, len(state.fibers), len(state.muscles), len(state.blobs), 0, state.warnings, [])
+
+
+def apply_vcp_snapshot(snapshot, stage_root, root, context):
+    state = VcpImportState(root, context.scene, snapshot, _compatible_scp_ids(stage_root, root))
+    _create_fibers(state)
+    _create_muscles(state)
+    _create_blobs(state)
+    cleanup_scp_dependents(root)
+    _sync_imported(state)
+    return _result(state)

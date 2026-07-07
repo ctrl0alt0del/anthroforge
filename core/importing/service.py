@@ -5,10 +5,11 @@ import tempfile
 
 import bpy
 
-from ..utils import ensure_af_root
+from ..utils import ensure_af_root, get_af_root
 from .merge import apply_snapshot
 from .model import PackageSnapshot
 from .stage import append_stage_root, expand_stage_keep, link_stage_keep, remove_stage_root, remove_unused_stage_objects
+from .vcp import apply_vcp_snapshot
 
 
 def _module_name():
@@ -65,3 +66,15 @@ def import_package_from_blend(filepath, context):
         return result
     finally:
         _cleanup_stage(stage, getattr(result, "kept_objects", ()), context.scene)
+
+
+def import_vcp_from_blend(filepath, context):
+    snapshot = _load_snapshot(filepath)
+    root = get_af_root(context.scene)
+    if root is None:
+        raise RuntimeError("No AnthroForge root found in target file.")
+    stage = _stage_snapshot(filepath, snapshot)
+    try:
+        return apply_vcp_snapshot(snapshot, stage.root, root, context)
+    finally:
+        _cleanup_stage(stage, (), context.scene)

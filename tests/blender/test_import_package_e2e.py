@@ -13,7 +13,7 @@ import bpy
 from _helpers import BlenderTestCase, add_shortcut, capture_mesh_attachment, fiber, find_flagged, mesh_object, reset_scene, root, scp_with_object, select_only, temp_blend_path
 from anthroforge.core.id_utils import next_prefixed_id
 from anthroforge.core.importing.extract import root_snapshot
-from anthroforge.core.importing.service import import_package_from_blend
+from anthroforge.core.importing.service import import_package_from_blend, import_vcp_from_blend
 from anthroforge.core.shortcuts import upsert_override
 from anthroforge.core.shortcuts.path_codec import make_bound_entity_id, make_shortcut_path
 from anthroforge.core.scp_runtime.runtime_state import set_mirror_effective_axis, set_mirror_source_id, set_mirror_status
@@ -36,6 +36,28 @@ def _blob(root_obj, muscle_id):
     item.name = item.id
     item.attach_target_type, item.attach_target_id = "MUSCLE", muscle_id
     return item
+
+
+def _quad_mesh_object(name):
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)], [], [(0, 1, 2, 3)])
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
+def _source_vcp_file():
+    snapshot, _right = _source_snapshot()
+    path = temp_blend_path()
+    bpy.ops.wm.save_as_mainfile(filepath=path)
+    return path, (snapshot.scps[0].source_id, snapshot.scps[1].source_id)
+
+
+def _matching_target():
+    root_obj = root()
+    left = scp_with_object(root_obj, "LeftTarget", mesh_object("LeftTarget"))
+    right = scp_with_object(root_obj, "RightTarget", mesh_object("RightTarget", (2.0, 0.0, 0.0)))
+    return root_obj, left, right
 
 
 def _source_snapshot():
@@ -99,4 +121,31 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertIsNotNone(find_flagged("af_fiber_proxy", fiber_item.id, "af_fiber_id"))
         self.assertIsNotNone(find_flagged("af_muscle_proxy", root_obj.af_vcp_system.muscles[-1].id, "af_muscle_id"))
         self.assertIsNotNone(find_flagged("af_blob_proxy", root_obj.af_vcp_system.blobs[-1].id, "af_blob_id"))
+
+    def test_import_vcp_uses_matching_target_scp_ids_and_topology(self):
+        path, source_ids = _source_vcp_file()
+        self.addCleanup(lambda: os.remove(path) if os.path.exists(path) else None)
+        reset_scene()
+        root_obj, left, right = _matching_target()
+        existing = fiber(root_obj, left.id, right.id)
+        result = import_vcp_from_blend(path, bpy.context)
+        imported_fiber = root_obj.af_vcp_system.fibers[-1]
+        imported_muscle = root_obj.af_vcp_system.muscles[-1]
+        self.assertEqual((left.id, right.id), source_ids)
+        self.assertEqual((result.scp_count, result.fiber_count, result.muscle_count, result.blob_count), (0, 1, 1, 1))
+        self.assertEqual((len(root_obj.af_scp_system.scps), existing.id, imported_fiber.id), (2, "FIBER_1", "FIBER_2"))
+        self.assertEqual((imported_fiber.a_parent_id, imported_fiber.b_parent_id), source_ids)
+        self.assertEqual((imported_muscle.fiber_refs[0].fiber_id, imported_fiber.muscle_id), (imported_fiber.id, imported_muscle.id))
+        self.assertEqual(root_obj.af_vcp_system.blobs[-1].attach_target_id, imported_muscle.id)
+
+    def test_import_vcp_skips_mismatched_scp_topology(self):
+        path, _source_ids = _source_vcp_file()
+        self.addCleanup(lambda: os.remove(path) if os.path.exists(path) else None)
+        reset_scene()
+        root_obj = root()
+        scp_with_object(root_obj, "LeftTarget", mesh_object("LeftTarget"))
+        scp_with_object(root_obj, "RightTarget", _quad_mesh_object("RightTarget"))
+        result = import_vcp_from_blend(path, bpy.context)
+        self.assertEqual((result.fiber_count, result.muscle_count, result.blob_count), (0, 0, 0))
+        self.assertEqual((len(root_obj.af_vcp_system.fibers), bool(result.warnings)), (0, True))
 

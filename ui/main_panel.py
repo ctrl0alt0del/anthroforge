@@ -21,6 +21,7 @@ class AF_PT_MainPanel(bpy.types.Panel):
         layout = self.layout
         root = get_af_root(context.scene)
         layout.operator("af.import_package", icon="IMPORT")
+        layout.operator("af.import_vcp", icon="IMPORT")
         _draw_attachment_toggle(layout, context.scene)
 
         if root is None:
