@@ -13,6 +13,21 @@ try:
 except ImportError:
     from core.id_utils import next_prefixed_id
 
+try:
+    from ...core.vcp.fiber_symmetry import MIRROR_SEAM_LOOP, signed_distance
+except ImportError:
+    from core.vcp.fiber_symmetry import MIRROR_SEAM_LOOP, signed_distance
+
+try:
+    from ...core.vcp.prop_update_guard import suppress_vcp_prop_updates
+except ImportError:
+    from core.vcp.prop_update_guard import suppress_vcp_prop_updates
+
+try:
+    from ...core.visualization.mirror_rules import effective_rule_for_scp
+except ImportError:
+    from core.visualization.mirror_rules import effective_rule_for_scp
+
 
 def create_fiber_vcp(context):
     root = root_for_context(context)
@@ -41,6 +56,22 @@ def create_loop_fiber_from_selected_vertices(context):
         return failure(error or "Select at least three ordered vertices.")
     fiber = _new_loop_fiber(root, specs)
     _activate(root.af_vcp_system, "FIBER", fiber.id)
+    _sync_entity(root, context.scene, "FIBER", {fiber.id}, bake=True)
+    _finalize_selection(context, root, fiber)
+    return success(f"Added {fiber.id}", value=fiber)
+
+
+def create_symmetric_loop_fiber_from_selected_vertices(context):
+    root = root_for_context(context)
+    if root is None:
+        return failure("No AF_ROOT found.")
+    specs, rule, error = _resolved_symmetric_loop(context, root)
+    if error:
+        return failure(error)
+    with suppress_vcp_prop_updates():
+        fiber = _new_symmetric_loop_fiber(root, specs, rule)
+    _activate(root.af_vcp_system, "FIBER", fiber.id)
+    _fiber_sync().clear_solver_cache(fiber.id)
     _sync_entity(root, context.scene, "FIBER", {fiber.id}, bake=True)
     _finalize_selection(context, root, fiber)
     return success(f"Added {fiber.id}", value=fiber)
@@ -103,9 +134,36 @@ def _resolved_loop_specs(context, root):
     return None, "Select ordered mesh/proxy vertices in Edit Mode."
 
 
+def _resolved_symmetric_loop(context, root):
+    specs, error = _resolved_loop_point_specs(context, root)
+    if error:
+        return None, None, error
+    rule, error = _common_mirror_rule(root, [spec[0] for spec in specs])
+    if error:
+        return None, None, error
+    error = _validate_symmetric_points(specs, rule)
+    return specs, rule, error
+
+
+def _resolved_loop_point_specs(context, root):
+    if _proxy_edit_target(context):
+        return _proxy_loop_point_specs(context, root)
+    if _geometry_edit_target(context, root.name):
+        return _mesh_loop_point_specs(context, root)
+    return None, "Select ordered mesh/proxy vertices in Edit Mode."
+
+
 def _proxy_loop_specs(context, root):
     picks, error = _selected_proxy_vertices()(context)
     return (None, error) if error else _proxy_specs_from_picks(root, context.scene, picks)
+
+
+def _proxy_loop_point_specs(context, root):
+    picks, error = _selected_proxy_vertices()(context)
+    if error:
+        return None, error
+    specs, error = _proxy_specs(root, context.scene, picks)
+    return (None, error) if error else _point_specs(root, context.scene, specs)
 
 
 def _proxy_specs_from_picks(root, scene, picks):
@@ -115,10 +173,123 @@ def _proxy_specs_from_picks(root, scene, picks):
     return _proxy_specs(root, scene, items)
 
 
+def _point_specs(root, scene, specs):
+    items = tuple(specs or ())
+    if len(items) < 3:
+        return None, "Select at least three ordered vertices."
+    points = tuple(_attachment_point(root, scene, sid, raw) for sid, raw in items)
+    return (None, "Could not resolve selected vertex positions.") if any(p is None for p in points) else (tuple(_with_point(items, points)), "")
+
+
+def _with_point(specs, points):
+    return ((sid, raw, point) for (sid, raw), point in zip(specs, points))
+
+
 def _mesh_loop_specs(context, root):
     obj = getattr(context, "active_object", None)
     indices = _selected_mesh_indices(obj)
     return (None, "Select at least three mesh vertices.") if len(indices) < 3 else (_mesh_specs(root, context.scene, obj, indices), "")
+
+
+def _mesh_loop_point_specs(context, root):
+    obj = getattr(context, "active_object", None)
+    indices = _selected_mesh_indices(obj)
+    if len(indices) < 3:
+        return None, "Select at least three mesh vertices."
+    return _point_specs(root, context.scene, _mesh_specs(root, context.scene, obj, indices))
+
+
+def _common_mirror_rule(root, scp_ids):
+    ids = tuple(dict.fromkeys(scp_ids))
+    rules = tuple(_effective_rule(root, sid) for sid in ids)
+    if _all_rules_match(rules):
+        return rules[0], ""
+    fallback = _common_ancestor_rule(root, ids)
+    if fallback is not None and _rules_compatible(rules, fallback):
+        return fallback, ""
+    if any(rule is None for rule in rules):
+        return None, "Selected vertices need a shared mirror-enabled SCP ancestor."
+    return None, "Selected vertices do not share one mirror rule."
+
+
+def _effective_rule(root, scp_id):
+    rule = effective_rule_for_scp(str(scp_id or ""), _scp_map(root))
+    return None if rule is None else (str(rule[0] or "X").upper(), tuple(float(v) for v in rule[1]))
+
+
+def _scp_map(root):
+    return {str(scp.id or ""): scp for scp in getattr(root.af_scp_system, "scps", ())}
+
+
+def _all_rules_match(rules):
+    items = tuple(rules or ())
+    return bool(items and all(rule is not None for rule in items) and all(_same_rule(items[0], rule) for rule in items))
+
+
+def _rules_compatible(rules, target):
+    return all(rule is None or _same_rule(rule, target) for rule in tuple(rules or ()))
+
+
+def _common_ancestor_rule(root, scp_ids):
+    scps = _scp_map(root)
+    for sid in _common_ancestor_ids(scps, scp_ids):
+        rule = _explicit_mirror_rule(scps.get(sid))
+        if rule is not None:
+            return rule
+    return None
+
+
+def _common_ancestor_ids(scp_map, scp_ids):
+    paths = [_ancestor_path(scp_map, sid) for sid in tuple(scp_ids or ())]
+    if not paths or any(not path for path in paths):
+        return ()
+    shared = set(paths[0])
+    for path in paths[1:]:
+        shared &= set(path)
+    return tuple(sid for sid in paths[0] if sid in shared)
+
+
+def _ancestor_path(scp_map, scp_id):
+    out, seen, cur = [], set(), str(scp_id or "")
+    while cur and cur in scp_map and cur not in seen:
+        out.append(cur)
+        seen.add(cur)
+        cur = str(getattr(scp_map[cur], "parent_id", "") or "")
+    return tuple(out)
+
+
+def _explicit_mirror_rule(scp):
+    if scp is None or not bool(getattr(scp, "mirror_enabled", False)):
+        return None
+    axis = str(getattr(scp, "mirror_axis", "X") or "X").upper()
+    origin = tuple(float(v) for v in getattr(scp, "mirror_origin", (0.0, 0.0, 0.0)))
+    return axis if axis in {"X", "Y", "Z"} else "X", origin
+
+
+def _same_rule(left, right, eps=1.0e-6):
+    return left[0] == right[0] and max(abs(left[1][i] - right[1][i]) for i in range(3)) <= eps
+
+
+def _validate_symmetric_points(specs, rule):
+    distances = [signed_distance(spec[2], *rule) for spec in tuple(specs or ())]
+    first, last = _on_mirror_plane(distances[0]), _on_mirror_plane(distances[-1])
+    if first and last:
+        return _validate_symmetric_interior(distances[1:-1])
+    if first or last:
+        return "Mirror-plane endpoints must be selected as both first and last vertices."
+    return _validate_symmetric_interior(distances)
+
+
+def _on_mirror_plane(distance, eps=1.0e-5):
+    return abs(float(distance)) <= eps
+
+
+def _validate_symmetric_interior(distances):
+    if not distances:
+        return "Select at least one off-plane side vertex."
+    if any(_on_mirror_plane(value) for value in distances):
+        return "Only seam endpoints may lie on the mirror plane."
+    return "" if len({value > 0.0 for value in distances}) == 1 else "Interior vertices must stay on one side of the mirror plane."
 
 
 def _endpoint_ids(context):
@@ -152,6 +323,14 @@ def _new_loop_fiber(root, anchor_specs):
     fiber.a_parent_id, fiber.a_attach_param = "", ""
     fiber.b_parent_id, fiber.b_attach_param = "", ""
     _apply_loop_anchor_specs(fiber, anchor_specs)
+    return fiber
+
+
+def _new_symmetric_loop_fiber(root, point_specs, rule):
+    fiber = _new_loop_fiber(root, [(sid, raw) for sid, raw, _point in point_specs])
+    fiber.symmetry_mode = MIRROR_SEAM_LOOP
+    fiber.symmetry_axis = str(rule[0] or "X")
+    fiber.symmetry_origin = tuple(rule[1])
     return fiber
 
 
@@ -265,6 +444,10 @@ def _proxy_attach(root, scene, pick):
     return _capture_attachment_from_proxy_vertex()(root, scene, pick.scp_id, pick.vertex_index, pick.signature)
 
 
+def _attachment_point(root, scene, scp_id, raw):
+    return _resolve_attachment_world()(root, scene, scp_id, raw)
+
+
 def _history_mesh_indices(bm):
     import bmesh
 
@@ -297,6 +480,14 @@ def _sync_scene():
     except ImportError:
         from app.runtime_api import sync_scene
     return sync_scene
+
+
+def _fiber_sync():
+    try:
+        from ...core.visualization.fiber_sync import register_fiber_sync
+    except ImportError:
+        from core.visualization.fiber_sync import register_fiber_sync
+    return register_fiber_sync()
 
 
 def _dirty_hints_for():
@@ -360,6 +551,14 @@ def _capture_attachment_from_proxy_vertex():
     except ImportError:
         from core.vcp.attachment_backend import capture_attachment_from_proxy_vertex
     return capture_attachment_from_proxy_vertex
+
+
+def _resolve_attachment_world():
+    try:
+        from ...core.vcp.attachment_backend import resolve_attachment_world
+    except ImportError:
+        from core.vcp.attachment_backend import resolve_attachment_world
+    return resolve_attachment_world
 
 
 def _notify_selection_changed():

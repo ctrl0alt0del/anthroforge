@@ -25,6 +25,9 @@ class FakeVector(tuple):
     def __new__(cls, values=(0.0, 0.0, 0.0)):
         return super().__new__(cls, tuple(values))
 
+    def copy(self):
+        return FakeVector(self)
+
 
 class FakeMatrix(tuple):
     def __new__(cls, values=()):

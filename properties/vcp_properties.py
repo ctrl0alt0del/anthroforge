@@ -137,6 +137,25 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
         default="OPEN",
         update=_on_fiber_prop_update,
     )
+    symmetry_mode: bpy.props.EnumProperty(
+        name="Symmetry",
+        items=(("NONE", "None", ""), ("MIRROR_SEAM_LOOP", "Mirror Seam Loop", "")),
+        default="NONE",
+        update=_on_fiber_prop_update,
+    )
+    symmetry_axis: bpy.props.EnumProperty(
+        name="Symmetry Axis",
+        items=(("X", "X", ""), ("Y", "Y", ""), ("Z", "Z", "")),
+        default="X",
+        update=_on_fiber_prop_update,
+    )
+    symmetry_origin: bpy.props.FloatVectorProperty(
+        name="Symmetry Origin",
+        size=3,
+        subtype="TRANSLATION",
+        default=(0.0, 0.0, 0.0),
+        update=_on_fiber_prop_update,
+    )
     a_parent_id: bpy.props.StringProperty(name="Origin SCP ID", update=_on_fiber_prop_update)
     a_attach_param: bpy.props.StringProperty(name="Origin Attach Param JSON", update=_on_fiber_prop_update)
     b_parent_id: bpy.props.StringProperty(name="Insertion SCP ID", update=_on_fiber_prop_update)

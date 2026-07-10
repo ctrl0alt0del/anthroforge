@@ -35,6 +35,12 @@ def loop_fiber_create_state(context):
     return ProxyFiberCreateState(False, "Edit one geometry mesh or switch to proxy view.")
 
 
+def symmetric_loop_fiber_create_state(context):
+    state = loop_fiber_create_state(context)
+    message = "Create a symmetric loop from the ordered half-loop vertices." if state.can_connect else state.message
+    return ProxyFiberCreateState(state.can_connect, message)
+
+
 def _proxy_state(picks, error):
     if error:
         return ProxyFiberCreateState(False, error)

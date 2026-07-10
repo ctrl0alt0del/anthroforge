@@ -9,6 +9,7 @@ from .fiber_collision import CollisionOracle
 from .fiber_loop import loop_pin_targets, resample_closed
 from .fiber_modes import is_loop_fiber, loop_anchor_specs
 from .fiber_planner import DIRECT, LOCAL_FALLBACK, PlannerAnchor, plan_route
+from .fiber_symmetry import expand_fiber_loop_points, is_mirror_seam_loop
 from .runtime_state import (
     fiber_recompute_status,
     fiber_planner_ms,
@@ -182,7 +183,13 @@ class FiberSolver:
         if len(pairs) < 3:
             return None
         anchors = [self._route_anchor(root, scene, runtime_registry, pid, raw) for pid, raw in pairs]
-        return None if any(anchor is None for anchor in anchors) else anchors
+        return None if any(anchor is None for anchor in anchors) else self._expanded_loop_anchors(fiber_prop, anchors)
+
+    def _expanded_loop_anchors(self, fiber_prop, anchors):
+        if not is_mirror_seam_loop(fiber_prop):
+            return anchors
+        points = expand_fiber_loop_points(fiber_prop, [anchor.point for anchor in anchors])
+        return list(anchors) + [PlannerAnchor(point.copy()) for point in points[len(anchors):]]
 
     def _loop_seed_route(self, oracle, anchors, bake):
         _ = bake

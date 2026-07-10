@@ -140,11 +140,28 @@ def _loop_mesh_object(name, location=(0.0, 0.0, 0.0)):
     return obj
 
 
+def _symmetric_loop_mesh_object(name):
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata([(0, -1, 0), (-1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
 def _loop_setup():
     root_obj = root()
     loop = scp_with_object(root_obj, "Loop", _loop_mesh_object("Loop"))
     _edit_select_vertex(loop.geometry_object_ref, 0, 1, 2, 3)
     bpy.ops.af.create_loop_fiber_from_selected_vertices()
+    return root_obj, root_obj.af_vcp_system.fibers[0], loop
+
+
+def _symmetric_loop_setup():
+    root_obj = root()
+    loop = scp_with_object(root_obj, "SymLoop", _symmetric_loop_mesh_object("SymLoop"))
+    loop.mirror_enabled, loop.mirror_axis = True, "X"
+    _edit_select_vertex(loop.geometry_object_ref, 0, 1, 2)
+    bpy.ops.af.create_symmetric_loop_fiber_from_selected_vertices()
     return root_obj, root_obj.af_vcp_system.fibers[0], loop
 
 
@@ -733,6 +750,16 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual((fiber.topology_mode, len(fiber.loop_anchors)), ("LOOP", 4))
         self.assertEqual((proxy.data.splines[0].use_cyclic_u, fiber_route_mode(fiber)), (True, "DIRECT"))
         self.assertTrue(all((anchors[i] - expected[i]).length < 1.0e-6 for i in range(4)))
+
+    def test_create_symmetric_loop_fiber_expands_selected_half(self):
+        _root_obj, fiber, _loop = _symmetric_loop_setup()
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        points = _fiber_world_vectors(fiber)
+        self.assertEqual((fiber.topology_mode, fiber.symmetry_mode, len(fiber.loop_anchors)), ("LOOP", "MIRROR_SEAM_LOOP", 3))
+        self.assertEqual((fiber.symmetry_axis, tuple(round(v, 4) for v in fiber.symmetry_origin)), ("X", (0.0, 0.0, 0.0)))
+        self.assertEqual(proxy.data.splines[0].use_cyclic_u, True)
+        self.assertTrue(any(point.x < -0.25 for point in points))
+        self.assertTrue(any(point.x > 0.25 for point in points))
 
     def test_recompute_loop_fiber_preserves_node_count_and_hides_handles(self):
         root_obj, fiber, _loop = _loop_setup()

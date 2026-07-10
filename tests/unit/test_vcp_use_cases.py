@@ -28,7 +28,7 @@ from core.vcp.runtime_state import (
 )
 from app.use_cases.blob_create import create_blob_vcp
 from app.use_cases.blob_tools import select_blob_control
-from app.use_cases.fiber_create import create_fiber_from_proxy_vertices, create_fiber_vcp
+from app.use_cases.fiber_create import _common_mirror_rule, _validate_symmetric_points, create_fiber_from_proxy_vertices, create_fiber_vcp
 from app.use_cases.fiber_tools import _run_bake_passes, add_fiber_touch_point, add_fiber_touch_point_at_world, clear_fiber_warm_start, move_fiber_touch_point, recompute_fiber, remove_fiber_touch_point
 from app.use_cases.muscle_create import create_muscle_vcp
 from app.use_cases.muscle_tools import flip_muscle_normals, select_muscle_inflation_ctrl
@@ -130,6 +130,19 @@ class VcpUseCaseTests(unittest.TestCase):
         self.assertEqual(len(root_obj.af_vcp_system.fibers), 0)
         self.assertIn("S2", result.message)
         self.assertIn("vertex 2", result.message)
+
+    def test_symmetric_loop_rule_uses_compatible_common_ancestor(self):
+        scps = [
+            Bag(id="S1", parent_id="", mirror_enabled=True, mirror_axis="X", mirror_origin=(0.0, 0.0, 0.0)),
+            Bag(id="S2", parent_id="S1", mirror_enabled=True, mirror_axis="X", mirror_origin=(0.0, 0.0, 0.0)),
+            Bag(id="S3", parent_id="S1", mirror_enabled=False, mirror_inherit_parent=False, mirror_axis="X"),
+        ]
+        rule, error = _common_mirror_rule(root(scps=scps), ("S2", "S3"))
+        self.assertEqual((rule, error), (("X", (0.0, 0.0, 0.0)), ""))
+
+    def test_symmetric_loop_validation_accepts_off_plane_half_loop(self):
+        specs = (("S1", "A", (0.03, 0.0, 0.0)), ("S2", "B", (0.2, 0.0, 0.0)), ("S3", "C", (0.04, 0.0, 0.0)))
+        self.assertEqual(_validate_symmetric_points(specs, ("X", (0.0, 0.0, 0.0))), "")
 
     def test_create_muscle_vcp_assigns_selected_fibers(self):
         fiber1 = Bag(id="F1", node_count=8, mid_touches=[], muscle_id="")

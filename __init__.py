@@ -34,6 +34,7 @@ from .operators.add_fiber_vcp import AF_OT_AddFiberVCP
 from .operators.fiber_proxy import (
     AF_OT_ConnectProxyVerticesWithFiber,
     AF_OT_CreateLoopFiberFromSelectedVertices,
+    AF_OT_CreateSymmetricLoopFiberFromSelectedVertices,
 )
 from .operators.add_muscle_vcp import AF_OT_AddMuscleVCP
 from .operators.add_blob_vcp import AF_OT_AddBlobVCP
@@ -180,6 +181,7 @@ classes = (
     AF_OT_AddFiberVCP,
     AF_OT_ConnectProxyVerticesWithFiber,
     AF_OT_CreateLoopFiberFromSelectedVertices,
+    AF_OT_CreateSymmetricLoopFiberFromSelectedVertices,
     AF_OT_AddMuscleVCP,
     AF_OT_AddBlobVCP,
     AF_OT_ToggleVCPCollapse,

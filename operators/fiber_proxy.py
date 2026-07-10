@@ -3,6 +3,7 @@ import bpy
 from ..app.use_cases.fiber_create import (
     create_fiber_from_proxy_vertices,
     create_loop_fiber_from_selected_vertices,
+    create_symmetric_loop_fiber_from_selected_vertices,
 )
 
 
@@ -29,3 +30,12 @@ class AF_OT_CreateLoopFiberFromSelectedVertices(bpy.types.Operator):
 
     def execute(self, context):
         return _finish(self, create_loop_fiber_from_selected_vertices(context))
+
+
+class AF_OT_CreateSymmetricLoopFiberFromSelectedVertices(bpy.types.Operator):
+    bl_idname = "af.create_symmetric_loop_fiber_from_selected_vertices"
+    bl_label = "Create Symmetric Loop Fiber From Selected Vertices"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        return _finish(self, create_symmetric_loop_fiber_from_selected_vertices(context))
