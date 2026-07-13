@@ -1,4 +1,5 @@
 import bpy
+import hashlib
 import json
 from mathutils import Vector
 from bpy_extras import view3d_utils
@@ -7,7 +8,8 @@ from ..deps.control_lifecycle import mark_dynamic_control_object
 from ..scp_runtime.object_colors import apply_object_color
 from ..attachment_codec import fiber_attach_signature
 from ..scp_proxy.signature import mesh_topology_signature
-from ..utils import depsgraph_for_scene, scene_for_id
+from ..perf_trace import perf_count, perf_time, perf_timer
+from ..utils import depsgraph_for_scene, scene_cache_get, scene_cache_set, scene_for_id
 from ..scp_runtime.common import find_geometry_scp_obj
 from ..vcp.attachment_backend import resolve_attachment_normal, resolve_attachment_world
 
@@ -20,7 +22,10 @@ def get_vis_collection(scene, collection_name):
     return col
 
 
-def find_fiber_proxy(vis_col, root_name, fiber_id):
+def find_fiber_proxy(vis_col, root_name, fiber_id, index=None):
+    indexed = _indexed(index, "fiber", str(fiber_id or ""))
+    if indexed is not None:
+        return indexed
     for obj in vis_col.objects:
         if (
             obj.get("af_fiber_proxy")
@@ -30,6 +35,10 @@ def find_fiber_proxy(vis_col, root_name, fiber_id):
         ):
             return obj
     return None
+
+
+def _indexed(index, bucket, key):
+    return None if index is None else dict(index.get(bucket, {})).get(key)
 
 
 def _find_with(objects, predicate):
@@ -45,7 +54,10 @@ def _endpoint_match(obj, root_name, fiber_id, endpoint):
     )
 
 
-def find_endpoint_handle(vis_col, root_name, fiber_id, endpoint):
+def find_endpoint_handle(vis_col, root_name, fiber_id, endpoint, index=None):
+    indexed = _indexed(index, "endpoint", (str(fiber_id or ""), str(endpoint or "")))
+    if indexed is not None:
+        return indexed
     return _find_with(
         vis_col.objects,
         lambda obj: _endpoint_match(obj, root_name, fiber_id, endpoint),
@@ -73,7 +85,10 @@ def _loop_anchor_match(obj, root_name, fiber_id, anchor_index):
     )
 
 
-def find_touch_handle(vis_col, root_name, fiber_id, touch_index):
+def find_touch_handle(vis_col, root_name, fiber_id, touch_index, index=None):
+    indexed = _indexed(index, "touch", (str(fiber_id or ""), int(touch_index)))
+    if indexed is not None:
+        return indexed
     return _find_with(
         vis_col.objects,
         lambda obj: _touch_match(obj, root_name, fiber_id, touch_index),
@@ -83,7 +98,10 @@ def find_touch_handle(vis_col, root_name, fiber_id, touch_index):
     )
 
 
-def find_loop_anchor_handle(vis_col, root_name, fiber_id, anchor_index):
+def find_loop_anchor_handle(vis_col, root_name, fiber_id, anchor_index, index=None):
+    indexed = _indexed(index, "loop", (str(fiber_id or ""), int(anchor_index)))
+    if indexed is not None:
+        return indexed
     return _find_with(
         vis_col.objects,
         lambda obj: _loop_anchor_match(obj, root_name, fiber_id, anchor_index),
@@ -196,29 +214,81 @@ def create_fiber_proxy(vis_col, root, fiber_id, default_color):
     return obj
 
 
-def update_curve_points(obj, points, thickness, bake=False, cyclic=False):
-    curve = obj.data
+def _fiber_points_key(root_name, fiber_id):
+    return f"fiber_points:{str(root_name or '')}:{str(fiber_id or '')}"
+
+
+def cached_fiber_points(scene, root_name, fiber_id):
+    raw = scene_cache_get(scene, _fiber_points_key(root_name, fiber_id))
+    return None if raw is None else [Vector(item) for item in raw]
+
+
+def _store_fiber_points(obj, points):
+    scene = scene_for_id(obj)
+    key = _fiber_points_key(obj.get("af_root_name"), obj.get("af_fiber_id"))
+    scene_cache_set(scene, key, tuple((float(p.x), float(p.y), float(p.z)) for p in points))
+
+
+def _clear_fiber_points_cache(obj):
+    scene = scene_for_id(obj)
+    key = _fiber_points_key(obj.get("af_root_name"), obj.get("af_fiber_id"))
+    scene_cache_set(scene, key, ())
+
+
+def _curve_signature(points, thickness, bake, cyclic):
+    h = hashlib.sha1(f"{len(points)}|{float(thickness):.8f}|{int(bake)}|{int(cyclic)}".encode())
+    for p in points:
+        h.update(f"|{float(p.x):.6f},{float(p.y):.6f},{float(p.z):.6f}".encode())
+    return h.hexdigest()
+
+
+def _flat_curve_points(points):
+    return [value for p in points for value in (float(p.x), float(p.y), float(p.z), 1.0)]
+
+
+def _clear_splines(curve):
     while curve.splines:
         curve.splines.remove(curve.splines[0])
 
+
+def _write_curve_spline(curve, points, cyclic):
+    _clear_splines(curve)
     spline = curve.splines.new(type="POLY")
     spline.points.add(len(points) - 1)
-    for i, p in enumerate(points):
-        spline.points[i].co = (p.x, p.y, p.z, 1.0)
+    spline.points.foreach_set("co", _flat_curve_points(points))
     spline.use_cyclic_u = bool(cyclic and len(points) > 2)
 
+
+def update_curve_points(obj, points, thickness, bake=False, cyclic=False):
+    scene, start = scene_for_id(obj), perf_timer()
+    signature = _curve_signature(points, thickness, bake, cyclic)
+    _store_fiber_points(obj, points)
+    try:
+        if obj.get("af_fiber_points_signature") == signature:
+            perf_count(scene, "curve_rewrite_skipped")
+            return
+        _write_curve_payload(obj, points, thickness, bake, cyclic, signature)
+    finally:
+        perf_time(scene, "fiber_curve_update", start)
+
+
+def _write_curve_payload(obj, points, thickness, bake, cyclic, signature):
+    curve = obj.data
+    _write_curve_spline(curve, points, cyclic)
     curve.bevel_depth = max(0.0, float(thickness))
     curve.fill_mode = "FULL"
     obj["af_fiber_points_world"] = json.dumps([[float(p.x), float(p.y), float(p.z)] for p in points])
     obj["af_fiber_points_mode"] = "BAKE" if bake else "INTERACTIVE"
+    obj["af_fiber_points_signature"] = signature
 
 
 def clear_curve_points(obj):
     curve = obj.data
-    while curve.splines:
-        curve.splines.remove(curve.splines[0])
+    _clear_splines(curve)
+    _clear_fiber_points_cache(obj)
     obj["af_fiber_points_world"] = "[]"
     obj["af_fiber_points_mode"] = "INTERACTIVE"
+    obj["af_fiber_points_signature"] = ""
 
 
 def get_scp_proxy(scene, root_name, scp_id):

@@ -27,21 +27,23 @@ from .muscle_sync_helpers import (
 from .muscle_inflation_modes import muscle_inflation_behavior, uses_inflation_control
 from .muscle_sync_runtime import collect_muscle_rows, ensure_inflation_ctrl
 from .control_runtime import active_entity_id
+from .vcp_object_index import build_vcp_object_index
 
 
 class MuscleSceneSync:
     def __init__(self, collection_name="AF_VCP_VIS"):
         self.collection_name = collection_name
         self._syncing = False
+        self._object_index = None
 
     def _get_vis_collection(self, scene):
         return get_vis_collection(scene, self.collection_name)
 
     def _find_muscle_proxy(self, vis_col, root_name, muscle_id, surface_type="BASE"):
-        return find_muscle_proxy(vis_col, root_name, muscle_id, surface_type=surface_type)
+        return find_muscle_proxy(vis_col, root_name, muscle_id, surface_type=surface_type, index=self._object_index)
 
     def _find_inflation_ctrl(self, vis_col, root_name, muscle_id):
-        return find_inflation_ctrl(vis_col, root_name, muscle_id)
+        return find_inflation_ctrl(vis_col, root_name, muscle_id, index=self._object_index)
 
     def _create_muscle_proxy(self, vis_col, root, muscle_id, surface_type):
         return create_muscle_proxy(vis_col, root, muscle_id, surface_type)
@@ -242,6 +244,7 @@ class MuscleSceneSync:
 
     def _sync_root_pass(self, root, scene, target_muscle_ids):
         vis_col = self._get_vis_collection(scene)
+        self._object_index = build_vcp_object_index(vis_col, root.name)
         vcp = root.af_vcp_system
         all_ids, target_ids = self._muscle_ids_to_sync(vcp, target_muscle_ids)
         active_id = self._selected_muscle_id(vcp, root, scene)
@@ -279,6 +282,7 @@ class MuscleSceneSync:
         try:
             self._sync_root_pass(root, scene, target_muscle_ids)
         finally:
+            self._object_index = None
             self._syncing = False
 
     def _is_relevant_inflation_update(self, root, vis_col, obj):

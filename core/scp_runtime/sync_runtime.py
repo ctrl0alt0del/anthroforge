@@ -4,13 +4,15 @@ import bpy
 
 from ..deps.runtime_trace import trace_line
 from ..deps.dirty_hints import dirty_hints_for
+from ..perf_trace import perf_time, perf_timer
 from ..shortcuts.session_state import consume_suppressed_ids
 from ..utils import get_af_root, scene_for_id, update_scene_view_layer
 from .attachment_runtime import apply_scp_attachments
-from .bound_objects import sync_all_scp_roles
+from .bound_objects import sync_all_scp_roles, sync_scp_roles_for_ids
 from .common import as_id, is_bound_scp_obj, scp_prop_map
 from .marking import detach_native_scp_parent_links, normalize_active_index, sync_parent_links
 from .mirror_scene import sync_mirrors
+from .tree import children_map
 
 
 def _resolve_sync_inputs(root, scene):
@@ -50,7 +52,15 @@ def _trace_sync_start(target_scp_ids, attachment_parent_ids):
 
 
 def _sync_pass_body(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta):
-    sync_all_scp_roles(root)
+    start = perf_timer()
+    try:
+        _sync_pass_steps(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta)
+    finally:
+        perf_time(scene, "scp_sync_body", start)
+
+
+def _sync_pass_steps(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta):
+    _sync_roles(root, target_scp_ids, attachment_parent_ids)
     detach_native_scp_parent_links(root, scene)
     sync_parent_links(root)
     normalize_active_index(root)
@@ -60,6 +70,28 @@ def _sync_pass_body(sync, root, scene, target_scp_ids, attachment_parent_ids, at
     _refresh_view_layer(scene)
     sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=target_scp_ids)
     _refresh_view_layer(scene)
+
+
+def _sync_roles(root, target_scp_ids, attachment_parent_ids):
+    ids = _role_scope_ids(root, target_scp_ids, attachment_parent_ids)
+    sync_all_scp_roles(root) if ids is None else sync_scp_roles_for_ids(root, ids)
+
+
+def _role_scope_ids(root, target_scp_ids, attachment_parent_ids):
+    if target_scp_ids is None:
+        return None
+    seeds = {as_id(v) for v in set(target_scp_ids or set()) | set(attachment_parent_ids or set()) if as_id(v)}
+    return _expanded_role_ids({as_id(s.id): s for s in root.af_scp_system.scps}, seeds)
+
+
+def _expanded_role_ids(scp_by_id, seeds):
+    kids, out, stack = children_map(scp_by_id), set(seeds or set()), list(seeds or set())
+    while stack:
+        current = stack.pop()
+        for child_id in kids.get(current, ()):
+            if child_id not in out:
+                out.add(child_id); stack.append(child_id)
+    return out
 
 
 def _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta):

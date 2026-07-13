@@ -3,6 +3,7 @@ from heapq import heappop, heappush
 from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
+from ..perf_trace import perf_count, perf_time, perf_timer
 from ..utils import depsgraph_for_scene, scene_cache_get, scene_cache_set, scene_for_id
 from .common import _EPS, matrix_flat16
 
@@ -85,8 +86,13 @@ def _cache_key(mesh_obj):
     return None if mesh_obj is None else int(mesh_obj.as_pointer())
 
 
-def _surface_entry_key(mesh_obj):
-    return None if mesh_obj is None else f"surface:{_cache_key(mesh_obj)}"
+def _typed_cache_key(kind, mesh_obj):
+    key = _cache_key(mesh_obj)
+    return None if key is None else (str(kind), key)
+
+
+def _surface_entry_key(mesh_obj, kind="full"):
+    return None if mesh_obj is None else f"surface:{kind}:{_cache_key(mesh_obj)}"
 
 
 def _data_id(data):
@@ -105,69 +111,134 @@ def _surface_stamp(obj_eval):
     return (_data_id(data), _mesh_counts(data), tuple(matrix_flat16(obj_eval.matrix_world)))
 
 
-def _remember_surface(cache, key, stamp, surface):
+def _remember_payload(cache, key, stamp, name, payload):
     if cache is not None and key is not None:
-        cache[key] = {"stamp": stamp, "surface": surface}
-    return surface
+        cache[key] = {"stamp": stamp, str(name): payload}
+    return payload
 
 
-def _local_surface(cache, key, stamp):
+def _local_payload(cache, key, stamp, name):
     entry = None if cache is None or key is None else cache.get(key)
-    return None if entry is None or entry.get("stamp") != stamp else entry.get("surface")
+    return None if entry is None or entry.get("stamp") != stamp else entry.get(str(name))
 
 
-def _cached_surface(mesh_obj, depsgraph):
+def _cached_surface(mesh_obj, depsgraph, kind="full"):
     scene = scene_for_id(mesh_obj)
     if scene is None or mesh_obj is None or depsgraph is None:
         return None, None, None
     obj_eval = mesh_obj.evaluated_get(depsgraph)
-    return scene, _surface_stamp(obj_eval), scene_cache_get(scene, _surface_entry_key(mesh_obj))
+    return scene, _surface_stamp(obj_eval), scene_cache_get(scene, _surface_entry_key(mesh_obj, kind))
 
 
-def _store_surface(scene, mesh_obj, stamp, surface):
-    if scene is not None and mesh_obj is not None and surface is not None:
-        scene_cache_set(scene, _surface_entry_key(mesh_obj), {"stamp": stamp, "surface": surface})
+def _store_payload(scene, mesh_obj, stamp, kind, name, payload):
+    if scene is not None and mesh_obj is not None and payload is not None:
+        scene_cache_set(scene, _surface_entry_key(mesh_obj, kind), {"stamp": stamp, str(name): payload})
 
 
 def build_mesh_surface_data(mesh_obj, depsgraph, cache=None):
-    key = _cache_key(mesh_obj)
-    scene, stamp, entry = _cached_surface(mesh_obj, depsgraph)
-    local = _local_surface(cache, key, stamp)
+    key = _typed_cache_key("full", mesh_obj)
+    scene, stamp, entry = _cached_surface(mesh_obj, depsgraph, "full")
+    local = _local_payload(cache, key, stamp, "surface")
     if local is not None:
         return local
     if entry and entry.get("stamp") == stamp:
-        return _remember_surface(cache, key, stamp, entry["surface"])
+        return _remember_payload(cache, key, stamp, "surface", entry["surface"])
     surface = _build_surface(mesh_obj, depsgraph)
-    _store_surface(scene, mesh_obj, stamp, surface)
-    return _remember_surface(cache, key, stamp, surface)
+    _store_payload(scene, mesh_obj, stamp, "full", "surface", surface)
+    return _remember_payload(cache, key, stamp, "surface", surface)
+
+
+def build_mesh_surface_bounds(mesh_obj, depsgraph, cache=None):
+    key = _typed_cache_key("bounds", mesh_obj)
+    scene, stamp, entry = _cached_surface(mesh_obj, depsgraph, "bounds")
+    local = _local_payload(cache, key, stamp, "bounds")
+    if local is not None:
+        return local
+    if entry and entry.get("stamp") == stamp:
+        return _remember_payload(cache, key, stamp, "bounds", entry["bounds"])
+    bounds = _build_bounds(mesh_obj, depsgraph)
+    _store_payload(scene, mesh_obj, stamp, "bounds", "bounds", bounds)
+    return _remember_payload(cache, key, stamp, "bounds", bounds)
+
+
+def build_mesh_surface_points(mesh_obj, depsgraph, kind, cache=None):
+    key = _typed_cache_key(str(kind), mesh_obj)
+    scene, stamp, entry = _cached_surface(mesh_obj, depsgraph, str(kind))
+    local = _local_payload(cache, key, stamp, str(kind))
+    if local is not None:
+        return local
+    if entry and entry.get("stamp") == stamp:
+        return _remember_payload(cache, key, stamp, str(kind), entry[str(kind)])
+    points = _build_points(mesh_obj, depsgraph, str(kind))
+    _store_payload(scene, mesh_obj, stamp, str(kind), str(kind), points)
+    return _remember_payload(cache, key, stamp, str(kind), points)
 
 
 def _build_surface(mesh_obj, depsgraph):
+    scene, start = scene_for_id(mesh_obj), perf_timer()
+    try:
+        return _build_surface_uncached(mesh_obj, depsgraph, scene)
+    finally:
+        perf_time(scene, "surface_build", start)
+
+
+def _build_surface_uncached(mesh_obj, depsgraph, scene):
     obj_eval = mesh_obj.evaluated_get(depsgraph)
     mesh_eval = obj_eval.to_mesh()
     if mesh_eval is None:
         return None
     try:
-        return _surface_payload(obj_eval, mesh_eval)
+        return _surface_payload(obj_eval, mesh_eval, scene)
     finally:
         obj_eval.to_mesh_clear()
 
 
-def _surface_payload(obj_eval, mesh_eval):
+def _build_bounds(mesh_obj, depsgraph):
+    obj_eval = mesh_obj.evaluated_get(depsgraph)
+    if _mesh_counts(getattr(obj_eval, "data", None))[0] <= 0:
+        return None
+    return _eval_bounds_world(obj_eval)
+
+
+def _eval_bounds_world(obj_eval):
+    points = [obj_eval.matrix_world @ Vector(corner) for corner in tuple(obj_eval.bound_box or ())]
+    return None if not points else _world_bounds(points)
+
+
+def _build_points(mesh_obj, depsgraph, kind):
+    obj_eval = mesh_obj.evaluated_get(depsgraph)
+    mesh_eval = obj_eval.to_mesh()
+    if mesh_eval is None or len(mesh_eval.vertices) <= 0:
+        return None
+    try:
+        return _points_payload(obj_eval, mesh_eval, kind)
+    finally:
+        obj_eval.to_mesh_clear()
+
+
+def _points_payload(obj_eval, mesh_eval, kind):
+    if str(kind) == "face_centers":
+        return _face_centers(obj_eval, mesh_eval)
+    return [obj_eval.matrix_world @ v.co.copy() for v in mesh_eval.vertices]
+
+
+def _surface_payload(obj_eval, mesh_eval, scene):
     if len(mesh_eval.vertices) <= 0:
         return None
     mesh_eval.calc_loop_triangles()
     verts_local = [v.co.copy() for v in mesh_eval.vertices]
     verts = [obj_eval.matrix_world @ v for v in verts_local]
     triangles = [tuple(tri.vertices) for tri in mesh_eval.loop_triangles]
-    return _surface_payload_data(obj_eval, mesh_eval, verts_local, verts, triangles)
+    return _surface_payload_data(obj_eval, mesh_eval, verts_local, verts, triangles, scene)
 
 
-def _surface_payload_data(obj_eval, mesh_eval, verts_local, verts_world, triangles):
+def _surface_payload_data(obj_eval, mesh_eval, verts_local, verts_world, triangles, scene):
     bvh_local = None if not triangles else BVHTree.FromPolygons(verts_local, triangles, all_triangles=True)
     bvh_world = None if not triangles else BVHTree.FromPolygons(verts_world, triangles, all_triangles=True)
     if bvh_local is None or bvh_world is None:
         return None
+    perf_count(scene, "surface_payload_built")
+    perf_count(scene, "bvh_built", 2)
     return {
         "bvh_local": bvh_local, "bvh_world": bvh_world, "face_centers": _face_centers(obj_eval, mesh_eval),
         "triangles": triangles, "verts_world": verts_world, "bounds_world": _world_bounds(verts_world),
@@ -211,13 +282,11 @@ def _world_bounds(verts_world):
 
 
 def build_face_centers(mesh_obj, depsgraph, cache=None):
-    surface = build_mesh_surface_data(mesh_obj, depsgraph, cache=cache)
-    return None if not surface else surface["face_centers"]
+    return build_mesh_surface_points(mesh_obj, depsgraph, "face_centers", cache=cache)
 
 
 def build_vertex_points(mesh_obj, depsgraph, cache=None):
-    surface = build_mesh_surface_data(mesh_obj, depsgraph, cache=cache)
-    return None if not surface else surface["verts_world"]
+    return build_mesh_surface_points(mesh_obj, depsgraph, "verts_world", cache=cache)
 
 
 def surface_shortest_vertex_path(surface, start_vertex, end_vertex):

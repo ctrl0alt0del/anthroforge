@@ -38,6 +38,7 @@ class FiberSceneSync:
         self.collection_name = collection_name
         self._solver = FiberSolver(surface_offset=0.002)
         self._syncing = False
+        self._object_index = None
         self.default_fiber_color = DEFAULT_FIBER_COLOR
         self.selected_fiber_color = SELECTED_FIBER_COLOR
 
@@ -60,16 +61,16 @@ class FiberSceneSync:
         return get_vis_collection(scene, self.collection_name)
 
     def _find_fiber_proxy(self, vis_col, root_name, fiber_id):
-        return find_fiber_proxy(vis_col, root_name, fiber_id)
+        return find_fiber_proxy(vis_col, root_name, fiber_id, self._object_index)
 
     def _find_endpoint_handle(self, vis_col, root_name, fiber_id, endpoint):
-        return find_endpoint_handle(vis_col, root_name, fiber_id, endpoint)
+        return find_endpoint_handle(vis_col, root_name, fiber_id, endpoint, self._object_index)
 
     def _find_touch_handle(self, vis_col, root_name, fiber_id, touch_index):
-        return find_touch_handle(vis_col, root_name, fiber_id, touch_index)
+        return find_touch_handle(vis_col, root_name, fiber_id, touch_index, self._object_index)
 
     def _find_loop_anchor_handle(self, vis_col, root_name, fiber_id, anchor_index):
-        return find_loop_anchor_handle(vis_col, root_name, fiber_id, anchor_index)
+        return find_loop_anchor_handle(vis_col, root_name, fiber_id, anchor_index, self._object_index)
 
     def _create_endpoint_handle(self, vis_col, root, fiber_id, endpoint):
         return create_endpoint_handle(vis_col, root, fiber_id, endpoint)

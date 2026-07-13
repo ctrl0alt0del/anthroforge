@@ -6,6 +6,7 @@ from ..deps.conflict_resolver import resolve_conflict
 from ..vcp.fiber_modes import is_loop_fiber, is_open_fiber
 from ..utils import depsgraph_for_scene, get_af_root, scene_for_id
 from .control_runtime import active_entity_id
+from .vcp_object_index import build_vcp_object_index
 
 
 def _iter_endpoints(fiber):
@@ -182,11 +183,13 @@ def _run_scene_sync(sync, root, scene, depsgraph, bake, target_fiber_ids, window
     sync._syncing = True
     try:
         vis_col = sync._get_vis_collection(scene)
+        sync._object_index = build_vcp_object_index(vis_col, root.name)
         _sync_target_fibers(sync, vis_col, root, scene, depsgraph, bake, target_fiber_ids)
         _cleanup_stale_fiber_proxies(vis_col, root.name, {f.id for f in root.af_vcp_system.fibers})
         sync._sync_handles(root, scene, vis_col, {}, window_manager=window_manager)
         sync._apply_selection_highlight(root, scene)
     finally:
+        sync._object_index = None
         sync._syncing = False
 
 
@@ -194,9 +197,11 @@ def _run_selection_refresh(sync, root, scene, window_manager=None):
     sync._syncing = True
     try:
         vis_col = sync._get_vis_collection(scene)
+        sync._object_index = build_vcp_object_index(vis_col, root.name)
         sync._sync_handles(root, scene, vis_col, {}, window_manager=window_manager)
         sync._apply_selection_highlight(root, scene)
     finally:
+        sync._object_index = None
         sync._syncing = False
 
 

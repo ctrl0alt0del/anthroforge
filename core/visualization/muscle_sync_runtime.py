@@ -2,6 +2,7 @@ import json
 from mathutils import Vector
 
 from ..vcp.runtime_state import muscle_inflation_ctrl_world, set_muscle_inflation_ctrl_world
+from .fiber_sync_helpers import cached_fiber_points
 from .mirror_rules import axis_index, effective_rule_for_muscle
 
 
@@ -12,29 +13,32 @@ def collect_fiber_points(root, scene, fiber_props):
     vis_col = fsync._get_vis_collection(scene)
     if vis_col is None:
         return None
-
     out = []
     for f in fiber_props:
-        fobj = fsync._find_fiber_proxy(vis_col, root.name, f.id)
-        if fobj is None:
+        pts = _fiber_points(scene, root, fsync, vis_col, f)
+        if pts is None or len(pts) < 2:
             return None
-
-        raw = fobj.get("af_fiber_points_world", "")
-        if not raw:
-            return None
-
-        try:
-            arr = json.loads(raw)
-            pts = [Vector((float(v[0]), float(v[1]), float(v[2]))) for v in arr]
-        except Exception:
-            return None
-
-        if len(pts) < 2:
-            return None
-
         out.append(pts)
-
     return out
+
+
+def _fiber_points(scene, root, fsync, vis_col, fiber):
+    cached = cached_fiber_points(scene, root.name, fiber.id)
+    if cached is not None:
+        return cached
+    fobj = fsync._find_fiber_proxy(vis_col, root.name, fiber.id)
+    return None if fobj is None else _json_fiber_points(fobj)
+
+
+def _json_fiber_points(fobj):
+    raw = fobj.get("af_fiber_points_world", "")
+    if not raw:
+        return None
+    try:
+        arr = json.loads(raw)
+        return [Vector((float(v[0]), float(v[1]), float(v[2]))) for v in arr]
+    except Exception:
+        return None
 
 
 def collect_muscle_rows(root, scene, muscle, fiber_props):

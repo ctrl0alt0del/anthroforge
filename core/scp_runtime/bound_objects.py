@@ -191,7 +191,7 @@ def _invalidate_object_index(root):
     invalidate_scp_object_maps(scene_for_id(root), root.name)
 
 
-def sync_scp_roles(root, scp):
+def sync_scp_roles(root, scp, invalidate=True):
     for obj in list(_live_bound_objects(scp)):
         clear_scp_tags(obj)
     _ensure_role_entries(root, scp)
@@ -200,7 +200,7 @@ def sync_scp_roles(root, scp):
     _sync_parenting(scp)
     _sync_identity(scp)
     _sync_color(root, scp)
-    _invalidate_object_index(root)
+    _invalidate_object_index(root) if invalidate else None
 
 
 def _live_bound_objects(scp):
@@ -256,4 +256,14 @@ def set_bound_native_parenting(root, scp, bound_id, enabled):
 
 def sync_all_scp_roles(root):
     for scp in root.af_scp_system.scps:
-        sync_scp_roles(root, scp)
+        sync_scp_roles(root, scp, invalidate=False)
+    _invalidate_object_index(root)
+
+
+def sync_scp_roles_for_ids(root, scp_ids):
+    wanted = {as_id(value) for value in set(scp_ids or set()) if as_id(value)}
+    if not wanted:
+        return
+    for scp in root.af_scp_system.scps:
+        sync_scp_roles(root, scp, invalidate=False) if as_id(scp.id) in wanted else None
+    _invalidate_object_index(root)

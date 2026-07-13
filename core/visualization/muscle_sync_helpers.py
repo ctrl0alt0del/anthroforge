@@ -1,8 +1,11 @@
 import bpy
+import hashlib
 
 from ..deps.control_lifecycle import mark_dynamic_control_object
+from ..perf_trace import perf_count, perf_time, perf_timer
 from ..scp_runtime.object_colors import apply_object_color
 from ..scp_runtime.surface import surface_bvh_local
+from ..utils import scene_for_id
 
 
 def get_vis_collection(scene, collection_name):
@@ -13,7 +16,14 @@ def get_vis_collection(scene, collection_name):
     return col
 
 
-def find_muscle_proxy(vis_col, root_name, muscle_id, surface_type="BASE"):
+def _indexed(index, bucket, key):
+    return None if index is None else dict(index.get(bucket, {})).get(key)
+
+
+def find_muscle_proxy(vis_col, root_name, muscle_id, surface_type="BASE", index=None):
+    indexed = _indexed(index, "muscle", (str(muscle_id or ""), str(surface_type or "")))
+    if indexed is not None:
+        return indexed
     for obj in vis_col.objects:
         if (
             obj.get("af_muscle_proxy")
@@ -26,7 +36,14 @@ def find_muscle_proxy(vis_col, root_name, muscle_id, surface_type="BASE"):
     return None
 
 
-def find_inflation_ctrl(vis_col, root_name, muscle_id):
+def find_inflation_ctrl(vis_col, root_name, muscle_id, index=None):
+    indexed = _indexed(index, "inflation", str(muscle_id or ""))
+    if indexed is not None:
+        return indexed
+    return _find_inflation_ctrl_in_collection(vis_col, root_name, muscle_id) or _find_inflation_ctrl_global(root_name, muscle_id)
+
+
+def _find_inflation_ctrl_in_collection(vis_col, root_name, muscle_id):
     for obj in vis_col.objects:
         if (
             obj.get("af_muscle_inflation_ctrl")
@@ -34,6 +51,10 @@ def find_inflation_ctrl(vis_col, root_name, muscle_id):
             and obj.get("af_muscle_id") == muscle_id
         ):
             return obj
+    return None
+
+
+def _find_inflation_ctrl_global(root_name, muscle_id):
     for obj in bpy.data.objects:
         if (
             obj.get("af_muscle_inflation_ctrl")
@@ -100,10 +121,63 @@ def ensure_material(obj, active=False):
 
 
 def update_mesh(obj, verts, faces):
+    scene, start = scene_for_id(obj), perf_timer()
+    try:
+        _update_mesh_payload(obj, verts, faces)
+    finally:
+        perf_time(scene, "muscle_mesh_update", start)
+
+
+def _update_mesh_payload(obj, verts, faces):
     mesh = obj.data
+    sig, topo = _mesh_signature(verts, faces), _topology_signature(faces)
+    if obj.get("af_mesh_signature") == sig:
+        perf_count(scene_for_id(obj), "mesh_rewrite_skipped")
+        return
+    if _same_topology(obj, mesh, verts, topo):
+        _update_mesh_vertices(obj, mesh, verts, sig)
+        return
+    _rebuild_mesh(obj, mesh, verts, faces, sig, topo)
+
+
+def _same_topology(obj, mesh, verts, topo):
+    return obj.get("af_mesh_topology_signature") == topo and len(mesh.vertices) == len(verts)
+
+
+def _update_mesh_vertices(obj, mesh, verts, sig):
+    mesh.vertices.foreach_set("co", _flat_verts(verts))
+    mesh.update()
+    obj["af_mesh_signature"] = sig
+
+
+def _rebuild_mesh(obj, mesh, verts, faces, sig, topo):
     mesh.clear_geometry()
     mesh.from_pydata(verts, [], faces)
     mesh.update()
+    obj["af_mesh_signature"] = sig
+    obj["af_mesh_topology_signature"] = topo
+
+
+def _flat_verts(verts):
+    return [float(value) for co in verts for value in _co3(co)]
+
+
+def _co3(co):
+    return (float(co.x), float(co.y), float(co.z)) if hasattr(co, "x") else (float(co[0]), float(co[1]), float(co[2]))
+
+
+def _topology_signature(faces):
+    h = hashlib.sha1()
+    for face in tuple(faces or ()):
+        h.update((",".join(str(int(v)) for v in face) + ";").encode())
+    return h.hexdigest()
+
+
+def _mesh_signature(verts, faces):
+    h = hashlib.sha1(_topology_signature(faces).encode())
+    for co in tuple(verts or ()):
+        h.update("|{:.6f},{:.6f},{:.6f}".format(*_co3(co)).encode())
+    return h.hexdigest()
 
 
 def remove_proxy_obj(obj):

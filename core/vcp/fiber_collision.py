@@ -2,8 +2,9 @@ from math import floor
 
 from mathutils import Vector
 
+from ..perf_trace import perf_count, perf_time, perf_timer
 from ..scp_runtime.common import iter_geometry_mesh_scp_objects
-from ..scp_runtime.surface import build_mesh_surface_data, surface_shortest_param_path, surface_shortest_vertex_path
+from ..scp_runtime.surface import build_mesh_surface_bounds, build_mesh_surface_data, surface_shortest_param_path, surface_shortest_vertex_path
 from ..utils import scene_cache_get, scene_cache_set
 
 
@@ -60,33 +61,64 @@ class CollisionOracle:
 
     def surface_path(self, owner_id, start_vertex, end_vertex):
         collider = _collider_by_id(self.colliders(), owner_id)
-        surface = None if collider is None else collider.get("surface")
+        surface = None if collider is None else _collider_surface(collider)
         return None if surface is None else surface_shortest_vertex_path(surface, start_vertex, end_vertex)
 
     def surface_param_path(self, owner_id, start_param, end_param):
         collider = _collider_by_id(self.colliders(), owner_id)
-        surface = None if collider is None else collider.get("surface")
+        surface = None if collider is None else _collider_surface(collider)
         return None if surface is None else surface_shortest_param_path(surface, start_param, end_param)
 
 
 def _build_colliders(root, scene, depsgraph):
+    start = perf_timer()
+    try:
+        return _build_colliders_uncached(root, scene, depsgraph)
+    finally:
+        perf_time(scene, "collider_build", start)
+
+
+def _build_colliders_uncached(root, scene, depsgraph):
     items = []
     for obj in iter_geometry_mesh_scp_objects(scene, root.name):
-        item = _collider_entry(obj, build_mesh_surface_data(obj, depsgraph))
+        item = _collider_entry(obj, build_mesh_surface_bounds(obj, depsgraph), depsgraph)
         if item is not None:
             items.append(item)
+    perf_count(scene, "collider_records_built", len(items))
     return sorted(items, key=lambda item: item["sid"])
 
 
-def _collider_entry(obj, surface):
-    if not surface:
+def _collider_entry(obj, bounds, depsgraph):
+    if not bounds:
         return None
     return {
-        "sid": str(obj.get("af_scp_id", "") or ""), "obj": obj, "bvh": surface["bvh_local"],
-        "surface": surface,
+        "sid": str(obj.get("af_scp_id", "") or ""), "obj": obj, "depsgraph": depsgraph,
+        "bvh": None, "surface": None,
         "m_inv": obj.matrix_world.inverted(), "m": obj.matrix_world.copy(), "m3": obj.matrix_world.to_3x3(),
-        "mn": surface["bounds_world"][0], "mx": surface["bounds_world"][1], "stamp": _collider_stamp(obj),
+        "mn": bounds[0], "mx": bounds[1], "stamp": _collider_stamp(obj),
     }
+
+
+def _collider_surface(collider):
+    if collider is None:
+        return None
+    if collider.get("surface") is None:
+        _materialize_collider(collider)
+    return collider.get("surface")
+
+
+def _collider_bvh(collider):
+    surface = _collider_surface(collider)
+    return None if surface is None else collider.get("bvh")
+
+
+def _materialize_collider(collider):
+    surface = build_mesh_surface_data(collider["obj"], collider.get("depsgraph"))
+    if surface is None:
+        return None
+    collider["surface"], collider["bvh"] = surface, surface["bvh_local"]
+    collider["mn"], collider["mx"] = surface["bounds_world"]
+    return surface
 
 
 def _collider_by_id(colliders, owner_id):
@@ -281,12 +313,15 @@ def _segment_ray_hit(collider, a, b):
 
 
 def _segment_ray_world_hit(collider, a, b):
+    bvh = _collider_bvh(collider)
+    if bvh is None:
+        return None
     local_a, local_b = collider["m_inv"] @ a, collider["m_inv"] @ b
     delta = local_b - local_a
     length = delta.length
     if length <= 1.0e-9:
         return None
-    hit = collider["bvh"].ray_cast(local_a, delta.normalized(), length)
+    hit = bvh.ray_cast(local_a, delta.normalized(), length)
     return None if not hit or hit[0] is None else collider["m"] @ hit[0]
 
 
@@ -327,8 +362,11 @@ def _sample_pen(collider, point, margin):
 
 
 def _bvh_signed_distance(collider, point):
+    bvh = _collider_bvh(collider)
+    if bvh is None:
+        return 1.0e9
     local = collider["m_inv"] @ point
-    hit = collider["bvh"].find_nearest(local)
+    hit = bvh.find_nearest(local)
     return 1.0e9 if not hit or hit[0] is None else _signed_hit(collider, local, hit)
 
 
@@ -340,9 +378,12 @@ def _signed_hit(collider, local, hit):
 
 
 def _ray_sign(collider, local):
+    bvh = _collider_bvh(collider)
+    if bvh is None:
+        return 1.0
     limit = (collider["mx"] - collider["mn"]).length + 1.0
-    pos = _ray_hit(collider["bvh"], local, Vector((1.0, 0.0, 0.0)), limit)
-    neg = _ray_hit(collider["bvh"], local, Vector((-1.0, 0.0, 0.0)), limit)
+    pos = _ray_hit(bvh, local, Vector((1.0, 0.0, 0.0)), limit)
+    neg = _ray_hit(bvh, local, Vector((-1.0, 0.0, 0.0)), limit)
     return -1.0 if pos and neg else (1.0 if (not pos and not neg) else None)
 
 
@@ -382,8 +423,11 @@ def _point_needs_push(oracle, collider, point):
 
 
 def _nearest_push(collider, point, margin):
+    bvh = _collider_bvh(collider)
+    if bvh is None:
+        return point, 0.0
     local = collider["m_inv"] @ point
-    hit = collider["bvh"].find_nearest(local)
+    hit = bvh.find_nearest(local)
     if not hit or hit[0] is None:
         return point, 0.0
     return _push_from_hit(collider, local, hit, margin)
@@ -464,7 +508,8 @@ def _grid_point(payload, index):
 
 
 def _signed_grid_sample(collider, local):
-    hit = collider["bvh"].find_nearest(local)
+    bvh = _collider_bvh(collider)
+    hit = None if bvh is None else bvh.find_nearest(local)
     return 1.0e9 if not hit or hit[0] is None else _signed_hit(collider, local, hit)
 
 
@@ -491,7 +536,7 @@ def _build_shell_nodes(collider, margin, dense):
 
 
 def _mesh_shell_nodes(collider, margin, dense):
-    surface = collider.get("surface") or {}
+    surface = _collider_surface(collider) or {}
     verts = [Vector(v) for v in _sample_even(surface.get("verts_world", ()), _shell_vertex_limit(dense))]
     if not verts:
         return []

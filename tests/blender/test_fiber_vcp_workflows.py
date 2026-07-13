@@ -18,6 +18,7 @@ from _helpers import BlenderTestCase, capture_mesh_attachment, capture_world_att
 from anthroforge.app.use_cases.fiber_tools import recompute_fiber as recompute_fiber_action
 from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param, encode_fiber_vertex_index, parse_fiber_attach_param
 from anthroforge.core.scp_runtime.surface import _surface_route_graph, surface_shortest_param_path
+from anthroforge.core.vcp import fiber_collision
 from anthroforge.core.vcp import fiber_planner
 from anthroforge.core.vcp.fiber_collision import CollisionOracle, _active_for_bounds, _mesh_shell_nodes
 from anthroforge.core.vcp.fiber_solver import FiberSolver
@@ -35,8 +36,9 @@ from anthroforge.core.vcp.runtime_state import (
     set_fiber_recompute_status,
 )
 from anthroforge.core.visualization import fiber_sync_runtime as fiber_runtime
+from anthroforge.core.visualization import fiber_sync_helpers
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
-from anthroforge.core.visualization.fiber_sync_helpers import endpoint_world, mark_endpoint_handle, mark_touch_handle, touch_world
+from anthroforge.core.visualization.fiber_sync_helpers import cached_fiber_points, endpoint_world, mark_endpoint_handle, mark_touch_handle, touch_world
 
 
 def _fiber_setup():
@@ -393,6 +395,15 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
         self.assertEqual(len(json.loads(proxy["af_fiber_points_world"])), 96)
 
+    def test_curve_update_skips_unchanged_payload_and_caches_points(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        points = [Vector(value) for value in json.loads(proxy["af_fiber_points_world"])]
+        with patch.object(fiber_sync_helpers, "_write_curve_payload") as writer:
+            fiber_sync_helpers.update_curve_points(proxy, points, fiber.thickness)
+        cached = cached_fiber_points(bpy.context.scene, root_obj.name, fiber.id)
+        self.assertEqual((writer.call_count, len(cached)), (0, len(points)))
+
     def test_recompute_fiber_direct_mode_records_planner_metrics(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup_direct()
         bpy.ops.af.recompute_fiber()
@@ -464,6 +475,16 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertGreater(pen, 0.0)
         self.assertLess(pushed_again.x, 10.0)
         self.assertGreater(push_delta, 0.0)
+
+    def test_far_collider_filter_does_not_materialize_full_surface(self):
+        root_obj = root()
+        _cube_scp(root_obj, "FarBlocker", (100.0, 0.0, 0.0), 1.0)
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        oracle = CollisionOracle(root_obj, bpy.context.scene, depsgraph)
+        points = (Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.0)))
+        with patch.object(fiber_collision, "build_mesh_surface_data") as full_surface:
+            self.assertEqual(tuple(oracle.active_colliders_for_polyline(points)), ())
+        self.assertEqual(full_surface.call_count, 0)
 
     def test_planner_shell_nodes_follow_rotated_mesh_boundary(self):
         root_obj = root()

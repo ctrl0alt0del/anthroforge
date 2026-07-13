@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 TEST_ROOT = Path(__file__).resolve().parents[1]
 ADDON_ROOT = Path(__file__).resolve().parents[2]
@@ -16,6 +17,7 @@ from core.scp_runtime.lookup import set_parent_relation
 from core.vcp.muscle_surface import prepare_surface_rows
 from core.vcp.runtime_state import muscle_inflation_ctrl_world
 from core.visualization.muscle_sync import apply_muscle_control_update, register_muscle_sync
+from core.visualization import fiber_sync_helpers, muscle_sync_helpers, muscle_sync_runtime
 from core.visualization.muscle_sync_helpers import find_muscle_proxy, mark_inflation_ctrl
 from core.visualization.vcp_mirror_runtime import sync_vcp_mirrors
 
@@ -212,6 +214,26 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         muscle = root_obj.af_vcp_system.muscles[0]
         base = find_flagged("af_muscle_proxy", muscle.id, "af_muscle_id")
         self.assertEqual((len(muscle.fiber_refs), base is not None), (2, True))
+
+    def test_muscle_rows_use_cached_fiber_points(self):
+        root_obj, first, second = _muscle_setup()
+        fibers = tuple(root_obj.af_vcp_system.fibers)
+        for fiber, proxy in zip(fibers, (first, second)):
+            rows = muscle_sync_runtime.json.loads(proxy["af_fiber_points_world"])
+            fiber_sync_helpers.update_curve_points(proxy, [Vector(row) for row in rows], fiber.thickness)
+        with patch.object(muscle_sync_runtime.json, "loads") as loads:
+            rows = muscle_sync_runtime.collect_fiber_points(root_obj, bpy.context.scene, fibers)
+        self.assertEqual((loads.call_count, len(rows)), (0, 2))
+
+    def test_update_mesh_skips_rebuild_for_same_topology(self):
+        obj = mesh_object("PerfMesh")
+        verts = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
+        faces = [(0, 1, 2)]
+        muscle_sync_helpers.update_mesh(obj, verts, faces)
+        changed = [(0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
+        with patch.object(muscle_sync_helpers, "_rebuild_mesh") as rebuild:
+            muscle_sync_helpers.update_mesh(obj, changed, faces)
+        self.assertEqual((rebuild.call_count, round(obj.data.vertices[1].co.x, 4)), (0, 2.0))
 
     def test_closed_loop_rows_are_rephased_before_muscle_surface(self):
         outer = _circle_points(32, 1.0, 0.0)
