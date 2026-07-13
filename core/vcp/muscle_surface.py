@@ -212,7 +212,7 @@ def normalize_fibers_uniform(ordered_fiber_points, n, closed_u=False):
     return [resample_uniform(pts, n, closed=closed_u) for pts in ordered_fiber_points]
 
 
-def densify_between_fibers(ordered_fiber_points):
+def densify_between_fibers(ordered_fiber_points, min_inserts=0):
     """
     Insert intermediate fiber rows so V spacing approaches U spacing.
     This reduces elongated quads and improves isotropic inflation behavior.
@@ -231,7 +231,7 @@ def densify_between_fibers(ordered_fiber_points):
     for i in range(m - 1):
         a = ordered_fiber_points[i]
         b = ordered_fiber_points[i + 1]
-        inserts = _inserts_for_row_pair(a, b, n, u_step)
+        inserts = _inserts_for_row_pair(a, b, n, u_step, min_inserts)
         for k in range(1, inserts + 1):
             t = k / float(inserts + 1)
             row = [a[j].lerp(b[j], t) for j in range(n)]
@@ -250,12 +250,12 @@ def _avg_u_step(rows, n):
     return max(1e-6, u_sum / max(1, u_cnt))
 
 
-def _inserts_for_row_pair(a, b, n, u_step):
+def _inserts_for_row_pair(a, b, n, u_step, min_inserts=0):
     v_avg = 0.0
     for j in range(n):
         v_avg += (b[j] - a[j]).length
     v_avg /= float(n)
-    return max(0, int(round(v_avg / u_step)) - 1)
+    return max(int(min_inserts), int(round(v_avg / u_step)) - 1)
 
 
 def prepare_surface_rows(ordered_fiber_points, target_n=None, densify_v=True, closed_u=False):
@@ -271,6 +271,48 @@ def prepare_surface_rows(ordered_fiber_points, target_n=None, densify_v=True, cl
         target_n = len(ordered_fiber_points[0])
 
     rows = normalize_fibers_uniform(ordered_fiber_points, target_n, closed_u=closed_u)
+    if closed_u:
+        rows = align_closed_rows(rows)
     if densify_v:
-        rows = densify_between_fibers(rows)
+        rows = densify_between_fibers(rows, min_inserts=_min_v_inserts(closed_u))
     return rows
+
+
+def _min_v_inserts(closed_u):
+    return 3 if bool(closed_u) else 0
+
+
+def align_closed_rows(rows):
+    items = [list(row) for row in tuple(rows or ())]
+    if len(items) < 2:
+        return items
+    out = [items[0]]
+    for row in items[1:]:
+        out.append(_best_closed_row(out[-1], row))
+    return out
+
+
+def _best_closed_row(reference, row):
+    if len(reference) != len(row) or len(row) < 2:
+        return row
+    options = (_best_shift(reference, row), _best_shift(reference, list(reversed(row))))
+    return min(options, key=lambda item: _row_score(reference, item))
+
+
+def _best_shift(reference, row):
+    best = None
+    for shift in range(len(row)):
+        candidate = _shift_row(row, shift)
+        score = _row_score(reference, candidate)
+        best = (score, candidate) if best is None or score < best[0] else best
+    return best[1]
+
+
+def _shift_row(row, shift):
+    index = int(shift) % max(1, len(row))
+    return list(row[index:]) + list(row[:index])
+
+
+def _row_score(reference, row):
+    count = max(1, min(len(reference), len(row)))
+    return sum((reference[i] - row[i]).length_squared for i in range(count)) / float(count)

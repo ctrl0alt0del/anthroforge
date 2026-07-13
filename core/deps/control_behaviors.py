@@ -109,7 +109,7 @@ def register_control_handler(control_types, handler, replace=False):
 def _builtin_handlers():
     return (
         (("SCP_CONTROL_OBJECT", "SCP_CURVE_POINT", "SCP_PARALLELEPIPED_VERTEX"), _apply_scp_control),
-        (("FIBER_ENDPOINT", "FIBER_TOUCH"), _apply_fiber_control),
+        (("FIBER_ENDPOINT", "FIBER_TOUCH", "FIBER_LOOP_ANCHOR"), _apply_fiber_control),
         (("MUSCLE_INFLATION",), _apply_muscle_control),
         (("BLOB_CONTROL",), _apply_blob_control),
     )

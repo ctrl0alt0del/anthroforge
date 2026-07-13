@@ -131,6 +131,15 @@ def _touch_handle(fiber_id, index=0):
     return next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_touch_handle") and obj.get("af_fiber_id") == fiber_id and int(obj.get("af_fiber_touch_index", -1)) == index)
 
 
+def _loop_anchor_handle(fiber_id, index=0):
+    return next(obj for obj in bpy.context.scene.objects if _is_loop_anchor_handle(obj, fiber_id, index))
+
+
+def _is_loop_anchor_handle(obj, fiber_id, index):
+    valid = obj.get("af_fiber_loop_anchor_handle") and obj.get("af_fiber_id") == fiber_id
+    return bool(valid and int(obj.get("af_fiber_loop_anchor_index", -1)) == int(index))
+
+
 def _loop_mesh_object(name, location=(0.0, 0.0, 0.0)):
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)], [], [(0, 1, 2, 3)])
@@ -167,6 +176,10 @@ def _symmetric_loop_setup():
 
 def _fiber_world_vectors(fiber):
     return [Vector(value) for value in _fiber_points_world(fiber)]
+
+
+def _cache_has_point(sync, fiber_id, point, eps=1.0e-6):
+    return any((cached - point).length <= eps for cached in sync._solver._cache.get(fiber_id, ()))
 
 
 def _point_in_box(point, center, half_extent):
@@ -760,6 +773,31 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(proxy.data.splines[0].use_cyclic_u, True)
         self.assertTrue(any(point.x < -0.25 for point in points))
         self.assertTrue(any(point.x > 0.25 for point in points))
+
+    def test_selected_loop_fiber_shows_anchor_handles(self):
+        root_obj, fiber, _loop = _loop_setup()
+        _sync_active_fiber(root_obj, fiber)
+        count = sum(bool(obj.get("af_fiber_loop_anchor_handle") and obj.get("af_fiber_id") == fiber.id) for obj in bpy.context.scene.objects)
+        self.assertEqual(count, len(fiber.loop_anchors))
+        self.assertLess((_loop_anchor_handle(fiber.id, 0).location - Vector((0.0, 0.0, 0.0))).length, 1.0e-6)
+
+    def test_loop_anchor_handle_move_recaptures_surface_mode(self):
+        root_obj, fiber, loop = _loop_setup()
+        _sync_active_fiber(root_obj, fiber)
+        handle = _loop_anchor_handle(fiber.id, 0)
+        select_only(handle)
+        handle.location = loop.geometry_object_ref.matrix_world @ loop.geometry_object_ref.data.vertices[2].co
+        sync = register_fiber_sync()
+        sync._solver._cache[fiber.id] = [Vector((9.0, 9.0, 9.0))]
+        with patch.object(fiber_runtime, "resolve_conflict", side_effect=lambda **kwargs: kwargs["incoming"]):
+            fiber_runtime.apply_fiber_control_update(sync, root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        target = loop.geometry_object_ref.matrix_world @ loop.geometry_object_ref.data.vertices[2].co
+        anchor = fiber.loop_anchors[0]
+        actual = endpoint_world(root_obj, bpy.context.scene, {}, anchor.parent_id, anchor.attach_param)
+        self.assertEqual(parse_fiber_attach_param(anchor.attach_param)[0], "surface_param_v2")
+        self.assertFalse(_cache_has_point(sync, fiber.id, Vector((9.0, 9.0, 9.0))))
+        self.assertLess(min((point - target).length for point in _fiber_world_vectors(fiber)), 1.0e-6)
+        self.assertLess((actual - target).length, 1.0e-6)
 
     def test_recompute_loop_fiber_preserves_node_count_and_hides_handles(self):
         root_obj, fiber, _loop = _loop_setup()

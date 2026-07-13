@@ -8,10 +8,12 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
         sys.path.insert(0, value)
 
 import bpy
+from mathutils import Vector
 
 from _helpers import BlenderTestCase, capture_mesh_attachment, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
 from core.id_utils import next_prefixed_id
 from core.scp_runtime.lookup import set_parent_relation
+from core.vcp.muscle_surface import prepare_surface_rows
 from core.vcp.runtime_state import muscle_inflation_ctrl_world
 from core.visualization.muscle_sync import apply_muscle_control_update, register_muscle_sync
 from core.visualization.muscle_sync_helpers import find_muscle_proxy, mark_inflation_ctrl
@@ -143,6 +145,16 @@ def _loop_mesh_object(name, location=(0.0, 0.0, 0.0)):
     return obj
 
 
+def _circle_points(count, radius=1.0, z=0.0):
+    import math
+
+    return [Vector((radius * math.cos(i * 6.28318530718 / count), radius * math.sin(i * 6.28318530718 / count), z)) for i in range(count)]
+
+
+def _avg_row_distance(a, b):
+    return sum((a[i] - b[i]).length for i in range(min(len(a), len(b)))) / float(min(len(a), len(b)))
+
+
 def _edit_select(obj, *indices):
     import bmesh
 
@@ -200,6 +212,19 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         muscle = root_obj.af_vcp_system.muscles[0]
         base = find_flagged("af_muscle_proxy", muscle.id, "af_muscle_id")
         self.assertEqual((len(muscle.fiber_refs), base is not None), (2, True))
+
+    def test_closed_loop_rows_are_rephased_before_muscle_surface(self):
+        outer = _circle_points(32, 1.0, 0.0)
+        inner = list(reversed(_circle_points(32, 0.8, 0.1)[9:] + _circle_points(32, 0.8, 0.1)[:9]))
+        rows = prepare_surface_rows([outer, inner], target_n=32, densify_v=False, closed_u=True)
+        self.assertGreater(_avg_row_distance(outer, inner), 1.0)
+        self.assertLess(_avg_row_distance(rows[0], rows[1]), 0.25)
+
+    def test_closed_loop_muscle_gets_minimum_inner_rows(self):
+        outer = _circle_points(32, 1.0, 0.0)
+        inner = _circle_points(32, 0.95, 0.03)
+        rows = prepare_surface_rows([outer, inner], target_n=32, densify_v=True, closed_u=True)
+        self.assertGreaterEqual(len(rows), 5)
 
     def test_add_muscle_from_single_mirrored_fiber_expands_across_plane(self):
         root_obj, first, _second = _mirrored_side_muscle_setup()

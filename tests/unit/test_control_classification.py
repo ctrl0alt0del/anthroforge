@@ -66,6 +66,7 @@ def _control_cases():
         ({"af_parallelepiped_vert_handle": True, "af_scp_id": "S1", "af_parallelepiped_vert_index": 1}, "SCP_PARALLELEPIPED_VERTEX", "SCP", "S1"),
         ({"af_fiber_endpoint_handle": True, "af_fiber_id": "F1", "af_fiber_endpoint": "A"}, "FIBER_ENDPOINT", "FIBER", "F1"),
         ({"af_fiber_touch_handle": True, "af_fiber_id": "F1", "af_fiber_touch_index": 0}, "FIBER_TOUCH", "FIBER", "F1"),
+        ({"af_fiber_loop_anchor_handle": True, "af_fiber_id": "F1", "af_fiber_loop_anchor_index": 2}, "FIBER_LOOP_ANCHOR", "FIBER", "F1"),
         ({"af_muscle_inflation_ctrl": True, "af_muscle_id": "M1"}, "MUSCLE_INFLATION", "MUSCLE", "M1"),
         ({"af_blob_control_gizmo": True, "af_blob_id": "B1"}, "BLOB_CONTROL", "BLOB", "B1"),
     ]

@@ -4,6 +4,7 @@ _BUILTIN_CONTROL_FLAGS = (
     "af_parallelepiped_vert_handle",
     "af_fiber_endpoint_handle",
     "af_fiber_touch_handle",
+    "af_fiber_loop_anchor_handle",
     "af_muscle_inflation_ctrl",
     "af_blob_control_gizmo",
 )

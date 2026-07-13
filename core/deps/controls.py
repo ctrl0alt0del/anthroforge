@@ -130,6 +130,15 @@ def _fiber_touch_info(obj, root_name):
     return _info("FIBER_TOUCH", "FIBER", fid, root_name, str(obj.name), {"fiber_id": fid, "touch_index": idx}, bind)
 
 
+def _fiber_loop_anchor_info(obj, root_name):
+    fid, idx = _as_id(obj.get("af_fiber_id")), _as_index(obj, "af_fiber_loop_anchor_index")
+    if not fid or idx < 0:
+        return None
+    bind = _binding("GEOMETRY_SAMPLE", "FINAL", f"FIBER/{fid}/loop_anchor/{idx}")
+    payload = {"fiber_id": fid, "loop_anchor_index": idx}
+    return _info("FIBER_LOOP_ANCHOR", "FIBER", fid, root_name, str(obj.name), payload, bind)
+
+
 def _muscle_inflation_info(obj, root_name):
     mid = _as_id(obj.get("af_muscle_id"))
     if not mid:
@@ -153,6 +162,7 @@ def _builtin_descriptors():
         ("af_parallelepiped_vert_handle", "SCP_PARALLELEPIPED_VERTEX", _parallelepiped_info),
         ("af_fiber_endpoint_handle", "FIBER_ENDPOINT", _fiber_endpoint_info),
         ("af_fiber_touch_handle", "FIBER_TOUCH", _fiber_touch_info),
+        ("af_fiber_loop_anchor_handle", "FIBER_LOOP_ANCHOR", _fiber_loop_anchor_info),
         ("af_muscle_inflation_ctrl", "MUSCLE_INFLATION", _muscle_inflation_info),
         ("af_blob_control_gizmo", "BLOB_CONTROL", _blob_control_info),
     )

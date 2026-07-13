@@ -8,8 +8,10 @@ from .fiber_sync_helpers import (
     find_fiber_proxy,
     find_endpoint_handle,
     find_touch_handle,
+    find_loop_anchor_handle,
     create_endpoint_handle,
     create_touch_handle,
+    create_loop_anchor_handle,
     set_fiber_color,
     create_fiber_proxy,
     update_curve_points,
@@ -66,11 +68,17 @@ class FiberSceneSync:
     def _find_touch_handle(self, vis_col, root_name, fiber_id, touch_index):
         return find_touch_handle(vis_col, root_name, fiber_id, touch_index)
 
+    def _find_loop_anchor_handle(self, vis_col, root_name, fiber_id, anchor_index):
+        return find_loop_anchor_handle(vis_col, root_name, fiber_id, anchor_index)
+
     def _create_endpoint_handle(self, vis_col, root, fiber_id, endpoint):
         return create_endpoint_handle(vis_col, root, fiber_id, endpoint)
 
     def _create_touch_handle(self, vis_col, root, fiber_id, touch_index):
         return create_touch_handle(vis_col, root, fiber_id, touch_index)
+
+    def _create_loop_anchor_handle(self, vis_col, root, fiber_id, anchor_index):
+        return create_loop_anchor_handle(vis_col, root, fiber_id, anchor_index)
 
     def _set_fiber_color(self, obj, color):
         set_fiber_color(obj, color)

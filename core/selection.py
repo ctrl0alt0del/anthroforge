@@ -7,6 +7,7 @@ _PROXY_CHECKS = (
     ("af_blob_proxy", "af_blob_id", "BLOB"),
     ("af_fiber_endpoint_handle", "af_fiber_id", "FIBER"),
     ("af_fiber_touch_handle", "af_fiber_id", "FIBER"),
+    ("af_fiber_loop_anchor_handle", "af_fiber_id", "FIBER"),
     ("af_muscle_inflation_ctrl", "af_muscle_id", "MUSCLE"),
     ("af_blob_control_gizmo", "af_blob_id", "BLOB"),
 )
