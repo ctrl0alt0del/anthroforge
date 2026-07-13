@@ -17,6 +17,7 @@ from mathutils import Vector
 from _helpers import BlenderTestCase, capture_mesh_attachment, capture_world_attachment, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
 from anthroforge.app.use_cases.fiber_tools import recompute_fiber as recompute_fiber_action
 from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param, encode_fiber_vertex_index, parse_fiber_attach_param
+from anthroforge.core.deps.dirty_hints import dirty_hints_for
 from anthroforge.core.scp_runtime.surface import _surface_route_graph, surface_shortest_param_path
 from anthroforge.core.vcp import fiber_collision
 from anthroforge.core.vcp import fiber_planner
@@ -39,6 +40,7 @@ from anthroforge.core.visualization import fiber_sync_runtime as fiber_runtime
 from anthroforge.core.visualization import fiber_sync_helpers
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
 from anthroforge.core.visualization.fiber_sync_helpers import cached_fiber_points, endpoint_world, mark_endpoint_handle, mark_touch_handle, touch_world
+from anthroforge.core.visualization.sync_runner import sync_from_dirty_hints
 
 
 def _fiber_setup():
@@ -784,6 +786,15 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual((fiber.topology_mode, len(fiber.loop_anchors)), ("LOOP", 4))
         self.assertEqual((proxy.data.splines[0].use_cyclic_u, fiber_route_mode(fiber)), (True, "DIRECT"))
         self.assertTrue(all((anchors[i] - expected[i]).length < 1.0e-6 for i in range(4)))
+
+    def test_loop_fiber_follows_parent_scp_transform_change(self):
+        root_obj, fiber, loop = _loop_setup()
+        before = [point.copy() for point in _fiber_world_vectors(fiber)]
+        loop.geometry_object_ref.location.x += 3.0
+        bpy.context.view_layer.update()
+        sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints=dirty_hints_for("SCP", {loop.id}))
+        after = _fiber_world_vectors(fiber)
+        self.assertLess((after[0] - before[0] - Vector((3.0, 0.0, 0.0))).length, 1.0e-6)
 
     def test_create_symmetric_loop_fiber_expands_selected_half(self):
         _root_obj, fiber, _loop = _symmetric_loop_setup()

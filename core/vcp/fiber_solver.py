@@ -25,6 +25,10 @@ from .runtime_state import (
 )
 
 
+def _rounded_param(value):
+    return round(float(value), 8) if isinstance(value, float) else value
+
+
 class FiberSolver:
     """
     Minimum-length fiber solver with hard anchor constraints:
@@ -38,12 +42,15 @@ class FiberSolver:
     def __init__(self, surface_offset=0.002):
         self.surface_offset = float(surface_offset)
         self._cache = {}
+        self._loop_cache_signatures = {}
 
     def clear_cache(self, fiber_id=None):
         if fiber_id is None:
             self._cache.clear()
+            self._loop_cache_signatures.clear()
         else:
             self._cache.pop(fiber_id, None)
+            self._loop_cache_signatures.pop(fiber_id, None)
 
     def _default_margin(self):
         return 0.002
@@ -176,6 +183,7 @@ class FiberSolver:
         if not self._preserve_metrics(fiber_prop, bake):
             self._store_metrics(fiber_prop, mode, planner_ms, refine_ms, max(active_count, len(planned)))
         self._cache[fiber_prop.id] = [p.copy() for p in nodes]
+        self._store_loop_cache_signature(fiber_prop, anchors, params)
         return nodes
 
     def _loop_route_anchors(self, root, scene, runtime_registry, fiber_prop):
@@ -206,12 +214,34 @@ class FiberSolver:
         return nodes, converged, max_disp, max_pen, active_count, (perf_counter() - t0) * 1000.0
 
     def _solve_loop_nodes(self, fiber_prop, anchors, oracle, params, route):
+        sig = self._loop_cache_signature(anchors, params)
+        cached = self._cached_loop_result(fiber_prop, sig, params["node_count"])
+        if cached is not None:
+            return cached, True, 0.0, 0.0, 0
         route = route or [anchor.point.copy() for anchor in anchors]
         nodes = self._loop_nodes(fiber_prop, route, params["node_count"])
         targets = loop_pin_targets(route, [anchor.point.copy() for anchor in anchors], len(nodes))
+        self._restore_pins(nodes, targets)
         active = self._active_colliders(oracle, nodes, params["margin"])
         converged, max_disp, max_pen = self._run_cyclic_iterations(nodes, targets, oracle, active, params)
         return nodes, converged, max_disp, max_pen, len(active)
+
+    def _cached_loop_result(self, fiber_prop, signature, count):
+        if not bool(getattr(fiber_prop, "use_warm_start", False)):
+            return None
+        if self._loop_cache_signatures.get(fiber_prop.id) != signature:
+            return None
+        cached = self._cache.get(fiber_prop.id)
+        return None if not cached else self._resample_loop_cache(cached, count)
+
+    def _store_loop_cache_signature(self, fiber_prop, anchors, params):
+        self._loop_cache_signatures[fiber_prop.id] = self._loop_cache_signature(anchors, params)
+
+    def _loop_cache_signature(self, anchors, params):
+        fields = ("node_count", "segment_collisions")
+        values = tuple((key, _rounded_param(params.get(key))) for key in fields)
+        points = tuple(tuple(round(float(v), 6) for v in anchor.point) for anchor in tuple(anchors or ()))
+        return values, points
 
     def _loop_nodes(self, fiber_prop, route, node_count):
         cached = self._warm_loop_nodes(fiber_prop, node_count)
@@ -219,7 +249,12 @@ class FiberSolver:
 
     def _warm_loop_nodes(self, fiber_prop, node_count):
         cached = None if not bool(getattr(fiber_prop, "use_warm_start", False)) else self._cache.get(fiber_prop.id)
-        return None if not cached else resample_closed(cached, node_count)
+        return None if not cached else self._resample_loop_cache(cached, node_count)
+
+    def _resample_loop_cache(self, cached, count):
+        if len(cached) == int(count):
+            return [p.copy() for p in cached]
+        return resample_closed(cached, int(count))
 
     def _run_cyclic_iterations(self, nodes, pin_targets, oracle, colliders, params):
         prev_nodes, pinned = [p.copy() for p in nodes], set(pin_targets)

@@ -3,6 +3,7 @@ import bpy
 from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..deps.conflict_resolver import resolve_conflict
+from ..scp_runtime.common import is_runtime_applied_matrix, mark_applied_matrix
 from ..vcp.fiber_modes import is_loop_fiber, is_open_fiber
 from ..utils import depsgraph_for_scene, get_af_root, scene_for_id
 from .control_runtime import active_entity_id
@@ -23,6 +24,7 @@ def _sync_endpoint_handle(sync, vis_col, root, scene, runtime_registry, fiber, e
     w = sync._endpoint_world(root, scene, runtime_registry, parent_id, raw)
     if w is not None:
         h.location = w
+        mark_applied_matrix(h)
         sync._set_helper_screen_size(h, px=14.0, window_manager=window_manager)
 
 
@@ -33,6 +35,7 @@ def _sync_touch_handle(sync, vis_col, root, scene, runtime_registry, fiber, inde
     w = sync._endpoint_world(root, scene, runtime_registry, touch.parent_id, touch.attach_param)
     if w is not None:
         h.location = w
+        mark_applied_matrix(h)
         sync._set_helper_screen_size(h, px=12.0, window_manager=window_manager)
 
 
@@ -43,6 +46,7 @@ def _sync_loop_anchor_handle(sync, vis_col, root, scene, runtime_registry, fiber
     w = sync._endpoint_world(root, scene, runtime_registry, anchor.parent_id, anchor.attach_param)
     if w is not None:
         h.location = w
+        mark_applied_matrix(h)
         sync._set_helper_screen_size(h, px=13.0, window_manager=window_manager)
 
 
@@ -135,8 +139,10 @@ def _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake):
     obj = sync._find_fiber_proxy(vis_col, root.name, fiber.id)
     if obj is None:
         obj = sync._create_fiber_proxy(vis_col, root, fiber.id)
+    if bake:
+        sync._set_fiber_prefer_bake(fiber, True)
     use_bake = bool(bake or sync._fiber_prefer_bake(fiber))
-    points = sync._solver.solve_points(root=root, fiber_prop=fiber, scene=scene, depsgraph=depsgraph, bake=bool(bake))
+    points = sync._solver.solve_points(root=root, fiber_prop=fiber, scene=scene, depsgraph=depsgraph, bake=use_bake)
     if len(points) >= 2:
         sync._update_curve_points(obj, points, fiber.thickness, bake=use_bake, cyclic=sync._fiber_cyclic(fiber))
         return
@@ -226,10 +232,6 @@ def _resolved_parent_obj(sync, scene, root, parent_id):
     return None if not parent_id else sync._get_scp_proxy(scene, root.name, parent_id)
 
 
-def _resolved_attachment(sync, parent_obj, moved_world):
-    return None if parent_obj is None else _compute_attach_raw(sync, parent_obj, moved_world)
-
-
 def _resolved_conflict(fiber, aspect, current, incoming, payload):
     return str(resolve_conflict(entity_type="FIBER", entity_id=str(fiber.id or ""), aspect=aspect, source="blender_control", current=current, incoming=incoming, payload=payload) or "")
 
@@ -244,35 +246,49 @@ def _apply_attach_update(sync, fiber, changed_ids, setter, current, resolved):
     return True
 
 
+def _changed_handle_raw(sync, root, scene, parent_id, location):
+    parent = _resolved_parent_obj(sync, scene, root, parent_id)
+    return _compute_touch_attach_raw(sync, parent, location)
+
+
+def _endpoint_parts(fiber, endpoint):
+    parent_id = fiber.a_parent_id if endpoint == "A" else fiber.b_parent_id
+    slot = "a_attach_param" if endpoint == "A" else "b_attach_param"
+    return parent_id, str(getattr(fiber, slot) or ""), slot
+
+
 def _update_endpoint_handle(sync, root, scene, obj, changed_ids):
     fiber = _find_fiber(root, obj.get("af_fiber_id"))
     endpoint = obj.get("af_fiber_endpoint")
     if fiber is None:
         return False
-    parent_id = fiber.a_parent_id if endpoint == "A" else fiber.b_parent_id
-    raw = _resolved_attachment(sync, _resolved_parent_obj(sync, scene, root, parent_id), obj.location.copy())
+    parent_id, current, slot = _endpoint_parts(fiber, endpoint)
+    raw = _changed_handle_raw(sync, root, scene, parent_id, obj.location.copy())
     if raw is None:
         return False
-    slot = "a_attach_param" if endpoint == "A" else "b_attach_param"
-    current = str(getattr(fiber, slot) or "")
-    incoming = str(raw or "")
-    resolved = _resolved_conflict(fiber, f"attachment.{str(endpoint).lower()}.param", current, incoming, {"endpoint": str(endpoint or "")})
+    aspect = f"attachment.{str(endpoint).lower()}.param"
+    resolved = _resolved_conflict(fiber, aspect, current, str(raw or ""), {"endpoint": str(endpoint or "")})
     return _apply_attach_update(sync, fiber, changed_ids, lambda value: setattr(fiber, slot, value), current, resolved)
+
+
+def _touch_at(fiber, touch_index):
+    if fiber is None or touch_index < 0 or touch_index >= len(fiber.mid_touches):
+        return None
+    return fiber.mid_touches[touch_index]
 
 
 def _update_touch_handle(sync, root, scene, obj, changed_ids):
     fiber = _find_fiber(root, obj.get("af_fiber_id"))
     touch_index = int(obj.get("af_fiber_touch_index", -1))
-    if fiber is None or touch_index < 0 or touch_index >= len(fiber.mid_touches):
-        return False
-    tp = fiber.mid_touches[touch_index]
-    parent = _resolved_parent_obj(sync, scene, root, tp.parent_id)
-    raw = _compute_touch_attach_raw(sync, parent, obj.location.copy())
-    if raw is None:
+    tp = _touch_at(fiber, touch_index)
+    if tp is None:
         return False
     current = str(tp.attach_param or "")
-    incoming = str(raw or "")
-    resolved = _resolved_conflict(fiber, f"attachment.touch[{int(touch_index)}].param", current, incoming, {"touch_index": int(touch_index)})
+    raw = _changed_handle_raw(sync, root, scene, tp.parent_id, obj.location.copy())
+    if raw is None:
+        return False
+    aspect = f"attachment.touch[{int(touch_index)}].param"
+    resolved = _resolved_conflict(fiber, aspect, current, str(raw or ""), {"touch_index": int(touch_index)})
     return _apply_attach_update(sync, fiber, changed_ids, lambda value: setattr(tp, "attach_param", value), current, resolved)
 
 
@@ -367,6 +383,8 @@ def _depsgraph_changed_fibers(sync, root, vis_col, depsgraph):
 
 def _merge_changed_fibers(sync, root, vis_col, changed, obj):
     if not _is_relevant_update_obj(sync, root, vis_col, obj):
+        return
+    if is_runtime_applied_matrix(obj):
         return
     classified = classify_control_object(obj)
     if not classified or str(classified["control_type"]) not in ("FIBER_ENDPOINT", "FIBER_TOUCH", "FIBER_LOOP_ANCHOR"):
