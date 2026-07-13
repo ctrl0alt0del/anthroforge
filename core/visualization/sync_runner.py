@@ -1,3 +1,5 @@
+import os
+import time
 from dataclasses import dataclass
 
 import bpy
@@ -12,18 +14,31 @@ except ImportError:
     from app.runtime_requests import runtime_request
     from app.runtime_sync import queue_runtime, run_runtime_now
 from ..deps import run_dependency_runtime
+from ..deps.runtime_trace import trace_enabled, trace_line
+from ..perf_trace import perf_count
 
 
 _RUNNING = False
 _PENDING = []
 _TIMER_ARMED = False
+_TIMER_DUE_AT = 0.0
+_ID_PAYLOAD_KEYS = ("scp_recapture_ids", "scp_apply_parent_ids", "scp_apply_target_ids")
+_FALSE_VALUES = {"0", "false", "no", "off"}
+_DEFER_ENV = "AF_DEPS_DEFER"
+_DEFER_MS_ENV = "AF_DEPS_DEFER_MS"
+_DEFER_MAX_MS_ENV = "AF_DEPS_DEFER_MAX_MS"
+_DEFAULT_DEFER_MS = 75.0
+_DEFAULT_MAX_MS = 0.0
+_RETRY_SECONDS = 0.01
 
 
-@dataclass(frozen=True)
+@dataclass
 class QueuedRuntime:
     scene_name: str = ""
     root_name: str = ""
     request: object = None
+    first_seen_at: float = 0.0
+    due_at: float = 0.0
 
 
 def _run_request(ctx, request):
@@ -56,28 +71,142 @@ def _proxy_rehide():
 
 
 def _scheduler(ctx, request):
-    _PENDING.append(_queue_item(ctx, request))
-    _arm_timer()
+    _enqueue_item(ctx, request)
+    _arm_next_timer()
 
 
-def _arm_timer():
-    global _TIMER_ARMED
-    if _TIMER_ARMED:
+def _arm_next_timer():
+    item = _next_due_item()
+    if item is not None:
+        _arm_timer(max(0.0, item.due_at - _now()))
+
+
+def _arm_timer(first_interval=0.0):
+    global _TIMER_ARMED, _TIMER_DUE_AT
+    interval = max(0.0, float(first_interval))
+    due_at = _now() + interval
+    if _TIMER_ARMED and abs(due_at - _TIMER_DUE_AT) <= 1.0e-6:
         return
+    if _TIMER_ARMED:
+        _drop_timer()
     _TIMER_ARMED = True
-    bpy.app.timers.register(_flush_pending, first_interval=0.0)
+    _TIMER_DUE_AT = due_at
+    bpy.app.timers.register(_flush_pending, first_interval=interval)
 
 
-def _next_request():
-    return None if not _PENDING else _PENDING.pop(0)
+def _now():
+    return time.monotonic()
 
 
-def _peek_request():
-    return None if not _PENDING else _PENDING[0]
+def _env_enabled(name, default=True):
+    raw = str(os.environ.get(name, "") or "").strip().lower()
+    return bool(default) if not raw else raw not in _FALSE_VALUES
+
+
+def _env_seconds(name, default_ms):
+    try:
+        return max(0.0, float(os.environ.get(name, default_ms) or default_ms)) / 1000.0
+    except Exception:
+        return max(0.0, float(default_ms)) / 1000.0
+
+
+def _defer_seconds():
+    return _env_seconds(_DEFER_MS_ENV, _DEFAULT_DEFER_MS)
+
+
+def _max_defer_seconds():
+    return _env_seconds(_DEFER_MAX_MS_ENV, _DEFAULT_MAX_MS)
+
+
+def _deferable(request):
+    return bool(_env_enabled(_DEFER_ENV) and request and not request.bake and str(request.source) == "depsgraph" and str(request.event_type) == "SCP_UPDATE")
+
+
+def _enqueue_item(ctx, request):
+    item = _queue_item(ctx, request)
+    if not _deferable(request):
+        _PENDING.append(item)
+        return item
+    return _enqueue_deferred(ctx, item)
+
+
+def _enqueue_deferred(ctx, item):
+    idx = _coalesce_index(item)
+    if idx is None:
+        _PENDING.append(item)
+        _count(ctx.scene, "scheduled")
+        return item
+    _PENDING[idx] = _merge_item(_PENDING[idx], item)
+    _count(ctx.scene, "coalesced")
+    return _PENDING[idx]
 
 
 def _queue_item(ctx, request):
-    return QueuedRuntime(_obj_name(ctx.scene), _obj_name(ctx.root), request)
+    started = _now()
+    due_at = started + (_defer_seconds() if _deferable(request) else 0.0)
+    return QueuedRuntime(_obj_name(ctx.scene), _obj_name(ctx.root), request, started, due_at)
+
+
+def _coalesce_index(item):
+    key = _defer_key(item)
+    for index, old in enumerate(_PENDING):
+        if _deferable(old.request) and _defer_key(old) == key:
+            return index
+    return None
+
+
+def _defer_key(item):
+    req = item.request
+    return (item.scene_name, item.root_name, str(req.source), str(req.event_type))
+
+
+def _merge_item(old, new):
+    request = _merge_request(old.request, new.request)
+    due_at = _merge_due_at(old, new)
+    return QueuedRuntime(old.scene_name, old.root_name, request, old.first_seen_at, due_at)
+
+
+def _merge_due_at(old, new):
+    max_wait = _max_defer_seconds()
+    if max_wait <= 0.0:
+        return new.due_at
+    return min(new.due_at, old.first_seen_at + max_wait)
+
+
+def _merge_request(old, new):
+    dirty = _merge_dirty(old.dirty_hints, new.dirty_hints)
+    payload = _merge_payload(old.payload, new.payload)
+    return runtime_request(dirty, old.bake or new.bake, new.source, new.event_type, payload)
+
+
+def _merge_dirty(old, new):
+    out = {str(k): set(v or set()) for k, v in dict(old or {}).items()}
+    for key, values in dict(new or {}).items():
+        out.setdefault(str(key), set()).update(set(values or set()))
+    return out
+
+
+def _payload_ids(payload, key):
+    return {str(v) for v in set(dict(payload or {}).get(key, ()) or ()) if str(v or "")}
+
+
+def _merge_payload(old, new):
+    out = dict(old or {})
+    out.update(dict(new or {}))
+    for key in _ID_PAYLOAD_KEYS:
+        if key in dict(old or {}) or key in dict(new or {}):
+            out[key] = sorted(_payload_ids(old, key) | _payload_ids(new, key))
+    if "non_source_ids_by_type" in out:
+        out["non_source_ids_by_type"] = _merge_nested_payload_ids(old, new)
+    return out
+
+
+def _merge_nested_payload_ids(old, new):
+    out = {}
+    for payload in (old, new):
+        for key, values in dict(dict(payload or {}).get("non_source_ids_by_type", {}) or {}).items():
+            out.setdefault(str(key), set()).update(str(v) for v in set(values or ()) if str(v or ""))
+    return {key: sorted(values) for key, values in out.items()}
 
 
 def _obj_name(obj):
@@ -91,16 +220,72 @@ def _resolve_item(item):
 
 
 def _flush_pending():
-    global _TIMER_ARMED
-    item = _peek_request()
-    if item is None:
-        _TIMER_ARMED = False
-        return None
+    now = _now()
+    if not _PENDING:
+        return _timer_result(None, now)
+    idx = _ready_index(now)
+    if idx is None:
+        return _wait_for_next(now)
+    item = _PENDING[idx]
     ctx, request = _resolve_item(item)
+    if not _valid_context(ctx):
+        return _discard_item(idx, now)
     if not _run_request(ctx, request):
-        return 0.0
-    _next_request()
-    return 0.0
+        return _timer_result(_RETRY_SECONDS, now)
+    return _finish_item(idx, ctx.scene, now)
+
+
+def _discard_item(idx, now):
+    _PENDING.pop(idx)
+    _count(None, "discarded")
+    return _next_timer(now)
+
+
+def _finish_item(idx, scene, now):
+    _PENDING.pop(idx)
+    _count(scene, "flushed")
+    return _next_timer(now)
+
+
+def _ready_index(now):
+    ready = [(i, item.due_at) for i, item in enumerate(_PENDING) if item.due_at <= now]
+    return None if not ready else min(ready, key=lambda value: value[1])[0]
+
+
+def _valid_context(ctx):
+    return bool(ctx and ctx.root is not None and ctx.scene is not None)
+
+
+def _wait_for_next(now):
+    item = _next_due_item()
+    _count(None if item is None else bpy.data.scenes.get(item.scene_name), "delayed")
+    return _timer_result(_next_delay(now), now)
+
+
+def _next_timer(now):
+    return _timer_result(None if not _PENDING else _next_delay(now), now)
+
+
+def _next_due_item():
+    return None if not _PENDING else min(_PENDING, key=lambda item: item.due_at)
+
+
+def _next_delay(now):
+    item = _next_due_item()
+    return 0.0 if item is None else max(0.0, item.due_at - now)
+
+
+def _timer_result(delay, now):
+    global _TIMER_ARMED, _TIMER_DUE_AT
+    _TIMER_ARMED = delay is not None
+    _TIMER_DUE_AT = 0.0 if delay is None else now + max(0.0, float(delay))
+    return None if delay is None else max(0.0, float(delay))
+
+
+def _count(scene, name):
+    perf_count(scene, f"defer_{name}")
+    if trace_enabled(scene=scene):
+        trace_line(f"defer.{name} pending={len(_PENDING)}")
 
 
 def _context(root=None, scene=None):
@@ -125,12 +310,13 @@ def schedule_sync_from_dirty_hints(
 
 
 def clear_pending_runtime(keep_timer=True):
-    global _RUNNING, _TIMER_ARMED
+    global _RUNNING, _TIMER_ARMED, _TIMER_DUE_AT
     _PENDING.clear()
     _RUNNING = False
     if not keep_timer:
         _drop_timer()
         _TIMER_ARMED = False
+        _TIMER_DUE_AT = 0.0
 
 
 @persistent

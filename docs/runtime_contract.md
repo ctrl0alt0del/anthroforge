@@ -32,14 +32,16 @@ The current payload contract includes these keys:
 
 ## Queue Semantics
 
-`schedule_sync_from_dirty_hints()` appends a request to the in-memory `_PENDING` queue in `core/visualization/sync_runner.py`.
+`schedule_sync_from_dirty_hints()` stores runtime work in the in-memory `_PENDING` queue in `core/visualization/sync_runner.py`.
 
-- Requests stay FIFO.
 - Queue items persist `scene` and `root` by name and resolve fresh RNA objects at flush time.
-- `_arm_timer()` registers exactly one Blender timer while `_TIMER_ARMED` is true.
-- `_flush_pending()` pops one request, calls `_run(**request)`, and returns `0.0` to keep draining the queue.
-- `_flush_pending()` returns `None` only when the queue is empty, and that transition clears `_TIMER_ARMED`.
+- Compatible depsgraph `SCP_UPDATE` transform requests coalesce by scene/root/source/event so the latest Blender state wins.
+- Coalesced SCP requests merge `dirty_hints`, `scp_recapture_ids`, `scp_apply_target_ids`, `scp_apply_parent_ids`, and `non_source_ids_by_type`.
+- Deferred SCP requests carry `first_seen_at` and `due_at`; `_TIMER_DUE_AT` tracks the currently armed Blender timer deadline.
+- `_arm_timer()` registers exactly one Blender timer while `_TIMER_ARMED` is true, rearming when the queue's earliest deadline moves earlier or later.
+- `_flush_pending()` runs one due request, returns a float for the next due item, and returns `None` only when the queue is empty.
 - `_RUNNING` prevents re-entrant execution inside `_run()`.
+- `AF_DEPS_DEFER=0` disables SCP debounce; `AF_DEPS_DEFER_MS` tunes quiet delay; `AF_DEPS_DEFER_MAX_MS` optionally caps continuous deferral when set above zero.
 - `load_pre`, `undo_pre`, and `redo_pre` clear queued work before history changes replace RNA data.
 
 ## Runtime Traversal Rules
@@ -51,4 +53,4 @@ The current payload contract includes these keys:
 
 ## Refactor Constraint
 
-Phase 2 and later may wrap this contract, but they must preserve the request fields, payload keys, FIFO timer behavior, and gate metadata semantics until parity tests are updated on purpose.
+Phase 2 and later may wrap this contract, but they must preserve the request fields, payload keys, deferred SCP merge behavior, and gate metadata semantics until parity tests are updated on purpose.

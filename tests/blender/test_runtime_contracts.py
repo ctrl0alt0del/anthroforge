@@ -1,6 +1,7 @@
 from pathlib import Path
 from collections import OrderedDict
 from types import SimpleNamespace
+import os
 import sys
 from unittest.mock import Mock, patch
 
@@ -17,7 +18,7 @@ from app.context import AddonContext
 from app.runtime_requests import RuntimeRequest
 from core.deps.drivers import DependencyDriver
 from core.id_utils import next_prefixed_id
-from core.scp_runtime.attachment_runtime import apply_scp_attachments
+from core.scp_runtime.attachment_runtime import apply_scp_attachments, capture_attachment_from_link
 from core.scp_runtime.common import scp_prop_map
 from core.scp_runtime.lookup import set_parent_relation
 from core.scp_runtime.runtime_state import attach_initialized, mirror_effective_axis, mirror_source_id, mirror_status
@@ -208,10 +209,111 @@ class RuntimeContractTests(BlenderTestCase):
         sync_runner._RUNNING = True
         with patch.object(sync_runner, "run_dependency_runtime") as run, patch.object(bpy.app.timers, "register") as arm:
             sync_runner.schedule_sync_from_dirty_hints(root=root(), scene=bpy.context.scene, dirty_hints={"SCP": {"S1"}}, source="depsgraph", payload={"scp_apply_parent_ids": ["S1"]})
-            self.assertEqual((sync_runner._flush_pending(), len(sync_runner._PENDING), run.call_count, arm.call_count), (0.0, 1, 0, 1))
+            self.assertEqual((round(sync_runner._flush_pending(), 2), len(sync_runner._PENDING), run.call_count, arm.call_count), (0.01, 1, 0, 1))
             sync_runner._RUNNING = False
             sync_runner._flush_pending()
         self.assertEqual((len(sync_runner._PENDING), run.call_args.kwargs["gate_meta"]["payload"]["scp_apply_parent_ids"]), (0, ["S1"]))
+
+    def test_deferred_scp_transform_updates_coalesce_payloads(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        root_obj = root()
+        with patch.object(sync_runner, "_now", return_value=10.0), patch.object(bpy.app.timers, "register"):
+            sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"SCP": {"S1"}}, source="depsgraph", event_type="SCP_UPDATE", payload={"scp_apply_parent_ids": ["S1"], "non_source_ids_by_type": {"SCP": ["S9"]}})
+            sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"SCP": {"S2"}}, source="depsgraph", event_type="SCP_UPDATE", payload={"scp_apply_parent_ids": ["S2"], "scp_recapture_ids": ["S2"], "non_source_ids_by_type": {"FIBER": ["F1"]}})
+        request = sync_runner._PENDING[0].request
+        self.assertEqual((len(sync_runner._PENDING), request.dirty_hints["SCP"]), (1, {"S1", "S2"}))
+        self.assertEqual(request.payload["scp_apply_parent_ids"], ["S1", "S2"])
+        self.assertEqual(request.payload["scp_recapture_ids"], ["S2"])
+        self.assertEqual(request.payload["non_source_ids_by_type"], {"SCP": ["S9"], "FIBER": ["F1"]})
+
+    def test_deferred_scp_transform_waits_for_quiet_delay(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        with patch.object(sync_runner, "_now", return_value=2.0), patch.object(bpy.app.timers, "register") as arm:
+            sync_runner.schedule_sync_from_dirty_hints(root=root(), scene=bpy.context.scene, dirty_hints={"SCP": {"S1"}}, source="depsgraph", event_type="SCP_UPDATE")
+        with patch.object(sync_runner, "_now", return_value=2.01), patch.object(sync_runner, "run_dependency_runtime") as run:
+            delay = sync_runner._flush_pending()
+        self.assertEqual((round(arm.call_args.kwargs["first_interval"], 3), round(delay, 3), run.call_count), (0.075, 0.065, 0))
+
+    def test_deferred_scp_transform_rearms_timer_when_coalesced_later(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        root_obj = root()
+        with patch.object(bpy.app.timers, "register") as arm, patch.object(sync_runner, "_now", return_value=10.0):
+            sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"SCP": {"S1"}}, source="depsgraph", event_type="SCP_UPDATE")
+        with patch.object(bpy.app.timers, "register") as arm2, patch.object(sync_runner, "_now", return_value=10.03):
+            sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"SCP": {"S2"}}, source="depsgraph", event_type="SCP_UPDATE")
+        self.assertEqual((arm.call_count, arm2.call_count, round(sync_runner._TIMER_DUE_AT, 3)), (1, 1, 10.105))
+
+    def test_deferred_scp_transform_flushes_after_quiet_delay(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        with patch.object(sync_runner, "_now", return_value=3.0), patch.object(bpy.app.timers, "register"):
+            sync_runner.schedule_sync_from_dirty_hints(root=root(), scene=bpy.context.scene, dirty_hints={"SCP": {"S1"}}, source="depsgraph", event_type="SCP_UPDATE")
+        with patch.object(sync_runner, "_now", return_value=3.08), patch.object(sync_runner, "run_dependency_runtime") as run:
+            self.assertIsNone(sync_runner._flush_pending())
+        self.assertEqual((len(sync_runner._PENDING), run.call_count), (0, 1))
+
+    def test_deferred_scp_transform_caps_continuous_drag_delay(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        root_obj = root()
+        env = {"AF_DEPS_DEFER_MAX_MS": "250"}
+        with patch.dict(os.environ, env), patch.object(bpy.app.timers, "register"), patch.object(sync_runner, "_now", return_value=4.0):
+            sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"SCP": {"S1"}}, source="depsgraph", event_type="SCP_UPDATE")
+        with patch.dict(os.environ, env), patch.object(bpy.app.timers, "register"), patch.object(sync_runner, "_now", return_value=4.20):
+            sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"SCP": {"S2"}}, source="depsgraph", event_type="SCP_UPDATE")
+        self.assertEqual(round(sync_runner._PENDING[0].due_at, 3), 4.25)
+        with patch.object(sync_runner, "_now", return_value=4.251), patch.object(sync_runner, "run_dependency_runtime") as run:
+            sync_runner._flush_pending()
+        self.assertEqual(run.call_count, 1)
+
+    def test_deferred_scp_transform_has_no_default_drag_cap(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        root_obj = root()
+        with patch.object(bpy.app.timers, "register"), patch.object(sync_runner, "_now", return_value=4.0):
+            sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"SCP": {"S1"}}, source="depsgraph", event_type="SCP_UPDATE")
+        with patch.object(bpy.app.timers, "register"), patch.object(sync_runner, "_now", return_value=4.20):
+            sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"SCP": {"S2"}}, source="depsgraph", event_type="SCP_UPDATE")
+        self.assertEqual(round(sync_runner._PENDING[0].due_at, 3), 4.275)
+
+    def test_immediate_request_is_not_blocked_by_deferred_drag_work(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        root_obj = root()
+        with patch.object(sync_runner, "_now", return_value=5.0), patch.object(bpy.app.timers, "register"):
+            sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"SCP": {"S1"}}, source="depsgraph", event_type="SCP_UPDATE")
+            sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"SCP": {"S9"}}, source="operator", event_type="IMPORT")
+        with patch.object(sync_runner, "_now", return_value=5.0), patch.object(sync_runner, "run_dependency_runtime") as run:
+            sync_runner._flush_pending()
+        self.assertEqual(run.call_args.kwargs["dirty_hints"]["SCP"], {"S9"})
+
+    def test_deferred_scp_transform_can_be_disabled_by_env(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        with patch.dict(os.environ, {"AF_DEPS_DEFER": "0"}), patch.object(sync_runner, "_now", return_value=6.0), patch.object(bpy.app.timers, "register") as arm:
+            sync_runner.schedule_sync_from_dirty_hints(root=root(), scene=bpy.context.scene, dirty_hints={"SCP": {"S1"}}, source="depsgraph", event_type="SCP_UPDATE")
+        self.assertEqual((sync_runner._PENDING[0].due_at, arm.call_args.kwargs["first_interval"]), (6.0, 0.0))
+
+    def test_deferred_scp_transform_flush_uses_latest_parent_state_once(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        root_obj = root()
+        parent = scp_with_object(root_obj, "Parent", empty_object("Parent"), with_geometry=False)
+        child = scp_with_object(root_obj, "Child", empty_object("Child", (1.0, 0.0, 0.0)), with_geometry=False)
+        child.attach_parent_anchor_mode = child.attach_child_anchor_mode = "OBJECT_ORIGIN"
+        set_parent_relation(child.transform_object_ref, child, parent.transform_object_ref)
+        self.assertTrue(capture_attachment_from_link(child, child.transform_object_ref, None, parent.transform_object_ref, None))
+        with patch.object(bpy.app.timers, "register"), patch.object(sync_runner, "_now", return_value=7.0):
+            parent.transform_object_ref.location.x = 2.0
+            sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"SCP": {parent.id}}, source="depsgraph", event_type="SCP_UPDATE", payload={"scp_recapture_ids": [parent.id], "scp_apply_parent_ids": [parent.id], "scp_apply_target_ids": [parent.id]})
+            parent.transform_object_ref.location.x = 4.0
+            sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"SCP": {parent.id}}, source="depsgraph", event_type="SCP_UPDATE", payload={"scp_recapture_ids": [parent.id], "scp_apply_parent_ids": [parent.id], "scp_apply_target_ids": [parent.id]})
+        with patch.object(sync_runner, "_now", return_value=7.08), patch.object(sync_runner, "run_dependency_runtime", wraps=sync_runner.run_dependency_runtime) as run:
+            sync_runner._flush_pending()
+        self.assertEqual((run.call_count, tuple(round(v, 4) for v in child.transform_object_ref.location)), (1, (5.0, 0.0, 0.0)))
 
     def test_schedule_sync_queues_explicit_context_and_request_objects(self):
         self.addCleanup(_reset_sync_runner)

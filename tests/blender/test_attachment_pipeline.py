@@ -25,11 +25,18 @@ def _world_verts(obj):
 def _reset_sync_runner():
     sync_runner._RUNNING = False
     sync_runner._TIMER_ARMED = False
+    sync_runner._TIMER_DUE_AT = 0.0
     sync_runner._PENDING.clear()
+
+
+def _force_pending_due():
+    for item in sync_runner._PENDING:
+        item.due_at = sync_runner._now()
 
 
 def _flush_attachment_runtime():
     for _ in range(5):
+        _force_pending_due()
         state = sync_runner._flush_pending()
         bpy.context.view_layer.update()
         if state is None:
