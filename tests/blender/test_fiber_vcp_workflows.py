@@ -16,7 +16,7 @@ from mathutils import Vector
 
 from _helpers import BlenderTestCase, capture_mesh_attachment, capture_world_attachment, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only
 from anthroforge.app.use_cases.fiber_tools import recompute_fiber as recompute_fiber_action
-from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param, encode_fiber_vertex_index, parse_fiber_attach_param
+from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param, encode_fiber_surface_param, encode_fiber_vertex_index, parse_fiber_attach_param
 from anthroforge.core.deps.dirty_hints import dirty_hints_for
 from anthroforge.core.scp_runtime.surface import _surface_route_graph, surface_shortest_param_path
 from anthroforge.core.vcp import fiber_collision
@@ -41,6 +41,7 @@ from anthroforge.core.visualization import fiber_sync_helpers
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
 from anthroforge.core.visualization.fiber_sync_helpers import cached_fiber_points, endpoint_world, mark_endpoint_handle, mark_touch_handle, touch_world
 from anthroforge.core.visualization.sync_runner import sync_from_dirty_hints
+from anthroforge.properties import vcp_properties
 
 
 def _fiber_setup():
@@ -338,6 +339,17 @@ class _SurfaceShortcutOracle:
         return key in {(0.0, 0.0, 1.0, 1.0), (1.0, 1.0, 1.0, 0.0)}
 
 
+class _SurfaceRouteOracle:
+    def __init__(self, route=None):
+        self.calls = 0
+        self.route = route or [Vector((0.0, 0.0, 0.0)), Vector((0.5, 0.1, 0.0)), Vector((1.0, 0.0, 0.0))]
+
+    def surface_param_path(self, owner_id, start_param, end_param):
+        _ = owner_id, start_param, end_param
+        self.calls += 1
+        return [point.copy() for point in self.route]
+
+
 class FiberVcpWorkflowTests(BlenderTestCase):
     def test_fiber_proxy_object_color_matches_material(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
@@ -360,6 +372,16 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         count = sum(bool(obj.get("af_fiber_endpoint_handle") and obj.get("af_fiber_id") == fiber.id) for obj in bpy.context.scene.objects)
         self.assertEqual((fiber.a_parent_id, fiber.b_parent_id, proxy is not None), (origin.id, insert.id, True))
         self.assertEqual((bool(fiber.a_attach_param), bool(fiber.b_attach_param), count), (True, True, 2))
+
+    def test_add_fiber_suppresses_intermediate_prop_sync(self):
+        root_obj = root()
+        origin = scp_with_object(root_obj, "Origin", mesh_object("Origin"))
+        insert = scp_with_object(root_obj, "Insert", mesh_object("Insert", (2.0, 0.0, 0.0)))
+        bpy.context.scene.af_new_fiber_origin_obj = origin.geometry_object_ref
+        bpy.context.scene.af_new_fiber_insertion_obj = insert.geometry_object_ref
+        with patch.object(vcp_properties, "sync_context") as sync:
+            self.assertEqual(bpy.ops.af.add_fiber_vcp(), {"FINISHED"})
+        self.assertEqual(sync.call_count, 0)
 
     def test_touch_tools_and_clear_warm_start_update_runtime_fields(self):
         root_obj, fiber, origin, _insert = _fiber_setup()
@@ -543,6 +565,48 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(set(targets), {0, 4, 8})
         self.assertGreater(nodes[2].y, 0.0)
 
+    def test_surface_route_toggle_skips_guides_when_disabled(self):
+        raw_a = encode_fiber_surface_param({"tri_vidx": (0, 1, 2), "tri_weights": (1.0, 0.0, 0.0)})
+        raw_b = encode_fiber_surface_param({"tri_vidx": (0, 1, 2), "tri_weights": (0.0, 1.0, 0.0)})
+        anchors = [fiber_planner.PlannerAnchor(Vector((0.0, 0.0, 0.0)), "S", raw_a), fiber_planner.PlannerAnchor(Vector((1.0, 0.0, 0.0)), "S", raw_b)]
+        oracle = _SurfaceRouteOracle()
+        fiber = type("Fiber", (), {"use_surface_routing": False})()
+        self.assertEqual(FiberSolver()._planner_guides(fiber, oracle, anchors), [])
+        self.assertEqual(oracle.calls, 0)
+        oracle = _SurfaceRouteOracle()
+        self.assertEqual(len(FiberSolver()._planner_guides(type("Fiber", (), {})(), oracle, anchors)), 1)
+        self.assertEqual(oracle.calls, 1)
+
+    def test_surface_route_rejects_large_detour(self):
+        raw_a = encode_fiber_surface_param({"tri_vidx": (0, 1, 2), "tri_weights": (1.0, 0.0, 0.0)})
+        raw_b = encode_fiber_surface_param({"tri_vidx": (0, 1, 2), "tri_weights": (0.0, 1.0, 0.0)})
+        route = [Vector((0.0, 0.0, 0.0)), Vector((0.0, 1.0, 0.0)), Vector((1.0, 0.0, 0.0))]
+        anchors = [fiber_planner.PlannerAnchor(route[0], "S", raw_a), fiber_planner.PlannerAnchor(route[-1], "S", raw_b)]
+        oracle = _SurfaceRouteOracle(route)
+        self.assertEqual(FiberSolver()._planner_guides(type("Fiber", (), {})(), oracle, anchors), [])
+        self.assertEqual(oracle.calls, 1)
+
+    def test_surface_route_accepts_near_direct_detour(self):
+        raw_a = encode_fiber_surface_param({"tri_vidx": (0, 1, 2), "tri_weights": (1.0, 0.0, 0.0)})
+        raw_b = encode_fiber_surface_param({"tri_vidx": (0, 1, 2), "tri_weights": (0.0, 1.0, 0.0)})
+        route = [Vector((0.0, 0.0, 0.0)), Vector((0.5, 0.1, 0.0)), Vector((1.0, 0.0, 0.0))]
+        anchors = [fiber_planner.PlannerAnchor(route[0], "S", raw_a), fiber_planner.PlannerAnchor(route[-1], "S", raw_b)]
+        self.assertEqual(len(FiberSolver()._planner_guides(type("Fiber", (), {})(), _SurfaceRouteOracle(route), anchors)), 1)
+
+    def test_surface_route_keeps_endpoint_touch_segments(self):
+        raw = encode_fiber_surface_param({"tri_vidx": (0, 1, 2), "tri_weights": (1.0, 0.0, 0.0)})
+        anchors = [fiber_planner.PlannerAnchor(Vector((float(i), 0.0, 0.0)), "S", raw) for i in range(3)]
+        oracle = _SurfaceRouteOracle()
+        self.assertEqual(len(FiberSolver()._planner_guides(type("Fiber", (), {})(), oracle, anchors)), 3)
+        self.assertEqual(oracle.calls, 2)
+
+    def test_surface_route_skips_touch_to_touch_segments(self):
+        raw = encode_fiber_surface_param({"tri_vidx": (0, 1, 2), "tri_weights": (1.0, 0.0, 0.0)})
+        anchors = [fiber_planner.PlannerAnchor(Vector((float(i), 0.0, 0.0)), "S", raw) for i in range(4)]
+        oracle = _SurfaceRouteOracle()
+        self.assertEqual(len(FiberSolver()._planner_guides(type("Fiber", (), {})(), oracle, anchors)), 4)
+        self.assertEqual(oracle.calls, 2)
+
     def test_surface_param_path_accepts_barycentric_endpoints(self):
         verts = [Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.0)), Vector((1.0, 1.0, 0.0)), Vector((0.0, 1.0, 0.0))]
         surface = {"verts_world": verts, "route_graph": _surface_route_graph(verts, ((0, 1, 2), (0, 2, 3)))}
@@ -668,6 +732,8 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         _root_obj, fiber, _origin, _insert = _fiber_setup()
         self.assertTrue(hasattr(fiber, "use_warm_start"))
         self.assertTrue(fiber.use_warm_start)
+        self.assertTrue(hasattr(fiber, "use_surface_routing"))
+        self.assertTrue(fiber.use_surface_routing)
         self.assertTrue(hasattr(fiber, "use_segment_collisions"))
         self.assertFalse(fiber.use_segment_collisions)
         self.assertTrue(hasattr(fiber, "preview_planner_route"))
@@ -786,6 +852,14 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual((fiber.topology_mode, len(fiber.loop_anchors)), ("LOOP", 4))
         self.assertEqual((proxy.data.splines[0].use_cyclic_u, fiber_route_mode(fiber)), (True, "DIRECT"))
         self.assertTrue(all((anchors[i] - expected[i]).length < 1.0e-6 for i in range(4)))
+
+    def test_create_loop_fiber_suppresses_intermediate_prop_sync(self):
+        root_obj = root()
+        loop = scp_with_object(root_obj, "Loop", _loop_mesh_object("Loop"))
+        _edit_select_vertex(loop.geometry_object_ref, 0, 1, 2, 3)
+        with patch.object(vcp_properties, "sync_context") as sync:
+            self.assertEqual(bpy.ops.af.create_loop_fiber_from_selected_vertices(), {"FINISHED"})
+        self.assertEqual(sync.call_count, 0)
 
     def test_loop_fiber_follows_parent_scp_transform_change(self):
         root_obj, fiber, loop = _loop_setup()

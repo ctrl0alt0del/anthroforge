@@ -54,7 +54,8 @@ def create_loop_fiber_from_selected_vertices(context):
     specs, error = _resolved_loop_specs(context, root)
     if not specs:
         return failure(error or "Select at least three ordered vertices.")
-    fiber = _new_loop_fiber(root, specs)
+    with suppress_vcp_prop_updates():
+        fiber = _new_loop_fiber(root, specs)
     _activate(root.af_vcp_system, "FIBER", fiber.id)
     _sync_entity(root, context.scene, "FIBER", {fiber.id}, bake=True)
     _finalize_selection(context, root, fiber)
@@ -80,7 +81,8 @@ def create_symmetric_loop_fiber_from_selected_vertices(context):
 def _create_fiber(context, root, resolved, error_message):
     if resolved is None:
         return failure(error_message or "Could not resolve fiber endpoints.")
-    fiber = _new_fiber(root, *resolved)
+    with suppress_vcp_prop_updates():
+        fiber = _new_fiber(root, *resolved)
     _activate(root.af_vcp_system, "FIBER", fiber.id)
     _sync_entity(root, context.scene, "FIBER", {fiber.id})
     _finalize_selection(context, root, fiber)
@@ -357,6 +359,7 @@ def _append_loop_anchor(fiber, parent_id, attach_param):
 def _fiber_defaults():
     return {
         "use_warm_start": True,
+        "use_surface_routing": True,
         "use_segment_collisions": False,
         "preview_planner_route": False,
         "node_count": 64,

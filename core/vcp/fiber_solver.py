@@ -24,6 +24,10 @@ from .runtime_state import (
     set_fiber_route_mode,
 )
 
+_SURFACE_ROUTE_MAX_LENGTH_RATIO = 1.35
+_SURFACE_ROUTE_MAX_DEVIATION_RATIO = 0.45
+_SURFACE_ROUTE_EPS = 1.0e-8
+
 
 def _rounded_param(value):
     return round(float(value), 8) if isinstance(value, float) else value
@@ -155,7 +159,7 @@ class FiberSolver:
             return self._invalid_result(fiber_prop, issue)
         params = self._runtime_params(fiber_prop, bake)
         oracle = CollisionOracle(root, scene, depsgraph, params["margin"], self.surface_offset)
-        guides = self._planner_guides(oracle, anchors)
+        guides = self._planner_guides(fiber_prop, oracle, anchors)
         seed, mode, planner_ms, planned = self._plan_seed(fiber_prop, oracle, anchors, bake)
         if self._preview_planner_route(fiber_prop):
             return self._planner_preview_result(fiber_prop, seed, mode, planner_ms, planned)
@@ -390,13 +394,22 @@ class FiberSolver:
         point = self._endpoint_world(root, scene, runtime_registry, parent_id, attach_param_raw)
         return None if point is None else PlannerAnchor(point.copy(), str(parent_id or ""), str(attach_param_raw or ""))
 
-    def _planner_guides(self, oracle, anchors):
+    def _planner_guides(self, fiber_prop, oracle, anchors):
+        if not self._use_surface_routing(fiber_prop):
+            return []
         guides, last = [], max(0, len(anchors) - 2)
         for i in range(len(anchors) - 1):
-            guides.extend(self._segment_guides(oracle, anchors[i], anchors[i + 1]))
+            if not self._interior_segment(anchors, i):
+                guides.extend(self._segment_guides(oracle, anchors[i], anchors[i + 1]))
             if i < last:
                 guides.append(anchors[i + 1].point.copy())
         return guides
+
+    def _interior_segment(self, anchors, index):
+        return 0 < int(index) < len(tuple(anchors or ())) - 2
+
+    def _use_surface_routing(self, fiber_prop):
+        return bool(getattr(fiber_prop, "use_surface_routing", True))
 
     def _segment_guides(self, oracle, start, end):
         route = self._surface_route(oracle, start, end)
@@ -405,7 +418,40 @@ class FiberSolver:
     def _surface_route(self, oracle, start, end):
         route = self._surface_param_route(oracle, start, end)
         route = self._surface_vertex_route(oracle, start, end) if route is None else route
-        return None if route is None else self._shortcut_surface_route(oracle, start, end, route)
+        if route is None:
+            return None
+        route = self._shortcut_surface_route(oracle, start, end, route)
+        return route if self._surface_route_usable(route) else None
+
+    def _surface_route_usable(self, route):
+        if len(route) <= 2:
+            return True
+        direct = (route[-1] - route[0]).length
+        if direct <= _SURFACE_ROUTE_EPS:
+            return False
+        length_ok = self._surface_route_ratio(route, direct) <= _SURFACE_ROUTE_MAX_LENGTH_RATIO
+        deviation_ok = self._surface_route_deviation_ratio(route, direct) <= _SURFACE_ROUTE_MAX_DEVIATION_RATIO
+        return bool(length_ok and deviation_ok)
+
+    def _surface_route_ratio(self, route, direct):
+        return self._polyline_length(route) / max(float(direct), _SURFACE_ROUTE_EPS)
+
+    def _surface_route_deviation_ratio(self, route, direct):
+        return self._max_chord_deviation(route) / max(float(direct), _SURFACE_ROUTE_EPS)
+
+    def _polyline_length(self, points):
+        return sum((points[i + 1] - points[i]).length for i in range(len(points) - 1))
+
+    def _max_chord_deviation(self, route):
+        start, chord = route[0], route[-1] - route[0]
+        if chord.length_squared <= _SURFACE_ROUTE_EPS:
+            return 0.0
+        return max(self._point_chord_deviation(point, start, chord) for point in route[1:-1])
+
+    def _point_chord_deviation(self, point, start, chord):
+        t = (point - start).dot(chord) / chord.length_squared
+        closest = start + chord * max(0.0, min(1.0, t))
+        return (point - closest).length
 
     def _surface_param_route(self, oracle, start, end):
         params = self._surface_route_params(start, end)

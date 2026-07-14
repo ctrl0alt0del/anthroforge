@@ -20,6 +20,7 @@ from core.visualization.muscle_sync import apply_muscle_control_update, register
 from core.visualization import fiber_sync_helpers, muscle_sync_helpers, muscle_sync_runtime
 from core.visualization.muscle_sync_helpers import find_muscle_proxy, mark_inflation_ctrl
 from core.visualization.vcp_mirror_runtime import sync_vcp_mirrors
+from anthroforge.properties import vcp_properties
 
 
 def _add_fiber(origin, insert):
@@ -452,6 +453,14 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         self.assertEqual((len(root_obj.af_vcp_system.muscles), root_obj.af_vcp_system.active_vcp_type), (0, "NONE"))
         self.assertEqual((_surface_obj(root_obj, muscle, "BASE"), _surface_obj(root_obj, muscle, "INFL")), (None, None))
         self.assertEqual((find_flagged("af_muscle_inflation_ctrl", muscle.id, "af_muscle_id"), [f.muscle_id for f in root_obj.af_vcp_system.fibers]), (None, ["", ""]))
+
+    def test_delete_muscle_suppresses_intermediate_prop_sync(self):
+        root_obj, first, second = _muscle_setup()
+        select_only(first); second.select_set(True); bpy.ops.af.add_muscle_vcp()
+        muscle = root_obj.af_vcp_system.muscles[0]
+        with patch.object(vcp_properties, "sync_context") as sync:
+            self.assertEqual(bpy.ops.af.delete_vcp_in_tree(node_id=muscle.id, node_type="MUSCLE"), {"FINISHED"})
+        self.assertEqual(sync.call_count, 0)
 
     def test_loop_muscle_rejects_mixed_open_and_loop_fibers(self):
         root_obj, first, _second = _muscle_setup()

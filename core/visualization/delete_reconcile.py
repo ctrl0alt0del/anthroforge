@@ -12,6 +12,7 @@ from ..scp_runtime.common import as_id, scp_prop_map
 from ..scp_runtime.marking import normalize_active_index
 from ..scp_runtime.tree import sanitize_parent_links
 from ..vcp.fiber_modes import fiber_parent_ids
+from ..vcp.prop_update_guard import suppress_vcp_prop_updates
 
 
 def _owner_key(obj):
@@ -154,11 +155,12 @@ def cleanup_scp_dependents(root):
 
 def reconcile_deleted_entities(root, scene, removed_keys):
     _ = scene
-    changed = _remove_muscles(root, _removed_ids(removed_keys, "MUSCLE"))
-    changed = _remove_blobs(root, _removed_ids(removed_keys, "BLOB")) or changed
-    changed = _remove_fibers(root, _removed_ids(removed_keys, "FIBER")) or changed
-    changed = _reconcile_scp_objects(root) or changed
-    return _reconcile_scp_dependents(root) or changed
+    with suppress_vcp_prop_updates():
+        changed = _remove_muscles(root, _removed_ids(removed_keys, "MUSCLE"))
+        changed = _remove_blobs(root, _removed_ids(removed_keys, "BLOB")) or changed
+        changed = _remove_fibers(root, _removed_ids(removed_keys, "FIBER")) or changed
+        changed = _reconcile_scp_objects(root) or changed
+        return _reconcile_scp_dependents(root) or changed
 
 
 def _reconcile_scp_objects(root):
