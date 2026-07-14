@@ -350,6 +350,58 @@ class _SurfaceRouteOracle:
         return [point.copy() for point in self.route]
 
 
+class _AlwaysVisiblePlannerOracle:
+    def segment_visible(self, a, b, owners=(), colliders=None):
+        _ = a, b, owners, colliders
+        return True
+
+
+class _NeverVisiblePlannerOracle:
+    def segment_visible(self, a, b, owners=(), colliders=None):
+        _ = a, b, owners, colliders
+        return False
+
+
+class _SelfSurfacePlannerOracle:
+    margin, clearance = 0.0, 0.01
+
+    def active_colliders_for_segment(self, a, b, padding=0.0):
+        _ = a, b, padding
+        return ({"sid": "S"},)
+
+    def segment_visible(self, a, b, owners=(), colliders=None):
+        _ = a, b, owners
+        return not any(c.get("sid") == "S" for c in tuple(colliders or ()))
+
+    def shell_nodes(self, collider, dense=False):
+        _ = collider, dense
+        raise AssertionError("same owner should not create roadmap shell nodes")
+
+
+class _ExternalBlockerPlannerOracle:
+    margin, clearance = 0.0, 0.01
+
+    def __init__(self):
+        self.shell_calls = 0
+
+    def active_colliders_for_segment(self, a, b, padding=0.0):
+        _ = a, b, padding
+        return ({"sid": "B"},)
+
+    def segment_visible(self, a, b, owners=(), colliders=None):
+        _ = owners
+        return not tuple(colliders or ()) or abs(a.y) > 0.1 or abs(b.y) > 0.1
+
+    def shell_nodes(self, collider, dense=False):
+        _ = collider, dense
+        self.shell_calls += 1
+        return [Vector((0.5, 1.0, 0.0))]
+
+
+def _path_len(points):
+    return sum((points[i + 1] - points[i]).length for i in range(len(points) - 1))
+
+
 class FiberVcpWorkflowTests(BlenderTestCase):
     def test_fiber_proxy_object_color_matches_material(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
@@ -450,7 +502,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(fiber_route_mode(fiber), "LOCAL_FALLBACK")
         self.assertEqual(fiber_planner_ms(fiber), 0.0)
 
-    def test_interactive_planner_preview_renders_raw_planner_route(self):
+    def test_interactive_planner_preview_renders_cleaned_planner_route(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
         fiber.preview_planner_route = True
         _cube_scp(root_obj, "Blocker", (1.0, 0.0, 0.0), 0.8)
@@ -564,6 +616,16 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(pinned_indices, [0, 4, 8])
         self.assertEqual(set(targets), {0, 4, 8})
         self.assertGreater(nodes[2].y, 0.0)
+
+    def test_mid_anchors_seed_nodes_when_surface_routing_disabled(self):
+        solver = FiberSolver()
+        fiber = type("Fiber", (), {"id": "F", "use_warm_start": False})()
+        anchors = [fiber_planner.PlannerAnchor(Vector((0.0, 0.0, 0.0))), fiber_planner.PlannerAnchor(Vector((1.0, 1.0, 0.0))), fiber_planner.PlannerAnchor(Vector((2.0, 0.0, 0.0)))]
+        nodes, pinned, targets = solver._build_level_nodes(fiber, anchors, [], 9, None)
+        pinned_indices = [i for i, value in enumerate(pinned) if value]
+        self.assertEqual(pinned_indices, [0, 4, 8])
+        self.assertEqual(set(targets), {0, 4, 8})
+        self.assertLess((nodes[4] - anchors[1].point).length, 1.0e-6)
 
     def test_surface_route_toggle_skips_guides_when_disabled(self):
         raw_a = encode_fiber_surface_param({"tri_vidx": (0, 1, 2), "tri_weights": (1.0, 0.0, 0.0)})
@@ -682,6 +744,31 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         segment = fiber_planner.PlannerSegment(start, end)
         nodes = fiber_planner._roadmap_nodes(_ManyShellOracle(), segment, ({"sid": "A"},), False)
         self.assertEqual(len(nodes), 96)
+
+    def test_planner_ignores_same_owner_surface_collider(self):
+        start = fiber_planner.PlannerAnchor(Vector((0.0, 0.0, 0.0)), "S")
+        end = fiber_planner.PlannerAnchor(Vector((1.0, 0.0, 0.0)), "S")
+        result = fiber_planner._plan_segment(_SelfSurfacePlannerOracle(), fiber_planner.PlannerSegment(start, end), False)
+        self.assertEqual((result.mode, len(result.points), result.active_ids), (fiber_planner.DIRECT, 2, ()))
+
+    def test_planner_keeps_external_blocker_as_roadmap_collider(self):
+        oracle = _ExternalBlockerPlannerOracle()
+        start = fiber_planner.PlannerAnchor(Vector((0.0, 0.0, 0.0)), "S")
+        end = fiber_planner.PlannerAnchor(Vector((1.0, 0.0, 0.0)), "S")
+        result = fiber_planner._plan_segment(oracle, fiber_planner.PlannerSegment(start, end), False)
+        self.assertEqual((result.mode, len(result.points), result.active_ids), (fiber_planner.ROADMAP, 3, ("B",)))
+        self.assertGreater(oracle.shell_calls, 0)
+
+    def test_planner_relax_shortens_visible_zigzag_seed(self):
+        route = [Vector((0.0, 0.0, 0.0)), Vector((0.5, 1.0, 0.0)), Vector((1.0, 0.0, 0.0))]
+        relaxed = fiber_planner._relax_path(_AlwaysVisiblePlannerOracle(), route, ())
+        self.assertLess(_path_len(relaxed), _path_len(route))
+        self.assertAlmostEqual(relaxed[1].y, 0.0, places=4)
+
+    def test_planner_relax_preserves_blocked_zigzag_seed(self):
+        route = [Vector((0.0, 0.0, 0.0)), Vector((0.5, 1.0, 0.0)), Vector((1.0, 0.0, 0.0))]
+        relaxed = fiber_planner._relax_path(_NeverVisiblePlannerOracle(), route, ())
+        self.assertEqual([tuple(point) for point in relaxed], [tuple(point) for point in route])
 
     def test_segment_penalty_skips_pushout_without_ray_hit(self):
         nodes = [Vector((0.1, 0.0, 0.0)), Vector((0.9, 0.0, 0.0))]

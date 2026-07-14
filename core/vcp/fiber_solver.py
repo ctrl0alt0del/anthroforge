@@ -612,6 +612,8 @@ class FiberSolver:
         return nodes, pinned, targets
 
     def _route_seed_points(self, anchors, guide_worlds):
+        if not guide_worlds:
+            return [anchor.point.copy() for anchor in tuple(anchors or ())]
         points = [anchors[0].point.copy()]
         points.extend(point.copy() for point in tuple(guide_worlds or ()))
         points.append(anchors[-1].point.copy())

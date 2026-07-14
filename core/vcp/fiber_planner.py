@@ -46,10 +46,11 @@ def _segments(anchors):
 
 def _plan_segment(oracle, segment, allow_dense=True):
     active = oracle.active_colliders_for_segment(segment.start.point, segment.end.point, padding=_corridor_pad(oracle))
-    if oracle.segment_visible(segment.start.point, segment.end.point, _owners(segment), active):
-        return PlannerResult(_segment_points(segment), DIRECT, _active_ids(active))
-    sparse = _roadmap_result(oracle, segment, active, False)
-    return sparse or _dense_or_fallback(oracle, segment, active, allow_dense)
+    blockers = _planning_colliders(active, segment)
+    if oracle.segment_visible(segment.start.point, segment.end.point, _owners(segment), blockers):
+        return PlannerResult(_segment_points(segment), DIRECT, _active_ids(blockers))
+    sparse = _roadmap_result(oracle, segment, blockers, False)
+    return sparse or _dense_or_fallback(oracle, segment, blockers, allow_dense)
 
 
 def _dense_or_fallback(oracle, segment, active, allow_dense):
@@ -64,6 +65,18 @@ def _corridor_pad(oracle):
 
 def _owners(segment):
     return segment.start.owner_id, segment.end.owner_id
+
+
+def _planning_colliders(active, segment):
+    owner = _same_owner(segment)
+    if not owner:
+        return tuple(active or ())
+    return tuple(c for c in tuple(active or ()) if str(c.get("sid", "") or "") != owner)
+
+
+def _same_owner(segment):
+    start, end = _owners(segment)
+    return str(start or "") if start and start == end else ""
 
 
 def _segment_points(segment):
@@ -180,7 +193,7 @@ def _reconstruct_path(came, goal):
 def _shortcut_path(oracle, points, active):
     if len(points) <= 2:
         return [point.copy() for point in points]
-    return _shortcut_walk(oracle, [point.copy() for point in points], active)
+    return _relax_path(oracle, _shortcut_walk(oracle, [point.copy() for point in points], active), active)
 
 
 def _shortcut_walk(oracle, points, active):
@@ -197,6 +210,44 @@ def _furthest_visible(oracle, points, active, index):
         if oracle.segment_visible(points[index], points[j], ("", ""), active):
             return j
     return index + 1
+
+
+def _relax_path(oracle, points, active, steps=6):
+    out = [point.copy() for point in tuple(points or ())]
+    if len(out) <= 2:
+        return out
+    for _step in range(int(steps)):
+        changed = _relax_pass(oracle, out, active)
+        if not changed:
+            break
+    return out
+
+
+def _relax_pass(oracle, points, active):
+    changed = False
+    for index in range(1, len(points) - 1):
+        changed = _relax_point(oracle, points, active, index) or changed
+    return changed
+
+
+def _relax_point(oracle, points, active, index):
+    candidate = (points[index - 1] + points[index + 1]) * 0.5
+    if not _relax_visible(oracle, points, active, index, candidate):
+        return False
+    if _local_path_len(points[index - 1], candidate, points[index + 1]) >= _local_path_len(points[index - 1], points[index], points[index + 1]):
+        return False
+    points[index] = candidate
+    return True
+
+
+def _relax_visible(oracle, points, active, index, candidate):
+    prev_ok = oracle.segment_visible(points[index - 1], candidate, ("", ""), active)
+    next_ok = oracle.segment_visible(candidate, points[index + 1], ("", ""), active)
+    return bool(prev_ok and next_ok)
+
+
+def _local_path_len(a, b, c):
+    return (b - a).length + (c - b).length
 
 
 def _merge_paths(results):
