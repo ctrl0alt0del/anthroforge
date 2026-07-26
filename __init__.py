@@ -1,8 +1,8 @@
 bl_info = {
   "name": "AnthroForge",
   "author": "AnthroForge Team",
-  "version": (0, 1, 0),
-  "blender": (4, 4, 0),
+  "version": (0, 2, 0),
+  "blender": (5, 0, 0),
   "location": "View3D > Sidebar > AnthroForge",
   "description": "Procedural anatomical construction system",
   "category": "Object",
@@ -79,6 +79,11 @@ from .operators.scp_objects import (
     AF_OT_SetSCPGeometryObject,
     AF_OT_SetSCPTransformObject,
 )
+from .operators.draft_skin import (
+    AF_OT_CancelDraftSkin,
+    AF_OT_GenerateDraftSkin,
+    AF_OT_PaintSkinCollagen,
+)
 
 from .ui.main_panel import AF_PT_MainPanel
 from .ui.panels.create_panel import AF_PT_CreatePanel
@@ -92,6 +97,7 @@ from .ui.panels.blob_edit_panel import AF_PT_BlobEditPanel
 from .ui.panels.shortcut_panel import AF_PT_ShortcutPanel, AF_UL_ShortcutWizardItems
 from .ui.panels.action_library_panel import AF_PT_ActionLibraryPanel
 from .ui.panels.control_objects_panel import AFPTControlObjectsPanel
+from .ui.panels.draft_skin_panel import AF_PT_DraftSkinPanel
 
 from .properties.scp_properties import (
     AF_SCP_BoundObject_Property,
@@ -140,6 +146,9 @@ classes = (
     AF_OT_MoveSCPOriginToAttachment,
     AF_OT_SetSCPChildAnchorLock,
     AF_OT_ClearSCPChildAnchorLock,
+    AF_OT_GenerateDraftSkin,
+    AF_OT_CancelDraftSkin,
+    AF_OT_PaintSkinCollagen,
     AF_OT_CreateEmptySCP,
     AF_OT_SetSCPTransformObject,
     AF_OT_ReplaceSCPTransformWithEmpty,
@@ -156,6 +165,7 @@ classes = (
     AF_PT_CreatePanel,
     AF_PT_TreePanel,
     AF_PT_EditPanel,
+    AF_PT_DraftSkinPanel,
 
     AF_SCP_BoundObject_Property,
     AF_SCP_Property,
@@ -277,6 +287,8 @@ def _register_runtime_hooks():
 
 
 def _unregister_runtime_hooks():
+    from .adapters.draft_skin.jobs import shutdown_jobs
+    shutdown_jobs()
     unregister_proxy_session_runtime()
     unregister_delete_reconcile()
     unregister_control_runtime()
@@ -290,7 +302,7 @@ def _unregister_runtime_hooks():
 def _retrofit_loaded_shortcuts():
     from .core.shortcuts.owner_backsolve import retrofit_owner_backsolve_defaults
     from .core.utils import get_af_root
-    for scene in bpy.data.scenes:
+    for scene in tuple(getattr(bpy.data, "scenes", ()) or ()):
         root = get_af_root(scene)
         if root is not None:
             retrofit_owner_backsolve_defaults(root)

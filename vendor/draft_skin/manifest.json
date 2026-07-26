@@ -1,0 +1,38 @@
+{
+  "bundle": "win64-cp311-v1",
+  "python": [3, 11],
+  "wheels": [
+    {
+      "file": "imageio-2.37.0-py3-none-any.whl",
+      "sha256": "11efa15b87bc7871b61590326b2d635439acc321cf7f8ce996f812543ce10eed"
+    },
+    {
+      "file": "lazy_loader-0.4-py3-none-any.whl",
+      "sha256": "342aa8e14d543a154047afb4ba8ef17f5563baad3fc610d7b15b213b0f119efc"
+    },
+    {
+      "file": "networkx-3.4.2-py3-none-any.whl",
+      "sha256": "df5d4365b724cf81b8c6a7312509d0c22386097011ad1abe274afd5e9d3bbc5f"
+    },
+    {
+      "file": "packaging-25.0-py3-none-any.whl",
+      "sha256": "29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484"
+    },
+    {
+      "file": "pillow-11.2.1-cp311-cp311-win_amd64.whl",
+      "sha256": "0f5c7eda47bf8e3c8a283762cab94e496ba977a420868cb819159980b6709193"
+    },
+    {
+      "file": "scikit_image-0.25.2-cp311-cp311-win_amd64.whl",
+      "sha256": "b4f6b61fc2db6340696afe3db6b26e0356911529f5f6aee8c322aa5157490c9b"
+    },
+    {
+      "file": "scipy-1.15.3-cp311-cp311-win_amd64.whl",
+      "sha256": "ae48a786a28412d744c62fd7816a4118ef97e5be0bee968ce8f0a2fba7acf3bb"
+    },
+    {
+      "file": "tifffile-2025.5.10-py3-none-any.whl",
+      "sha256": "e37147123c0542d67bc37ba5cdd67e12ea6fbe6e86c52bee037a9eb6a064e5ad"
+    }
+  ]
+}

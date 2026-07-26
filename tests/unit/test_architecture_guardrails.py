@@ -37,3 +37,11 @@ class ArchitectureGuardrailTests(unittest.TestCase):
     def test_core_context_boundary_has_no_new_usages(self):
         status = CONTEXT.ratchet_status()
         self.assertEqual(status["new"], {})
+
+    def test_draft_skin_core_is_blender_independent(self):
+        folder = ADDON_ROOT / "core" / "draft_skin"
+        offenders = [
+            path.name for path in folder.glob("*.py")
+            if "import bpy" in path.read_text(encoding="utf-8")
+        ]
+        self.assertEqual(offenders, [])

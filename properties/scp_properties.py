@@ -83,6 +83,16 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         update=_on_scp_prop_update,
     )
     color_initialized: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
+    skin_collagen_mode: bpy.props.EnumProperty(
+        name="Skin Collagen Mode",
+        items=[
+            ("AUTO", "Auto", "Use legacy-compatible semantic defaults"),
+            ("UNIFORM", "Uniform", "Use one collagen value for the SCP"),
+            ("PAINTED", "Painted", "Use AF_SKIN_COLLAGEN weights with the uniform value as fallback"),
+        ],
+        default="AUTO",
+    )
+    skin_collagen: bpy.props.FloatProperty(name="Skin Collagen", default=1.0, min=0.0, max=1.0)
     parent_id: bpy.props.StringProperty(name="Parent ID", default="", update=_on_scp_prop_update)
     attach_parent_anchor_mode: bpy.props.EnumProperty(
         name="Parent Anchor",

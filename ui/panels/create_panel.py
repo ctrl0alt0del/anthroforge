@@ -4,6 +4,7 @@ from ...app.queries.create import create_panel_state
 from ...app.queries.root import has_root
 from .scp_create_sections import draw_active_object_box, draw_create_buttons, draw_mirror_box, draw_parent_box
 from .scp_objects_panel import draw_scp_object_section
+from .scp_skin_section import draw_skin_collagen_box
 
 
 def _draw_active_scp_sections(layout, context, scene, scp):
@@ -12,6 +13,7 @@ def _draw_active_scp_sections(layout, context, scene, scp):
     layout.separator()
     draw_parent_box(layout, context, scene, scp)
     draw_mirror_box(layout, scp)
+    draw_skin_collagen_box(layout, scp)
     draw_scp_object_section(layout, scene, scp)
 
 
