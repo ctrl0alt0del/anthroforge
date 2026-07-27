@@ -25,6 +25,7 @@ from core.draft_skin.protocol import (
     read_result,
     read_status,
     write_capture,
+    write_job,
     write_result,
     write_status,
 )
@@ -162,6 +163,10 @@ class DraftSkinTests(unittest.TestCase):
             path.write_bytes(b"not an npz")
             with self.assertRaises((OSError, ValueError)):
                 read_result(path)
+
+    def test_worker_imports_job_manifest_writer(self):
+        from workers import draft_skin_worker
+        self.assertIs(draft_skin_worker.write_job, write_job)
 
 
 if __name__ == "__main__":

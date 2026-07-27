@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import tempfile
 from unittest import mock
 
 TEST_ROOT = Path(__file__).resolve().parents[1]
@@ -16,12 +17,15 @@ from adapters.draft_skin.capture import capture_skin
 from adapters.draft_skin import output as output_adapter
 from adapters.draft_skin.output import replace_draft_skin
 from adapters.draft_skin.vendor import ensure_worker_dependencies
+from core.draft_skin.constants import PROTOCOL_VERSION, SOLVER_VERSION
 
 ensure_worker_dependencies()
 
 from core.draft_skin.mesh import orient_outward
-from core.draft_skin.model import SkinResult
+from core.draft_skin.model import SkinCapture, SkinJobSpec, SkinResult, SkinSource
+from core.draft_skin.protocol import capture_hash, read_job, read_result, read_status, write_job
 from core.draft_skin.validation import validate_mesh
+from workers import draft_skin_worker
 
 
 def cube_arrays():
@@ -55,6 +59,16 @@ def vcp_record(collection, entity_id, muscle_id=""):
     if hasattr(item, "muscle_id"):
         item.muscle_id = muscle_id
     return item
+
+
+def worker_spec(folder):
+    root_path = Path(folder)
+    value = lambda name: str(root_path / name)
+    return SkinJobSpec(
+        PROTOCOL_VERSION, SOLVER_VERSION, "ROOT", "", str(root_path), value("source.blend"),
+        value("input.npz"), value("result.npz"), value("status.json"),
+        value("job.log"), value("cancel.request"),
+    )
 
 
 class DraftSkinIntegrationTests(BlenderTestCase):
@@ -142,6 +156,20 @@ class DraftSkinIntegrationTests(BlenderTestCase):
         bpy.ops.ed.undo()
         restored = bpy.context.scene.objects.get("AF_DRAFT_SKIN")
         self.assertEqual(restored["af_skin_input_hash"], "one")
+
+    def test_worker_rewrites_manifest_and_completes(self):
+        vertices, faces = cube_arrays()
+        source = SkinSource(0, "SCP", "S1", "ORIGINAL", "Cube", vertices, faces, np.ones(8))
+        digest = capture_hash("ROOT", (source,))
+        capture = SkinCapture("ROOT", (source,), vertices.min(0), vertices.max(0), digest, 1 / 32, 32)
+        with tempfile.TemporaryDirectory(prefix="af_worker_smoke_") as folder:
+            spec = worker_spec(folder)
+            write_job(spec)
+            with mock.patch.object(draft_skin_worker, "_bake_and_capture", return_value=capture):
+                draft_skin_worker.run_job(Path(folder))
+            status, result = read_status(spec.status_path), read_result(spec.result_path)
+            updated = read_job(Path(folder) / "job.json")
+        self.assertEqual((status.state, result.validation.valid, updated.input_hash), ("SUCCEEDED", True, digest))
 
 
 if __name__ == "__main__":

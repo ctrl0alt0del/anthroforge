@@ -10,7 +10,7 @@ for entry in (str(ADDON_ROOT.parent), str(ADDON_ROOT)):
         sys.path.insert(0, entry)
 
 from core.draft_skin.model import SkinJobStatus
-from core.draft_skin.protocol import read_job, write_capture, write_result, write_status
+from core.draft_skin.protocol import read_job, write_capture, write_job, write_result, write_status
 from core.draft_skin.status import SkinCancelled
 from adapters.draft_skin.vendor import ensure_worker_dependencies
 
