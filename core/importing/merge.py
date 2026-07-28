@@ -412,8 +412,13 @@ def _schedule_diff_sync(state):
         schedule_sync_from_dirty_hints(root=state.root, scene=state.scene, dirty_hints=dirty, source="operator", event_type="IMPORT")
 
 
+def _apply_draft_skin_settings(state):
+    apply_scalar_dict(state.root.af_draft_skin_settings, state.snapshot.draft_skin_settings)
+
+
 def apply_snapshot(snapshot, stage_root, root, context):
     state = MergeState(root, context.scene, _target_collection(context), snapshot, stage_root, stage_bound_map(stage_root))
+    _apply_draft_skin_settings(state)
     _create_scps(state)
     _set_scp_parents(state)
     _create_vcps(state)

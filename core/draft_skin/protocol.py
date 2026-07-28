@@ -8,6 +8,7 @@ import numpy as np
 
 from .constants import PROTOCOL_VERSION
 from .model import SkinCapture, SkinJobSpec, SkinJobStatus, SkinResult, SkinSource, SkinValidationReport
+from .settings import DEFAULT_SETTINGS, settings_from_payload, settings_payload
 
 
 def _atomic_path(path):
@@ -116,6 +117,7 @@ def _capture_header(capture, metadata):
         "upper": np.asarray(capture.upper, dtype=np.float64),
         "metadata": np.asarray(metadata),
         "warnings": np.asarray(json.dumps(list(capture.warnings))),
+        "settings": np.asarray(json.dumps(settings_payload(capture.settings), sort_keys=True)),
     }
 
 
@@ -136,6 +138,7 @@ def read_capture(path):
             voxel_size=float(data["voxel_size"][0]),
             resolution=int(data["resolution"][0]),
             warnings=tuple(json.loads(str(data["warnings"]))),
+            settings=settings_from_payload(json.loads(str(data["settings"]))),
         )
 
 
@@ -183,8 +186,9 @@ def read_result(path):
         )
 
 
-def capture_hash(root_name, sources):
+def capture_hash(root_name, sources, settings=DEFAULT_SETTINGS):
     digest = hashlib.sha256(str(root_name).encode("utf-8"))
+    digest.update(json.dumps(settings_payload(settings), sort_keys=True).encode("utf-8"))
     for source in sources:
         _update_source_hash(digest, source)
     return digest.hexdigest()

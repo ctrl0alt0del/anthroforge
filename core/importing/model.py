@@ -1,5 +1,14 @@
 from dataclasses import dataclass, field
 
+try:
+    from ..draft_skin.settings import root_settings_percentages
+except ImportError:
+    from core.draft_skin.settings import root_settings_percentages
+
+
+def _default_draft_skin_settings():
+    return root_settings_percentages()
+
 
 @dataclass
 class BoundObjectSnapshot:
@@ -136,10 +145,12 @@ class PackageSnapshot:
     muscles: list[MuscleSnapshot] = field(default_factory=list)
     blobs: list[BlobSnapshot] = field(default_factory=list)
     shortcuts: list[ShortcutSnapshot] = field(default_factory=list)
+    draft_skin_settings: dict = field(default_factory=_default_draft_skin_settings)
 
     @classmethod
     def from_dict(cls, data):
         data = dict(data or {})
+        data.setdefault("draft_skin_settings", _default_draft_skin_settings())
         data["scps"] = [ScpSnapshot.from_dict(x) for x in data.get("scps", ())]
         data["fibers"] = [FiberSnapshot.from_dict(x) for x in data.get("fibers", ())]
         data["muscles"] = [MuscleSnapshot.from_dict(x) for x in data.get("muscles", ())]

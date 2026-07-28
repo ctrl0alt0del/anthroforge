@@ -3,6 +3,7 @@ from .model import (
     SkinJobSpec,
     SkinJobStatus,
     SkinResult,
+    SkinSolverSettings,
     SkinSource,
     SkinValidationReport,
 )
@@ -12,6 +13,7 @@ __all__ = (
     "SkinJobSpec",
     "SkinJobStatus",
     "SkinResult",
+    "SkinSolverSettings",
     "SkinSource",
     "SkinValidationReport",
 )

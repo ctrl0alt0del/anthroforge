@@ -78,6 +78,7 @@ def _matching_target():
 
 def _source_snapshot():
     root_obj = root()
+    root_obj.af_draft_skin_settings.collagen_depth_percent = 1.25
     left = scp_with_object(root_obj, "Left", mesh_object("Left"))
     right = scp_with_object(root_obj, "Right", mesh_object("Right", (2.0, 0.0, 0.0)))
     left.mirror_enabled, left.mirror_axis = True, "Y"
@@ -137,12 +138,14 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertIsNotNone(find_flagged("af_fiber_proxy", fiber_item.id, "af_fiber_id"))
         self.assertIsNotNone(find_flagged("af_muscle_proxy", root_obj.af_vcp_system.muscles[-1].id, "af_muscle_id"))
         self.assertIsNotNone(find_flagged("af_blob_proxy", root_obj.af_vcp_system.blobs[-1].id, "af_blob_id"))
+        self.assertAlmostEqual(root_obj.af_draft_skin_settings.collagen_depth_percent, 1.25)
 
     def test_import_scp_diff_imports_only_missing_scps(self):
         path, (parent_id, child_id) = _source_scp_diff_file()
         self.addCleanup(lambda: os.remove(path) if os.path.exists(path) else None)
         reset_scene()
         root_obj = root()
+        root_obj.af_draft_skin_settings.collagen_depth_percent = 0.25
         parent = scp_with_object(root_obj, "ParentTarget", mesh_object("ParentTarget"))
         self.assertEqual(parent.id, parent_id)
         with patch("anthroforge.core.importing.merge.schedule_sync_from_dirty_hints") as schedule:
@@ -156,12 +159,14 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertIn(child_id, schedule.call_args.kwargs["dirty_hints"]["SCP"])
         result = import_scp_diff_from_blend(path, bpy.context)
         self.assertEqual((result.scp_count, result.fiber_count, result.shortcut_count), (0, 0, 0))
+        self.assertAlmostEqual(root_obj.af_draft_skin_settings.collagen_depth_percent, 0.25)
 
     def test_import_vcp_uses_matching_target_scp_ids_and_topology(self):
         path, source_ids = _source_vcp_file()
         self.addCleanup(lambda: os.remove(path) if os.path.exists(path) else None)
         reset_scene()
         root_obj, left, right = _matching_target()
+        root_obj.af_draft_skin_settings.collagen_depth_percent = 0.35
         existing = fiber(root_obj, left.id, right.id)
         with patch("anthroforge.core.importing.service.append_stage_root", side_effect=AssertionError("append")), patch(
             "anthroforge.core.importing.vcp.schedule_sync_from_dirty_hints"
@@ -177,6 +182,7 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertEqual(root_obj.af_vcp_system.blobs[-1].attach_target_id, imported_muscle.id)
         self.assertEqual(schedule.call_count, 1)
         self.assertIn(imported_fiber.id, schedule.call_args.kwargs["dirty_hints"]["FIBER"])
+        self.assertAlmostEqual(root_obj.af_draft_skin_settings.collagen_depth_percent, 0.35)
 
     def test_import_vcp_skips_mismatched_scp_topology(self):
         path, _source_ids = _source_vcp_file()

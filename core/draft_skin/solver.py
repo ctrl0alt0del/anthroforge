@@ -2,13 +2,14 @@ import time
 
 import numpy as np
 
-from .constants import BLEND_RADIUS, REQUIRED_OFFSET, REQUIRED_PROBE, REST_OFFSET, REST_PROBE, SOLVER_VERSION
+from .constants import SOLVER_VERSION
 from .fields import collagen_field, exterior_field, smooth_max, surface_distance
 from .grid import choose_resolution, estimated_bytes
 from .mesh import extract_mesh, largest_component, orient_outward, sample_grid, signed_volume, smooth_mesh
 from .model import SkinResult
 from .raster import rasterize
 from .resources import worker_memory_limit
+from .settings import resolved_solver_distances, settings_payload, settings_percentages
 from .status import check_cancelled, report
 from .validation import validate_mesh
 
@@ -16,14 +17,16 @@ from .validation import validate_mesh
 def solve_capture(capture, progress=None, cancelled=None):
     started = time.perf_counter()
     vertices, faces, scp_faces, collagen = combine_capture(capture)
-    resolution, grid = choose_resolution(vertices, worker_memory_limit(), capture.resolution)
+    length = float(np.max(capture.upper - capture.lower))
+    distances = resolved_solver_distances(capture.settings, length)
+    resolution, grid = choose_resolution(vertices, worker_memory_limit(), capture.resolution, capture.settings)
     origin, dimensions, voxel = grid
     _preflight(dimensions, vertices, faces)
     required, full, collagen_grid = _build_fields(
-        vertices, faces, scp_faces, collagen, origin, dimensions, voxel, progress, cancelled
+        vertices, faces, scp_faces, collagen, origin, dimensions, voxel, distances, progress, cancelled
     )
     result = _extract_result(required, full, collagen_grid, vertices, origin, voxel, progress, cancelled)
-    stats = _statistics(capture, result, dimensions, voxel, resolution, started)
+    stats = _statistics(capture, result, dimensions, voxel, resolution, distances, started)
     return SkinResult(result[0], result[1], result[2], stats, result[3])
 
 
@@ -59,36 +62,38 @@ def _preflight(dimensions, vertices, faces):
         raise MemoryError("Draft skin grid exceeds the safe worker memory limit.")
 
 
-def _build_fields(vertices, faces, scp_faces, values, origin, dimensions, voxel, progress, cancelled):
+def _build_fields(vertices, faces, scp_faces, values, origin, dimensions, voxel, distances, progress, cancelled):
     report(progress, "Rasterizing", 0.06, "Rasterizing all contributors")
     all_surface, _unused = rasterize(vertices, faces, origin, dimensions, voxel, cancelled=cancelled)
     report(progress, "Rasterizing", 0.22, "Rasterizing SCP collagen sources")
     scp_surface, seeds = rasterize(vertices, scp_faces, origin, dimensions, voxel, values, cancelled=cancelled)
-    required = _required_field(all_surface, voxel, progress, cancelled)
-    full = _rest_field(scp_surface, required, voxel, progress, cancelled)
-    collagen = _collagen(scp_surface, seeds, voxel, progress, cancelled)
+    required = _required_field(all_surface, voxel, distances, progress, cancelled)
+    full = _rest_field(scp_surface, required, voxel, distances, progress, cancelled)
+    collagen = _collagen(scp_surface, seeds, voxel, distances, progress, cancelled)
     return required, full, collagen
 
 
-def _required_field(surface, voxel, progress, cancelled):
+def _required_field(surface, voxel, distances, progress, cancelled):
     check_cancelled(cancelled)
     report(progress, "Required envelope", 0.36, "Building SCP and VCP envelope")
     distance = surface_distance(surface, voxel)
-    return exterior_field(distance, voxel, REQUIRED_PROBE, REQUIRED_OFFSET)
+    return exterior_field(distance, voxel, distances["required_probe"], distances["required_offset"])
 
 
-def _rest_field(surface, required, voxel, progress, cancelled):
+def _rest_field(surface, required, voxel, distances, progress, cancelled):
     check_cancelled(cancelled)
     report(progress, "Rest envelope", 0.52, "Building SCP collagen envelope")
     distance = surface_distance(surface, voxel)
-    rest = exterior_field(distance, voxel, REST_PROBE, REST_OFFSET)
-    return smooth_max(rest, required, BLEND_RADIUS * voxel)
+    rest = exterior_field(distance, voxel, distances["rest_probe"], distances["rest_offset"])
+    return smooth_max(rest, required, distances["blend_radius"])
 
 
-def _collagen(surface, seeds, voxel, progress, cancelled):
+def _collagen(surface, seeds, voxel, distances, progress, cancelled):
     report(progress, "Collagen field", 0.65, "Propagating variable collagen")
     callback = lambda value: report(progress, "Collagen field", 0.65 + (0.12 * value))
-    return collagen_field(surface, seeds, voxel, callback, cancelled)
+    return collagen_field(
+        surface, seeds, voxel, distances["collagen_inner"], distances["collagen_outer"], callback, cancelled
+    )
 
 
 def _extract_result(required, full, collagen, sources, origin, voxel, progress, cancelled):
@@ -118,21 +123,30 @@ def _sources_inside(field, vertices, origin, voxel):
     return bool(np.all(values >= (-1.5 * voxel)))
 
 
-def _statistics(capture, result, dimensions, voxel, resolution, started):
+def _statistics(capture, result, dimensions, voxel, resolution, distances, started):
     vertices, faces, collagen, validation = result
     stats = _geometry_statistics(vertices, faces, collagen, dimensions, voxel)
-    stats.update({
-        "root_name": capture.root_name,
-        "input_hash": capture.input_hash,
-        "solver_version": SOLVER_VERSION,
-        "sources": len(capture.sources),
-        "resolution": int(resolution),
-        "elapsed_seconds": time.perf_counter() - started,
-        "warnings": list(capture.warnings),
-        "validation": validation.message,
-        "source_map": _source_map(capture),
-    })
+    stats.update(_run_statistics(capture, validation, resolution, started))
+    stats.update(_settings_statistics(capture, distances))
     return stats
+
+
+def _run_statistics(capture, validation, resolution, started):
+    return {
+        "root_name": capture.root_name, "input_hash": capture.input_hash,
+        "solver_version": SOLVER_VERSION, "sources": len(capture.sources),
+        "resolution": int(resolution), "elapsed_seconds": time.perf_counter() - started,
+        "warnings": list(capture.warnings), "validation": validation.message,
+        "source_map": _source_map(capture),
+    }
+
+
+def _settings_statistics(capture, distances):
+    return {
+        "settings": settings_payload(capture.settings),
+        "settings_percent": settings_percentages(capture.settings),
+        "resolved_distances": {key: float(value) for key, value in distances.items()},
+    }
 
 
 def _geometry_statistics(vertices, faces, collagen, dimensions, voxel):

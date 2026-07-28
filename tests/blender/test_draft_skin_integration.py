@@ -14,6 +14,7 @@ import numpy as np
 
 from _helpers import BlenderTestCase, mesh_object, root, scp_with_object
 from adapters.draft_skin.capture import capture_skin
+from adapters.draft_skin.painting import clear_map, fill_default, finish_paint, prepare_paint, set_brush_weight
 from adapters.draft_skin import output as output_adapter
 from adapters.draft_skin.output import replace_draft_skin
 from adapters.draft_skin.vendor import ensure_worker_dependencies
@@ -80,6 +81,52 @@ class DraftSkinIntegrationTests(BlenderTestCase):
         capture = capture_skin(root_obj, bpy.context.scene, bpy.context.evaluated_depsgraph_get())
         self.assertEqual((len(capture.sources), capture.sources[0].entity_type), (1, "SCP"))
         self.assertTrue(np.allclose(capture.sources[0].collagen, 0.0))
+
+    def test_root_settings_change_capture_contract_and_hash(self):
+        root_obj = root()
+        scp_with_object(root_obj, "Skull", mesh_object("Skull"))
+        first = capture_skin(root_obj, bpy.context.scene, bpy.context.evaluated_depsgraph_get())
+        root_obj.af_draft_skin_settings.collagen_depth_percent = 2.0
+        second = capture_skin(root_obj, bpy.context.scene, bpy.context.evaluated_depsgraph_get())
+        self.assertAlmostEqual(second.settings.collagen_depth_ratio, 0.02)
+        self.assertNotEqual(first.input_hash, second.input_hash)
+
+    def test_root_settings_expose_limits_and_reset_defaults(self):
+        settings = root().af_draft_skin_settings
+        settings.minimum_offset_percent = 1.5
+        settings.collagen_falloff_percent = 8.0
+        self.assertEqual(bpy.ops.af.reset_draft_skin_settings(), {"FINISHED"})
+        self.assertAlmostEqual(settings.minimum_offset_percent, 0.5406473118473614)
+        self.assertAlmostEqual(settings.collagen_falloff_percent, 3.964746953547317)
+        rna = settings.bl_rna.properties
+        self.assertEqual((rna["minimum_offset_percent"].hard_max, rna["collagen_falloff_percent"].hard_max), (2.0, 10.0))
+
+    def test_paint_entry_initializes_only_unassigned_weights(self):
+        root_obj = root()
+        obj = mesh_object("Ear")
+        scp = scp_with_object(root_obj, "Ear", obj)
+        group = obj.vertex_groups.new(name="AF_SKIN_COLLAGEN")
+        group.add([0], 0.25, "REPLACE")
+        prepare_paint(bpy.context, scp)
+        values = [group.weight(index) for index in range(3)]
+        unified = bpy.context.scene.tool_settings.weight_paint.unified_paint_settings
+        self.assertEqual((scp.skin_collagen_mode, scp.skin_collagen, obj.mode), ("PAINTED", 0.0, "WEIGHT_PAINT"))
+        self.assertTrue(np.allclose(values, (0.25, 0.0, 0.0)))
+        self.assertEqual((unified.use_unified_weight, unified.weight), (True, 0.0))
+        finish_paint(bpy.context, scp)
+
+    def test_fill_clear_and_brush_weight_actions(self):
+        root_obj = root()
+        obj = mesh_object("Skull")
+        scp = scp_with_object(root_obj, "Skull", obj)
+        scp.skin_collagen_mode, scp.skin_collagen = "PAINTED", 0.6
+        group = fill_default(bpy.context, scp)
+        set_brush_weight(bpy.context, 0.5)
+        self.assertTrue(np.allclose([group.weight(index) for index in range(3)], 0.6))
+        self.assertAlmostEqual(bpy.context.scene.tool_settings.weight_paint.unified_paint_settings.weight, 0.5)
+        clear_map(bpy.context, scp)
+        self.assertEqual(scp.skin_collagen_mode, "UNIFORM")
+        self.assertIsNone(obj.vertex_groups.get("AF_SKIN_COLLAGEN"))
 
     def test_atomic_output_replaces_previous_and_writes_attribute(self):
         root_obj = root()

@@ -15,6 +15,14 @@ class SkinSource:
 
 
 @dataclass(frozen=True)
+class SkinSolverSettings:
+    minimum_offset_ratio: float = 1.189424086064195 / 220.0
+    collagen_depth_ratio: float = (3.1717975628378534 - 1.189424086064195) / 220.0
+    collagen_core_ratio: float = 4.75769634425678 / 220.0
+    collagen_falloff_ratio: float = (13.480139642060877 - 4.75769634425678) / 220.0
+
+
+@dataclass(frozen=True)
 class SkinCapture:
     root_name: str
     sources: tuple[SkinSource, ...]
@@ -24,6 +32,7 @@ class SkinCapture:
     voxel_size: float
     resolution: int = 220
     warnings: tuple[str, ...] = ()
+    settings: SkinSolverSettings = field(default_factory=SkinSolverSettings)
 
 
 @dataclass(frozen=True)

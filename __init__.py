@@ -81,8 +81,13 @@ from .operators.scp_objects import (
 )
 from .operators.draft_skin import (
     AF_OT_CancelDraftSkin,
+    AF_OT_ClearSkinCollagen,
+    AF_OT_FillSkinCollagen,
+    AF_OT_FinishSkinCollagenPaint,
     AF_OT_GenerateDraftSkin,
     AF_OT_PaintSkinCollagen,
+    AF_OT_ResetDraftSkinSettings,
+    AF_OT_SetSkinCollagenBrushWeight,
 )
 
 from .ui.main_panel import AF_PT_MainPanel
@@ -119,6 +124,7 @@ from .properties.shortcut_properties import (
     AF_DataShortcut_System_Property,
     AF_ShortcutWizardItem_Property,
 )
+from .properties.draft_skin_properties import AF_DraftSkinSettings_Property
 
 from .core.visualization.sync import register_sync, unregister_sync
 from .core.visualization.fiber_sync import register_fiber_sync, unregister_fiber_sync
@@ -149,6 +155,11 @@ classes = (
     AF_OT_GenerateDraftSkin,
     AF_OT_CancelDraftSkin,
     AF_OT_PaintSkinCollagen,
+    AF_OT_FillSkinCollagen,
+    AF_OT_ClearSkinCollagen,
+    AF_OT_FinishSkinCollagenPaint,
+    AF_OT_SetSkinCollagenBrushWeight,
+    AF_OT_ResetDraftSkinSettings,
     AF_OT_CreateEmptySCP,
     AF_OT_SetSCPTransformObject,
     AF_OT_ReplaceSCPTransformWithEmpty,
@@ -170,6 +181,7 @@ classes = (
     AF_SCP_BoundObject_Property,
     AF_SCP_Property,
     AF_SCP_System_Property,
+    AF_DraftSkinSettings_Property,
 
     AF_OT_ClearFiberWarmStart,
     AF_OT_RecomputeFiber,
@@ -263,6 +275,8 @@ def _ensure_object_props():
         bpy.types.Object.af_vcp_system = bpy.props.PointerProperty(type=AF_VCP_System_Property)
     if not hasattr(bpy.types.Object, "af_shortcut_system"):
         bpy.types.Object.af_shortcut_system = bpy.props.PointerProperty(type=AF_DataShortcut_System_Property)
+    if not hasattr(bpy.types.Object, "af_draft_skin_settings"):
+        bpy.types.Object.af_draft_skin_settings = bpy.props.PointerProperty(type=AF_DraftSkinSettings_Property)
 
 
 def _drop_object_prop(name):
@@ -330,5 +344,6 @@ def unregister():
     _drop_object_prop("af_scp_system")
     _drop_object_prop("af_vcp_system")
     _drop_object_prop("af_shortcut_system")
+    _drop_object_prop("af_draft_skin_settings")
     for cls in reversed(classes):
         _safe_unregister_class(cls)

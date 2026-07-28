@@ -18,7 +18,7 @@ from adapters.draft_skin import jobs
 from core.draft_skin.fields import collagen_field
 from core.draft_skin.grid import choose_resolution, estimated_bytes, grid_spec
 from core.draft_skin.mesh import orient_outward
-from core.draft_skin.model import SkinCapture, SkinJobStatus, SkinResult, SkinSource
+from core.draft_skin.model import SkinCapture, SkinJobStatus, SkinResult, SkinSolverSettings, SkinSource
 from core.draft_skin.protocol import (
     capture_hash,
     read_capture,
@@ -30,6 +30,14 @@ from core.draft_skin.protocol import (
     write_status,
 )
 from core.draft_skin.solver import solve_capture
+from core.draft_skin.settings import (
+    DEFAULT_SETTINGS,
+    padding_ratio,
+    resolved_solver_distances,
+    settings_from_percentages,
+    settings_payload,
+    settings_percentages,
+)
 from core.draft_skin.status import SkinCancelled
 from core.draft_skin.validation import validate_mesh
 
@@ -88,6 +96,26 @@ class DraftSkinTests(unittest.TestCase):
         self.assertEqual(field[15, 15, 15], 0.0)
         self.assertGreater(field[29, 29, 29], 0.99)
 
+    def test_zero_collagen_falloff_width_stays_finite(self):
+        surface = np.zeros((7, 7, 7), dtype=bool)
+        seeds = np.full(surface.shape, np.inf, dtype=np.float32)
+        surface[3, 3, 3], seeds[3, 3, 3] = True, 0.0
+        field = collagen_field(surface, seeds, 1.0, 0.0, 0.0)
+        self.assertTrue(np.isfinite(field).all())
+
+    def test_default_settings_preserve_accepted_voxel_distances(self):
+        values = resolved_solver_distances(DEFAULT_SETTINGS, 220.0)
+        self.assertAlmostEqual(values["required_offset"], 1.189424086064195)
+        self.assertAlmostEqual(values["rest_offset"], 3.1717975628378534)
+        self.assertAlmostEqual(values["collagen_inner"], 4.75769634425678)
+        self.assertAlmostEqual(values["collagen_outer"], 13.480139642060877)
+        self.assertAlmostEqual(padding_ratio(DEFAULT_SETTINGS) * 220.0, 18.27308903277034)
+
+    def test_percentage_settings_round_trip(self):
+        settings = settings_from_percentages(0.5, 0.9, 2.1, 4.0)
+        values = settings_percentages(settings)
+        self.assertEqual(tuple(round(value, 6) for value in values.values()), (0.5, 0.9, 2.1, 4.0))
+
     def test_cube_validation_accepts_closed_outward_mesh(self):
         vertices, faces = cube_mesh()
         report = validate_mesh(vertices, faces, True)
@@ -97,7 +125,11 @@ class DraftSkinTests(unittest.TestCase):
         vertices, faces = cube_mesh()
         source = SkinSource(0, "SCP", "S1", "ORIGINAL", "Cube", vertices, faces, np.ones(8))
         digest = capture_hash("ROOT", (source,))
-        capture = SkinCapture("ROOT", (source,), vertices.min(0), vertices.max(0), digest, 1 / 220)
+        settings = SkinSolverSettings(0.01, 0.02, 0.03, 0.04)
+        digest = capture_hash("ROOT", (source,), settings)
+        capture = SkinCapture(
+            "ROOT", (source,), vertices.min(0), vertices.max(0), digest, 1 / 220, settings=settings
+        )
         result = SkinResult(vertices, faces, np.ones(8), {"input_hash": digest}, validate_mesh(vertices, faces))
         with tempfile.TemporaryDirectory() as folder:
             input_path, result_path = Path(folder) / "input.npz", Path(folder) / "result.npz"
@@ -105,7 +137,14 @@ class DraftSkinTests(unittest.TestCase):
             write_result(result_path, result)
             loaded_capture, loaded_result = read_capture(input_path), read_result(result_path)
         self.assertEqual((loaded_capture.input_hash, loaded_result.statistics["input_hash"]), (digest, digest))
+        self.assertEqual(loaded_capture.settings, settings)
         self.assertTrue(loaded_result.validation.valid)
+
+    def test_capture_hash_includes_solver_settings(self):
+        vertices, faces = cube_mesh()
+        source = SkinSource(0, "SCP", "S1", "ORIGINAL", "Cube", vertices, faces, np.ones(8))
+        changed = SkinSolverSettings(collagen_depth_ratio=0.02)
+        self.assertNotEqual(capture_hash("ROOT", (source,)), capture_hash("ROOT", (source,), changed))
 
     def test_status_round_trip_is_atomic_and_typed(self):
         status = SkinJobStatus("RUNNING", "Meshing", 0.75, "Extracting", ("low memory",))
@@ -129,6 +168,19 @@ class DraftSkinTests(unittest.TestCase):
         result = solve_capture(capture)
         self.assertTrue(result.validation.valid, result.validation.message)
         self.assertGreater(len(result.vertices), len(vertices))
+
+    def test_solver_uses_authored_collagen_depth(self):
+        vertices, faces = cube_mesh()
+        source = SkinSource(0, "SCP", "S1", "ORIGINAL", "Cube", vertices, faces, np.ones(8))
+        default = SkinSolverSettings()
+        tight = SkinSolverSettings(default.minimum_offset_ratio, 0.0, default.collagen_core_ratio, default.collagen_falloff_ratio)
+        captures = [
+            SkinCapture("ROOT", (source,), vertices.min(0), vertices.max(0), name, 1 / 48, 48, settings=settings)
+            for name, settings in (("default", default), ("tight", tight))
+        ]
+        full, reduced = (solve_capture(capture) for capture in captures)
+        self.assertLess(reduced.statistics["volume"], full.statistics["volume"])
+        self.assertEqual(full.statistics["settings"], settings_payload(default))
 
     def test_solver_observes_cancellation(self):
         vertices, faces = cube_mesh()

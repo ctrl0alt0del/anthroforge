@@ -1,6 +1,7 @@
 import bpy
 
 from ..app.queries.scp import active_scp_from_context
+from ..app.queries.root import root_for_context
 from ..app.use_cases.draft_skin import (
     abort_generation,
     cancel_generation,
@@ -8,7 +9,14 @@ from ..app.use_cases.draft_skin import (
     poll_generation,
     start_generation,
 )
-from ..core.draft_skin.constants import COLLAGEN_GROUP
+from ..adapters.draft_skin.painting import (
+    clear_map,
+    fill_default,
+    finish_paint,
+    prepare_paint,
+    set_brush_weight,
+)
+from ..core.draft_skin.settings import root_settings_percentages
 
 
 def _report(operator, result):
@@ -67,30 +75,83 @@ class AF_OT_CancelDraftSkin(bpy.types.Operator):
 class AF_OT_PaintSkinCollagen(bpy.types.Operator):
     bl_idname = "af.paint_skin_collagen"
     bl_label = "Paint Collagen"
-    bl_description = "Create and activate the AnthroForge collagen vertex group"
+    bl_description = "Activate absolute collagen weights on the source SCP"
+    bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-        scp = active_scp_from_context(context)
-        obj = None if scp is None else getattr(scp, "geometry_object_ref", None)
-        if obj is None or obj.type != "MESH":
-            self.report({"ERROR"}, "The active SCP has no mesh geometry.")
-            return {"CANCELLED"}
-        try:
-            _enter_weight_paint(context, obj)
-            scp.skin_collagen_mode = "PAINTED"
-        except Exception as error:
-            self.report({"ERROR"}, str(error))
-            return {"CANCELLED"}
+        return _run_scp_action(self, context, prepare_paint)
+
+
+class AF_OT_FillSkinCollagen(bpy.types.Operator):
+    bl_idname = "af.fill_skin_collagen"
+    bl_label = "Fill Default"
+    bl_description = "Replace all painted collagen weights with the SCP default"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        return _run_scp_action(self, context, fill_default)
+
+
+class AF_OT_ClearSkinCollagen(bpy.types.Operator):
+    bl_idname = "af.clear_skin_collagen"
+    bl_label = "Clear Painted Map"
+    bl_description = "Remove painted weights and keep the SCP scalar as a uniform value"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        return _run_scp_action(self, context, clear_map)
+
+
+class AF_OT_FinishSkinCollagenPaint(bpy.types.Operator):
+    bl_idname = "af.finish_skin_collagen_paint"
+    bl_label = "Finish Painting"
+    bl_description = "Leave Weight Paint mode"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        return _run_scp_action(self, context, finish_paint)
+
+
+class AF_OT_SetSkinCollagenBrushWeight(bpy.types.Operator):
+    bl_idname = "af.set_skin_collagen_brush_weight"
+    bl_label = "Set Collagen Brush Weight"
+    bl_options = {"REGISTER", "UNDO"}
+
+    weight: bpy.props.FloatProperty(min=0.0, max=1.0)
+
+    def execute(self, context):
+        set_brush_weight(context, self.weight)
         return {"FINISHED"}
 
 
-def _enter_weight_paint(context, obj):
-    if context.object is not None and context.object.mode != "OBJECT":
-        bpy.ops.object.mode_set(mode="OBJECT")
-    for item in context.selected_objects:
-        item.select_set(False)
-    obj.select_set(True)
-    context.view_layer.objects.active = obj
-    group = obj.vertex_groups.get(COLLAGEN_GROUP) or obj.vertex_groups.new(name=COLLAGEN_GROUP)
-    obj.vertex_groups.active_index = group.index
-    bpy.ops.object.mode_set(mode="WEIGHT_PAINT")
+class AF_OT_ResetDraftSkinSettings(bpy.types.Operator):
+    bl_idname = "af.reset_draft_skin_settings"
+    bl_label = "Reset Defaults"
+    bl_description = "Restore the accepted draft-skin field parameters"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        root = root_for_context(context)
+        if root is None:
+            self.report({"ERROR"}, "No AnthroForge root is active.")
+            return {"CANCELLED"}
+        _reset_settings(root.af_draft_skin_settings)
+        return {"FINISHED"}
+
+
+def _run_scp_action(operator, context, action):
+    scp = active_scp_from_context(context)
+    if scp is None:
+        operator.report({"ERROR"}, "No SCP is active.")
+        return {"CANCELLED"}
+    try:
+        action(context, scp)
+    except Exception as error:
+        operator.report({"ERROR"}, str(error))
+        return {"CANCELLED"}
+    return {"FINISHED"}
+
+
+def _reset_settings(settings):
+    for name, value in root_settings_percentages().items():
+        setattr(settings, name, value)

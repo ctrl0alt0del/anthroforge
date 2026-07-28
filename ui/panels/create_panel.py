@@ -13,7 +13,7 @@ def _draw_active_scp_sections(layout, context, scene, scp):
     layout.separator()
     draw_parent_box(layout, context, scene, scp)
     draw_mirror_box(layout, scp)
-    draw_skin_collagen_box(layout, scp)
+    draw_skin_collagen_box(layout, context, scp)
     draw_scp_object_section(layout, scene, scp)
 
 

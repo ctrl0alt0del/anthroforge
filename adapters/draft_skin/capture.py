@@ -3,13 +3,15 @@ from dataclasses import replace
 import numpy as np
 
 try:
-    from ...core.draft_skin.constants import AUTO_ZERO_TERMS, COLLAGEN_GROUP, TARGET_RESOLUTION
+    from ...core.draft_skin.constants import COLLAGEN_GROUP, TARGET_RESOLUTION
     from ...core.draft_skin.model import SkinCapture, SkinSource
     from ...core.draft_skin.protocol import capture_hash
+    from ...core.draft_skin.settings import effective_collagen, settings_from_percentages
 except ImportError:
-    from core.draft_skin.constants import AUTO_ZERO_TERMS, COLLAGEN_GROUP, TARGET_RESOLUTION
+    from core.draft_skin.constants import COLLAGEN_GROUP, TARGET_RESOLUTION
     from core.draft_skin.model import SkinCapture, SkinSource
     from core.draft_skin.protocol import capture_hash
+    from core.draft_skin.settings import effective_collagen, settings_from_percentages
 
 
 def capture_skin(root, scene, depsgraph):
@@ -147,11 +149,12 @@ def _scp_by_id(root):
 
 
 def _base_collagen(scp, obj):
-    mode = str(getattr(scp, "skin_collagen_mode", "AUTO"))
-    if mode != "AUTO":
-        return float(getattr(scp, "skin_collagen", 1.0))
-    text = f"{getattr(scp, 'name', '')} {obj.name}".lower()
-    return 0.0 if any(term in text for term in AUTO_ZERO_TERMS) else 1.0
+    return effective_collagen(
+        getattr(scp, "skin_collagen_mode", "AUTO"),
+        getattr(scp, "skin_collagen", 1.0),
+        getattr(scp, "name", ""),
+        obj.name,
+    )
 
 
 def _painted_values(scp, depsgraph, count, base, cache, warnings):
@@ -193,5 +196,16 @@ def _make_capture(root, sources, warnings):
     vertices = np.concatenate([item.vertices for item in sources])
     lower, upper = vertices.min(axis=0), vertices.max(axis=0)
     voxel = float(np.max(upper - lower) / TARGET_RESOLUTION)
-    digest = capture_hash(root.name, sources)
-    return SkinCapture(root.name, sources, lower, upper, digest, voxel, TARGET_RESOLUTION, tuple(warnings))
+    settings = _root_settings(root)
+    digest = capture_hash(root.name, sources, settings)
+    return SkinCapture(root.name, sources, lower, upper, digest, voxel, TARGET_RESOLUTION, tuple(warnings), settings)
+
+
+def _root_settings(root):
+    values = root.af_draft_skin_settings
+    return settings_from_percentages(
+        values.minimum_offset_percent,
+        values.collagen_depth_percent,
+        values.collagen_core_percent,
+        values.collagen_falloff_percent,
+    )

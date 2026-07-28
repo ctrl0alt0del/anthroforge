@@ -12,9 +12,19 @@ not contain UVs, skin weights, or a game-ready edge layout.
    - **Uniform** uses the SCP's scalar collagen value.
    - **Painted** reads absolute weights from `AF_SKIN_COLLAGEN`; unassigned
      vertices inherit the scalar value.
-2. Use **Paint Collagen** to create and activate the vertex group when needed.
-3. Press **Generate Draft Skin**. The panel reports the background stage and
+2. Adjust the root's four model-relative field controls when the default skin
+   envelope needs to be tighter, deeper, or spread over a different radius.
+3. Use **Paint Collagen** to initialize and activate the vertex group. Blue is
+   absolute collagen `0`; red is absolute collagen `1`. Native Blender brushes,
+   gradients, and blur remain available.
+4. Press **Generate Draft Skin**. The panel reports the background stage and
    progress; **Cancel** or Escape stops the worker.
+
+**Minimum Skin Distance** is the required offset from all contributors.
+**Maximum Collagen Depth** is additional distance beyond that minimum.
+**Collagen Core Radius** preserves painted values near the SCP, and
+**Collagen Falloff Width** controls their transition back to full collagen.
+All four values are percentages of the captured model's longest axis.
 
 The previous draft skin is retained until the replacement has passed validation
 and imported successfully. Failed and cancelled job logs are shown in the panel
@@ -48,9 +58,10 @@ match. A mismatch uses the uniform fallback and records a warning.
 
 ## Numerical pipeline
 
-The longest source axis uses 220 cells when memory permits, with approximately
-18 cells of padding. The worker lowers the resolution no further than 160 cells
-when the estimated peak exceeds the smaller of 4 GiB and 35% of available RAM.
+The longest source axis uses 220 cells when memory permits. Padding is derived
+from the authored envelope and falloff plus a fixed safety margin. The worker
+lowers the resolution no further than 160 cells when the estimated peak exceeds
+the smaller of 4 GiB and 35% of available RAM.
 
 Triangle surfaces are sampled in grouped, vectorized batches. Exterior
 accessibility and Euclidean distance transforms produce:
@@ -70,7 +81,7 @@ Collagen is sampled back onto the output's point-domain
 
 ## Protocol and dependencies
 
-Jobs use protocol-versioned, `allow_pickle=False` `input.npz` and `result.npz`
+Jobs use protocol-v2, `allow_pickle=False` `input.npz` and `result.npz`
 files plus atomically replaced `job.json` and `status.json`. `job.log` is
 append-only and `cancel.request` is the cancellation signal.
 
