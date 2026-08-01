@@ -45,3 +45,9 @@ class ArchitectureGuardrailTests(unittest.TestCase):
             if "import bpy" in path.read_text(encoding="utf-8")
         ]
         self.assertEqual(offenders, [])
+
+    def test_topology_core_is_blender_independent(self):
+        folder = ADDON_ROOT / "core" / "topology"
+        offenders = [path.name for path in folder.glob("*.py")
+                     if "import bpy" in path.read_text(encoding="utf-8")]
+        self.assertEqual(offenders, [])

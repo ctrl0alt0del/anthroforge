@@ -1,0 +1,10 @@
+{
+  "bundle": "win64-cp311-v1",
+  "python": [3, 11],
+  "wheels": [
+    {
+      "file": "pyinstantmeshes-1.0.0-cp311-cp311-win_amd64.whl",
+      "sha256": "6c2f3b63970fb59d89bddd5312a62cba98be572320cdd45ad151f0c12658b106"
+    }
+  ]
+}

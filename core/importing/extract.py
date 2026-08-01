@@ -127,6 +127,7 @@ def root_snapshot(root):
     return PackageSnapshot(
         root_name=str(root.name or "AF_ROOT"),
         draft_skin_settings=scalar_dict(root.af_draft_skin_settings),
+        topology_settings=scalar_dict(root.af_topology_settings),
         scps=[_scp_snapshot(scp) for scp in root.af_scp_system.scps],
         fibers=[_fiber_snapshot(fiber) for fiber in vcp.fibers],
         muscles=[_muscle_snapshot(muscle) for muscle in vcp.muscles],

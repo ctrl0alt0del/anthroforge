@@ -2,8 +2,10 @@ from dataclasses import dataclass, field
 
 try:
     from ..draft_skin.settings import root_settings_percentages
+    from ..topology.settings import default_settings_payload as default_topology_settings
 except ImportError:
     from core.draft_skin.settings import root_settings_percentages
+    from core.topology.settings import default_settings_payload as default_topology_settings
 
 
 def _default_draft_skin_settings():
@@ -146,11 +148,13 @@ class PackageSnapshot:
     blobs: list[BlobSnapshot] = field(default_factory=list)
     shortcuts: list[ShortcutSnapshot] = field(default_factory=list)
     draft_skin_settings: dict = field(default_factory=_default_draft_skin_settings)
+    topology_settings: dict = field(default_factory=default_topology_settings)
 
     @classmethod
     def from_dict(cls, data):
         data = dict(data or {})
         data.setdefault("draft_skin_settings", _default_draft_skin_settings())
+        data.setdefault("topology_settings", default_topology_settings())
         data["scps"] = [ScpSnapshot.from_dict(x) for x in data.get("scps", ())]
         data["fibers"] = [FiberSnapshot.from_dict(x) for x in data.get("fibers", ())]
         data["muscles"] = [MuscleSnapshot.from_dict(x) for x in data.get("muscles", ())]

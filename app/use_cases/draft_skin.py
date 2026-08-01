@@ -6,7 +6,7 @@ def start_generation(context):
     root = root_for_context(context)
     if root is None:
         return failure("Create an AnthroForge root before generating skin.")
-    if _jobs().active_job(context.scene) is not None:
+    if _jobs().active_job(context.scene) is not None or _topology_running(context.scene):
         return failure("A draft skin job is already running in this scene.", "WARNING")
     try:
         job = _jobs().start_job(context.scene, root.name, _binary_path(), _save_copy)
@@ -101,6 +101,14 @@ def _jobs():
     except ImportError:
         from adapters.draft_skin import jobs
     return jobs
+
+
+def _topology_running(scene):
+    try:
+        from ...adapters.topology.jobs import active_job
+    except ImportError:
+        from adapters.topology.jobs import active_job
+    return active_job(scene) is not None
 
 
 def _output():

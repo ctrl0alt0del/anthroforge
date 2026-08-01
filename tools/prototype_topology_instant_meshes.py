@@ -4,11 +4,14 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 import bpy
 import bmesh
 import numpy as np
+from mathutils import Vector
+from mathutils.bvhtree import BVHTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import prototype_topology_annuli as annulus_test
@@ -16,6 +19,12 @@ import prototype_topology_field as field_test
 import prototype_topology_global_layout as global_test
 import prototype_topology_guides as guide_test
 import prototype_topology_cube_shell as cube_test
+
+
+@dataclass(frozen=True)
+class SymmetryPlane:
+    origin: np.ndarray
+    normal: np.ndarray
 
 
 def parse_args():
@@ -26,11 +35,23 @@ def parse_args():
     parser.add_argument("--target-vertices", type=int, default=4200)
     parser.add_argument("--target-faces", type=int, default=64000)
     parser.add_argument("--ignore-guides", action="store_true")
+    parser.add_argument("--stress-variant", default="")
+    parser.add_argument("--symmetry-origin", nargs=3, type=float, default=(0.0, 0.0, 0.0))
+    parser.add_argument("--symmetry-normal", nargs=3, type=float, default=(1.0, 0.0, 0.0))
     return parser.parse_args(sys.argv[sys.argv.index("--") + 1 :])
 
 
-def remesh_arrays(work, anchors, vendor, count):
-    bisect_left_half(work)
+def symmetry_plane(args):
+    origin = np.asarray(args.symmetry_origin, dtype=np.float64)
+    normal = np.asarray(args.symmetry_normal, dtype=np.float64)
+    length = float(np.linalg.norm(normal))
+    if not np.isfinite(origin).all() or not np.isfinite(normal).all() or length < 1.0e-12:
+        raise ValueError("Symmetry plane requires a finite origin and non-zero normal.")
+    return SymmetryPlane(origin, normal / length)
+
+
+def remesh_arrays(work, anchors, vendor, count, plane):
+    bisect_left_half(work, plane)
     vertices, faces, _normals = guide_test.mesh_arrays(work)
     faces = cut_guide_holes(vertices, faces, anchors)
     with tempfile.TemporaryDirectory(prefix="af_instant_") as folder:
@@ -38,44 +59,62 @@ def remesh_arrays(work, anchors, vendor, count):
         run_worker(input_path, output_path, vendor, count)
         with np.load(output_path, allow_pickle=False) as values:
             return mirrored_output(
-                values["vertices"].copy(), values["faces"].copy(), anchors)
+                values["vertices"].copy(), values["faces"].copy(), anchors, plane)
 
 
-def bisect_left_half(work):
+def local_plane(work, plane):
+    origin = work.matrix_world.inverted() @ Vector(plane.origin)
+    normal = work.matrix_world.to_3x3().transposed() @ Vector(plane.normal)
+    return origin, normal.normalized()
+
+
+def bisect_left_half(work, plane):
     mesh = bmesh.new()
     mesh.from_mesh(work.data)
     geometry = tuple(mesh.verts) + tuple(mesh.edges) + tuple(mesh.faces)
-    bmesh.ops.bisect_plane(mesh, geom=geometry, plane_co=(0.0, 0.0, 0.0),
-                           plane_no=(1.0, 0.0, 0.0), clear_outer=True,
+    origin, normal = local_plane(work, plane)
+    bmesh.ops.bisect_plane(mesh, geom=geometry, plane_co=origin,
+                           plane_no=normal, clear_outer=True,
                            clear_inner=False, use_snap_center=True)
     bmesh.ops.triangulate(mesh, faces=tuple(mesh.faces))
     mesh.to_mesh(work.data)
     mesh.free()
 
 
-def mirrored_output(vertices, faces, anchors):
+def mirrored_output(vertices, faces, anchors, plane):
     diagonal = float(np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)))
-    snap_symmetry_boundary(vertices, faces, diagonal)
-    mirrored = vertices.copy()
-    mirrored[:, 0] *= -1.0
+    snap_symmetry_boundary(vertices, faces, diagonal, plane)
+    mirrored = reflect_points(vertices, plane)
     parts = [(vertices, faces), (mirrored, faces[:, ::-1])]
     hybrid = cube_test.welded_hybrid(parts, 1.0e-6 * diagonal)
     return hybrid.vertices, hybrid.faces
 
 
-def snap_symmetry_boundary(vertices, faces, diagonal):
+def signed_distances(points, plane):
+    return (np.asarray(points) - plane.origin) @ plane.normal
+
+
+def reflect_points(points, plane):
+    values = np.asarray(points)
+    distances = signed_distances(values, plane)
+    return values - (2.0 * distances[:, None] * plane.normal)
+
+
+def snap_symmetry_boundary(vertices, faces, diagonal, plane):
     boundary = np.unique(boundary_edges(faces))
-    near = boundary[np.abs(vertices[boundary, 0]) < 0.02 * diagonal]
-    vertices[near, 0] = 0.0
-    vertices[:, 0] = np.minimum(vertices[:, 0], 0.0)
+    distances = signed_distances(vertices, plane)
+    near = boundary[np.abs(distances[boundary]) < 0.02 * diagonal]
+    vertices[near] -= distances[near, None] * plane.normal
+    outside = np.maximum(signed_distances(vertices, plane), 0.0)
+    vertices[:] -= outside[:, None] * plane.normal
 
 
-def fill_unmatched_boundaries(hybrid, anchors):
+def fill_unmatched_boundaries(hybrid, anchors, plane):
     loops = cube_test.boundary_loops(boundary_edges(hybrid.faces))
     extras = unmatched_boundaries(loops, hybrid.vertices, anchors)
     mesh = hybrid_bmesh(hybrid)
     for loop in extras:
-        fill_bmesh_loop(mesh, loop)
+        fill_bmesh_loop(mesh, loop, plane)
     return bmesh_hybrid(mesh)
 
 
@@ -101,8 +140,8 @@ def hybrid_bmesh(hybrid):
     return mesh
 
 
-def fill_bmesh_loop(mesh, loop):
-    first_ids, second_ids = mirrored_loop_chains(mesh, loop)
+def fill_bmesh_loop(mesh, loop, plane):
+    first_ids, second_ids = mirrored_loop_chains(mesh, loop, plane)
     if len(first_ids) != len(second_ids):
         raise RuntimeError("Symmetry slit chains have different lengths.")
     first = tuple(mesh.verts[int(index)] for index in first_ids)
@@ -136,21 +175,26 @@ def add_slit_rows(mesh, first, second, centers, index):
     mesh.faces.new(right)
 
 
-def mirrored_loop_chains(mesh, loop):
+def mirrored_loop_chains(mesh, loop, plane):
     fixed = [index for index, vertex in enumerate(loop)
-             if abs(float(mesh.verts[int(vertex)].co.x)) < 1.0e-8]
+             if abs(vertex_plane_distance(mesh.verts[int(vertex)], plane)) < 1.0e-8]
     if len(fixed) != 2:
         raise RuntimeError("Unmatched boundary is not a symmetry slit.")
     start, end = fixed
     first = loop[start:end + 1]
     second = tuple(reversed(loop[end:] + loop[:start + 1]))
-    if chain_x(mesh, first) > chain_x(mesh, second):
+    if chain_side(mesh, first, plane) > chain_side(mesh, second, plane):
         first, second = second, first
     return first, second
 
 
-def chain_x(mesh, chain):
-    return float(np.mean([mesh.verts[int(index)].co.x for index in chain]))
+def vertex_plane_distance(vertex, plane):
+    return float(signed_distances(np.asarray(vertex.co), plane))
+
+
+def chain_side(mesh, chain, plane):
+    points = np.asarray([mesh.verts[int(index)].co[:] for index in chain])
+    return float(signed_distances(points, plane).mean())
 
 
 def bmesh_hybrid(mesh):
@@ -237,28 +281,28 @@ def boundary_edges(faces):
     return unique[counts == 1]
 
 
-def guide_transitions(vertices, faces, anchors):
+def guide_transitions(vertices, faces, anchors, plane):
     loops = cube_test.boundary_loops(boundary_edges(faces))
     pairs = cube_test.matched_boundaries(loops, vertices, anchors)
     diagonal = float(np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)))
-    values = [make_transition(anchor.name, pair, diagonal)
+    values = [make_transition(anchor.name, pair, diagonal, plane)
               for anchor, pair in zip(anchors, pairs)]
-    return mirror_paired_transitions(values, diagonal)
+    return mirror_paired_transitions(values, diagonal, plane)
 
 
-def interior_transitions(vertices, faces, anchors):
+def interior_transitions(vertices, faces, anchors, plane):
     loops = cube_test.boundary_loops(boundary_edges(faces))
     extras = unmatched_boundaries(loops, vertices, anchors)
     diagonal = float(np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)))
-    values = [inner_transition(loop, vertices, anchors, diagonal) for loop in extras]
-    return mirror_paired_transitions(values, diagonal)
+    values = [inner_transition(loop, vertices, anchors, diagonal, plane) for loop in extras]
+    return mirror_paired_transitions(values, diagonal, plane)
 
 
-def inner_transition(loop, vertices, anchors, diagonal):
+def inner_transition(loop, vertices, anchors, diagonal, plane):
     boundary = vertices[np.asarray(loop)]
     anchor = min(anchors, key=lambda item: np.linalg.norm(
         inner_ring(item).mean(axis=0) - boundary.mean(axis=0)))
-    return make_transition(f"{anchor.name}_INNER", (boundary, inner_ring(anchor)), diagonal)
+    return make_transition(f"{anchor.name}_INNER", (boundary, inner_ring(anchor)), diagonal, plane)
 
 
 def inner_ring(anchor):
@@ -266,9 +310,9 @@ def inner_ring(anchor):
     return min(rings, key=global_test.ring_perimeter)
 
 
-def make_transition(name, pair, diagonal):
+def make_transition(name, pair, diagonal, plane):
     boundary, ring = pair
-    if abs(float(boundary[:, 0].mean())) > 1.0e-5 * diagonal:
+    if abs(float(signed_distances(boundary.mean(axis=0), plane))) > 1.0e-5 * diagonal:
         return side_transition(name, boundary, ring)
     first = cube_test.canonical_loop(boundary)
     second = cube_test.align_loop(first, ring)
@@ -316,35 +360,42 @@ def transition_center(item):
     return item.vertices.mean(axis=0)
 
 
-def reflected_center(item):
-    value = transition_center(item).copy()
-    value[0] *= -1.0
-    return value
+def reflected_center(item, plane):
+    return reflect_points(transition_center(item)[None, :], plane)[0]
 
 
-def mirror_paired_transitions(values, diagonal):
+def mirror_paired_transitions(values, diagonal, plane):
     pending = {index for index, item in enumerate(values)
-               if transition_center(item)[0] > 1.0e-5 * diagonal}
+               if signed_distances(transition_center(item), plane) > 1.0e-5 * diagonal}
     for index, item in enumerate(values):
-        if transition_center(item)[0] < -1.0e-5 * diagonal:
-            mirror_one_transition(values, index, pending, diagonal)
+        if signed_distances(transition_center(item), plane) < -1.0e-5 * diagonal:
+            mirror_one_transition(values, index, pending, diagonal, plane)
     return tuple(values)
 
 
-def mirror_one_transition(values, source, pending, diagonal):
+def mirror_one_transition(values, source, pending, diagonal, plane):
     if not pending:
         return
     target = min(pending, key=lambda index: np.linalg.norm(
-        transition_center(values[index]) - reflected_center(values[source])))
-    error = np.linalg.norm(transition_center(values[target]) - reflected_center(values[source]))
+        transition_center(values[index]) - reflected_center(values[source], plane)))
+    error = np.linalg.norm(transition_center(values[target]) - reflected_center(values[source], plane))
     if error < 0.02 * diagonal:
-        values[target] = cube_test.mirrored_transition(values[source], values[target])
+        values[target] = mirrored_transition(values[source], values[target], plane)
         pending.remove(target)
 
 
-def stitched_mesh(obj, anchors, collection):
+def mirrored_transition(source, target, plane):
+    from scipy.spatial import cKDTree
+    points = reflect_points(source.vertices, plane)
+    distances, indices = cKDTree(target.vertices).query(points, workers=-1)
+    if float(distances.max()) > 1.0e-4:
+        raise RuntimeError("Transition pair is not symmetric across the requested plane.")
+    return cube_test.Transition(target.name, target.vertices, indices[source.faces][:, ::-1])
+
+
+def stitched_mesh(obj, anchors, collection, plane):
     vertices, faces = object_quad_arrays(obj)
-    transitions = guide_transitions(vertices, faces, anchors)
+    transitions = guide_transitions(vertices, faces, anchors, plane)
     parts = [(vertices, faces)]
     parts.extend((item.vertices, item.faces) for item in transitions)
     parts.extend(cube_test.anchor_mesh(anchor) for anchor in anchors)
@@ -420,11 +471,84 @@ def edge_counts(faces):
     return values
 
 
-def symmetry_error(vertices):
+def symmetry_error(vertices, plane):
     from scipy.spatial import cKDTree
-    reflected = vertices.copy()
-    reflected[:, 0] *= -1.0
+    reflected = reflect_points(vertices, plane)
     return float(cKDTree(vertices).query(reflected, workers=-1)[0].max())
+
+
+def edge_symmetry_error(vertices, counts, plane):
+    from scipy.spatial import cKDTree
+    edges = np.asarray(tuple(counts), dtype=np.int32)
+    centers = vertices[edges].mean(axis=1)
+    reflected = reflect_points(centers, plane)
+    return float(cKDTree(centers).query(reflected, workers=-1)[0].max())
+
+
+def boundary_loop_counts(counts):
+    edges = np.asarray([edge for edge, value in counts.items() if value == 1],
+                       dtype=np.int32)
+    if not len(edges):
+        return []
+    return sorted(len(loop) for loop in cube_test.boundary_loops(edges))
+
+
+def component_count(vertex_count, counts):
+    adjacency = [set() for _index in range(vertex_count)]
+    for first, second in counts:
+        adjacency[first].add(second)
+        adjacency[second].add(first)
+    pending, result = set(range(vertex_count)), 0
+    while pending:
+        stack, result = [pending.pop()], result + 1
+        while stack:
+            linked = adjacency[stack.pop()].intersection(pending)
+            pending.difference_update(linked)
+            stack.extend(linked)
+    return result
+
+
+def degenerate_face_count(vertices, faces):
+    quads = np.asarray(faces, dtype=np.int32)
+    points = vertices[quads]
+    first = np.cross(points[:, 1] - points[:, 0], points[:, 2] - points[:, 0])
+    second = np.cross(points[:, 2] - points[:, 0], points[:, 3] - points[:, 0])
+    areas = 0.5 * (np.linalg.norm(first, axis=1) + np.linalg.norm(second, axis=1))
+    repeated = np.asarray([len(set(face)) < len(face) for face in faces])
+    return int(np.count_nonzero((areas < 1.0e-12) | repeated))
+
+
+def self_intersection_count(vertices, faces):
+    bvh = BVHTree.FromPolygons(vertices.tolist(), faces, all_triangles=False)
+    pairs = bvh.overlap(bvh)
+    return sum(first < second and not set(faces[first]).intersection(faces[second])
+               for first, second in pairs)
+
+
+def guide_preservation(vertices, faces, anchors):
+    from scipy.spatial import cKDTree
+    tree, face_sets = cKDTree(vertices), {frozenset(face) for face in faces}
+    return {anchor.name: preserved_anchor(anchor, tree, face_sets) for anchor in anchors}
+
+
+def preserved_anchor(anchor, tree, face_sets):
+    points = field_test.object_world_vertices(anchor)
+    distances, indices = tree.query(points, workers=-1)
+    kept = sum(frozenset(int(indices[index]) for index in polygon.vertices) in face_sets
+               for polygon in anchor.data.polygons)
+    return {"vertex_error": float(distances.max()), "faces": int(kept),
+            "expected_faces": len(anchor.data.polygons)}
+
+
+def valence_metrics(vertex_count, counts):
+    values = np.zeros(vertex_count, dtype=np.int32)
+    for first, second in counts:
+        values[first] += 1
+        values[second] += 1
+    unique, frequencies = np.unique(values, return_counts=True)
+    return {"maximum": int(values.max()),
+            "counts": {str(int(key)): int(value)
+                       for key, value in zip(unique, frequencies)}}
 
 
 def quad_aspects(vertices, faces):
@@ -435,32 +559,61 @@ def quad_aspects(vertices, faces):
     return lengths.max(axis=1) / np.maximum(lengths.min(axis=1), 1.0e-12)
 
 
-def metrics(obj):
+def metrics(obj, anchors, plane):
     vertices, faces = mesh_arrays(obj)
     counts = edge_counts(faces)
-    aspects = quad_aspects(vertices, faces)
-    arities = Counter(map(len, faces))
-    return {"vertices": len(vertices), "faces": len(faces), "face_arities": dict(arities),
+    values = topology_metrics(vertices, faces, counts)
+    values.update(quality_metrics(vertices, faces, counts, plane))
+    values["guides"] = guide_preservation(vertices, faces, anchors)
+    values["symmetry_plane"] = {
+        "origin": plane.origin.tolist(), "normal": plane.normal.tolist()}
+    return values
+
+
+def topology_metrics(vertices, faces, counts):
+    return {"vertices": len(vertices), "faces": len(faces),
+            "face_arities": dict(Counter(map(len, faces))),
             "boundary_edges": sum(value == 1 for value in counts.values()),
             "nonmanifold_edges": sum(value > 2 for value in counts.values()),
-            "symmetry_error": symmetry_error(vertices),
+            "boundary_loops": boundary_loop_counts(counts),
+            "euler_characteristic": len(vertices) - len(counts) + len(faces),
+            "components": component_count(len(vertices), counts),
+            "finite": bool(np.isfinite(vertices).all()),
+            "degenerate_faces": degenerate_face_count(vertices, faces),
+            "self_intersections": self_intersection_count(vertices, faces)}
+
+
+def quality_metrics(vertices, faces, counts, plane):
+    aspects = quad_aspects(vertices, faces)
+    return {"symmetry_error": symmetry_error(vertices, plane),
+            "edge_symmetry_error": edge_symmetry_error(vertices, counts, plane),
+            "valence": valence_metrics(len(vertices), counts),
             "aspect_p95": float(np.quantile(aspects, 0.95)),
             "aspect_max": float(aspects.max())}
 
 
 def build(args):
     _root, skin = guide_test.scene_inputs()
+    apply_stress_variant(args.stress_variant)
+    plane = symmetry_plane(args)
     anchors = () if args.ignore_guides else field_test.anchor_objects()
     collection = guide_test.make_collection("AF_TOPOLOGY_INSTANT_MESHES_TEST")
     work = global_test.smooth_proxy(skin, args.target_faces, collection)
-    vertices, faces = remesh_arrays(work, anchors, args.vendor, args.target_vertices)
+    vertices, faces = remesh_arrays(work, anchors, args.vendor, args.target_vertices, plane)
     raw = create_mesh(vertices, faces, collection)
-    return skin, anchors, collection, stitched_mesh(raw, anchors, collection)
+    return skin, anchors, collection, stitched_mesh(raw, anchors, collection, plane), plane
+
+
+def apply_stress_variant(name):
+    if not name:
+        return
+    import prototype_topology_stress_variants as stress
+    stress.apply_variant(name)
 
 
 def finish(args, data):
-    _skin, anchors, collection, obj = data
-    values = metrics(obj)
+    _skin, anchors, collection, obj, plane = data
+    values = metrics(obj, anchors, plane)
     visuals = create_visuals(obj, anchors, collection)
     render_all(prepare_render(visuals), visuals, args.render_dir)
     Path(args.render_dir, "metrics.json").write_text(json.dumps(values, indent=2), encoding="utf-8")

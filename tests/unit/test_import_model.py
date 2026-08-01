@@ -47,6 +47,10 @@ class ImportModelTests(unittest.TestCase):
         self.assertAlmostEqual(settings["minimum_offset_percent"], 0.5406473118473614)
         self.assertAlmostEqual(settings["collagen_falloff_percent"], 3.964746953547317)
 
+    def test_package_snapshot_defaults_legacy_topology_settings(self):
+        settings = PackageSnapshot.from_dict(_snapshot_dict()).topology_settings
+        self.assertEqual((settings["target_quad_count"], settings["symmetry_mode"]), (8100, "X"))
+
 
 def _snapshot_dict():
     return {
