@@ -8,8 +8,9 @@ import numpy as np
 
 from .constants import PROTOCOL_VERSION
 from .model import (
-    SymmetryPlane, TopologyCapture, TopologyGuide, TopologyJobSpec,
-    TopologyJobStatus, TopologyResult, TopologyValidationReport,
+    SymmetryPlane, TopologyCapture, TopologyDensityRule, TopologyGuide,
+    TopologyJobSpec, TopologyJobStatus, TopologyOwnershipSource, TopologyResult,
+    TopologyValidationReport,
 )
 from .settings import settings_from_payload, settings_payload
 
@@ -72,6 +73,15 @@ def _guide_offsets(guides):
     return np.asarray([0, *np.cumsum([len(item.points) for item in guides])], dtype=np.int64)
 
 
+def _source_meta(source):
+    return {key: getattr(source, key) for key in (
+        "source_index", "entity_type", "entity_id", "mirror_role", "owner_scp_ids")}
+
+
+def _source_offsets(sources, name):
+    return np.asarray([0, *np.cumsum([len(getattr(item, name)) for item in sources])], dtype=np.int64)
+
+
 def _plane_arrays(plane):
     if plane is None:
         return np.zeros(3), np.zeros(3)
@@ -85,7 +95,7 @@ def write_capture(path, capture):
 
 
 def _capture_payload(capture, points, origin, normal):
-    return {
+    payload = {
         "protocol_version": np.asarray([PROTOCOL_VERSION], dtype=np.int32),
         "root_name": np.asarray(capture.root_name), "input_hash": np.asarray(capture.input_hash),
         "vertices": np.asarray(capture.vertices, dtype=np.float64),
@@ -96,11 +106,27 @@ def _capture_payload(capture, points, origin, normal):
         "plane_origin": origin, "plane_normal": normal,
         "settings": np.asarray(json.dumps(settings_payload(capture.settings), sort_keys=True)),
         "warnings": np.asarray(json.dumps(list(capture.warnings))),
+        "density_rules": np.asarray(json.dumps([asdict(item) for item in capture.density_rules])),
     }
+    payload.update(_ownership_payload(capture.ownership_sources))
+    return payload
+
+
+def _ownership_payload(sources):
+    vertices = [np.asarray(item.vertices, dtype=np.float64) for item in sources]
+    triangles = [np.asarray(item.triangles, dtype=np.int32) for item in sources]
+    return {"owner_metadata": np.asarray(json.dumps([_source_meta(item) for item in sources])),
+            "owner_vertices": _concat(vertices), "owner_triangles": _concat_faces(triangles),
+            "owner_vertex_offsets": _source_offsets(sources, "vertices"),
+            "owner_triangle_offsets": _source_offsets(sources, "triangles")}
 
 
 def _concat(arrays):
     return np.concatenate(arrays) if arrays else np.empty((0, 3), dtype=np.float64)
+
+
+def _concat_faces(arrays):
+    return np.concatenate(arrays) if arrays else np.empty((0, 3), dtype=np.int32)
 
 
 def _check_protocol(data):
@@ -115,11 +141,29 @@ def read_capture(path):
         guides = _read_guides(data)
         settings = settings_from_payload(json.loads(str(data["settings"])))
         plane = _read_plane(data, settings)
+        rules = tuple(TopologyDensityRule(**item) for item in json.loads(str(data["density_rules"])))
+        sources = _read_ownership_sources(data)
         return TopologyCapture(
             str(data["root_name"]), data["vertices"].copy(), data["triangles"].copy(),
             guides, data["lower"].copy(), data["upper"].copy(), str(data["input_hash"]),
-            settings, plane, tuple(json.loads(str(data["warnings"]))),
+            settings, plane, tuple(json.loads(str(data["warnings"]))), rules, sources,
         )
+
+
+def _read_ownership_sources(data):
+    metadata = json.loads(str(data["owner_metadata"]))
+    vertices, triangles = data["owner_vertices"], data["owner_triangles"]
+    voff, toff = data["owner_vertex_offsets"], data["owner_triangle_offsets"]
+    return tuple(_ownership_source(item,
+                 vertices[voff[i]:voff[i + 1]].copy(),
+                 triangles[toff[i]:toff[i + 1]].copy())
+                 for i, item in enumerate(metadata))
+
+
+def _ownership_source(metadata, vertices, triangles):
+    values = dict(metadata)
+    values["owner_scp_ids"] = tuple(values.get("owner_scp_ids", ()))
+    return TopologyOwnershipSource(**values, vertices=vertices, triangles=triangles)
 
 
 def _read_guides(data):
@@ -142,6 +186,8 @@ def write_result(path, result):
                quads=np.asarray(result.quads, dtype=np.int32),
                face_regions=np.asarray(result.face_regions, dtype=np.int32),
                guide_indices=np.asarray(result.guide_indices, dtype=np.int32),
+               owner_scp_indices=_optional_array(result.owner_scp_indices, np.int32),
+               target_edge_lengths=_optional_array(result.target_edge_lengths, np.float32),
                statistics=np.asarray(json.dumps(result.statistics)),
                validation=np.asarray(json.dumps(report)))
 
@@ -152,10 +198,15 @@ def read_result(path):
         report = TopologyValidationReport(**json.loads(str(data["validation"])))
         return TopologyResult(data["vertices"].copy(), data["quads"].copy(),
                               data["face_regions"].copy(), data["guide_indices"].copy(),
-                              json.loads(str(data["statistics"])), report)
+                              json.loads(str(data["statistics"])), report,
+                              data["owner_scp_indices"].copy(), data["target_edge_lengths"].copy())
 
 
-def capture_hash(root_name, vertices, triangles, guides, settings, plane):
+def _optional_array(values, dtype):
+    return np.empty(0, dtype=dtype) if values is None else np.asarray(values, dtype=dtype)
+
+
+def capture_hash(root_name, vertices, triangles, guides, settings, plane, rules=(), sources=()):
     digest = hashlib.sha256(str(root_name).encode("utf-8"))
     digest.update(json.dumps(settings_payload(settings), sort_keys=True).encode("utf-8"))
     _update_array(digest, vertices); _update_array(digest, triangles)
@@ -164,7 +215,15 @@ def capture_hash(root_name, vertices, triangles, guides, settings, plane):
     for guide in guides:
         digest.update(json.dumps(_guide_meta(guide), sort_keys=True).encode("utf-8"))
         _update_array(digest, guide.points)
+    _update_density_hash(digest, rules, sources)
     return digest.hexdigest()
+
+
+def _update_density_hash(digest, rules, sources):
+    digest.update(json.dumps([asdict(item) for item in rules], sort_keys=True).encode("utf-8"))
+    for source in sources:
+        digest.update(json.dumps(_source_meta(source), sort_keys=True).encode("utf-8"))
+        _update_array(digest, source.vertices); _update_array(digest, source.triangles)
 
 
 def _update_array(digest, values):

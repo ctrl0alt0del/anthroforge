@@ -7,6 +7,8 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from .engine import annuli, cube, guides, instant, layout
+from .density_runtime import budget_statistics, budget_warnings, build_density, has_adaptive_density, sample_density
+from .adaptive_refine import base_quad_target, refine_to_density
 
 try:
     from ...core.topology.constants import GUIDE_ROWS, REGION_AUTO, REGION_GUIDE, REGION_TRANSITION
@@ -28,13 +30,21 @@ def solve_capture(capture, vendor, status=None, cancelled=None):
     update("Guides", 0.15, "Projecting closed topology guides.")
     anchors, guide_map, warnings = _anchors(capture, skin, collection)
     check_cancelled(cancelled)
-    target = internal_target(capture.settings.target_quad_count, _reserved_quads(anchors))
-    result = _run_mesh(capture, skin, anchors, collection, vendor, target, update)
+    update("Density", 0.32, "Resolving hierarchical SCP topology density.")
+    density = build_density(capture)
+    target = _initial_target(capture, density, anchors)
+    result = _run_mesh(capture, skin, anchors, collection, vendor, target, density, update)
     if needs_correction(len(result[1]), capture.settings.target_quad_count):
         target = corrected_target(target, len(result[1]), capture.settings.target_quad_count)
-        result = _run_mesh(capture, skin, anchors, collection, vendor, target, update)
+        result = _run_mesh(capture, skin, anchors, collection, vendor, target, density, update)
     check_cancelled(cancelled)
-    return _finish(capture, result, anchors, guide_map, warnings, target, update)
+    return _finish(capture, result, anchors, guide_map, warnings, target, density, update)
+
+
+def _initial_target(capture, density, anchors):
+    reserved = _reserved_quads(anchors)
+    base = base_quad_target(capture, density, reserved) if has_adaptive_density(capture) else capture.settings.target_quad_count
+    return internal_target(base, reserved)
 
 
 def _skin_object(capture):
@@ -102,7 +112,7 @@ def _reserved_quads(anchors):
     return sum(len(obj.data.polygons) for obj in anchors) * 3
 
 
-def _run_mesh(capture, skin, anchors, collection, vendor, target, update):
+def _run_mesh(capture, skin, anchors, collection, vendor, target, density, update):
     update("Remeshing", 0.48, f"Solving field-aligned quads (target {target}).")
     faces = proxy_face_count(len(capture.triangles), capture.settings.target_quad_count)
     work = layout.smooth_proxy(skin, faces, collection)
@@ -111,6 +121,10 @@ def _run_mesh(capture, skin, anchors, collection, vendor, target, update):
     else:
         plane = instant.SymmetryPlane(capture.plane.origin, capture.plane.normal)
         vertices, quads = instant.remesh_arrays(work, anchors, vendor, target, plane)
+    if has_adaptive_density(capture):
+        labels = np.full(len(quads), REGION_AUTO); indices = np.full(len(quads), -1)
+        vertices, quads, _labels, _indices = refine_to_density(
+            capture, (vertices, quads, labels, indices), density)
     update("Stitching", 0.76, "Stitching immutable guide annuli.")
     return _assemble(vertices, quads, anchors, capture.plane)
 
@@ -178,20 +192,40 @@ def _combined_labeled(parts):
     return np.vstack(vertices), np.vstack(faces), np.asarray(regions), np.asarray(indices)
 
 
-def _finish(capture, result, anchors, guide_map, warnings, target, update):
+def _finish(capture, result, anchors, guide_map, warnings, target, density, update):
     update("Validation", 0.9, "Validating topology and guide preservation.")
     vertices, faces, regions, indices = result
+    owners, lengths = sample_density(capture, density[0], density[1], vertices)
     metrics = _metrics(capture, vertices, faces, regions, anchors)
     report = validate_topology(vertices, faces, metrics)
-    all_warnings = list(capture.warnings) + list(warnings)
-    if metrics["self_intersections"]:
-        all_warnings.append(f"Detected {metrics['self_intersections']} local self-intersections.")
-    stats = dict(metrics, input_hash=capture.input_hash, internal_target=target,
-                 requested_quads=capture.settings.target_quad_count,
-                 guide_map=guide_map, warnings=all_warnings)
+    budgets = budget_statistics(capture, owners, faces, density[2])
+    all_warnings = _result_warnings(capture, warnings, density, metrics, budgets)
+    stats = _result_stats(capture, metrics, target, guide_map, all_warnings,
+                          budgets)
     if not report.valid:
         raise RuntimeError(report.message)
-    return TopologyResult(vertices, faces, regions, indices, stats, report)
+    return TopologyResult(vertices, faces, regions, indices, stats, report, owners, lengths)
+
+
+def _result_warnings(capture, warnings, density, metrics, budgets):
+    values = list(capture.warnings) + list(warnings) + list(density[3])
+    values.extend(budget_warnings(budgets))
+    if metrics["self_intersections"]:
+        values.append(f"Detected {metrics['self_intersections']} local self-intersections.")
+    return values
+
+
+def _result_stats(capture, metrics, target, guide_map, warnings, budgets):
+    return dict(metrics, input_hash=capture.input_hash, internal_target=target,
+                requested_quads=capture.settings.target_quad_count,
+                guide_map=guide_map, warnings=warnings,
+                adaptive_density=has_adaptive_density(capture),
+                density_backend=_density_backend(capture), topology_budgets=budgets,
+                owner_map={item.scp_index: item.scp_id for item in capture.density_rules})
+
+
+def _density_backend(capture):
+    return "CONFORMING_QUAD_REFINEMENT" if has_adaptive_density(capture) else "UNIFORM_INSTANT_MESHES"
 
 
 def _metrics(capture, vertices, faces, regions, anchors):

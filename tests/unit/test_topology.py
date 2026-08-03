@@ -5,13 +5,17 @@ from pathlib import Path
 import numpy as np
 
 from core.topology.density import corrected_target, internal_target, needs_correction
+from core.topology.budgets import build_regions, density_errors, density_field, smooth_target_lengths
 from core.topology.model import (
-    SymmetryPlane, TopologyCapture, TopologyGuide, TopologyResult,
-    TopologySettings, TopologyValidationReport,
+    SymmetryPlane, TopologyCapture, TopologyDensityRule, TopologyGuide,
+    TopologyOwnershipSource, TopologyResult, TopologySettings, TopologyValidationReport,
 )
+from core.topology.ownership import assign_ownership, vertex_areas
+from core.topology.refine import refine_quads
 from core.topology.protocol import capture_hash, read_capture, read_result, write_capture, write_result
 from core.topology.symmetry import normalized_plane, reflect_points, signed_distances
 from core.topology.validation import validate_topology
+from adapters.topology.density_runtime import budget_warnings
 
 
 class TopologyTests(unittest.TestCase):
@@ -31,9 +35,11 @@ class TopologyTests(unittest.TestCase):
         plane = SymmetryPlane(np.asarray((1, 2, 3.0)), np.asarray((0, 1, 0.0)))
         guide = TopologyGuide(0, "F1", "Guide", "ORIGINAL", np.eye(3))
         vertices, faces = np.eye(3), np.asarray(((0, 1, 2),), dtype=np.int32)
-        digest = capture_hash("AF_ROOT", vertices, faces, (guide,), settings, plane)
+        rules = (_rule(0, "scp", "", "SUBTREE_BUDGET", 4000),)
+        sources = (_ownership_source(0, "SCP", "scp", ("scp",), 0.0),)
+        digest = capture_hash("AF_ROOT", vertices, faces, (guide,), settings, plane, rules, sources)
         capture = TopologyCapture("AF_ROOT", vertices, faces, (guide,), np.zeros(3),
-                                  np.ones(3), digest, settings, plane)
+                                  np.ones(3), digest, settings, plane, (), rules, sources)
         report = TopologyValidationReport(*([True] * 12))
         result = TopologyResult(np.zeros((4, 3)), np.asarray(((0, 1, 2, 3),)),
                                 np.zeros(1), -np.ones(1), {"ok": True}, report)
@@ -43,6 +49,8 @@ class TopologyTests(unittest.TestCase):
             loaded_capture, loaded_result = read_capture(capture_path), read_result(result_path)
         self.assertEqual(loaded_capture.input_hash, digest)
         self.assertEqual(loaded_capture.guides[0].fiber_id, "F1")
+        self.assertEqual(loaded_capture.density_rules, rules)
+        self.assertEqual(loaded_capture.ownership_sources[0].owner_scp_ids, ("scp",))
         self.assertTrue(loaded_result.validation.valid)
 
     def test_validation_accepts_orientable_quad_patch(self):
@@ -54,6 +62,68 @@ class TopologyTests(unittest.TestCase):
         vertices = np.eye(3)
         report = validate_topology(vertices, np.asarray(((0, 1, 2),), dtype=np.int32))
         self.assertFalse(report.valid)
+
+    def test_nested_subtree_budgets_are_inclusive(self):
+        rules = _density_rules()
+        owners, areas = np.asarray((0, 1, 2)), np.ones(3)
+        regions = {item.scp_id: item for item in build_regions(rules, 9000, owners, areas)}
+        self.assertEqual(regions[""].exclusive_quads, 5000)
+        self.assertEqual(regions["cranium"].exclusive_quads, 1500)
+        self.assertEqual(regions["face"].exclusive_quads, 2500)
+
+    def test_budget_validation_rejects_oversubscription(self):
+        rules = (_rule(0, "body", "", "INHERIT", 0),
+                 _rule(1, "cranium", "body", "SUBTREE_BUDGET", 9500))
+        self.assertTrue(density_errors(rules, 9000))
+
+    def test_budget_warning_reports_large_approximation(self):
+        values = ({"scp_id": "cranium", "requested_exclusive_quads": 4000,
+                   "actual_exclusive_quads": 3000},)
+        self.assertIn("3000/4000", budget_warnings(values)[0])
+
+    def test_ownership_resolves_nearest_scp_and_vcp_candidates(self):
+        sources = (_ownership_source(0, "SCP", "left", ("left",), 0.0),
+                   _ownership_source(1, "SCP", "right", ("right",), 10.0),
+                   _ownership_source(2, "MUSCLE", "muscle", ("left", "right"), 5.0))
+        vertices = np.asarray(((0, 0, 0), (5, 0, 0), (10, 0, 0), (5, 1, 0)), dtype=float)
+        faces = np.asarray(((0, 1, 3), (1, 2, 3)), dtype=np.int32)
+        rules = (_rule(0, "left", "", "INHERIT", 0), _rule(1, "right", "", "INHERIT", 0))
+        result = assign_ownership(vertices, faces, sources, rules)
+        self.assertEqual((result.owner_indices[0], result.owner_indices[2]), (0, 1))
+
+    def test_density_smoothing_preserves_region_predictions(self):
+        vertices = np.asarray(((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)), dtype=float)
+        faces = np.asarray(((0, 1, 2), (0, 2, 3)), dtype=np.int32)
+        rules = (_rule(0, "left", "", "SUBTREE_BUDGET", 100),)
+        areas = vertex_areas(vertices, faces); regions = build_regions(rules, 200, np.zeros(4), areas)
+        field = density_field(regions, 4)
+        smoothed = smooth_target_lengths(field.target_edge_lengths, faces, areas, regions)
+        self.assertTrue(np.isfinite(smoothed).all())
+
+    def test_conforming_refinement_keeps_only_quads(self):
+        vertices = np.asarray(((0, 0, 0), (1, 0, 0), (2, 0, 0),
+                               (0, 1, 0), (1, 1, 0), (2, 1, 0)), dtype=float)
+        faces = np.asarray(((0, 1, 4, 3), (1, 2, 5, 4)), dtype=np.int32)
+        points, refined, parents = refine_quads(vertices, faces, (True, False))
+        self.assertEqual(refined.shape, (6, 4))
+        self.assertTrue(np.isfinite(points).all())
+        self.assertEqual(tuple(np.bincount(parents)), (4, 2))
+
+
+def _rule(index, scp_id, parent, mode, quads):
+    return TopologyDensityRule(index, scp_id, parent, mode, quads)
+
+
+def _density_rules():
+    return (_rule(0, "body", "", "INHERIT", 0),
+            _rule(1, "cranium", "body", "SUBTREE_BUDGET", 4000),
+            _rule(2, "face", "cranium", "SUBTREE_BUDGET", 2500))
+
+
+def _ownership_source(index, kind, entity_id, owners, x_value):
+    vertices = np.asarray(((x_value, 0, 0), (x_value, 1, 0), (x_value, 0, 1)), dtype=float)
+    return TopologyOwnershipSource(index, kind, entity_id, "ORIGINAL", owners,
+                                   vertices, np.asarray(((0, 1, 2),), dtype=np.int32))
 
 
 if __name__ == "__main__":

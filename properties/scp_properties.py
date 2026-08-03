@@ -93,6 +93,14 @@ class AF_SCP_Property(bpy.types.PropertyGroup):
         default="AUTO",
     )
     skin_collagen: bpy.props.FloatProperty(name="Skin Collagen", default=1.0, min=0.0, max=1.0)
+    topology_density_mode: bpy.props.EnumProperty(
+        name="Topology Density",
+        items=(("INHERIT", "Inherit", "Use the nearest ancestor topology budget"),
+               ("SUBTREE_BUDGET", "Subtree Budget", "Reserve quads for this SCP and all descendants")),
+        default="INHERIT",
+    )
+    topology_subtree_quads: bpy.props.IntProperty(
+        name="Subtree Quads", default=1000, min=100, max=500000)
     parent_id: bpy.props.StringProperty(name="Parent ID", default="", update=_on_scp_prop_update)
     attach_parent_anchor_mode: bpy.props.EnumProperty(
         name="Parent Anchor",

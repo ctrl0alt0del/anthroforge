@@ -11,6 +11,49 @@ class TopologySettings:
 
 
 @dataclass(frozen=True)
+class TopologyDensityRule:
+    scp_index: int
+    scp_id: str
+    parent_id: str
+    mode: str = "INHERIT"
+    subtree_quads: int = 0
+
+
+@dataclass(frozen=True)
+class TopologyOwnershipSource:
+    source_index: int
+    entity_type: str
+    entity_id: str
+    mirror_role: str
+    owner_scp_ids: tuple[str, ...]
+    vertices: Any
+    triangles: Any
+
+
+@dataclass(frozen=True)
+class TopologyBudgetRegion:
+    scp_id: str
+    requested_quads: int
+    exclusive_quads: int
+    owner_indices: tuple[int, ...]
+    area: float = 0.0
+
+
+@dataclass(frozen=True)
+class TopologyOwnership:
+    owner_indices: Any
+    fallback_count: int = 0
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class TopologyDensityField:
+    target_edge_lengths: Any
+    regions: tuple[TopologyBudgetRegion, ...]
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class SymmetryPlane:
     origin: Any
     normal: Any
@@ -37,6 +80,8 @@ class TopologyCapture:
     settings: TopologySettings = field(default_factory=TopologySettings)
     plane: SymmetryPlane | None = None
     warnings: tuple[str, ...] = ()
+    density_rules: tuple[TopologyDensityRule, ...] = ()
+    ownership_sources: tuple[TopologyOwnershipSource, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -90,3 +135,5 @@ class TopologyResult:
     guide_indices: Any
     statistics: dict[str, Any] = field(default_factory=dict)
     validation: TopologyValidationReport | None = None
+    owner_scp_indices: Any = None
+    target_edge_lengths: Any = None

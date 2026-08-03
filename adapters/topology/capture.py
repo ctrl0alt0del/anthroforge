@@ -1,6 +1,8 @@
 import numpy as np
 from mathutils import Vector
 
+from .ownership_capture import density_rules, ownership_sources
+
 try:
     from ...core.topology.model import SymmetryPlane, TopologyCapture, TopologyGuide
     from ...core.topology.protocol import capture_hash
@@ -17,10 +19,12 @@ def capture_topology(root, scene, depsgraph):
     settings = _root_settings(root)
     plane = _resolved_plane(root, settings)
     guides, warnings = _guides(root, scene, depsgraph)
+    rules = density_rules(root)
+    sources = ownership_sources(root, scene, depsgraph)
     lower, upper = vertices.min(axis=0), vertices.max(axis=0)
-    digest = capture_hash(root.name, vertices, triangles, guides, settings, plane)
+    digest = capture_hash(root.name, vertices, triangles, guides, settings, plane, rules, sources)
     return TopologyCapture(root.name, vertices, triangles, guides, lower, upper,
-                           digest, settings, plane, tuple(warnings))
+                           digest, settings, plane, tuple(warnings), rules, sources)
 
 
 def _draft_skin(root, scene):

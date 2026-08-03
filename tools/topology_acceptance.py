@@ -14,6 +14,8 @@ def _arguments():
     parser.add_argument("--output", required=True)
     parser.add_argument("--target", type=int, required=True)
     parser.add_argument("--symmetry", choices=("NONE", "X", "Y", "Z"), required=True)
+    parser.add_argument("--density-scp")
+    parser.add_argument("--density-quads", type=int)
     values = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     return parser.parse_args(values)
 
@@ -52,7 +54,19 @@ def main():
         raise RuntimeError("Acceptance scene has no AF_ROOT.")
     root.af_topology_settings.target_quad_count = arguments.target
     root.af_topology_settings.symmetry_mode = arguments.symmetry
+    _apply_density(root, arguments)
     _run(root, arguments)
+
+
+def _apply_density(root, arguments):
+    if not arguments.density_scp:
+        return
+    scp = next((item for item in root.af_scp_system.scps
+                if arguments.density_scp in {item.id, item.name}), None)
+    if scp is None or arguments.density_quads is None:
+        raise RuntimeError("Density SCP or quad budget is invalid.")
+    scp.topology_density_mode = "SUBTREE_BUDGET"
+    scp.topology_subtree_quads = arguments.density_quads
 
 
 if __name__ == "__main__":

@@ -22,12 +22,21 @@ def _build_mesh(result):
     mesh.update(calc_edges=True)
     _write_attribute(mesh, "af_topology_region", result.face_regions)
     _write_attribute(mesh, "af_topology_guide_index", result.guide_indices)
+    _write_point_attribute(mesh, "af_topology_owner_scp_index", result.owner_scp_indices, "INT")
+    _write_point_attribute(mesh, "af_topology_target_edge_length", result.target_edge_lengths, "FLOAT")
     return mesh
 
 
 def _write_attribute(mesh, name, values):
     attribute = mesh.attributes.new(name, "INT", "FACE")
     attribute.data.foreach_set("value", values.astype(int).ravel())
+
+
+def _write_point_attribute(mesh, name, values, data_type):
+    if values is None or len(values) != len(mesh.vertices):
+        return
+    attribute = mesh.attributes.new(name, data_type, "POINT")
+    attribute.data.foreach_set("value", values.ravel())
 
 
 def _create(scene, root, result, mesh):
@@ -65,6 +74,7 @@ def _tag(obj, root, result):
     obj["af_topology_solver_version"] = SOLVER_VERSION
     obj["af_topology_stats_json"] = json.dumps(result.statistics, sort_keys=True)
     obj["af_topology_guide_map_json"] = json.dumps(result.statistics.get("guide_map", []), sort_keys=True)
+    obj["af_topology_owner_map_json"] = json.dumps(result.statistics.get("owner_map", {}), sort_keys=True)
 
 
 def _previous(scene, root):
