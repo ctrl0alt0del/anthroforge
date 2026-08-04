@@ -55,7 +55,7 @@ def _surface_loop(guide, bvh, graph, tree, vertices, symmetry, diagonal):
     projected = guide_test.projected_guide(guide, bvh)
     if projected is None:
         return None
-    points = geodesic_closure(projected[0], graph, tree, vertices)
+    points = geodesic_closure(projected[0], graph, tree, vertices, guide.name)
     points, normals = project_points(points, bvh)
     points, normals = resample_fields(points, normals, 192)
     points, normals = project_points(points, bvh)
@@ -73,14 +73,26 @@ def surface_graph(vertices, faces):
     return coo_matrix((weights, (edges[:, 0], edges[:, 1])), shape=(len(vertices),) * 2).tocsr()
 
 
-def geodesic_closure(points, graph, tree, vertices):
+def geodesic_closure(points, graph, tree, vertices, guide_name):
     if endpoint_gap_is_local(points):
         return points
     from scipy.sparse.csgraph import dijkstra
     start, finish = tree.query((points[-1], points[0]))[1]
     _distances, predecessors = dijkstra(graph, indices=start, return_predecessors=True)
     path = predecessor_path(int(start), int(finish), predecessors)
-    return np.vstack((points, vertices[path[1:-1]])) if len(path) > 2 else points
+    indices = validated_path_indices(path, start, finish, len(vertices), guide_name)
+    return np.vstack((points, vertices[indices])) if len(indices) else points
+
+
+def validated_path_indices(path, start, finish, vertex_count, guide_name):
+    if not path:
+        return np.empty(0, dtype=np.intp)
+    indices = np.asarray(path, dtype=np.intp)
+    endpoints = indices[0] == start and indices[-1] == finish
+    in_range = bool(np.all((indices >= 0) & (indices < vertex_count)))
+    if not endpoints or not in_range:
+        raise RuntimeError(f"Topology guide '{guide_name}' returned an invalid closure path.")
+    return indices[1:-1]
 
 
 def endpoint_gap_is_local(points):

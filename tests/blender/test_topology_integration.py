@@ -12,6 +12,7 @@ for value in (str(Path(__file__).parent), str(TEST_ROOT), str(ADDON_ROOT)):
 
 from _helpers import BlenderTestCase, mesh_object, root, scp_with_object
 from adapters.topology.capture import capture_topology
+from adapters.topology.engine import annuli, instant
 from adapters.topology.output import replace_topology
 from core.topology.model import TopologyResult
 from core.topology.validation import validate_topology
@@ -57,7 +58,62 @@ def topology_result(offset=0.0):
                           validate_topology(vertices, quads), owners, lengths)
 
 
+def closure_fixture(connected=True):
+    from adapters.draft_skin.vendor import ensure_worker_dependencies
+    ensure_worker_dependencies()
+    from scipy.sparse import coo_matrix
+    from scipy.spatial import cKDTree
+    vertices = np.column_stack((np.arange(4.0), np.zeros((4, 2))))
+    edges = ((0, 1), (1, 0), (1, 2), (2, 1), (2, 3), (3, 2)) if connected else ((0, 1), (1, 0))
+    graph = coo_matrix((np.ones(len(edges)), tuple(zip(*edges))), shape=(4, 4)).tocsr()
+    points = np.asarray(((3, 0, 0), (2.9, .01, 0), (2.8, 0, 0), (0, 0, 0)))
+    return points, graph, cKDTree(vertices), vertices
+
+
 class TopologyIntegrationTests(BlenderTestCase):
+    def test_guide_cut_stops_at_authored_outer_ring(self):
+        ring = np.asarray(((-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)), dtype=float)
+        vertices = np.asarray(((0.8, -.1, 0), (.9, .1, 0), (1, 0, 0),
+                               (1.05, -.1, 0), (1.15, .1, 0), (1.1, 0, 0)))
+        faces = np.asarray(((0, 1, 2), (3, 4, 5)), dtype=np.int32)
+        np.testing.assert_array_equal(instant.guide_face_mask(vertices, faces, ring), (True, False))
+
+    def test_plane_coordinates_support_arbitrary_symmetry(self):
+        normal = np.asarray((1.0, 1.0, 0.0)); normal /= np.linalg.norm(normal)
+        plane = instant.SymmetryPlane(np.asarray((1.0, 2.0, 3.0)), normal)
+        points = np.asarray(((2.0, 2.0, 4.0), (1.0, 3.0, 2.0)))
+        mirrored = instant.reflect_points(points, plane)
+        first, second = instant.plane_coordinates(points, plane), instant.plane_coordinates(mirrored, plane)
+        np.testing.assert_allclose(first[:, 0], -second[:, 0])
+        np.testing.assert_allclose(first[:, 1:], second[:, 1:])
+
+    def test_transition_mismatch_names_guide(self):
+        boundary = np.asarray(((0, 0, 1), (0, 1, 0), (0, 0, -1), (0, -1, 0)), dtype=float)
+        ring = boundary + np.asarray((2, 0, 0)); plane = instant.SymmetryPlane(np.zeros(3), np.asarray((1, 0, 0)))
+        with self.assertRaisesRegex(RuntimeError, "EyeGuide"):
+            instant.make_transition("EyeGuide", (boundary, ring), 4.0, plane)
+
+    def test_local_guide_closure_keeps_points(self):
+        points = np.asarray(((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)))
+        result = annuli.geodesic_closure(points, None, None, None, "Local")
+        np.testing.assert_array_equal(result, points)
+
+    def test_nonlocal_guide_closure_selects_vertex_rows(self):
+        points, graph, tree, vertices = closure_fixture()
+        result = annuli.geodesic_closure(points, graph, tree, vertices, "FIBER_18")
+        np.testing.assert_array_equal(result[-2:], vertices[[1, 2]])
+
+    def test_unreachable_guide_closure_keeps_points(self):
+        points, graph, tree, vertices = closure_fixture(False)
+        result = annuli.geodesic_closure(points, graph, tree, vertices, "Detached")
+        np.testing.assert_array_equal(result, points)
+
+    def test_invalid_guide_closure_names_guide(self):
+        with self.assertRaisesRegex(RuntimeError, "BrokenGuide"):
+            annuli.validated_path_indices((0, 5, 3), 0, 3, 4, "BrokenGuide")
+        with self.assertRaisesRegex(RuntimeError, "WrongEnds"):
+            annuli.validated_path_indices((1, 2, 3), 0, 3, 4, "WrongEnds")
+
     def test_capture_requires_current_root_skin(self):
         with self.assertRaisesRegex(ValueError, "draft skin"):
             capture_topology(root(), bpy.context.scene, bpy.context.evaluated_depsgraph_get())

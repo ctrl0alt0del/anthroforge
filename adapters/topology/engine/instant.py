@@ -221,7 +221,7 @@ def local_points(points, center, first, second):
 
 def guide_face_mask(vertices, faces, ring):
     center, first, second, normal = ring_frame(ring)
-    polygon = local_points(ring, center, first, second) * 1.20
+    polygon = local_points(ring, center, first, second)
     centers = vertices[faces].mean(axis=1)
     local = local_points(centers, center, first, second)
     radius = np.linalg.norm(ring - center, axis=1).max()
@@ -311,15 +311,37 @@ def inner_ring(anchor):
 
 def make_transition(name, pair, diagonal, plane):
     boundary, ring = pair
-    if plane is None or abs(float(signed_distances(boundary.mean(axis=0), plane))) > 1.0e-5 * diagonal:
+    centered = tuple(loop_is_centered(loop, plane, diagonal) for loop in pair)
+    if centered[0] != centered[1]:
+        raise RuntimeError(f"Topology guide '{name}' was matched to the wrong symmetry side.")
+    if not centered[0]:
         return side_transition(name, boundary, ring)
     first = cube_test.canonical_loop(boundary)
     second = cube_test.align_loop(first, ring)
     vertices = np.vstack((first, second))
+    local = tuple(plane_coordinates(loop, plane) for loop in (first, second))
     faces = equal_transition_faces(len(first)) if len(first) == len(second) else (
-        cube_test.centered_transition_faces(first, second))
+        cube_test.centered_transition_faces(*local))
     cube_test.validate_transition_boundary(faces, len(first), len(second))
     return cube_test.Transition(name, vertices, faces)
+
+
+def loop_is_centered(points, plane, diagonal):
+    if plane is None:
+        return False
+    distance = abs(float(signed_distances(points.mean(axis=0), plane)))
+    return distance <= 1.0e-5 * diagonal
+
+
+def plane_coordinates(points, plane):
+    reference = np.asarray((0.0, 0.0, 1.0))
+    if abs(float(np.dot(reference, plane.normal))) > 0.9:
+        reference = np.asarray((0.0, 1.0, 0.0))
+    vertical = reference - (np.dot(reference, plane.normal) * plane.normal)
+    vertical /= max(float(np.linalg.norm(vertical)), 1.0e-12)
+    tangent = np.cross(vertical, plane.normal)
+    relative = np.asarray(points) - plane.origin
+    return np.column_stack((relative @ plane.normal, relative @ tangent, relative @ vertical))
 
 
 def equal_transition_faces(count):
