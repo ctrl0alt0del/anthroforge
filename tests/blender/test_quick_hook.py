@@ -16,11 +16,13 @@ from mathutils import Matrix
 
 from _helpers import BlenderTestCase, empty_object, mesh_object, reset_scene, root, select_only
 from anthroforge.app.queries.action_library import quick_hook_panel_state
-from anthroforge.app.use_cases.action_library_quick_hook import commit_quick_hook, quick_hook_draft
+from anthroforge.app.use_cases.action_library_quick_hook import commit_quick_hook, name_quick_hook_control, quick_hook_draft
+from anthroforge.app.use_cases.shortcut_wizard import populate_shortcut_wizard
 from anthroforge.core.action_library_quick_hook import clear_quick_hook_sessions, reusable_quick_hook
 from anthroforge.core.scp_runtime.bound_objects import find_bound_entry_by_object
 from anthroforge.core.scp_runtime.object_roles import create_scp, set_scp_geometry_object, set_scp_transform_object
-from anthroforge.operators.action_library_quick_hook import _adjust_draft, _cycle_falloff
+from anthroforge.operators.action_library_quick_hook import _activate_quick_hook_control, _adjust_draft, _confirm_modal, _cycle_falloff
+from anthroforge.operators.shortcuts import AF_OT_ShortcutWizard
 
 
 def _bind_for_hook(obj):
@@ -252,6 +254,72 @@ class QuickHookTests(BlenderTestCase):
         self.assertEqual(draft.falloff, "LINEAR")
         _cycle_falloff(operator, False)
         self.assertEqual(draft.falloff, "SMOOTH")
+
+    def test_modal_confirmation_schedules_name_dialog(self):
+        obj, _scp, _transform = self._mesh_fixture()
+        draft, _error = quick_hook_draft(bpy.context)
+        operator = SimpleNamespace(_quick_hook_draft=draft, report=lambda *_args: None)
+        callbacks = []
+        timer = "anthroforge.operators.action_library_quick_hook._register_quick_hook_timer"
+        with patch(timer, side_effect=lambda callback: callbacks.append(callback)):
+            result = _confirm_modal(operator, bpy.context)
+        self.assertEqual((result, len(callbacks)), ({"FINISHED"}, 1))
+        target = "anthroforge.operators.action_library_quick_hook._invoke_quick_hook_name"
+        with patch(target) as invoke:
+            callbacks[0]()
+        self.assertEqual((invoke.call_args.args[3], invoke.call_args.args[4]), ("EyeSCP_Hook_01", obj.name))
+
+    def test_empty_name_keeps_generated_default(self):
+        obj, scp, _transform = self._mesh_fixture()
+        draft, _error = quick_hook_draft(bpy.context)
+        commit_quick_hook(bpy.context, draft)
+        modifier, control = _hook_modifiers(obj)[0], _hook_modifiers(obj)[0].object
+        default_name = control.name
+        named, error = name_quick_hook_control(bpy.context, obj.name, control.name, default_name, "")
+        entry = find_bound_entry_by_object(scp, control)
+        self.assertEqual((error, named, control.name, entry.label), ("", control, default_name, default_name))
+        self.assertEqual(modifier.name, f"AF Hook {default_name}")
+
+    def test_custom_name_targets_shortcut_wizard_to_hook(self):
+        obj, _scp, _transform = self._mesh_fixture()
+        draft, _error = quick_hook_draft(bpy.context)
+        commit_quick_hook(bpy.context, draft)
+        modifier, control = _hook_modifiers(obj)[0], _hook_modifiers(obj)[0].object
+        named, error = name_quick_hook_control(bpy.context, obj.name, control.name, control.name, "Blink Hook")
+        _activate_quick_hook_control(bpy.context, named)
+        ok, wizard_error = populate_shortcut_wizard(bpy.context)
+        paths = [item.data_path for item in bpy.context.scene.af_shortcut_wizard_items]
+        self.assertEqual((error, named.name, modifier.name), ("", "Blink Hook", "AF Hook Blink Hook"))
+        self.assertEqual((ok, wizard_error, bpy.context.active_object), (True, "", named))
+        self.assertTrue(paths and all("Blink Hook" in path for path in paths))
+
+    def test_z_name_operator_launches_shortcut_wizard(self):
+        obj, _scp, _transform = self._mesh_fixture()
+        draft, _error = quick_hook_draft(bpy.context)
+        commit_quick_hook(bpy.context, draft)
+        control = _hook_modifiers(obj)[0].object
+        callbacks = []
+        target = "anthroforge.operators.action_library_quick_hook._register_quick_hook_timer"
+        with patch(target, side_effect=lambda callback: callbacks.append(callback)):
+            result = bpy.ops.af.name_quick_scp_hook("EXEC_DEFAULT", hook_name="Lid Hook", control_object_name=control.name, geometry_object_name=obj.name, default_name=control.name)
+        self.assertEqual(result, {"FINISHED"})
+        self.assertEqual((bpy.context.active_object.name, bpy.context.mode), ("Lid Hook", "OBJECT"))
+        self.assertEqual(len(callbacks), 1)
+        target = "anthroforge.operators.action_library_quick_hook._invoke_shortcut_wizard"
+        with patch(target) as launch:
+            callbacks[0]()
+        launch.assert_called_once()
+        self.assertEqual(launch.call_args.args[1].name, "Lid Hook")
+
+    def test_shortcut_wizard_accepts_hook_wildcard(self):
+        scene = bpy.context.scene
+        manager = SimpleNamespace(invoke_props_dialog=lambda *_args, **_kwargs: {"RUNNING_MODAL"})
+        context = SimpleNamespace(scene=scene, window_manager=manager)
+        operator = SimpleNamespace(wildcard_value="Lid Hook", report=lambda *_args: None)
+        target = "anthroforge.operators.shortcuts.populate_shortcut_wizard"
+        with patch(target, return_value=(True, "")):
+            result = AF_OT_ShortcutWizard.invoke(operator, context, None)
+        self.assertEqual((result, scene.af_shortcut_wizard_wildcard_value), ({"RUNNING_MODAL"}, "Lid Hook"))
 
     def test_native_hook_supports_all_editable_scp_geometry_types(self):
         factories = self._geometry_factories()

@@ -126,11 +126,15 @@ class AF_OT_ShortcutWizard(bpy.types.Operator):
     bl_label = "Shortcut Wizard"
     bl_options = {"REGISTER", "UNDO"}
 
+    wildcard_value: bpy.props.StringProperty(default="", options={"HIDDEN", "SKIP_SAVE"})
+
     def invoke(self, context, _event):
         ok, error = populate_shortcut_wizard(context)
         if not ok:
             self.report({"ERROR"}, error)
             return {"CANCELLED"}
+        if self.wildcard_value:
+            context.scene.af_shortcut_wizard_wildcard_value = self.wildcard_value
         return context.window_manager.invoke_props_dialog(self, width=720)
 
     def draw(self, context):

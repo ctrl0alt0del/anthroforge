@@ -63,6 +63,7 @@ from .operators.shortcuts import (
 from .operators.action_library import (
     AF_OT_CreateCurveLoftGroup,
     AF_OT_CreateLocalTransformProps,
+    AF_OT_NameQuickSCPHook,
     AF_OT_RebindLocalTransformProps,
     AF_OT_RemoveLocalTransformProps,
     AF_OT_QuickSCPHook,
@@ -245,6 +246,7 @@ classes = (
     AF_OT_ShortcutWizard,
     AF_OT_CreateCurveLoftGroup,
     AF_OT_CreateLocalTransformProps,
+    AF_OT_NameQuickSCPHook,
     AF_OT_RebindLocalTransformProps,
     AF_OT_RemoveLocalTransformProps,
     AF_OT_QuickSCPHook,

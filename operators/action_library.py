@@ -3,7 +3,15 @@ import bpy
 from ..app.use_cases.action_library_gn import create_curve_loft_group, curve_loft_exists, curve_loft_name
 from ..app.use_cases.action_library_split_corner import split_scp_by_corner
 from ..app.use_cases.local_transform_props import create_local_transform_props, rebind_local_transform_props, remove_local_transform_props
-from .action_library_quick_hook import cancel_quick_hook, execute_quick_hook, invoke_quick_hook, modal_quick_hook
+from .action_library_quick_hook import (
+    cancel_quick_hook,
+    draw_quick_hook_name,
+    execute_quick_hook,
+    execute_quick_hook_name,
+    invoke_quick_hook,
+    invoke_quick_hook_name,
+    modal_quick_hook,
+)
 
 
 def _finish(op, context, action):
@@ -80,6 +88,26 @@ class AF_OT_QuickSCPHook(bpy.types.Operator):
 
     def execute(self, context):
         return execute_quick_hook(self, context)
+
+
+class AF_OT_NameQuickSCPHook(bpy.types.Operator):
+    bl_idname = "af.name_quick_scp_hook"
+    bl_label = "Name Quick Hook"
+    bl_options = {"REGISTER", "UNDO"}
+
+    hook_name: bpy.props.StringProperty(name="Hook Name", default="", options={"SKIP_SAVE"})
+    control_object_name: bpy.props.StringProperty(default="", options={"HIDDEN", "SKIP_SAVE"})
+    geometry_object_name: bpy.props.StringProperty(default="", options={"HIDDEN", "SKIP_SAVE"})
+    default_name: bpy.props.StringProperty(default="", options={"HIDDEN", "SKIP_SAVE"})
+
+    def invoke(self, context, _event):
+        return invoke_quick_hook_name(self, context)
+
+    def draw(self, _context):
+        draw_quick_hook_name(self)
+
+    def execute(self, context):
+        return execute_quick_hook_name(self, context)
 
 
 def _invoke_curve_loft(op, context, event):

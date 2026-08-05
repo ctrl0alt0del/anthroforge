@@ -218,3 +218,47 @@ def _pointer(value):
         return int(value.as_pointer())
     except Exception:
         return id(value)
+
+
+def name_quick_hook_control(context, geometry_name, control_name, default_name, requested_name):
+    scene = None if context is None else getattr(context, "scene", None)
+    geometry = None if scene is None else scene.objects.get(str(geometry_name or ""))
+    control = None if scene is None else scene.objects.get(str(control_name or ""))
+    error = _quick_hook_name_error(geometry, control)
+    if error:
+        return None, error
+    control.name = _resolved_hook_name(control, default_name, requested_name)
+    _rename_target_modifiers(geometry, control)
+    _rename_bound_entry(context, control)
+    return control, ""
+
+
+def _quick_hook_name_error(geometry, control):
+    if geometry is None or control is None:
+        return "The Quick Hook target is no longer available."
+    marked = control.type == "EMPTY" and control.get("af_scp_control") and control.get("af_scp_bound")
+    owned = supported_edit_object(geometry) and geometry.get("af_scp_bound")
+    owned = owned and geometry.get("af_root_name") == control.get("af_root_name")
+    owned = owned and geometry.get("af_scp_id") == control.get("af_scp_id")
+    linked = any(mod.type == "HOOK" and mod.object == control for mod in geometry.modifiers)
+    return "The Quick Hook target is no longer valid." if not marked or not owned or not linked else ""
+
+
+def _resolved_hook_name(control, default_name, requested_name):
+    requested = str(requested_name or "").strip()
+    fallback = str(default_name or "").strip() or str(control.name)
+    return requested or fallback
+
+
+def _rename_target_modifiers(geometry, control):
+    for modifier in geometry.modifiers:
+        if modifier.type == "HOOK" and modifier.object == control:
+            modifier.name = f"AF Hook {control.name}"
+
+
+def _rename_bound_entry(context, control):
+    root = get_af_root(context.scene)
+    scp = None if root is None else scp_for_object(root, control)
+    entry = None if scp is None else find_bound_entry_by_object(scp, control)
+    if entry is not None:
+        entry.label = str(control.name)

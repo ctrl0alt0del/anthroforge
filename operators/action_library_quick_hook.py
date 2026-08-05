@@ -3,8 +3,8 @@ import math
 import bpy
 from mathutils import Vector
 
-from ..app.use_cases.action_library_quick_hook import commit_quick_hook, quick_hook_draft
-from ..core.action_library_quick_hook import FALLOFF_TYPES
+from ..app.use_cases.action_library_quick_hook import commit_quick_hook, name_quick_hook_control, quick_hook_draft
+from ..core.action_library_quick_hook import FALLOFF_TYPES, reusable_quick_hook
 
 
 _NAVIGATION = {"MIDDLEMOUSE", "TRACKPADPAN", "TRACKPADZOOM"}
@@ -85,7 +85,37 @@ def _confirm_modal(operator, context):
     result = {"FINISHED"} if ok else {"CANCELLED"}
     if error:
         operator.report({"ERROR"}, error)
-    return _end_modal(operator, context, result)
+    result = _end_modal(operator, context, result)
+    if ok:
+        _begin_name_step(operator, context, operator._quick_hook_draft)
+    return result
+
+
+def _begin_name_step(operator, context, draft):
+    row = reusable_quick_hook(context.scene, draft.geometry, draft.scp_id)
+    if row is None:
+        return operator.report({"WARNING"}, "Hook created, but its naming step could not start.")
+    scene_name, control_name, geometry_name = context.scene.name, row.control.name, draft.geometry.name
+    callback = lambda: _open_quick_hook_name(scene_name, control_name, geometry_name)
+    _register_quick_hook_timer(callback)
+
+
+def _open_quick_hook_name(scene_name, control_name, geometry_name):
+    scene = bpy.data.scenes.get(str(scene_name or ""))
+    control = None if scene is None else scene.objects.get(str(control_name or ""))
+    window, area, region = _shortcut_wizard_window(scene)
+    if control is None or window is None or area is None or region is None:
+        return None
+    _invoke_quick_hook_name(window, area, region, control.name, geometry_name)
+    return None
+
+
+def _invoke_quick_hook_name(window, area, region, control_name, geometry_name):
+    try:
+        with bpy.context.temp_override(window=window, area=area, region=region):
+            bpy.ops.af.name_quick_scp_hook("INVOKE_DEFAULT", control_object_name=control_name, geometry_object_name=geometry_name, default_name=control_name)
+    except Exception as exc:
+        print(f"AnthroForge Quick Hook: naming could not start: {exc}")
 
 
 def execute_quick_hook(operator, context):
@@ -101,6 +131,75 @@ def execute_quick_hook(operator, context):
 
 def cancel_quick_hook(operator, context):
     _end_modal(operator, context, {"CANCELLED"})
+
+
+def invoke_quick_hook_name(operator, context):
+    operator.hook_name = ""
+    return context.window_manager.invoke_props_dialog(operator, width=360, title="Name Quick Hook", confirm_text="Continue")
+
+
+def draw_quick_hook_name(operator):
+    operator.layout.prop(operator, "hook_name", text="Hook Name")
+    operator.layout.label(text=f'Leave blank to use "{operator.default_name}".', icon="INFO")
+
+
+def execute_quick_hook_name(operator, context):
+    control, error = name_quick_hook_control(context, operator.geometry_object_name, operator.control_object_name, operator.default_name, operator.hook_name)
+    if error:
+        operator.report({"ERROR"}, error)
+        return {"CANCELLED"}
+    _activate_quick_hook_control(context, control)
+    _schedule_shortcut_wizard(context, control)
+    return {"FINISHED"}
+
+
+def _activate_quick_hook_control(context, control):
+    active = getattr(context, "active_object", None)
+    if active is not None and getattr(active, "mode", "OBJECT") != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+    for obj in tuple(getattr(context, "selected_objects", ()) or ()):
+        obj.select_set(False)
+    control.select_set(True)
+    context.view_layer.objects.active = control
+
+
+def _schedule_shortcut_wizard(context, control):
+    scene_name, control_name = context.scene.name, control.name
+    callback = lambda: _open_shortcut_wizard(scene_name, control_name)
+    _register_quick_hook_timer(callback)
+
+
+def _register_quick_hook_timer(callback):
+    bpy.app.timers.register(callback, first_interval=0.0)
+
+
+def _open_shortcut_wizard(scene_name, control_name):
+    scene = bpy.data.scenes.get(str(scene_name or ""))
+    control = None if scene is None else scene.objects.get(str(control_name or ""))
+    window, area, region = _shortcut_wizard_window(scene)
+    if control is None or window is None or area is None or region is None:
+        return None
+    _invoke_shortcut_wizard(scene, control, window, area, region)
+    return None
+
+
+def _invoke_shortcut_wizard(scene, control, window, area, region):
+    try:
+        with bpy.context.temp_override(window=window, area=area, region=region, active_object=control, object=control):
+            bpy.ops.af.shortcut_wizard("INVOKE_DEFAULT", wildcard_value=str(control.name))
+    except Exception as exc:
+        print(f"AnthroForge Quick Hook: Shortcut Wizard could not start: {exc}")
+
+
+def _shortcut_wizard_window(scene):
+    manager = getattr(bpy.context, "window_manager", None)
+    windows = () if manager is None else tuple(manager.windows)
+    window = next((item for item in windows if item.scene == scene), None)
+    areas = () if window is None else tuple(window.screen.areas)
+    area = next((item for item in areas if item.type == "VIEW_3D"), None)
+    regions = () if area is None else tuple(area.regions)
+    region = next((item for item in regions if item.type == "WINDOW"), None)
+    return window, area, region
 
 
 def _end_modal(operator, context, result):
