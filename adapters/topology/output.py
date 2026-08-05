@@ -1,6 +1,7 @@
 import json
 
 import bpy
+import numpy as np
 
 try:
     from ...core.topology.constants import SOLVER_VERSION
@@ -21,10 +22,31 @@ def _build_mesh(result):
     mesh.from_pydata(result.vertices.tolist(), [], result.quads.tolist())
     mesh.update(calc_edges=True)
     _write_attribute(mesh, "af_topology_region", result.face_regions)
-    _write_attribute(mesh, "af_topology_guide_index", result.guide_indices)
+    _write_attribute(mesh, "af_topology_face_guide_index", result.guide_indices)
     _write_point_attribute(mesh, "af_topology_owner_scp_index", result.owner_scp_indices, "INT")
     _write_point_attribute(mesh, "af_topology_target_edge_length", result.target_edge_lengths, "FLOAT")
+    _write_bindings(mesh, result.skin_binding, result.guide_binding)
     return mesh
+
+
+def _write_bindings(mesh, skin, guide):
+    if skin is not None:
+        _write_point_attribute(mesh, "af_topology_skin_triangle", skin.triangle_indices, "INT")
+        _write_vector_attribute(mesh, "af_topology_skin_barycentric", skin.barycentric)
+        _write_point_attribute(mesh, "af_topology_skin_offset", skin.offsets, "FLOAT")
+    if guide is not None:
+        _write_point_attribute(mesh, "af_topology_guide_index", guide.guide_indices, "INT")
+        _write_point_attribute(mesh, "af_topology_guide_row", guide.rows, "INT")
+        _write_point_attribute(mesh, "af_topology_guide_parameter", guide.parameters, "FLOAT")
+    schema = 1 if skin is None else skin.schema
+    _write_point_attribute(mesh, "af_topology_bind_schema", [schema] * len(mesh.vertices), "INT")
+
+
+def _write_vector_attribute(mesh, name, values):
+    if values is None or len(values) != len(mesh.vertices):
+        return
+    attribute = mesh.attributes.new(name, "FLOAT_VECTOR", "POINT")
+    attribute.data.foreach_set("vector", values.astype(float).ravel())
 
 
 def _write_attribute(mesh, name, values):
@@ -36,7 +58,7 @@ def _write_point_attribute(mesh, name, values, data_type):
     if values is None or len(values) != len(mesh.vertices):
         return
     attribute = mesh.attributes.new(name, data_type, "POINT")
-    attribute.data.foreach_set("value", values.ravel())
+    attribute.data.foreach_set("value", np.asarray(values).ravel())
 
 
 def _create(scene, root, result, mesh):

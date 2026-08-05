@@ -1,5 +1,6 @@
-PROTOCOL_VERSION = 2
-SOLVER_VERSION = "rolling-probe-collagen-2"
+PROTOCOL_VERSION = 3
+SOLVER_VERSION = "rolling-probe-collagen-bindings-3"
+BINDING_SCHEMA = 1
 COLLAGEN_GROUP = "AF_SKIN_COLLAGEN"
 AUTO_ZERO_TERMS = ("ear", "cartilage", "nasal")
 TARGET_RESOLUTION = 220

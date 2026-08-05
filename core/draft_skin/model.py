@@ -80,3 +80,4 @@ class SkinResult:
     collagen: Any
     statistics: dict[str, Any] = field(default_factory=dict)
     validation: SkinValidationReport | None = None
+    binding: Any = None

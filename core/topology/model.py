@@ -8,6 +8,7 @@ class TopologySettings:
     symmetry_mode: str = "X"
     custom_origin: tuple[float, float, float] = (0.0, 0.0, 0.0)
     custom_normal: tuple[float, float, float] = (1.0, 0.0, 0.0)
+    refinement_strategy: str = "NONE"
 
 
 @dataclass(frozen=True)
@@ -137,3 +138,5 @@ class TopologyResult:
     validation: TopologyValidationReport | None = None
     owner_scp_indices: Any = None
     target_edge_lengths: Any = None
+    skin_binding: Any = None
+    guide_binding: Any = None

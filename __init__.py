@@ -90,6 +90,7 @@ from .operators.draft_skin import (
     AF_OT_SetSkinCollagenBrushWeight,
 )
 from .operators.topology import AF_OT_CancelTopology, AF_OT_GenerateTopology
+from .operators.warm_update import AF_OT_CancelWarmUpdate, AF_OT_UpdateSkinTopology
 
 from .ui.main_panel import AF_PT_MainPanel
 from .ui.panels.create_panel import AF_PT_CreatePanel
@@ -105,6 +106,7 @@ from .ui.panels.action_library_panel import AF_PT_ActionLibraryPanel
 from .ui.panels.control_objects_panel import AFPTControlObjectsPanel
 from .ui.panels.draft_skin_panel import AF_PT_DraftSkinPanel
 from .ui.panels.topology_panel import AF_PT_TopologyPanel
+from .ui.panels.warm_update_panel import AF_PT_WarmUpdatePanel
 
 from .properties.scp_properties import (
     AF_SCP_BoundObject_Property,
@@ -165,6 +167,8 @@ classes = (
     AF_OT_ResetDraftSkinSettings,
     AF_OT_GenerateTopology,
     AF_OT_CancelTopology,
+    AF_OT_UpdateSkinTopology,
+    AF_OT_CancelWarmUpdate,
     AF_OT_CreateEmptySCP,
     AF_OT_SetSCPTransformObject,
     AF_OT_ReplaceSCPTransformWithEmpty,
@@ -183,6 +187,7 @@ classes = (
     AF_PT_EditPanel,
     AF_PT_DraftSkinPanel,
     AF_PT_TopologyPanel,
+    AF_PT_WarmUpdatePanel,
 
     AF_SCP_BoundObject_Property,
     AF_SCP_Property,
@@ -312,6 +317,8 @@ def _register_runtime_hooks():
 def _unregister_runtime_hooks():
     from .adapters.draft_skin.jobs import shutdown_jobs
     from .adapters.topology.jobs import shutdown_jobs as shutdown_topology_jobs
+    from .adapters.warm_update.jobs import shutdown_jobs as shutdown_warm_jobs
+    shutdown_warm_jobs()
     shutdown_topology_jobs()
     shutdown_jobs()
     unregister_proxy_session_runtime()

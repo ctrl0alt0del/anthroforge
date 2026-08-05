@@ -9,6 +9,7 @@ import numpy as np
 from .constants import PROTOCOL_VERSION
 from .model import SkinCapture, SkinJobSpec, SkinJobStatus, SkinResult, SkinSource, SkinValidationReport
 from .settings import DEFAULT_SETTINGS, settings_from_payload, settings_payload
+from ..warm_start.model import SkinWarmBinding
 
 
 def _atomic_path(path):
@@ -162,28 +163,57 @@ def _read_sources(data):
 
 def write_result(path, result):
     report = {} if result.validation is None else asdict(result.validation)
-    atomic_npz(
-        path,
-        protocol_version=np.asarray([PROTOCOL_VERSION], dtype=np.int32),
-        vertices=np.asarray(result.vertices, dtype=np.float32),
-        triangles=np.asarray(result.triangles, dtype=np.int32),
-        collagen=np.asarray(result.collagen, dtype=np.float32),
-        statistics=np.asarray(json.dumps(result.statistics)),
-        validation=np.asarray(json.dumps(report)),
-    )
+    payload = {
+        "protocol_version": np.asarray([PROTOCOL_VERSION], dtype=np.int32),
+        "vertices": np.asarray(result.vertices, dtype=np.float32),
+        "triangles": np.asarray(result.triangles, dtype=np.int32),
+        "collagen": np.asarray(result.collagen, dtype=np.float32),
+        "statistics": np.asarray(json.dumps(result.statistics)),
+        "validation": np.asarray(json.dumps(report)),
+    }
+    payload.update(_binding_payload(result.binding, len(result.vertices)))
+    atomic_npz(path, **payload)
+
+
+def _binding_payload(binding, count):
+    if binding is None:
+        binding = _empty_binding(count)
+    return {"bind_sources": np.asarray(binding.source_indices, dtype=np.int32),
+            "bind_triangles": np.asarray(binding.triangle_indices, dtype=np.int32),
+            "bind_barycentric": np.asarray(binding.barycentric, dtype=np.float32),
+            "bind_weights": np.asarray(binding.weights, dtype=np.float32),
+            "bind_normal_offset": np.asarray(binding.normal_offsets, dtype=np.float32),
+            "bind_support": np.asarray(binding.support, dtype=np.float32),
+            "bind_schema": np.asarray([binding.schema], dtype=np.int32)}
+
+
+def _empty_binding(count):
+    shape = (int(count), 4)
+    return SkinWarmBinding(np.full(shape, -1), np.full(shape, -1),
+                           np.zeros((*shape, 3)), np.zeros(shape),
+                           np.zeros(count), np.zeros(count), 1)
 
 
 def read_result(path):
     with np.load(path, allow_pickle=False) as data:
         _check_protocol(data)
         report = SkinValidationReport(**json.loads(str(data["validation"])))
+        binding = _read_binding(data)
         return SkinResult(
             vertices=data["vertices"].copy(),
             triangles=data["triangles"].copy(),
             collagen=data["collagen"].copy(),
             statistics=json.loads(str(data["statistics"])),
             validation=report,
+            binding=binding,
         )
+
+
+def _read_binding(data):
+    return SkinWarmBinding(data["bind_sources"].copy(), data["bind_triangles"].copy(),
+                           data["bind_barycentric"].copy(), data["bind_weights"].copy(),
+                           data["bind_normal_offset"].copy(), data["bind_support"].copy(),
+                           int(data["bind_schema"][0]))
 
 
 def capture_hash(root_name, sources, settings=DEFAULT_SETTINGS):

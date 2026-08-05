@@ -63,7 +63,8 @@ def _root_settings(root):
     payload = {"target_quad_count": value.target_quad_count,
                "symmetry_mode": value.symmetry_mode,
                "custom_origin": tuple(value.custom_origin),
-               "custom_normal": tuple(value.custom_normal)}
+               "custom_normal": tuple(value.custom_normal),
+               "refinement_strategy": value.refinement_strategy}
     return settings_from_payload(payload)
 
 

@@ -96,7 +96,8 @@ def _set_status(scene, stage, progress, message, running):
 
 def _other_job_running(scene):
     from ...adapters.draft_skin.jobs import active_job as active_skin
-    return active_skin(scene) is not None or _jobs().active_job(scene) is not None
+    from ...adapters.warm_update.jobs import active_job as active_warm
+    return bool(active_skin(scene) or active_warm(scene) or _jobs().active_job(scene))
 
 
 def _jobs():

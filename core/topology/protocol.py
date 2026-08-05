@@ -13,6 +13,7 @@ from .model import (
     TopologyValidationReport,
 )
 from .settings import settings_from_payload, settings_payload
+from ..warm_start.model import TopologyGuideBinding, TopologySkinBinding
 
 
 def _atomic_path(path):
@@ -181,7 +182,7 @@ def _read_plane(data, settings):
 
 def write_result(path, result):
     report = {} if result.validation is None else asdict(result.validation)
-    atomic_npz(path, protocol_version=np.asarray([PROTOCOL_VERSION], dtype=np.int32),
+    payload = dict(protocol_version=np.asarray([PROTOCOL_VERSION], dtype=np.int32),
                vertices=np.asarray(result.vertices, dtype=np.float32),
                quads=np.asarray(result.quads, dtype=np.int32),
                face_regions=np.asarray(result.face_regions, dtype=np.int32),
@@ -190,16 +191,52 @@ def write_result(path, result):
                target_edge_lengths=_optional_array(result.target_edge_lengths, np.float32),
                statistics=np.asarray(json.dumps(result.statistics)),
                validation=np.asarray(json.dumps(report)))
+    payload.update(_topology_binding_payload(result, len(result.vertices)))
+    atomic_npz(path, **payload)
+
+
+def _topology_binding_payload(result, count):
+    skin = result.skin_binding or _empty_skin_binding(count)
+    guide = result.guide_binding or _empty_guide_binding(count)
+    return {"skin_bind_triangle": np.asarray(skin.triangle_indices, np.int32),
+            "skin_bind_barycentric": np.asarray(skin.barycentric, np.float32),
+            "skin_bind_offset": np.asarray(skin.offsets, np.float32),
+            "skin_bind_schema": np.asarray([skin.schema], np.int32),
+            "guide_bind_index": np.asarray(guide.guide_indices, np.int32),
+            "guide_bind_row": np.asarray(guide.rows, np.int32),
+            "guide_bind_parameter": np.asarray(guide.parameters, np.float32),
+            "guide_bind_schema": np.asarray([guide.schema], np.int32)}
+
+
+def _empty_skin_binding(count):
+    return TopologySkinBinding(np.full(count, -1), np.zeros((count, 3)),
+                               np.zeros(count), 1)
+
+
+def _empty_guide_binding(count):
+    return TopologyGuideBinding(np.full(count, -1), np.full(count, -1),
+                                np.full(count, -1.0), 1)
 
 
 def read_result(path):
     with np.load(path, allow_pickle=False) as data:
         _check_protocol(data)
         report = TopologyValidationReport(**json.loads(str(data["validation"])))
+        skin, guide = _read_topology_bindings(data)
         return TopologyResult(data["vertices"].copy(), data["quads"].copy(),
                               data["face_regions"].copy(), data["guide_indices"].copy(),
                               json.loads(str(data["statistics"])), report,
-                              data["owner_scp_indices"].copy(), data["target_edge_lengths"].copy())
+                              data["owner_scp_indices"].copy(), data["target_edge_lengths"].copy(),
+                              skin, guide)
+
+
+def _read_topology_bindings(data):
+    skin = TopologySkinBinding(data["skin_bind_triangle"].copy(),
+                               data["skin_bind_barycentric"].copy(),
+                               data["skin_bind_offset"].copy(), int(data["skin_bind_schema"][0]))
+    guide = TopologyGuideBinding(data["guide_bind_index"].copy(), data["guide_bind_row"].copy(),
+                                 data["guide_bind_parameter"].copy(), int(data["guide_bind_schema"][0]))
+    return skin, guide
 
 
 def _optional_array(values, dtype):

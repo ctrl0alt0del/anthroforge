@@ -12,10 +12,12 @@ from core.topology.model import (
 )
 from core.topology.ownership import assign_ownership, vertex_areas
 from core.topology.refine import refine_quads
+from core.topology.refinement import muscle_proximity_weights, muscle_target_lengths
 from core.topology.protocol import capture_hash, read_capture, read_result, write_capture, write_result
 from core.topology.symmetry import normalized_plane, reflect_points, signed_distances
 from core.topology.validation import validate_topology
 from adapters.topology.density_runtime import budget_warnings
+from adapters.topology.refinement_runtime import has_muscle_refinement
 
 
 class TopologyTests(unittest.TestCase):
@@ -52,6 +54,7 @@ class TopologyTests(unittest.TestCase):
         self.assertEqual(loaded_capture.density_rules, rules)
         self.assertEqual(loaded_capture.ownership_sources[0].owner_scp_ids, ("scp",))
         self.assertTrue(loaded_result.validation.valid)
+        self.assertEqual(len(loaded_result.skin_binding.triangle_indices), 4)
 
     def test_validation_accepts_orientable_quad_patch(self):
         vertices = np.asarray(((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)), dtype=float)
@@ -108,6 +111,25 @@ class TopologyTests(unittest.TestCase):
         self.assertEqual(refined.shape, (6, 4))
         self.assertTrue(np.isfinite(points).all())
         self.assertEqual(tuple(np.bincount(parents)), (4, 2))
+
+    def test_muscle_proximity_increases_local_density(self):
+        distances = np.asarray((0.0, 0.03, 0.1))
+        weights = muscle_proximity_weights(distances, 1.0)
+        lengths = muscle_target_lengths(np.ones(3), weights)
+        self.assertLess(lengths[0], lengths[1])
+        self.assertLess(lengths[1], lengths[2])
+        self.assertAlmostEqual(lengths[2], 1.0)
+
+    def test_muscle_strategy_requires_captured_muscle(self):
+        settings = TopologySettings(refinement_strategy="MUSCLE_PROXIMITY")
+        capture = TopologyCapture("Root", np.eye(3), np.asarray(((0, 1, 2),)), (),
+                                  np.zeros(3), np.ones(3), "hash", settings)
+        self.assertFalse(has_muscle_refinement(capture))
+        source = _ownership_source(0, "MUSCLE", "M1", (), 0.0)
+        capture = TopologyCapture("Root", np.eye(3), np.asarray(((0, 1, 2),)), (),
+                                  np.zeros(3), np.ones(3), "hash", settings,
+                                  ownership_sources=(source,))
+        self.assertTrue(has_muscle_refinement(capture))
 
 
 def _rule(index, scp_id, parent, mode, quads):

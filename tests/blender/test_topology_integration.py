@@ -134,6 +134,12 @@ class TopologyIntegrationTests(BlenderTestCase):
         capture = capture_topology(root_obj, bpy.context.scene, bpy.context.evaluated_depsgraph_get())
         self.assertTrue(np.allclose(capture.plane.normal, np.asarray((0.25, 0, 1.0)) / np.linalg.norm((0.25, 0, 1.0))))
 
+    def test_capture_includes_refinement_strategy(self):
+        root_obj = root(); draft_skin(root_obj)
+        root_obj.af_topology_settings.refinement_strategy = "NONE"
+        capture = capture_topology(root_obj, bpy.context.scene, bpy.context.evaluated_depsgraph_get())
+        self.assertEqual(capture.settings.refinement_strategy, "NONE")
+
     def test_atomic_output_replaces_mesh_and_writes_attributes(self):
         root_obj = root()
         first = replace_topology(bpy.context.scene, root_obj, topology_result())

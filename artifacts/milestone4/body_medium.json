@@ -1,0 +1,15 @@
+{
+  "connectivity_preserved": true,
+  "guide_error": 0.0,
+  "mode": "MEDIUM",
+  "self_intersections": 0,
+  "skin_surface_deviation": {"max": 0.3939104864784522, "mean": 0.07006095604856184, "p95": 0.12693462117019258},
+  "symmetry_error": 0.0,
+  "timing_seconds": {"full_generation": 31.86914809999871, "topology_reprojection": 10.690921100002015, "warm_skin": 2.142065799998818, "warm_total": 19.38305639999453},
+  "topology_inversions": 0,
+  "topology_quads": 29604,
+  "topology_surface_deviation": {"max": 0.15672879943461648, "mean": 0.0658107765083432, "p95": 0.10118105675755108},
+  "warm_skin_update": "warm",
+  "warm_skin_vertices": 54454,
+  "warm_topology_update": "rebound"
+}

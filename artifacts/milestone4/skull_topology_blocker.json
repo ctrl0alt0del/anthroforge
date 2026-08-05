@@ -1,0 +1,8 @@
+{
+  "classification": "DEFERRED_TRANSITION_BUG",
+  "error": "faces.new(...): face already exists",
+  "instant_meshes_reached": true,
+  "scene": "E:\\development\\WIP_models\\skull_muscles_skin_test.blend",
+  "stage": "Stitching immutable guide annuli",
+  "target_quads": 8100
+}

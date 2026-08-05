@@ -1,6 +1,8 @@
 import numpy as np
 from scipy.spatial import cKDTree
 
+from .refinement_runtime import apply_refinement_strategy, has_muscle_refinement
+
 try:
     from ...core.topology.budgets import build_regions, density_field, explicit_rules, smooth_target_lengths
     from ...core.topology.ownership import assign_ownership, vertex_areas
@@ -16,13 +18,15 @@ def build_density(capture):
     regions = build_regions(capture.density_rules, capture.settings.target_quad_count,
                             ownership.owner_indices, areas)
     field = density_field(regions, len(capture.vertices))
-    lengths = smooth_target_lengths(field.target_edge_lengths, capture.triangles, areas, regions)
-    warnings = (*ownership.warnings, *field.warnings)
-    return ownership.owner_indices, lengths, regions, warnings
+    adjusted, strategy_warnings, strategy_stats = apply_refinement_strategy(
+        capture, field.target_edge_lengths)
+    lengths = smooth_target_lengths(adjusted, capture.triangles, areas, regions)
+    warnings = (*ownership.warnings, *field.warnings, *strategy_warnings)
+    return ownership.owner_indices, lengths, regions, warnings, strategy_stats
 
 
 def has_adaptive_density(capture):
-    return bool(explicit_rules(capture.density_rules))
+    return bool(explicit_rules(capture.density_rules)) or has_muscle_refinement(capture)
 
 
 def sample_density(capture, owners, lengths, points):

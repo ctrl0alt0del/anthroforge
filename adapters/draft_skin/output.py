@@ -1,6 +1,7 @@
 import json
 
 import bpy
+import numpy as np
 
 try:
     from ...core.draft_skin.constants import SOLVER_VERSION
@@ -52,12 +53,37 @@ def _build_mesh(result):
     mesh.from_pydata(result.vertices.tolist(), [], result.triangles.tolist())
     mesh.update(calc_edges=True)
     _write_collagen(mesh, result.collagen)
+    _write_bindings(mesh, result.binding)
     return mesh
 
 
 def _write_collagen(mesh, values):
     attribute = mesh.attributes.new("af_skin_collagen", "FLOAT", "POINT")
     attribute.data.foreach_set("value", values.astype(float).ravel())
+
+
+def _write_bindings(mesh, binding):
+    if binding is None:
+        return
+    for index in range(4):
+        _point_value(mesh, f"af_skin_bind_source_{index}", "INT", binding.source_indices[:, index])
+        _point_value(mesh, f"af_skin_bind_triangle_{index}", "INT", binding.triangle_indices[:, index])
+        _point_vector(mesh, f"af_skin_bind_barycentric_{index}", binding.barycentric[:, index])
+        _point_value(mesh, f"af_skin_bind_weight_{index}", "FLOAT", binding.weights[:, index])
+    _point_value(mesh, "af_skin_bind_normal_offset", "FLOAT", binding.normal_offsets)
+    _point_value(mesh, "af_skin_bind_support", "FLOAT", binding.support)
+    _point_value(mesh, "af_skin_bind_schema", "INT", [binding.schema] * len(mesh.vertices))
+
+
+def _point_value(mesh, name, data_type, values):
+    attribute = mesh.attributes.new(name, data_type, "POINT")
+    field = "value"
+    attribute.data.foreach_set(field, np.asarray(values).ravel())
+
+
+def _point_vector(mesh, name, values):
+    attribute = mesh.attributes.new(name, "FLOAT_VECTOR", "POINT")
+    attribute.data.foreach_set("vector", np.asarray(values, dtype=float).ravel())
 
 
 def _output_collection(scene):

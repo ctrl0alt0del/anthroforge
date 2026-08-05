@@ -1,4 +1,5 @@
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
 
 import bpy
@@ -12,16 +13,22 @@ from .adaptive_refine import base_quad_target, refine_to_density
 
 try:
     from ...core.topology.constants import GUIDE_ROWS, REGION_AUTO, REGION_GUIDE, REGION_TRANSITION
+    from ...core.topology.bindings import build_topology_guide_binding, build_topology_skin_binding
     from ...core.topology.density import corrected_target, internal_target, needs_correction, proxy_face_count
-    from ...core.topology.model import TopologyResult
+    from ...core.topology.model import TopologyGuide, TopologyResult
     from ...core.topology.status import check_cancelled
     from ...core.topology.validation import validate_topology
+    from ...core.warm_start.signatures import guide_layout_signature, structural_signature
+    from ...core.warm_start.invalidation import guide_pairing_signature, settings_signature
 except ImportError:
     from core.topology.constants import GUIDE_ROWS, REGION_AUTO, REGION_GUIDE, REGION_TRANSITION
+    from core.topology.bindings import build_topology_guide_binding, build_topology_skin_binding
     from core.topology.density import corrected_target, internal_target, needs_correction, proxy_face_count
-    from core.topology.model import TopologyResult
+    from core.topology.model import TopologyGuide, TopologyResult
     from core.topology.status import check_cancelled
     from core.topology.validation import validate_topology
+    from core.warm_start.signatures import guide_layout_signature, structural_signature
+    from core.warm_start.invalidation import guide_pairing_signature, settings_signature
 
 
 def solve_capture(capture, vendor, status=None, cancelled=None):
@@ -201,10 +208,20 @@ def _finish(capture, result, anchors, guide_map, warnings, target, density, upda
     budgets = budget_statistics(capture, owners, faces, density[2])
     all_warnings = _result_warnings(capture, warnings, density, metrics, budgets)
     stats = _result_stats(capture, metrics, target, guide_map, all_warnings,
-                          budgets)
+                          budgets, density[4])
+    stats.update(_warm_statistics(capture, vertices, faces, guide_map))
     if not report.valid:
         raise RuntimeError(report.message)
-    return TopologyResult(vertices, faces, regions, indices, stats, report, owners, lengths)
+    bindings = _result_bindings(capture, vertices, faces, regions, indices, anchors)
+    return TopologyResult(vertices, faces, regions, indices, stats, report,
+                          owners, lengths, *bindings)
+
+
+def _result_bindings(capture, vertices, faces, regions, indices, anchors):
+    skin = build_topology_skin_binding(vertices, capture.vertices, capture.triangles)
+    points = tuple(cube.ordered_outer_ring(anchor) for anchor in anchors)
+    guides = build_topology_guide_binding(vertices, faces, regions, indices, points)
+    return skin, guides
 
 
 def _result_warnings(capture, warnings, density, metrics, budgets):
@@ -215,13 +232,59 @@ def _result_warnings(capture, warnings, density, metrics, budgets):
     return values
 
 
-def _result_stats(capture, metrics, target, guide_map, warnings, budgets):
+def _result_stats(capture, metrics, target, guide_map, warnings, budgets, refinement):
     return dict(metrics, input_hash=capture.input_hash, internal_target=target,
                 requested_quads=capture.settings.target_quad_count,
                 guide_map=guide_map, warnings=warnings,
                 adaptive_density=has_adaptive_density(capture),
                 density_backend=_density_backend(capture), topology_budgets=budgets,
-                owner_map={item.scp_index: item.scp_id for item in capture.density_rules})
+                owner_map={item.scp_index: item.scp_id for item in capture.density_rules},
+                refinement_strategy=capture.settings.refinement_strategy,
+                refinement_statistics=refinement)
+
+
+def _warm_statistics(capture, vertices, faces, guide_map):
+    guides = _patch_guides(capture.guides, guide_map)
+    layouts = [{"guide_index": item.guide_index, "fiber_id": item.fiber_id,
+                "points": np.asarray(item.points).tolist()} for item in guides]
+    return {"structural_signature": structural_signature(len(vertices), faces),
+            "skin_structural_signature": structural_signature(len(capture.vertices), capture.triangles),
+            "guide_layout_signature": guide_layout_signature(guides),
+            "source_guide_layout_signature": guide_layout_signature(capture.guides),
+            "guide_pairing_signature": guide_pairing_signature(capture.guides),
+            "symmetry_settings_signature": _symmetry_signature(capture),
+            "density_settings_signature": _density_signature(capture),
+            "guide_layout": layouts}
+
+
+def _symmetry_signature(capture):
+    settings = capture.settings
+    payload = (settings.symmetry_mode, settings.custom_origin, settings.custom_normal)
+    return settings_signature(payload)
+
+
+def _density_signature(capture):
+    payload = {"target": capture.settings.target_quad_count,
+               "refinement": capture.settings.refinement_strategy,
+               "rules": [asdict(item) for item in capture.density_rules]}
+    return settings_signature(payload)
+
+
+def _patch_guides(guides, guide_map):
+    by_name = {item.object_name: item for item in guides}
+    values = []
+    for index, mapping in enumerate(guide_map):
+        candidates = [by_name[name] for name in mapping["sources"] if name in by_name]
+        if candidates:
+            source = max(candidates, key=lambda item: _loop_perimeter(item.points))
+            values.append(TopologyGuide(index, source.fiber_id, source.object_name,
+                                        source.mirror_role, source.points))
+    return tuple(values)
+
+
+def _loop_perimeter(points):
+    values = np.asarray(points)
+    return float(np.linalg.norm(np.roll(values, -1, axis=0) - values, axis=1).sum())
 
 
 def _density_backend(capture):

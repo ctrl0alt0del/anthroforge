@@ -51,3 +51,9 @@ class ArchitectureGuardrailTests(unittest.TestCase):
         offenders = [path.name for path in folder.glob("*.py")
                      if "import bpy" in path.read_text(encoding="utf-8")]
         self.assertEqual(offenders, [])
+
+    def test_warm_start_core_is_blender_independent(self):
+        folder = ADDON_ROOT / "core" / "warm_start"
+        offenders = [path.name for path in folder.glob("*.py")
+                     if "import bpy" in path.read_text(encoding="utf-8")]
+        self.assertEqual(offenders, [])

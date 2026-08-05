@@ -139,6 +139,7 @@ class DraftSkinTests(unittest.TestCase):
         self.assertEqual((loaded_capture.input_hash, loaded_result.statistics["input_hash"]), (digest, digest))
         self.assertEqual(loaded_capture.settings, settings)
         self.assertTrue(loaded_result.validation.valid)
+        self.assertEqual(loaded_result.binding.source_indices.shape, (len(vertices), 4))
 
     def test_capture_hash_includes_solver_settings(self):
         vertices, faces = cube_mesh()

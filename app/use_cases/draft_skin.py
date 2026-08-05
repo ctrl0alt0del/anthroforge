@@ -108,7 +108,11 @@ def _topology_running(scene):
         from ...adapters.topology.jobs import active_job
     except ImportError:
         from adapters.topology.jobs import active_job
-    return active_job(scene) is not None
+    try:
+        from ...adapters.warm_update.jobs import active_job as warm_job
+    except ImportError:
+        from adapters.warm_update.jobs import active_job as warm_job
+    return active_job(scene) is not None or warm_job(scene) is not None
 
 
 def _output():

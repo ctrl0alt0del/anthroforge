@@ -34,6 +34,7 @@ def _draw_settings(layout, root, running):
     box.label(text="Quad Generation")
     column = box.column(); column.enabled = not running
     column.prop(settings, "target_quad_count")
+    column.prop(settings, "refinement_strategy")
     column.prop(settings, "symmetry_mode")
     if settings.symmetry_mode == "CUSTOM":
         column.prop(settings, "custom_origin")

@@ -1,0 +1,11 @@
+{
+  "elapsed_seconds": 130.58418249999522,
+  "geometry_hash_preserved": true,
+  "mode": "PREPARE",
+  "scene": "E:\\development\\WIP_models\\skull_muscles_skin_test.blend",
+  "skin_binding_attributes": 19,
+  "skin_vertices": 214205,
+  "topology_vertices": 0,
+  "unbound_percent": 0.0,
+  "visibility_rejected_percent": 0.0
+}

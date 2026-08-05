@@ -55,6 +55,17 @@ def _register_scene_core_props():
     bpy.types.Scene.af_topology_diagnostic = bpy.props.StringProperty(default="", options={"SKIP_SAVE"})
 
 
+def _register_scene_update_props():
+    bpy.types.Scene.af_warm_update_running = bpy.props.BoolProperty(default=False, options={"SKIP_SAVE"})
+    bpy.types.Scene.af_warm_update_progress = bpy.props.FloatProperty(default=0.0, min=0.0, max=1.0, subtype="FACTOR", options={"SKIP_SAVE"})
+    bpy.types.Scene.af_warm_update_stage = bpy.props.StringProperty(default="", options={"SKIP_SAVE"})
+    bpy.types.Scene.af_warm_update_message = bpy.props.StringProperty(default="", options={"SKIP_SAVE"})
+    bpy.types.Scene.af_warm_update_diagnostic = bpy.props.StringProperty(default="", options={"SKIP_SAVE"})
+    bpy.types.Scene.af_last_update_type = bpy.props.StringProperty(default="")
+    bpy.types.Scene.af_last_update_seconds = bpy.props.FloatProperty(default=0.0, min=0.0)
+    bpy.types.Scene.af_last_update_diagnostic = bpy.props.StringProperty(default="")
+
+
 def _register_scene_pointer_props():
     bpy.types.Scene.af_scp_parent_obj = bpy.props.PointerProperty(name="SCP Parent", type=bpy.types.Object, poll=_poll_parent_proxy)
     bpy.types.Scene.af_scp_object_picker = bpy.props.PointerProperty(name="SCP Object", type=bpy.types.Object, poll=_poll_any_obj)
@@ -99,6 +110,7 @@ def _wizard_item_type():
 
 def register_scene_props():
     _register_scene_core_props()
+    _register_scene_update_props()
     _register_scene_pointer_props()
     _register_scene_string_props()
     _register_scene_action_library_props()
@@ -111,5 +123,5 @@ def _delete_scene_prop(name):
 
 
 def unregister_scene_props():
-    for name in ("af_topology_diagnostic", "af_topology_message", "af_topology_stage", "af_topology_progress", "af_topology_running", "af_draft_skin_diagnostic", "af_draft_skin_message", "af_draft_skin_stage", "af_draft_skin_progress", "af_draft_skin_running", "af_shortcut_wizard_active_index", "af_shortcut_wizard_items", "af_shortcut_wizard_wildcard_value", "af_shortcut_view_mode", "af_new_shortcut_path", "af_new_shortcut_name", "af_action_single_angle", "af_action_curve_count", "af_action_gn_name", "af_vcp_tree_collapsed_json", "af_tree_collapsed_json", "af_new_blob_target_obj", "af_new_fiber_insertion_obj", "af_new_fiber_origin_obj", "af_control_scp_obj", "af_scp_object_picker", "af_scp_parent_obj", "af_selection_order_json", "af_selection_sync_lock", "af_attachments_enabled"):
+    for name in ("af_last_update_diagnostic", "af_last_update_seconds", "af_last_update_type", "af_warm_update_diagnostic", "af_warm_update_message", "af_warm_update_stage", "af_warm_update_progress", "af_warm_update_running", "af_topology_diagnostic", "af_topology_message", "af_topology_stage", "af_topology_progress", "af_topology_running", "af_draft_skin_diagnostic", "af_draft_skin_message", "af_draft_skin_stage", "af_draft_skin_progress", "af_draft_skin_running", "af_shortcut_wizard_active_index", "af_shortcut_wizard_items", "af_shortcut_wizard_wildcard_value", "af_shortcut_view_mode", "af_new_shortcut_path", "af_new_shortcut_name", "af_action_single_angle", "af_action_curve_count", "af_action_gn_name", "af_vcp_tree_collapsed_json", "af_tree_collapsed_json", "af_new_blob_target_obj", "af_new_fiber_insertion_obj", "af_new_fiber_origin_obj", "af_control_scp_obj", "af_scp_object_picker", "af_scp_parent_obj", "af_selection_order_json", "af_selection_sync_lock", "af_attachments_enabled"):
         _delete_scene_prop(name)

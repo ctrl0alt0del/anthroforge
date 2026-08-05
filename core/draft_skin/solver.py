@@ -3,6 +3,7 @@ import time
 import numpy as np
 
 from .constants import SOLVER_VERSION
+from .bindings import build_skin_bindings
 from .fields import collagen_field, exterior_field, smooth_max, surface_distance
 from .grid import choose_resolution, estimated_bytes
 from .mesh import extract_mesh, largest_component, orient_outward, sample_grid, signed_volume, smooth_mesh
@@ -12,6 +13,11 @@ from .resources import worker_memory_limit
 from .settings import resolved_solver_distances, settings_payload, settings_percentages
 from .status import check_cancelled, report
 from .validation import validate_mesh
+from ..warm_start.signatures import (
+    geometry_state_hash, solver_settings_hash, source_connectivity_signature,
+    source_identity_signature, structural_signature,
+)
+from ..warm_start.invalidation import source_contact_signature
 
 
 def solve_capture(capture, progress=None, cancelled=None):
@@ -26,8 +32,25 @@ def solve_capture(capture, progress=None, cancelled=None):
         vertices, faces, scp_faces, collagen, origin, dimensions, voxel, distances, progress, cancelled
     )
     result = _extract_result(required, full, collagen_grid, vertices, origin, voxel, progress, cancelled)
+    binding, quality = build_skin_bindings(result[0], capture.sources)
     stats = _statistics(capture, result, dimensions, voxel, resolution, distances, started)
-    return SkinResult(result[0], result[1], result[2], stats, result[3])
+    _finish_binding_statistics(stats, quality)
+    return SkinResult(result[0], result[1], result[2], stats, result[3], binding)
+
+
+def _finish_binding_statistics(statistics, quality):
+    statistics.update(quality)
+    _check_binding_quality(quality, statistics)
+
+
+def _check_binding_quality(quality, statistics):
+    unbound = float(quality["unbound_percent"])
+    if unbound > 5.0:
+        raise ValueError(f"Draft-skin binding failed for {unbound:.2f}% of vertices.")
+    if quality["visibility_rejected_percent"] > 5.0:
+        statistics.setdefault("warnings", []).append("Some draft-skin bindings have weak source visibility.")
+    if quality["ambiguous_percent"] > 25.0:
+        statistics.setdefault("warnings", []).append("Draft-skin bindings contain broad ambiguous support.")
 
 
 def combine_capture(capture):
@@ -128,7 +151,17 @@ def _statistics(capture, result, dimensions, voxel, resolution, distances, start
     stats = _geometry_statistics(vertices, faces, collagen, dimensions, voxel)
     stats.update(_run_statistics(capture, validation, resolution, started))
     stats.update(_settings_statistics(capture, distances))
+    stats.update(_binding_signatures(capture, vertices, faces))
     return stats
+
+
+def _binding_signatures(capture, vertices, faces):
+    return {"structural_signature": structural_signature(len(vertices), faces),
+            "source_identity_signature": source_identity_signature(capture.sources),
+            "source_connectivity_signature": source_connectivity_signature(capture.sources),
+            "source_contact_signature": source_contact_signature(capture.sources),
+            "geometry_state_hash": geometry_state_hash(capture.sources),
+            "solver_settings_hash": solver_settings_hash(capture.settings)}
 
 
 def _run_statistics(capture, validation, resolution, started):
