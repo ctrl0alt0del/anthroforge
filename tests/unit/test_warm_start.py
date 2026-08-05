@@ -27,6 +27,7 @@ from core.warm_start.metrics import symmetry_error
 from core.topology.model import SymmetryPlane
 from core.warm_start.job import _replace_with_retry, read_status, write_status
 from core.warm_start.model import WarmUpdateStatus
+from core.warm_start.arap import arap_cache_stats, clear_arap_cache, constrained_arap
 from adapters.warm_update import jobs as warm_jobs
 from workers import warm_update_worker
 
@@ -97,6 +98,25 @@ class WarmStartTests(unittest.TestCase):
         capture = _warm_capture(points, faces, binding, old, new)
         np.testing.assert_allclose(solve_warm_skin(capture).vertices,
                                    solve_warm_skin(capture).vertices)
+
+    def test_arap_reuses_edges_and_factorization(self):
+        vertices, faces = _skin(0.0); clear_arap_cache()
+        constrained_arap(vertices, faces, vertices, "stable", iterations=1)
+        before = arap_cache_stats()
+        constrained_arap(vertices, faces, vertices, "stable", iterations=1)
+        after = arap_cache_stats()
+        self.assertEqual(after["factor_builds"], before["factor_builds"])
+        self.assertGreater(after["factor_hits"], before["factor_hits"])
+
+    def test_topology_projection_avoids_global_rebind_when_bound(self):
+        skin, triangles = _skin(0.0); vertices = skin.copy()
+        quads = np.asarray(((0, 1, 2, 3),), np.int32)
+        binding = build_topology_skin_binding(vertices, skin, triangles)
+        guide = _empty_guides(4)
+        with mock.patch("core.warm_start.topology_solver.build_topology_skin_binding",
+                        wraps=build_topology_skin_binding) as rebuild:
+            result = reproject_topology(vertices, quads, skin, triangles, binding, guide)
+        self.assertTrue(result[1].valid); rebuild.assert_not_called()
 
     def test_legacy_skin_migration_preserves_geometry(self):
         vertices, faces = _cube()
@@ -248,6 +268,15 @@ class WarmStartTests(unittest.TestCase):
                 warm_jobs.start_job(scene, "Root", "AUTO", "blender", lambda _path: None)
             self.assertTrue(warm_jobs.cancel_job(scene))
         warm_jobs.finish_job(scene, True); warm_jobs.shutdown_jobs()
+
+    def test_warm_service_is_reused_for_subsequent_jobs(self):
+        process, folder = _FakeProcess(), Path(tempfile.mkdtemp())
+        with mock.patch.object(warm_jobs, "_SERVICE", None):
+            with mock.patch.object(warm_jobs, "_launch_service", return_value=process) as launch:
+                first = warm_jobs._ensure_service("blender")
+                second = warm_jobs._ensure_service("blender")
+        self.assertIs(first[0], second[0]); launch.assert_called_once()
+        import shutil; shutil.rmtree(first[1], ignore_errors=True)
 
     def test_full_skin_fallback_rebinds_topology_before_rebuild(self):
         decision = mock.Mock(topology_rebuild=False)

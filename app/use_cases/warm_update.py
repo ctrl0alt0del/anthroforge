@@ -9,7 +9,8 @@ def start_update(context, mode="AUTO"):
     if _any_job(context.scene):
         return failure("Another AnthroForge generation job is already running.", "WARNING")
     try:
-        job = _jobs().start_job(context.scene, root.name, mode, _binary_path(), _save_copy)
+        prepare = _prepare_callback(context, root, mode)
+        job = _jobs().start_job(context.scene, root.name, mode, _binary_path(), prepare)
         _set_status(context.scene, "Starting", 0.0, "Update worker is starting.", True)
         return success("Skin and topology update started.", value=job)
     except Exception as error:
@@ -119,3 +120,13 @@ def _binary_path():
 def _save_copy(path):
     import bpy
     bpy.ops.wm.save_as_mainfile(filepath=str(path), copy=True, compress=False)
+
+
+def _prepare_callback(context, root, mode):
+    if mode == "PREPARE":
+        return lambda spec: _save_copy(spec.source_path)
+    try:
+        from ...adapters.warm_update.capture import prepare_array_job
+    except ImportError:
+        from adapters.warm_update.capture import prepare_array_job
+    return lambda spec: prepare_array_job(context, root, spec)

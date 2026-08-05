@@ -22,11 +22,11 @@ except ImportError:
     from core.warm_start.topology_solver import project_and_rebind_topology, reproject_topology
 
 
-def update_topology(root, scene, depsgraph):
+def update_topology(root, scene, depsgraph, capture=None):
     obj = _topology(root, scene)
     vertices, quads = _mesh_arrays(obj)
     skin_binding, guide_binding = _read_bindings(obj.data)
-    capture = capture_topology(root, scene, depsgraph)
+    capture = capture or capture_topology(root, scene, depsgraph)
     old_guides = _stored_guides(obj)
     new_guides = _current_patch_guides(obj, capture.guides)
     if not _valid_guide_layout(obj, new_guides):
@@ -53,10 +53,10 @@ def _guide_fallback(vertices):
     return vertices, status, report
 
 
-def rebind_after_skin(root, scene, depsgraph, predicted=None):
+def rebind_after_skin(root, scene, depsgraph, predicted=None, capture=None):
     obj = _topology(root, scene)
     vertices, quads = _mesh_arrays(obj)
-    capture = capture_topology(root, scene, depsgraph)
+    capture = capture or capture_topology(root, scene, depsgraph)
     regions = _face_values(obj.data, "af_topology_region")
     guides = _face_values(obj.data, "af_topology_face_guide_index")
     patch_guides = _current_patch_guides(obj, capture.guides)

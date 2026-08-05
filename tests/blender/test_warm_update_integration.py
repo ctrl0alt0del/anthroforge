@@ -47,6 +47,19 @@ class WarmUpdateIntegrationTests(BlenderTestCase):
         self.assertEqual(second[1]["af_topology_input_hash"], "1.0")
         self.assertEqual([item.as_pointer() for item in first], [item.as_pointer() for item in second])
 
+    def test_warm_output_copies_connectivity_and_updates_positions(self):
+        root_obj = root(); skin, topology = warm_output.replace_outputs(
+            bpy.context.scene, root_obj, _skin_result(0.0), _topology_result(0.0))
+        skin_mesh, topology_mesh = skin.data.as_pointer(), topology.data.as_pointer()
+        skin_result, topology_result = _skin_result(0.25), _topology_result(0.25)
+        skin_result.statistics["last_update_type"] = "warm"
+        topology_result.statistics["last_update_type"] = "warm"
+        warm_output.replace_outputs(bpy.context.scene, root_obj, skin_result, topology_result)
+        self.assertNotEqual(skin.data.as_pointer(), skin_mesh)
+        self.assertNotEqual(topology.data.as_pointer(), topology_mesh)
+        np.testing.assert_allclose(_points(skin), _cube(0.25)[0])
+        np.testing.assert_allclose(_points(topology), _cube(0.25)[0])
+
     def test_failed_coordinated_import_restores_both_outputs(self):
         root_obj = root()
         skin, topology = warm_output.replace_outputs(bpy.context.scene, root_obj,

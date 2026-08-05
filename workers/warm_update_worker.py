@@ -2,6 +2,7 @@ import json
 import sys
 import time
 import traceback
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -30,7 +31,9 @@ def _run_update(root, scene, depsgraph, spec, started):
     skin_result, skin_type = _solve_skin(root, scene, depsgraph, skin_capture, decision, spec)
     if skin_result is not None:
         _install_skin(root, scene, skin_result)
-    topology_result, topology_type = _solve_topology(root, scene, depsgraph, decision, skin_type, spec)
+        topology_capture = _updated_topology_capture(topology_capture, skin_result)
+    topology_result, topology_type = _solve_topology(root, scene, depsgraph, decision, skin_type, spec,
+                                                     topology_capture)
     _write_results(spec, skin_result, topology_result)
     summary = _summary(decision, skin_type, topology_type, started, skin_result, topology_result)
     write_summary(spec.summary_path, summary)
@@ -176,7 +179,7 @@ def _try_warm_skin(root, scene, depsgraph, capture, spec):
         from core.warm_start.skin_solver import solve_warm_skin
         _status(spec, "RUNNING", "Warm skin", 0.16, "Deforming existing draft skin.")
         started = time.perf_counter()
-        warm_capture = capture_warm_skin(root, scene, depsgraph)
+        warm_capture = capture_warm_skin(root, scene, depsgraph, capture)
         result = solve_warm_skin(warm_capture)
         elapsed = time.perf_counter() - started
         return _warm_skin_result(root, scene, capture, warm_capture, result, elapsed) if result.status.valid else None
@@ -212,35 +215,35 @@ def _install_skin(root, scene, result):
     replace_draft_skin(scene, root, result, result.statistics.get("source_map", []))
 
 
-def _solve_topology(root, scene, depsgraph, decision, skin_type, spec):
+def _solve_topology(root, scene, depsgraph, decision, skin_type, spec, capture=None):
     if not decision.topology_rebuild and _topology_object(root, scene) is not None:
-        warm = _try_warm_topology(root, scene, depsgraph, skin_type, spec)
+        warm = _try_warm_topology(root, scene, depsgraph, skin_type, spec, capture)
         if warm is not None:
             return warm, "rebound" if skin_type == "rebuilt" else "warm"
     _status(spec, "RUNNING", "Topology rebuild", 0.62, "Rebuilding guided quad topology.")
-    return _full_topology(root, scene, depsgraph, spec), "rebuilt"
+    return _full_topology(root, scene, depsgraph, spec, capture), "rebuilt"
 
 
-def _try_warm_topology(root, scene, depsgraph, skin_type, spec):
+def _try_warm_topology(root, scene, depsgraph, skin_type, spec, capture=None):
     try:
         from adapters.topology.warm import rebind_after_skin, update_topology
         _status(spec, "RUNNING", "Topology update", 0.58, "Reprojecting existing quad topology.")
         started = time.perf_counter()
-        result = rebind_after_skin(root, scene, depsgraph) if skin_type == "rebuilt" else update_topology(root, scene, depsgraph)
+        result = (rebind_after_skin(root, scene, depsgraph, capture=capture) if skin_type == "rebuilt"
+                  else update_topology(root, scene, depsgraph, capture))
         status = result[3] if skin_type == "rebuilt" else result[1]
         elapsed = time.perf_counter() - started
-        capture = _capture_topology(root, scene, depsgraph)
         return _topology_result(root, scene, status.update_type or "rebound", elapsed, capture) if status.valid else None
     except Exception as error:
         _append_log(spec, f"Topology fallback: {error}")
         return None
 
 
-def _full_topology(root, scene, depsgraph, spec):
+def _full_topology(root, scene, depsgraph, spec, capture=None):
     from adapters.topology.capture import capture_topology
     from adapters.topology.solver import solve_capture
     from adapters.topology.vendor import ensure_worker_dependencies
-    capture = capture_topology(root, scene, depsgraph); vendor = ensure_worker_dependencies()
+    capture = capture or capture_topology(root, scene, depsgraph); vendor = ensure_worker_dependencies()
     result = solve_capture(capture, vendor, _topology_progress(spec), lambda: _cancelled(spec))
     result.statistics["last_update_type"] = "rebuilt"
     return result
@@ -264,14 +267,22 @@ def _topology_result(root, scene, update_type, elapsed=0.0, capture=None):
 def _warm_topology_metrics(obj, vertices, quads, binding, capture):
     if capture is None:
         return {}
-    from adapters.topology.engine.instant import self_intersection_count
     from adapters.topology.warm import _current_patch_guides
     from core.warm_start.metrics import guide_error
     guides = _current_patch_guides(obj, capture.guides)
     values = guide_error(vertices, binding, guides)
     symmetry = _symmetry_metric(vertices, capture)
     return {"guide_error": values["max"], "symmetry_error": symmetry,
-            "self_intersections": self_intersection_count(vertices, tuple(map(tuple, quads)))}
+            "self_intersections": None, "diagnostics_deferred": True}
+
+
+def _updated_topology_capture(capture, skin):
+    if capture is None:
+        return None
+    vertices = np.asarray(skin.vertices, dtype=np.float64)
+    lower, upper = vertices.min(axis=0), vertices.max(axis=0)
+    return replace(capture, vertices=vertices, triangles=np.asarray(skin.triangles),
+                   lower=lower, upper=upper)
 
 
 def _symmetry_metric(vertices, capture):

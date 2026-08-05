@@ -12,11 +12,11 @@ except ImportError:
     from core.warm_start.signatures import geometry_state_hash, solver_settings_hash, structural_signature
 
 
-def capture_warm_skin(root, scene, depsgraph):
+def capture_warm_skin(root, scene, depsgraph, current=None):
     obj = _draft_skin(root, scene)
     vertices, triangles = _mesh_arrays(obj)
     binding = _read_binding(obj.data)
-    current = capture_skin(root, scene, depsgraph)
+    current = current or capture_skin(root, scene, depsgraph)
     stats = json.loads(obj.get("af_skin_stats_json", "{}"))
     return SkinWarmCapture(vertices, triangles, binding, (), current.sources,
                            structural_signature(len(vertices), triangles),

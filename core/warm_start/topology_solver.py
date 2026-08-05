@@ -6,6 +6,8 @@ from .arap import constrained_arap
 from .model import WarmInvalidationReason, WarmUpdateStatus, WarmValidationReport
 from .signatures import structural_signature
 
+_PROJECTION_STATS = {"bound_vertices": 0, "global_fallback_vertices": 0}
+
 
 def reproject_topology(vertices, quads, skin_vertices, skin_triangles, skin_binding,
                        guide_binding, old_guides=(), new_guides=(), iterations=3,
@@ -103,7 +105,7 @@ def _relax_project(reference, quads, targets, skin_vertices, skin_triangles, bin
     locked = (guides.guide_indices >= 0) & (guides.rows >= 0)
     for _index in range(int(iterations)):
         proposal = constrained_arap(reference, _triangulate(quads), current, key, 1, 12.0)
-        proposal = _project_points(proposal, skin_vertices, skin_triangles)
+        proposal = _project_bound_points(proposal, skin_vertices, skin_triangles, binding)
         proposal[locked] = targets[locked]
         current = proposal if _quad_orientation(reference, proposal, quads) else current
     return current
@@ -149,6 +151,68 @@ def _project_points(points, skin_vertices, skin_triangles):
     binding = build_topology_skin_binding(points, skin_vertices, skin_triangles)
     binding = _zero_offset_binding(binding)
     return evaluate_skin_binding(binding, skin_vertices, skin_triangles)
+
+
+def _project_bound_points(points, skin_vertices, skin_triangles, binding):
+    faces = np.asarray(skin_triangles, dtype=np.int32)[binding.triangle_indices]
+    triangles = np.asarray(skin_vertices, dtype=np.float64)[faces]
+    points = np.asarray(points, dtype=np.float64)
+    projected, escaped = _project_rows(points, triangles)
+    _PROJECTION_STATS["bound_vertices"] += len(points)
+    if np.any(escaped):
+        projected[escaped] = _fallback_projection(points[escaped], skin_vertices,
+                                                   skin_triangles, binding, escaped)
+    return projected
+
+
+def _project_rows(points, triangles, chunk_size=32768):
+    output, escaped = np.empty_like(points), np.zeros(len(points), dtype=bool)
+    for start in range(0, len(points), int(chunk_size)):
+        stop = min(len(points), start + int(chunk_size))
+        output[start:stop], escaped[start:stop] = _project_chunk(points[start:stop], triangles[start:stop])
+    return output, escaped
+
+
+def _project_chunk(points, triangles):
+    raw = _raw_row_barycentric(points, triangles)
+    barycentric = np.maximum(raw, 0.0)
+    barycentric /= np.maximum(barycentric.sum(axis=1, keepdims=True), 1e-12)
+    projected = np.einsum("ni,nij->nj", barycentric, triangles)
+    return projected, np.min(raw, axis=1) < -0.05
+
+
+def _raw_row_barycentric(points, triangles):
+    first = triangles[:, 0]
+    u, v = triangles[:, 1] - first, triangles[:, 2] - first
+    dot = lambda a, b: np.einsum("ij,ij->i", a, b)
+    uu, uv, vv = dot(u, u), dot(u, v), dot(v, v)
+    pu, pv = dot(points - first, u), dot(points - first, v)
+    denominator = np.maximum(uu * vv - uv * uv, 1e-15)
+    second = (pu * vv - pv * uv) / denominator
+    third = (pv * uu - pu * uv) / denominator
+    return np.column_stack((1.0 - second - third, second, third))
+
+
+def _fallback_projection(points, skin_vertices, skin_triangles, binding, mask):
+    rebound = build_topology_skin_binding(points, skin_vertices, skin_triangles)
+    binding.triangle_indices[mask] = rebound.triangle_indices
+    binding.barycentric[mask] = rebound.barycentric
+    binding.offsets[mask] = 0.0
+    _PROJECTION_STATS["global_fallback_vertices"] += len(points)
+    return evaluate_skin_binding(rebound, skin_vertices, skin_triangles) - _offset_vectors(rebound, skin_vertices, skin_triangles)
+
+
+def _offset_vectors(binding, vertices, faces):
+    triangles = np.asarray(vertices)[np.asarray(faces)[binding.triangle_indices]]
+    return _normals(triangles) * np.asarray(binding.offsets)[:, None]
+
+
+def projection_stats():
+    return dict(_PROJECTION_STATS)
+
+
+def reset_projection_stats():
+    _PROJECTION_STATS.update(bound_vertices=0, global_fallback_vertices=0)
 
 
 def _triangulate(quads):

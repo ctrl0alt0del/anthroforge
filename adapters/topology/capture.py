@@ -16,6 +16,10 @@ except ImportError:
 def capture_topology(root, scene, depsgraph):
     skin = _draft_skin(root, scene)
     vertices, triangles = _mesh_arrays(skin, depsgraph)
+    return capture_topology_surface(root, scene, depsgraph, vertices, triangles)
+
+
+def capture_topology_surface(root, scene, depsgraph, vertices, triangles):
     settings = _root_settings(root)
     plane = _resolved_plane(root, settings)
     guides, warnings = _guides(root, scene, depsgraph)

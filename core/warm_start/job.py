@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .model import WarmInvalidationReason, WarmUpdateStatus
 
-WARM_JOB_VERSION = 1
+WARM_JOB_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,11 @@ class WarmJobSpec:
     status_path: str
     log_path: str
     cancel_path: str
+    request_path: str
+    skin_capture_path: str
+    topology_capture_path: str
+    current_skin_path: str
+    current_topology_path: str
 
 
 def atomic_json(path, payload):

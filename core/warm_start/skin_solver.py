@@ -11,7 +11,6 @@ def solve_warm_skin(capture, progress=None):
     started, reason = time.perf_counter(), _compatibility(capture)
     if reason != WarmInvalidationReason.NONE:
         return _fallback(capture, reason, "Warm-start source contracts changed.")
-    transforms = source_triangle_transformations(capture.old_sources, capture.new_sources)
     _report(progress, "Predicting", 0.2)
     predicted = predict_skin_vertices(capture.binding, capture.new_sources)
     corrected = restore_offsets(predicted, capture.binding, capture.new_sources)
@@ -21,7 +20,7 @@ def solve_warm_skin(capture, progress=None):
     corrected = collision_containment_correction(relaxed, capture.binding, capture.new_sources)
     corrected = inversion_safe_vertices(capture.vertices, corrected, capture.triangles)
     validation = validate_warm_skin(capture.vertices, capture.triangles, corrected, capture.binding)
-    return _result(capture, corrected, validation, started, len(transforms))
+    return _result(capture, corrected, validation, started, len(capture.new_sources))
 
 
 def inversion_safe_vertices(reference, proposal, triangles, steps=10):

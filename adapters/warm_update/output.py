@@ -31,7 +31,8 @@ def _prepare_skin(values, scene, root, result):
     if result is None:
         return
     obj = skin_output._previous_skin(scene, root)
-    values.append(("SKIN", obj, skin_output._build_mesh(result),
+    mesh = _skin_mesh(obj, result)
+    values.append(("SKIN", obj, mesh,
                    None if obj is None else obj.data, result, _snapshot(obj)))
 
 
@@ -39,8 +40,52 @@ def _prepare_topology(values, scene, root, result):
     if result is None:
         return
     obj = topology_output._previous(scene, root)
-    values.append(("TOPOLOGY", obj, topology_output._build_mesh(result),
+    mesh = _topology_mesh(obj, result)
+    values.append(("TOPOLOGY", obj, mesh,
                    None if obj is None else obj.data, result, _snapshot(obj)))
+
+
+def _skin_mesh(obj, result):
+    if not _warm_result(result) or not _position_compatible(obj, result.vertices, result.triangles):
+        return skin_output._build_mesh(result)
+    return _position_copy(obj.data, result.vertices, "AF_DRAFT_SKIN_NEW")
+
+
+def _topology_mesh(obj, result):
+    if not _warm_result(result) or not _position_compatible(obj, result.vertices, result.quads):
+        return topology_output._build_mesh(result)
+    mesh = _position_copy(obj.data, result.vertices, "AF_TOPOLOGY_NEW")
+    _patch_topology_bindings(mesh, result)
+    return mesh
+
+
+def _position_compatible(obj, vertices, faces):
+    return bool(obj is not None and len(obj.data.vertices) == len(vertices)
+                and len(obj.data.polygons) == len(faces))
+
+
+def _warm_result(result):
+    return result.statistics.get("last_update_type") in {"warm", "rebound"}
+
+
+def _position_copy(mesh, vertices, name):
+    copied = mesh.copy(); copied.name = name
+    copied.vertices.foreach_set("co", __import__("numpy").asarray(vertices).ravel())
+    copied.update()
+    return copied
+
+
+def _patch_topology_bindings(mesh, result):
+    from ..topology.warm import _set_values, _set_vectors
+    skin, guide = result.skin_binding, result.guide_binding
+    if skin is not None:
+        _set_values(mesh, "af_topology_skin_triangle", skin.triangle_indices)
+        _set_vectors(mesh, "af_topology_skin_barycentric", skin.barycentric)
+        _set_values(mesh, "af_topology_skin_offset", skin.offsets)
+    if guide is not None:
+        _set_values(mesh, "af_topology_guide_index", guide.guide_indices)
+        _set_values(mesh, "af_topology_guide_row", guide.rows)
+        _set_values(mesh, "af_topology_guide_parameter", guide.parameters)
 
 
 def _discard_new(prepared):

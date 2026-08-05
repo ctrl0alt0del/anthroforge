@@ -18,6 +18,14 @@ Reported surface distances are in scene world units.
 - Symmetric and asymmetric runs preserved connectivity and produced zero inversions and
   reported self-intersections. Enabled symmetry is exact to the recorded precision.
 
+## Optimized coordinated update
+
+The persistent array-worker path was validated on the guide-free skeleton at the established
+33.5k target. A small edit completed in 8.31 seconds versus 34.50 seconds for a full solve.
+Warm skin took 2.39 seconds and topology reprojection 1.74 seconds. Connectivity, symmetry,
+and the 29,580-quad layout were preserved with zero inversions. The earlier comparable warm
+path took about 19.15 seconds, so the coordinated latency fell by roughly 57%.
+
 ## Known acceptance blocker
 
 The skull facial-guide cold topology solve reaches Instant Meshes, then fails during the
