@@ -11,6 +11,7 @@ bl_info = {
 import bpy
 
 from .core.action_library_quick_hook import clear_quick_hook_sessions
+from .core.scp_runtime.visibility import restore_all_scp_isolations
 
 __addon_enabled__ = False
 
@@ -24,6 +25,7 @@ from .operators.add_scp import (
 )
 from .operators.tree import (
     AF_OT_ToggleSCPCollapse,
+    AF_OT_ToggleSCPVisibility,
     AF_OT_CopySCPInTree,
     AF_OT_DeleteSCPInTree,
     AF_OT_DeleteVCPInTree,
@@ -181,6 +183,7 @@ classes = (
     AF_OT_RemoveSCPBoundObject,
     AF_OT_ToggleSCPBoundNativeParenting,
     AF_OT_ToggleSCPCollapse,
+    AF_OT_ToggleSCPVisibility,
     AF_OT_CopySCPInTree,
     AF_OT_DeleteSCPInTree,
     AF_OT_PromoteSCPInTree,
@@ -327,7 +330,7 @@ def _unregister_runtime_hooks():
     shutdown_warm_jobs()
     shutdown_topology_jobs()
     shutdown_jobs()
-    clear_quick_hook_sessions()
+    _clear_transient_sessions()
     unregister_proxy_session_runtime()
     unregister_delete_reconcile()
     unregister_control_runtime()
@@ -336,6 +339,11 @@ def _unregister_runtime_hooks():
     unregister_muscle_sync()
     unregister_fiber_sync()
     unregister_sync()
+
+
+def _clear_transient_sessions():
+    clear_quick_hook_sessions()
+    restore_all_scp_isolations()
 
 
 def _retrofit_loaded_shortcuts():

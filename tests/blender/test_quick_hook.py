@@ -1,4 +1,5 @@
 from pathlib import Path
+import math
 import sys
 import unittest
 from unittest.mock import patch
@@ -18,7 +19,7 @@ from _helpers import BlenderTestCase, empty_object, mesh_object, reset_scene, ro
 from anthroforge.app.queries.action_library import quick_hook_panel_state
 from anthroforge.app.use_cases.action_library_quick_hook import commit_quick_hook, name_quick_hook_control, quick_hook_draft
 from anthroforge.app.use_cases.shortcut_wizard import populate_shortcut_wizard
-from anthroforge.core.action_library_quick_hook import clear_quick_hook_sessions, reusable_quick_hook
+from anthroforge.core.action_library_quick_hook import clear_quick_hook_sessions, quick_hook_influence, quick_hook_preview_weights, reusable_quick_hook
 from anthroforge.core.scp_runtime.bound_objects import find_bound_entry_by_object
 from anthroforge.core.scp_runtime.object_roles import create_scp, set_scp_geometry_object, set_scp_transform_object
 from anthroforge.operators.action_library_quick_hook import _activate_quick_hook_control, _adjust_draft, _confirm_modal, _cycle_falloff
@@ -254,6 +255,30 @@ class QuickHookTests(BlenderTestCase):
         self.assertEqual(draft.falloff, "LINEAR")
         _cycle_falloff(operator, False)
         self.assertEqual(draft.falloff, "SMOOTH")
+
+    def test_preview_captures_selected_mesh_points_and_cage_edges(self):
+        obj, _scp, _transform = self._mesh_fixture()
+        draft, error = quick_hook_draft(bpy.context)
+        self.assertEqual((error, draft.selected_count), ("", 2))
+        self.assertEqual(draft.preview_edges, ((0, 1),))
+        self.assertEqual(tuple(_round_vector(point) for point in draft.preview_points), ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)))
+        self.assertTrue(all(0.0 < weight < 1.0 for weight in quick_hook_preview_weights(draft)))
+
+    def test_preview_captures_selected_faces_for_heat_overlay(self):
+        obj, _scp, _transform = self._mesh_fixture()
+        _select_mesh(obj, (0, 1, 2))
+        draft, error = quick_hook_draft(bpy.context)
+        self.assertEqual((error, draft.selected_count), ("", 3))
+        self.assertEqual(draft.preview_faces, ((0, 1, 2),))
+
+    def test_preview_matches_blender_falloff_profiles(self):
+        expected = {"LINEAR": 0.5, "SHARP": 0.25, "ROOT": math.sqrt(0.5), "SPHERE": math.sqrt(0.75), "INVERSE_SQUARE": 0.75, "SMOOTH": 0.5, "CONSTANT": 1.0}
+        for falloff, value in expected.items():
+            with self.subTest(falloff=falloff):
+                self.assertAlmostEqual(quick_hook_influence(0.5, 1.0, falloff), value)
+        self.assertEqual(quick_hook_influence(0.5, 0.0, "SMOOTH", 0.4), 0.4)
+        self.assertEqual(quick_hook_influence(20.0, 1.0, "NONE", 0.4), 0.4)
+        self.assertEqual(quick_hook_influence(1.0, 1.0, "CONSTANT"), 0.0)
 
     def test_modal_confirmation_schedules_name_dialog(self):
         obj, _scp, _transform = self._mesh_fixture()

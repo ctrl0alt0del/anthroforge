@@ -3,6 +3,11 @@ from dataclasses import dataclass, field
 from .root import root_for_context, scene_from_context
 from .scp import active_scp_id
 
+try:
+    from ...core.scp_runtime.visibility import isolated_scp_id
+except ImportError:
+    from core.scp_runtime.visibility import isolated_scp_id
+
 
 @dataclass(frozen=True)
 class TreeSelection:
@@ -17,6 +22,7 @@ class TreePanelState:
     scene: object = None
     root: object = None
     active_scp_id: str = ""
+    isolated_scp_id: str = ""
     selection: TreeSelection = field(default_factory=TreeSelection)
 
 
@@ -65,4 +71,5 @@ def tree_panel_state(context):
     root = root_for_context(context)
     if root is None:
         return TreePanelState(scene=scene)
-    return TreePanelState(scene=scene, root=root, active_scp_id=active_scp_id(context), selection=_tree_selection(context, root))
+    isolated = isolated_scp_id(scene, getattr(context, "view_layer", None), root.name)
+    return TreePanelState(scene=scene, root=root, active_scp_id=active_scp_id(context), isolated_scp_id=isolated, selection=_tree_selection(context, root))

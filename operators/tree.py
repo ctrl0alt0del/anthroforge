@@ -11,6 +11,7 @@ from ..core.scp_runtime.common import as_id, find_primary_scp_obj, find_scp_by_i
 from ..core.scp_runtime.lookup import activate_scp
 from ..core.scp_runtime.object_colors import enable_object_color_view
 from ..core.scp_runtime.tree import children_map
+from ..core.scp_runtime.visibility import isolated_scp_id, restore_scp_isolation, toggle_scp_isolation
 from ..core.visualization.control_runtime import notify_selection_changed
 
 
@@ -29,6 +30,21 @@ class AF_OT_ToggleSCPCollapse(bpy.types.Operator):
     def execute(self, context):
         if not toggle_scp_tree_node(context.scene, self.scp_id):
             return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class AF_OT_ToggleSCPVisibility(bpy.types.Operator):
+    bl_idname = "af.toggle_scp_visibility"
+    bl_label = "Isolate SCP Visibility"
+    bl_description = "Show this SCP in isolation; toggle again to restore previous visibility"
+
+    scp_id: bpy.props.StringProperty()
+
+    def execute(self, context):
+        root = get_af_root(context.scene)
+        if root is None or find_scp_by_id(root, self.scp_id) is None:
+            return {"CANCELLED"}
+        toggle_scp_isolation(context.scene, context.view_layer, root, self.scp_id)
         return {"FINISHED"}
 
 
@@ -93,11 +109,17 @@ class AF_OT_DeleteSCPInTree(bpy.types.Operator):
         root = get_af_root(context.scene)
         if root is None or not self.scp_id:
             return {"CANCELLED"}
+        _restore_deleted_isolation(context, root, self.scp_id)
         if not delete_scp(root, context.scene, self.scp_id):
             return {"CANCELLED"}
         sync_scene(root=root, scene=context.scene, dirty_hints=empty_dirty_hints(), source="operator", event_type="DELETE")
         notify_selection_changed(context.scene, force=True, active_object=context.active_object)
         return {"FINISHED"}
+
+
+def _restore_deleted_isolation(context, root, scp_id):
+    active = isolated_scp_id(context.scene, context.view_layer, root.name)
+    restore_scp_isolation(context.scene, context.view_layer) if active == str(scp_id) else None
 
 
 class AF_OT_PromoteSCPInTree(bpy.types.Operator):

@@ -22,6 +22,7 @@ from core.scp_runtime.common import find_scp_by_id
 from core.scp_runtime.bound_objects import set_bound_native_parenting
 from core.shortcuts import override_modes, upsert_override
 from core.shortcuts.path_codec import make_bound_entity_id, make_shortcut_path
+from anthroforge.core.scp_runtime.visibility import reapply_scp_isolations
 
 
 class DummyOperator:
@@ -80,7 +81,59 @@ def _world_xyz(obj):
     return tuple(round(float(value), 4) for value in obj.matrix_world.translation)
 
 
+def _tag_scp_control(obj, root_obj, scp_id):
+    obj["af_root_name"], obj["af_scp_id"], obj["af_scp_control"] = root_obj.name, scp_id, True
+    return obj
+
+
+def _tag_scp_mirror(obj, root_obj, scp_id):
+    obj["af_root_name"], obj["af_source_scp_id"], obj["af_scp_mirror"] = root_obj.name, scp_id, True
+    return obj
+
+
+def _hidden_states(*objects):
+    return tuple(obj.hide_get() for obj in objects)
+
+
 class ScpTreeWorkflowTests(BlenderTestCase):
+    def test_scp_visibility_toggle_isolates_switches_and_restores(self):
+        root_obj = root()
+        first = scp_with_object(root_obj, "First", mesh_object("First"))
+        second = scp_with_object(root_obj, "Second", mesh_object("Second"))
+        hidden = empty_object("FirstHidden")
+        add_bound_object_to_scp(root_obj, first, hidden)
+        hidden.hide_set(True)
+        control = _tag_scp_control(empty_object("SecondControl"), root_obj, second.id)
+        mirror = _tag_scp_mirror(mesh_object("SecondMirror"), root_obj, second.id)
+        unrelated = mesh_object("Unrelated")
+        self.assertEqual(bpy.ops.af.toggle_scp_visibility(scp_id=first.id), {"FINISHED"})
+        self.assertEqual(_hidden_states(first.transform_object_ref, hidden, second.transform_object_ref, control, mirror, unrelated), (False, True, True, True, True, False))
+        self.assertEqual(bpy.ops.af.toggle_scp_visibility(scp_id=second.id), {"FINISHED"})
+        self.assertEqual(_hidden_states(first.transform_object_ref, hidden, second.transform_object_ref, control, mirror), (True, True, False, False, False))
+        self.assertEqual(bpy.ops.af.toggle_scp_visibility(scp_id=second.id), {"FINISHED"})
+        self.assertEqual(_hidden_states(first.transform_object_ref, hidden, second.transform_object_ref, control, mirror, unrelated), (False, True, False, False, False, False))
+
+    def test_deleting_isolated_scp_restores_other_visibility(self):
+        root_obj = root()
+        first = scp_with_object(root_obj, "First", mesh_object("First"))
+        second = scp_with_object(root_obj, "Second", mesh_object("Second"))
+        second_obj = second.transform_object_ref
+        bpy.ops.af.toggle_scp_visibility(scp_id=first.id)
+        self.assertTrue(second_obj.hide_get())
+        self.assertEqual(bpy.ops.af.delete_scp_in_tree(scp_id=first.id), {"FINISHED"})
+        self.assertFalse(second_obj.hide_get())
+
+    def test_scp_isolation_captures_objects_created_during_sync(self):
+        root_obj = root()
+        first = scp_with_object(root_obj, "First", mesh_object("First"))
+        second = scp_with_object(root_obj, "Second", mesh_object("Second"))
+        bpy.ops.af.toggle_scp_visibility(scp_id=first.id)
+        late = _tag_scp_mirror(mesh_object("LateMirror"), root_obj, second.id)
+        reapply_scp_isolations(bpy.context.scene)
+        self.assertTrue(late.hide_get())
+        bpy.ops.af.toggle_scp_visibility(scp_id=first.id)
+        self.assertFalse(late.hide_get())
+
     def test_create_root_and_empty_scp_operators_seed_active_state(self):
         bpy.ops.af.create_root()
         bpy.ops.af.create_empty_scp()

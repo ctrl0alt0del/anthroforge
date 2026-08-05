@@ -31,5 +31,5 @@ class AF_PT_TreePanel(bpy.types.Panel):
         state = tree_panel_state(context)
         box = self.layout.box()
         box.label(text="SCPs")
-        draw_tree_section(box, state.scene, state.root, state.active_scp_id, state.selection.scp_ids)
+        draw_tree_section(box, state.scene, state.root, state.active_scp_id, state.isolated_scp_id, state.selection.scp_ids)
         _draw_vcp_box(box, state.scene, state.root, state.selection.fiber_ids, state.selection.muscle_ids, state.selection.blob_ids)

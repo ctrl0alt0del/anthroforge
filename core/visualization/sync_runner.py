@@ -49,9 +49,16 @@ def _run_request(ctx, request):
     try:
         run_runtime_now(ctx, request, run_dependency_runtime)
     finally:
+        _reapply_scp_isolation(ctx.scene)
         _rehide_proxy_session(ctx.root, ctx.scene)
         _RUNNING = False
     return True
+
+
+def _reapply_scp_isolation(scene):
+    from ..scp_runtime.visibility import reapply_scp_isolations
+    if scene is not None:
+        reapply_scp_isolations(scene)
 
 
 def _rehide_proxy_session(root, scene):

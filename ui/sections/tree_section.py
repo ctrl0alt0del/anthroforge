@@ -34,10 +34,18 @@ def _draw_expand_toggle(row, scene, scp_id, has_children, collapsed):
         row.label(text="", icon="DOT")
 
 
-def _draw_row_actions(row, scp, selected_ids, depth):
+def _draw_visibility_toggle(row, scp_id, isolated_id):
+    active = bool(isolated_id and isolated_id == scp_id)
+    hidden = bool(isolated_id and isolated_id != scp_id)
+    op = row.operator("af.toggle_scp_visibility", text="", icon="HIDE_ON" if hidden else "HIDE_OFF", depress=active)
+    op.scp_id = scp_id
+
+
+def _draw_row_actions(row, scp, selected_ids, depth, isolated_id):
     label = scp.name if scp.name else scp.id
     op = row.operator("af.select_scp_in_tree", text=label, emboss=True, depress=(scp.id in selected_ids))
     op.scp_id = scp.id
+    _draw_visibility_toggle(row, scp.id, isolated_id)
     if depth > 0:
         promote_op = row.operator("af.promote_scp_in_tree", text="", icon="TRIA_UP", emboss=False)
         promote_op.scp_id = scp.id
@@ -47,12 +55,12 @@ def _draw_row_actions(row, scp, selected_ids, depth):
     delete_op.scp_id = scp.id
 
 
-def _draw_children(layout, scene, children, children_map, depth, active_id, selected_ids, visited):
+def _draw_children(layout, scene, children, children_map, depth, active_id, isolated_id, selected_ids, visited):
     for child in children:
-        _draw_node(layout, scene, child, children_map, depth + 1, active_id, selected_ids, visited)
+        _draw_node(layout, scene, child, children_map, depth + 1, active_id, isolated_id, selected_ids, visited)
 
 
-def _draw_node(layout, scene, scp, children_map, depth, active_id, selected_ids, visited):
+def _draw_node(layout, scene, scp, children_map, depth, active_id, isolated_id, selected_ids, visited):
     if scp.id in visited:
         return
     visited.add(scp.id)
@@ -62,12 +70,12 @@ def _draw_node(layout, scene, scp, children_map, depth, active_id, selected_ids,
     row = layout.row(align=True)
     _draw_indent(row, depth)
     _draw_expand_toggle(row, scene, scp.id, has_children, collapsed)
-    _draw_row_actions(row, scp, selected_ids, depth)
+    _draw_row_actions(row, scp, selected_ids, depth, isolated_id)
     if has_children and not collapsed:
-        _draw_children(layout, scene, children, children_map, depth, active_id, selected_ids, visited)
+        _draw_children(layout, scene, children, children_map, depth, active_id, isolated_id, selected_ids, visited)
 
 
-def draw_tree_section(layout, scene, root, active_scp_id, selected_scp_ids):
+def draw_tree_section(layout, scene, root, active_scp_id, isolated_scp_id, selected_scp_ids):
     roots, children_map = _build_tree(root)
     visited = set()
 
@@ -76,4 +84,4 @@ def draw_tree_section(layout, scene, root, active_scp_id, selected_scp_ids):
         return
 
     for scp in roots:
-        _draw_node(layout, scene, scp, children_map, 0, active_scp_id, selected_scp_ids, visited)
+        _draw_node(layout, scene, scp, children_map, 0, active_scp_id, isolated_scp_id, selected_scp_ids, visited)

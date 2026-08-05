@@ -4,7 +4,7 @@ import bpy
 from mathutils import Vector
 
 from ..app.use_cases.action_library_quick_hook import commit_quick_hook, name_quick_hook_control, quick_hook_draft
-from ..core.action_library_quick_hook import FALLOFF_TYPES, reusable_quick_hook
+from ..core.action_library_quick_hook import FALLOFF_TYPES, quick_hook_influence, quick_hook_preview_weights, reusable_quick_hook
 
 
 _NAVIGATION = {"MIDDLEMOUSE", "TRACKPADPAN", "TRACKPADZOOM"}
@@ -231,21 +231,119 @@ def _draw_geometry(operator):
     draft = getattr(operator, "_quick_hook_draft", None)
     if draft is None:
         return
-    color = (0.12, 0.8, 1.0, 0.85) if operator._quick_hook_armed else (0.55, 0.65, 0.7, 0.5)
+    color = (0.12, 0.8, 1.0, 0.38) if operator._quick_hook_armed else (0.55, 0.65, 0.7, 0.25)
     for axes in ((0, 1), (0, 2), (1, 2)):
         _draw_ring(draft, axes, color)
     _draw_center(draft, color)
+    _draw_influence_preview(draft)
+
+
+def _draw_influence_preview(draft):
+    rows = _preview_rows(draft)
+    if not rows:
+        return
+    heat = [_heat_color(row[2]) for row in rows]
+    ghost = [_ghost_color(row[2]) for row in rows]
+    _draw_preview_faces(draft, rows, False)
+    _draw_preview_faces(draft, rows, True)
+    _draw_outlined_points([row[0] for row in rows], heat, 12.0)
+    _draw_connectors(rows)
+    _draw_ghost_edges(draft, rows)
+    _draw_test_tug(draft)
+    _draw_outlined_points([row[1] for row in rows], ghost, 10.0)
+
+
+def _draw_preview_faces(draft, rows, ghost):
+    points, colors = [], []
+    slot = 1 if ghost else 0
+    for triangle in draft.preview_faces:
+        for index in triangle:
+            points.append(rows[index][slot])
+            colors.append(_preview_face_color(rows[index][2], ghost))
+    _draw_colored("TRIS", points, colors, 1.0)
+
+
+def _preview_face_color(weight, ghost):
+    value = min(1.0, max(0.0, float(weight)))
+    if ghost:
+        return 0.12, 0.95, 1.0, 0.12 + value * 0.18
+    color = _heat_color(value)
+    return color[0], color[1], color[2], 0.2 + value * 0.3
+
+
+def _draw_outlined_points(points, colors, size):
+    outline = [(0.015, 0.02, 0.025, 0.95)] * len(points)
+    _draw_colored("POINTS", points, outline, size + 5.0)
+    _draw_colored("POINTS", points, colors, size)
+
+
+def _preview_rows(draft):
+    weights = quick_hook_preview_weights(draft)
+    matrix, direction = draft.geometry.matrix_world, _view_up()
+    distance = _preview_distance(draft)
+    world = tuple(matrix @ Vector(point) for point in draft.preview_points)
+    return tuple((point, point + direction * distance * weight, weight) for point, weight in zip(world, weights))
+
+
+def _view_up():
+    region = getattr(bpy.context, "region_data", None)
+    matrix = getattr(region, "view_matrix", None)
+    direction = Vector((0.0, 0.0, 1.0)) if matrix is None else matrix.inverted_safe().to_3x3() @ Vector((0.0, 1.0, 0.0))
+    return direction.normalized() if direction.length_squared else Vector((0.0, 0.0, 1.0))
+
+
+def _preview_distance(draft):
+    scale = max((abs(value) for value in draft.geometry.matrix_world.to_scale()), default=1.0)
+    return max(float(draft.pixel_scale) * 400.0 * scale * 0.08, 1.0e-4)
+
+
+def _heat_color(weight):
+    value = min(1.0, max(0.0, float(weight)))
+    if value < 0.5:
+        return _mix_color((0.08, 0.25, 0.8, 0.55), (1.0, 0.85, 0.08, 0.9), value * 2.0)
+    return _mix_color((1.0, 0.85, 0.08, 0.9), (1.0, 0.12, 0.04, 1.0), value * 2.0 - 1.0)
+
+
+def _mix_color(first, second, amount):
+    return tuple(a + (b - a) * amount for a, b in zip(first, second))
+
+
+def _ghost_color(weight):
+    return 0.12, 0.95, 1.0, 0.22 + 0.68 * min(1.0, max(0.0, float(weight)))
+
+
+def _draw_connectors(rows):
+    points, colors = [], []
+    for original, ghost, weight in rows:
+        if (ghost - original).length_squared <= 1.0e-12:
+            continue
+        color = _ghost_color(weight)
+        points.extend((original, ghost))
+        colors.extend((color, color))
+    _draw_colored("LINES", points, colors, 2.5)
+
+
+def _draw_ghost_edges(draft, rows):
+    points, colors = [], []
+    for start, end in draft.preview_edges:
+        if max(start, end) >= len(rows):
+            continue
+        points.extend((rows[start][1], rows[end][1]))
+        colors.extend((_ghost_color(rows[start][2]), _ghost_color(rows[end][2])))
+    _draw_colored("LINES", points, colors, 3.0)
+
+
+def _draw_test_tug(draft):
+    center = draft.geometry.matrix_world @ Vector(draft.center)
+    end = center + _view_up() * _preview_distance(draft)
+    color = (0.12, 0.95, 1.0, 0.65)
+    _draw_uniform("LINES", (center, end), color, 2.0)
+    _draw_uniform_points((end,), color, 7.0)
 
 
 def _draw_ring(draft, axes, color):
     points = [_ring_point(draft, axes, step) for step in range(65)]
-    gpu, batch_for_shader = _gpu_tools()
-    shader = gpu.shader.from_builtin("UNIFORM_COLOR")
-    gpu.state.blend_set("ALPHA")
-    shader.bind()
-    shader.uniform_float("color", color)
-    batch_for_shader(shader, "LINE_STRIP", {"pos": points}).draw(shader)
-    gpu.state.blend_set("NONE")
+    _draw_uniform("LINE_STRIP", points, color, 1.0)
 
 
 def _ring_point(draft, axes, step):
@@ -257,28 +355,162 @@ def _ring_point(draft, axes, step):
 
 
 def _draw_center(draft, color):
+    point = draft.geometry.matrix_world @ Vector(draft.center)
+    _draw_uniform_points((point,), color, 9.0)
+
+
+def _draw_uniform(mode, points, color, width=1.0):
+    if not points:
+        return
+    if mode in {"LINES", "LINE_STRIP"}:
+        return _draw_uniform_polyline(mode, points, color, width)
+    return _draw_uniform_primitive(mode, points, color)
+
+
+def _draw_uniform_primitive(mode, points, color):
     gpu, batch_for_shader = _gpu_tools()
     shader = gpu.shader.from_builtin("UNIFORM_COLOR")
-    point = draft.geometry.matrix_world @ Vector(draft.center)
-    gpu.state.point_size_set(9.0)
+    gpu.state.blend_set("ALPHA")
+    gpu.state.depth_test_set("NONE")
     shader.bind()
     shader.uniform_float("color", color)
-    batch_for_shader(shader, "POINTS", {"pos": [point]}).draw(shader)
-    gpu.state.point_size_set(1.0)
+    batch_for_shader(shader, mode, {"pos": points}).draw(shader)
+    gpu.state.blend_set("NONE")
+
+
+def _draw_uniform_polyline(mode, points, color, width):
+    gpu, batch_for_shader = _gpu_tools()
+    shader = gpu.shader.from_builtin("POLYLINE_UNIFORM_COLOR")
+    _prepare_polyline(shader, width)
+    shader.uniform_float("color", color)
+    batch_for_shader(shader, mode, {"pos": points}).draw(shader)
+    gpu.state.blend_set("NONE")
+
+
+def _draw_colored(mode, points, colors, size):
+    if not points:
+        return
+    if mode == "POINTS":
+        return _draw_colored_points(points, colors, size)
+    if mode in {"LINES", "LINE_STRIP"}:
+        return _draw_colored_polyline(mode, points, colors, size)
+    return _draw_colored_primitive(mode, points, colors)
+
+
+def _draw_uniform_points(points, color, size):
+    if not points:
+        return
+    gpu, batch_for_shader = _gpu_tools()
+    shader = gpu.shader.from_builtin("POINT_UNIFORM_COLOR")
+    _prepare_overlay(gpu)
+    shader.bind()
+    shader.uniform_float("color", color)
+    shader.uniform_float("size", size)
+    batch_for_shader(shader, "POINTS", {"pos": points}).draw(shader)
+    gpu.state.blend_set("NONE")
+
+
+def _draw_colored_points(points, colors, size):
+    gpu, batch_for_shader = _gpu_tools()
+    shader = gpu.shader.from_builtin("POINT_FLAT_COLOR")
+    _prepare_overlay(gpu)
+    shader.bind()
+    shader.uniform_float("size", size)
+    batch_for_shader(shader, "POINTS", {"pos": points, "color": colors}).draw(shader)
+    gpu.state.blend_set("NONE")
+
+
+def _draw_colored_polyline(mode, points, colors, width):
+    gpu, batch_for_shader = _gpu_tools()
+    shader = gpu.shader.from_builtin("POLYLINE_SMOOTH_COLOR")
+    _prepare_polyline(shader, width)
+    batch_for_shader(shader, mode, {"pos": points, "color": colors}).draw(shader)
+    gpu.state.blend_set("NONE")
+
+
+def _draw_colored_primitive(mode, points, colors):
+    gpu, batch_for_shader = _gpu_tools()
+    shader = gpu.shader.from_builtin("SMOOTH_COLOR")
+    _prepare_overlay(gpu)
+    shader.bind()
+    batch_for_shader(shader, mode, {"pos": points, "color": colors}).draw(shader)
+    gpu.state.blend_set("NONE")
+
+
+def _prepare_polyline(shader, width):
+    gpu, _batch_for_shader = _gpu_tools()
+    _prepare_overlay(gpu)
+    shader.bind()
+    shader.uniform_float("viewportSize", _viewport_size())
+    shader.uniform_float("lineWidth", float(width))
+
+
+def _prepare_overlay(gpu):
+    gpu.state.blend_set("ALPHA")
+    gpu.state.depth_test_set("NONE")
+
+
+def _viewport_size():
+    region = getattr(bpy.context, "region", None)
+    return float(getattr(region, "width", 1.0)), float(getattr(region, "height", 1.0))
 
 
 def _draw_status(operator):
-    import blf
     draft = getattr(operator, "_quick_hook_draft", None)
-    text = "Move pointer into viewport" if not operator._quick_hook_armed else _status_text(draft)
-    blf.position(0, 24, 42, 0)
-    blf.size(0, 14)
-    blf.color(0, 0.9, 0.95, 1.0, 1.0)
+    if draft is None:
+        return
+    _draw_falloff_graph(draft)
+    text = "Move pointer into viewport" if not operator._quick_hook_armed else _value_text(draft)
+    _draw_text(text, 24, 38, 14, (0.9, 0.95, 1.0, 1.0))
+    if operator._quick_hook_armed:
+        _draw_text("Mouse X radius · Y strength · Wheel falloff · LMB confirm · Esc cancel", 24, 18, 11, (0.72, 0.82, 0.9, 1.0))
+
+
+def _draw_falloff_graph(draft):
+    x, y, width, height = 24.0, 76.0, 150.0, 48.0
+    _draw_uniform("TRIS", _graph_background(x, y, width, height), (0.02, 0.03, 0.05, 0.72))
+    _draw_uniform("LINES", _graph_border(x, y, width, height), (0.45, 0.55, 0.62, 0.7))
+    points = [_graph_point(draft, x, y, width, height, index) for index in range(49)]
+    _draw_uniform("LINE_STRIP", points, (1.0, 0.45, 0.08, 1.0), 2.0)
+    _draw_text(f"{draft.falloff.replace('_', ' ').title()} influence", 28, 130, 11, (0.8, 0.88, 0.94, 1.0))
+    _draw_text("Blue low · Red high · Cyan ghost", 28, 61, 10, (0.72, 0.82, 0.9, 1.0))
+
+
+def _graph_background(x, y, width, height):
+    return ((x, y, 0.0), (x + width, y, 0.0), (x + width, y + height, 0.0), (x, y, 0.0), (x + width, y + height, 0.0), (x, y + height, 0.0))
+
+
+def _graph_border(x, y, width, height):
+    return ((x, y, 0.0), (x + width, y, 0.0), (x + width, y, 0.0), (x + width, y + height, 0.0), (x + width, y + height, 0.0), (x, y + height, 0.0), (x, y + height, 0.0), (x, y, 0.0))
+
+
+def _graph_point(draft, x, y, width, height, index):
+    fraction = index / 48.0
+    weight = _graph_weight(draft, fraction)
+    return x + width * fraction, y + height * weight, 0.0
+
+
+def _graph_weight(draft, fraction):
+    if draft.radius <= 0.0:
+        return min(1.0, max(0.0, float(draft.strength)))
+    return quick_hook_influence(fraction, 1.0, draft.falloff, draft.strength)
+
+
+def _draw_text(text, x, y, size, color):
+    import blf
+    blf.position(0, x, y, 0)
+    blf.size(0, size)
+    blf.color(0, *color)
     blf.draw(0, text)
 
 
 def _status_text(draft):
-    return f"Radius {draft.radius:.4g} | Strength {draft.strength:.2f} | {draft.falloff} | LMB/Enter confirm | Esc/RMB cancel"
+    return f"{_value_text(draft)} | X radius | Y strength | Wheel falloff | LMB/Enter confirm | Esc/RMB cancel"
+
+
+def _value_text(draft):
+    affected = sum(weight > 1.0e-4 for weight in quick_hook_preview_weights(draft))
+    return f"Radius {draft.radius:.4g} · Strength {draft.strength:.2f} · {draft.falloff.replace('_', ' ').title()} · {affected}/{draft.selected_count} influenced"
 
 
 def _gpu_tools():
