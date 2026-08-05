@@ -3,6 +3,7 @@ import bpy
 from ..app.use_cases.action_library_gn import create_curve_loft_group, curve_loft_exists, curve_loft_name
 from ..app.use_cases.action_library_split_corner import split_scp_by_corner
 from ..app.use_cases.local_transform_props import create_local_transform_props, rebind_local_transform_props, remove_local_transform_props
+from .action_library_quick_hook import cancel_quick_hook, execute_quick_hook, invoke_quick_hook, modal_quick_hook
 
 
 def _finish(op, context, action):
@@ -61,6 +62,24 @@ class AF_OT_SplitSCPByCorner(bpy.types.Operator):
 
     def execute(self, context):
         return _finish(self, context, split_scp_by_corner)
+
+
+class AF_OT_QuickSCPHook(bpy.types.Operator):
+    bl_idname = "af.quick_scp_hook"
+    bl_label = "Quick Hook"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def invoke(self, context, _event):
+        return invoke_quick_hook(self, context)
+
+    def modal(self, context, event):
+        return modal_quick_hook(self, context, event)
+
+    def cancel(self, context):
+        cancel_quick_hook(self, context)
+
+    def execute(self, context):
+        return execute_quick_hook(self, context)
 
 
 def _invoke_curve_loft(op, context, event):

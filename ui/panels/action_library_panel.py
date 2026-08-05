@@ -1,6 +1,6 @@
 import bpy
 
-from ...app.queries.action_library import curve_loft_panel_state, local_transform_panel_state, split_corner_panel_state
+from ...app.queries.action_library import curve_loft_panel_state, local_transform_panel_state, quick_hook_panel_state, split_corner_panel_state
 from ...app.queries.proxy_view import proxy_view_panel_state
 
 
@@ -55,6 +55,24 @@ def _draw_curve_loft_button(box, state):
 def _draw_split_corner_header(box):
     box.label(text="Split SCP by Corner")
     box.label(text="Split selected curve corners into SCP segments.", icon="HOOK")
+
+
+def _draw_quick_hook_header(box):
+    box.label(text="Quick Hook")
+    box.label(text="Create a native Hook from the current point selection.", icon="HOOK")
+
+
+def _draw_quick_hook_status(box, state):
+    box.label(text=state.message, icon="CHECKMARK" if state.can_create else "INFO")
+    if state.reuse_target:
+        box.label(text=f"Target: {state.reuse_target}", icon="EMPTY_AXIS")
+
+
+def _draw_quick_hook_controls(box, scene, state):
+    box.prop(scene, "af_action_quick_hook_reuse", text="Reuse Last Hook")
+    row = box.row()
+    row.enabled = state.can_create
+    row.operator("af.quick_scp_hook", text=state.button_text, icon="HOOK")
 
 
 def _draw_split_corner_status(box, state):
@@ -119,6 +137,14 @@ def _draw_split_corner_box(layout, context):
     _draw_split_corner_button(box, state)
 
 
+def _draw_quick_hook_box(layout, context):
+    state = quick_hook_panel_state(context)
+    box = layout.box()
+    _draw_quick_hook_header(box)
+    _draw_quick_hook_status(box, state)
+    _draw_quick_hook_controls(box, context.scene, state)
+
+
 class AF_PT_ActionLibraryPanel(bpy.types.Panel):
     bl_label = "Action Library"
     bl_idname = "AF_PT_action_library_panel"
@@ -131,4 +157,5 @@ class AF_PT_ActionLibraryPanel(bpy.types.Panel):
         _draw_local_transform_box(self.layout, context)
         _draw_proxy_box(self.layout, context)
         _draw_curve_loft_box(self.layout, context)
+        _draw_quick_hook_box(self.layout, context)
         _draw_split_corner_box(self.layout, context)

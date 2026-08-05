@@ -8,6 +8,11 @@ except ImportError:
     from core.local_transform_props import local_transform_state
     from core.action_library_split_corner import split_corner_spec
 
+try:
+    from ..use_cases.action_library_quick_hook import quick_hook_draft
+except ImportError:
+    from app.use_cases.action_library_quick_hook import quick_hook_draft
+
 
 @dataclass(frozen=True)
 class LocalTransformPanelState:
@@ -34,6 +39,15 @@ class SplitCornerPanelState:
     message: str = ""
 
 
+@dataclass(frozen=True)
+class QuickHookPanelState:
+    can_create: bool = False
+    message: str = ""
+    reuse_enabled: bool = False
+    reuse_target: str = ""
+    button_text: str = "Create Quick Hook"
+
+
 def local_transform_panel_state(context):
     obj = None if context is None else getattr(context, "active_object", None)
     state = local_transform_state(obj)
@@ -55,6 +69,27 @@ def split_corner_panel_state(context):
     _spec, error = split_corner_spec(context)
     message = error or "Split the selected curve corners into SCP segments with shared parent controls."
     return SplitCornerPanelState(not error, message)
+
+
+def quick_hook_panel_state(context):
+    scene = None if context is None else getattr(context, "scene", None)
+    enabled = bool(scene and getattr(scene, "af_action_quick_hook_reuse", False))
+    draft, error = quick_hook_draft(context)
+    reuse = None if draft is None else draft.reuse
+    target = "" if reuse is None else str(reuse.control.name)
+    message = _quick_hook_message(error, enabled, target)
+    button = "Add Hook Layer" if target else "Create Quick Hook"
+    return QuickHookPanelState(not error, message, enabled, target, button)
+
+
+def _quick_hook_message(error, enabled, target):
+    if error:
+        return error
+    if target:
+        return f'Reuse target: "{target}".'
+    if enabled:
+        return "No reusable target yet; this creates and remembers a new control."
+    return "Select points, then tune radius, strength, and falloff in the viewport."
 
 
 def _name(obj):

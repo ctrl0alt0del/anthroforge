@@ -10,6 +10,8 @@ bl_info = {
 
 import bpy
 
+from .core.action_library_quick_hook import clear_quick_hook_sessions
+
 __addon_enabled__ = False
 
 from .operators.create_root import AF_OT_CreateRoot
@@ -63,6 +65,7 @@ from .operators.action_library import (
     AF_OT_CreateLocalTransformProps,
     AF_OT_RebindLocalTransformProps,
     AF_OT_RemoveLocalTransformProps,
+    AF_OT_QuickSCPHook,
     AF_OT_SplitSCPByCorner,
 )
 from .operators.control_objects import (
@@ -244,6 +247,7 @@ classes = (
     AF_OT_CreateLocalTransformProps,
     AF_OT_RebindLocalTransformProps,
     AF_OT_RemoveLocalTransformProps,
+    AF_OT_QuickSCPHook,
     AF_OT_SplitSCPByCorner,
     AFOTMarkSelectedSCPControlObject,
     AFOTToggleControlObjectApplyParent,
@@ -321,6 +325,7 @@ def _unregister_runtime_hooks():
     shutdown_warm_jobs()
     shutdown_topology_jobs()
     shutdown_jobs()
+    clear_quick_hook_sessions()
     unregister_proxy_session_runtime()
     unregister_delete_reconcile()
     unregister_control_runtime()
