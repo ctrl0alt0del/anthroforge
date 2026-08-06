@@ -101,6 +101,9 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         if self._draw_invalid_status(status_box, fiber):
             return
         status = fiber_recompute_status(fiber)
+        if status == "REFINING":
+            status_box.label(text="Status: Refining", icon="TIME")
+            return
         if status == "CONVERGED":
             status_box.label(text="Status: Converged", icon="CHECKMARK")
             return

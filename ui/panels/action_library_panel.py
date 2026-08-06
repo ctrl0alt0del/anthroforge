@@ -1,6 +1,6 @@
 import bpy
 
-from ...app.queries.action_library import curve_loft_panel_state, local_transform_panel_state, quick_hook_panel_state, split_corner_panel_state
+from ...app.queries.action_library import curve_loft_panel_state, local_transform_panel_state, quick_fiber_panel_state, quick_hook_panel_state, split_corner_panel_state
 from ...app.queries.proxy_view import proxy_view_panel_state
 
 
@@ -73,6 +73,17 @@ def _draw_quick_hook_controls(box, scene, state):
     row = box.row()
     row.enabled = state.can_create
     row.operator("af.quick_scp_hook", text=state.button_text, icon="HOOK")
+
+
+def _draw_quick_fiber_box(layout, context):
+    state = quick_fiber_panel_state(context)
+    box = layout.box()
+    box.label(text="Quick Fiber")
+    box.label(text="Draw fibers directly between visible SCP surfaces.", icon="CURVE_DATA")
+    box.label(text=state.message, icon="CHECKMARK" if state.can_create else "INFO")
+    row = box.row()
+    row.enabled = state.can_create
+    row.operator("af.quick_fiber", text="Create Quick Fiber", icon="CURVE_DATA")
 
 
 def _draw_split_corner_status(box, state):
@@ -155,6 +166,7 @@ class AF_PT_ActionLibraryPanel(bpy.types.Panel):
 
     def draw(self, context):
         _draw_local_transform_box(self.layout, context)
+        _draw_quick_fiber_box(self.layout, context)
         _draw_proxy_box(self.layout, context)
         _draw_curve_loft_box(self.layout, context)
         _draw_quick_hook_box(self.layout, context)

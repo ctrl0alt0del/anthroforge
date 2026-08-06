@@ -12,6 +12,7 @@ from .action_library_quick_hook import (
     invoke_quick_hook_name,
     modal_quick_hook,
 )
+from .action_library_quick_fiber import cancel_quick_fiber, invoke_quick_fiber, modal_quick_fiber
 
 
 def _finish(op, context, action):
@@ -88,6 +89,23 @@ class AF_OT_QuickSCPHook(bpy.types.Operator):
 
     def execute(self, context):
         return execute_quick_hook(self, context)
+
+
+class AF_OT_QuickFiber(bpy.types.Operator):
+    bl_idname = "af.quick_fiber"
+    bl_label = "Quick Fiber"
+    bl_options = {"REGISTER", "UNDO"}
+
+    restore_on_cancel: bpy.props.BoolProperty(default=True, options={"HIDDEN", "SKIP_SAVE"})
+
+    def invoke(self, context, _event):
+        return invoke_quick_fiber(self, context)
+
+    def modal(self, context, event):
+        return modal_quick_fiber(self, context, event)
+
+    def cancel(self, context):
+        cancel_quick_fiber(self, context)
 
 
 class AF_OT_NameQuickSCPHook(bpy.types.Operator):

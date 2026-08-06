@@ -2,7 +2,7 @@ from pathlib import Path
 import sys
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 TEST_ROOT = Path(__file__).resolve().parents[1]
 ADDON_ROOT = Path(__file__).resolve().parents[2]
@@ -22,14 +22,13 @@ from core.vcp.runtime_state import (
     fiber_recompute_status,
     set_fiber_eps_disp,
     set_fiber_eps_pen,
-    set_fiber_not_converged,
     set_fiber_recompute_ms,
     set_fiber_recompute_status,
 )
 from app.use_cases.blob_create import create_blob_vcp
 from app.use_cases.blob_tools import select_blob_control
 from app.use_cases.fiber_create import _common_mirror_rule, _validate_symmetric_points, create_fiber_from_proxy_vertices, create_fiber_vcp
-from app.use_cases.fiber_tools import _run_bake_passes, add_fiber_touch_point, add_fiber_touch_point_at_world, clear_fiber_warm_start, move_fiber_touch_point, recompute_fiber, remove_fiber_touch_point
+from app.use_cases.fiber_tools import add_fiber_touch_point, add_fiber_touch_point_at_world, clear_fiber_warm_start, move_fiber_touch_point, recompute_fiber, remove_fiber_touch_point
 from app.use_cases.muscle_create import create_muscle_vcp
 from app.use_cases.muscle_tools import flip_muscle_normals, select_muscle_inflation_ctrl
 from app.use_cases.vcp_delete import delete_vcp_in_tree
@@ -262,35 +261,26 @@ class VcpUseCaseTests(unittest.TestCase):
         self.assertEqual((fiber_recompute_status(fiber), fiber_recompute_ms(fiber)), ("UNKNOWN", 0.0))
         self.assertEqual((fiber_eps_disp(fiber), fiber_eps_pen(fiber)), (0.0, 0.0))
 
-    def test_recompute_fiber_updates_status_and_prefers_bake(self):
+    def test_recompute_fiber_enqueues_background_refinement(self):
         fiber = Bag(id="F1")
-        set_fiber_not_converged(fiber, True)
         root_obj = root(fibers=[fiber], active_type="FIBER", active_id="F1")
         ctx = context(scene(root_obj))
-        with patch("app.use_cases.fiber_tools._recompute", return_value=(12.5, False)):
+        request = SimpleNamespace(ok=True, error="")
+        runner = Mock(return_value=request)
+        with patch("app.use_cases.fiber_tools._request_refinement", return_value=runner):
             result = recompute_fiber(ctx)
-        self.assertEqual((result.ok, result.level), (True, "WARNING"))
-        self.assertEqual((fiber_recompute_status(fiber), round(fiber_recompute_ms(fiber), 1)), ("NOT_CONVERGED", 12.5))
-        self.assertFalse("af_prefer_bake" not in fiber)
-        self.assertTrue(fiber["af_prefer_bake"])
+        self.assertTrue(result.ok)
+        runner.assert_called_once_with(root_obj, ctx.scene, fiber, show_preview=False)
+        self.assertIn("background", result.message)
 
-    def test_run_bake_passes_stops_when_residuals_stall(self):
-        fiber = Bag(id="F1"); calls = []
-        def fake_sync(*_args, **_kwargs):
-            calls.append(1); set_fiber_not_converged(fiber, True); set_fiber_eps_disp(fiber, 1.0); set_fiber_eps_pen(fiber, 2.0)
-        with patch("app.use_cases.fiber_tools._sync_entity", side_effect=fake_sync):
-            converged = _run_bake_passes(root(), scene(), fiber, 60)
-        self.assertFalse(converged)
-        self.assertEqual(len(calls), 2)
-
-    def test_run_bake_passes_caps_solved_loop_retries(self):
-        fiber = Bag(id="F1", topology_mode="LOOP"); calls = []
-        def fake_sync(*_args, **_kwargs):
-            calls.append(1); set_fiber_not_converged(fiber, True); set_fiber_eps_disp(fiber, float(len(calls))); set_fiber_eps_pen(fiber, float(len(calls)))
-        with patch("app.use_cases.fiber_tools._sync_entity", side_effect=fake_sync):
-            converged = _run_bake_passes(root(), scene(), fiber, 60)
-        self.assertFalse(converged)
-        self.assertEqual(len(calls), 3)
+    def test_recompute_fiber_reports_enqueue_failure(self):
+        fiber = Bag(id="F1")
+        ctx = context(scene(root(fibers=[fiber], active_type="FIBER", active_id="F1")))
+        request = SimpleNamespace(ok=False, error="No collision route")
+        with patch("app.use_cases.fiber_tools._request_refinement", return_value=Mock(return_value=request)):
+            result = recompute_fiber(ctx)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.message, "No collision route")
 
     def test_add_and_remove_fiber_touch_point_sync_runtime(self):
         fiber = Bag(id="F1", mid_touches=FakeCollection())

@@ -1,7 +1,8 @@
 from pathlib import Path
 import sys
 import json
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import bmesh
 
@@ -36,10 +37,13 @@ from anthroforge.core.vcp.runtime_state import (
     set_fiber_recompute_ms,
     set_fiber_recompute_status,
 )
+from anthroforge.core.vcp.prop_update_guard import suppress_vcp_prop_updates
 from anthroforge.core.visualization import fiber_sync_runtime as fiber_runtime
 from anthroforge.core.visualization import fiber_sync_helpers
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
 from anthroforge.core.visualization.fiber_sync_helpers import cached_fiber_points, endpoint_world, mark_endpoint_handle, mark_touch_handle, touch_world
+from anthroforge.core.visualization import fiber_refinement
+from anthroforge.core.visualization.fiber_refinement import drain_fiber_refinements, fiber_refinement_state
 from anthroforge.core.visualization.sync_runner import sync_from_dirty_hints
 from anthroforge.properties import vcp_properties
 
@@ -52,6 +56,13 @@ def _fiber_setup():
     bpy.context.scene.af_new_fiber_insertion_obj = insert.geometry_object_ref
     bpy.ops.af.add_fiber_vcp()
     return root_obj, root_obj.af_vcp_system.fibers[0], origin, insert
+
+
+def _recompute_and_drain(fiber_id=""):
+    result = bpy.ops.af.recompute_fiber(fiber_id=fiber_id)
+    if result == {"FINISHED"}:
+        assert drain_fiber_refinements()
+    return result
 
 
 def _fiber_setup_direct():
@@ -460,14 +471,60 @@ class FiberVcpWorkflowTests(BlenderTestCase):
 
     def test_recompute_fiber_sets_status_and_elapsed_time(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup()
-        bpy.ops.af.recompute_fiber()
+        _recompute_and_drain()
         self.assertIn(fiber_recompute_status(fiber), {"CONVERGED", "NOT_CONVERGED"})
         self.assertGreaterEqual(fiber_recompute_ms(fiber), 0.0)
+
+    def test_recompute_returns_while_blocked_route_is_refining(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        _cube_scp(root_obj, "Blocker", (1.0, 0.0, 0.0), 0.8)
+        self.assertEqual(bpy.ops.af.recompute_fiber(), {"FINISHED"})
+        self.assertEqual((fiber_recompute_status(fiber), fiber_refinement_state(bpy.context.scene, fiber.id)),
+                         ("REFINING", "REFINING"))
+        self.assertTrue(drain_fiber_refinements())
+
+    def test_refinement_completion_dispatches_one_solve_ready_event(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        _cube_scp(root_obj, "Blocker", (1.0, 0.0, 0.0), 0.8)
+        callback = Mock()
+        with patch.object(fiber_refinement, "_sync_scene", return_value=callback):
+            bpy.ops.af.recompute_fiber()
+            self.assertTrue(drain_fiber_refinements())
+        self.assertEqual(callback.call_count, 1)
+        self.assertEqual(callback.call_args.kwargs["payload"], {"solved_fiber_ids": [fiber.id]})
+
+    def test_fiber_edit_cancels_stale_refinement_and_keeps_curve(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        _cube_scp(root_obj, "Blocker", (1.0, 0.0, 0.0), 0.8)
+        before = _fiber_points_world(fiber)
+        bpy.ops.af.recompute_fiber()
+        with suppress_vcp_prop_updates():
+            fiber.node_count += 8
+        self.assertTrue(drain_fiber_refinements())
+        self.assertEqual(fiber_recompute_status(fiber), "UNKNOWN")
+        self.assertEqual(_fiber_points_world(fiber), before)
+
+    def test_collider_geometry_update_cancels_refinement(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        _blocker, obj = _cube_scp(root_obj, "Blocker", (1.0, 0.0, 0.0), 0.8)
+        bpy.ops.af.recompute_fiber()
+        update = SimpleNamespace(id=obj.data, is_updated_geometry=True, is_updated_transform=False)
+        fiber_refinement._on_depsgraph_update(bpy.context.scene, SimpleNamespace(updates=(update,)))
+        self.assertEqual(fiber_refinement_state(bpy.context.scene, fiber.id), "UNKNOWN")
+
+    def test_new_refinement_request_supersedes_existing_job(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        _cube_scp(root_obj, "Blocker", (1.0, 0.0, 0.0), 0.8)
+        first = fiber_refinement.request_fiber_refinement(root_obj, bpy.context.scene, fiber)
+        second = fiber_refinement.request_fiber_refinement(root_obj, bpy.context.scene, fiber)
+        self.assertIsNot(first.job, second.job)
+        self.assertEqual(fiber_refinement_state(bpy.context.scene, fiber.id), "REFINING")
+        self.assertTrue(drain_fiber_refinements())
 
     def test_recompute_fiber_preserves_requested_node_count(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup()
         fiber.node_count = 96
-        bpy.ops.af.recompute_fiber()
+        _recompute_and_drain()
         proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
         self.assertEqual(len(json.loads(proxy["af_fiber_points_world"])), 96)
 
@@ -482,7 +539,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
 
     def test_recompute_fiber_direct_mode_records_planner_metrics(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup_direct()
-        bpy.ops.af.recompute_fiber()
+        _recompute_and_drain()
         self.assertEqual(fiber_route_mode(fiber), "DIRECT")
         self.assertGreaterEqual(fiber_planner_ms(fiber), 0.0)
         self.assertGreaterEqual(fiber_refine_ms(fiber), 0.0)
@@ -490,7 +547,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
     def test_recompute_fiber_roadmap_mode_detours_around_blocker(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
         _cube_scp(root_obj, "Blocker", (1.0, 0.0, 0.0), 0.8)
-        bpy.ops.af.recompute_fiber()
+        _recompute_and_drain()
         points = _fiber_points_world(fiber)
         self.assertEqual(fiber_route_mode(fiber), "ROADMAP")
         self.assertTrue(any(abs(p[1]) > 1.0e-4 or abs(p[2]) > 1.0e-4 for p in points[1:-1]))
@@ -790,7 +847,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         touch = fiber.mid_touches.add()
         touch.parent_id = blocker.id
         touch.attach_param = capture_world_attachment(root_obj, blocker.id, blocker_obj.matrix_world @ target_local)
-        bpy.ops.af.recompute_fiber()
+        _recompute_and_drain()
         target_world = blocker_obj.matrix_world @ target_local
         points = [Vector(value) for value in _fiber_points_world(fiber)]
         self.assertLess(min((point - target_world).length for point in points), 1.0e-6)
@@ -812,7 +869,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         root_obj, fiber, _origin, _insert = _fiber_setup()
         for i in range(8):
             _cube_scp(root_obj, f"Far{i}", (20.0, float(i) * 2.0, 0.0), 0.8)
-        bpy.ops.af.recompute_fiber()
+        _recompute_and_drain()
         self.assertLess(fiber_active_colliders(fiber), 5)
 
     def test_new_fiber_defaults_warm_start_on(self):
@@ -995,7 +1052,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
     def test_recompute_loop_fiber_preserves_node_count_and_hides_handles(self):
         root_obj, fiber, _loop = _loop_setup()
         fiber.node_count = 48
-        bpy.ops.af.recompute_fiber(fiber_id=fiber.id)
+        _recompute_and_drain(fiber.id)
         proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
         self.assertEqual((len(_fiber_points_world(fiber)), proxy.data.splines[0].use_cyclic_u), (48, True))
         self.assertEqual((_handle_count(fiber.id), fiber_route_mode(fiber)), (0, "DIRECT"))

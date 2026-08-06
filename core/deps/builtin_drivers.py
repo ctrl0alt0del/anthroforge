@@ -174,10 +174,29 @@ class FiberSyncDriver(DependencyDriver):
             register_fiber_sync().refresh_selection(root=root, scene=scene)
             return
         ids = set(impacted.get("FIBER", set()) or set())
-        if is_full:
-            register_fiber_sync().sync_root_to_scene(root=root, scene=scene, bake=bake)
-        elif ids:
-            register_fiber_sync().sync_root_to_scene(root=root, scene=scene, bake=bake, target_fiber_ids=ids)
+        solved = _solved_fiber_ids(gate_meta)
+        ids -= solved
+        if solved:
+            register_fiber_sync().refresh_selection(root=root, scene=scene)
+        _sync_unsolved_fibers(root, scene, is_full, ids, solved, bake)
+
+
+def _sync_unsolved_fibers(root, scene, is_full, ids, solved, bake):
+    sync = register_fiber_sync()
+    if is_full and not solved:
+        sync.sync_root_to_scene(root=root, scene=scene, bake=bake)
+        return
+    if is_full:
+        ids |= {fiber.id for fiber in root.af_vcp_system.fibers} - solved
+    if ids:
+        sync.sync_root_to_scene(root=root, scene=scene, bake=bake, target_fiber_ids=ids)
+
+
+def _solved_fiber_ids(gate_meta):
+    meta = dict(gate_meta or {})
+    if str(meta.get("event_type", "")) != "FIBER_SOLVE_READY":
+        return set()
+    return _payload_id_set(_meta_payload(meta), "solved_fiber_ids")
 
 
 class MuscleSyncDriver(DependencyDriver):

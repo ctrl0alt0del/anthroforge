@@ -19,12 +19,13 @@ from anthroforge.core.scp_proxy import flush_proxy_session_runtime, run_proxy_se
 from anthroforge.core.scp_proxy.consts import ATTR_SLOT, ATTR_VERTEX, SIDE_MIRRORED
 from anthroforge.core.scp_proxy.session import active_session
 from anthroforge.core.scp_runtime.lookup import set_parent_relation
+from anthroforge.core.scp_runtime import viewport_picker
 from anthroforge.core.utils import get_af_root
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
 from anthroforge.core.visualization.fiber_sync_helpers import endpoint_world
+from anthroforge.core.visualization.fiber_refinement import drain_fiber_refinements
 from anthroforge.core.visualization.mirror_rules import mirror_matrix
 from anthroforge.core.visualization.vcp_mirror_runtime import sync_vcp_mirrors
-from anthroforge.operators import fiber_tools as fiber_tool_ops
 
 
 def _object_mode():
@@ -125,8 +126,9 @@ def _poly_center_world(obj, face_index=0):
 
 def _modal_proxy_hit(root_obj, obj, face_index=0):
     center = _poly_center_world(obj, face_index)
-    row = fiber_tool_ops._candidate_row(root_obj, obj)
-    return fiber_tool_ops._object_scp_hit(row, center + Vector((0.0, 0.0, 2.0)), Vector((0.0, 0.0, -1.0)))
+    row = viewport_picker.candidate_for_object(root_obj, obj)
+    hit = viewport_picker.raycast_world(center + Vector((0.0, 0.0, 2.0)), Vector((0.0, 0.0, -1.0)), (row,))
+    return None if hit is None else hit[:2]
 
 
 def _fiber_points_world(fiber_id):
@@ -300,7 +302,7 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         root_obj, parent, left, _right = _proxy_setup()
         self.assertEqual(_switch(parent.transform_object_ref), {"FINISHED"})
         proxy = _session_proxy(root_obj, "original")
-        self.assertTrue(any(row[1] == proxy for row in fiber_tool_ops._pick_candidates(bpy.context)))
+        self.assertTrue(any(row[1] == proxy for row in viewport_picker.pick_candidates(bpy.context, root_obj)))
         hit = _modal_proxy_hit(root_obj, proxy)
         self.assertEqual(hit[0], left.id)
         self.assertLess((hit[1] - _poly_center_world(left.geometry_object_ref)).length, 1.0e-6)
@@ -320,6 +322,7 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         self.assertFalse(_polyline_has_interior_samples(_fiber_points_world(fiber.id)))
         _object_mode()
         self.assertEqual(bpy.ops.af.recompute_fiber(fiber_id=fiber.id), {"FINISHED"})
+        self.assertTrue(drain_fiber_refinements())
         self.assertFalse(_polyline_has_interior_samples(_fiber_points_world(fiber.id)))
 
     def test_mirrored_proxy_selection_maps_back_to_target_scp(self):

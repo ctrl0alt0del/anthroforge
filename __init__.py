@@ -66,6 +66,7 @@ from .operators.action_library import (
     AF_OT_CreateCurveLoftGroup,
     AF_OT_CreateLocalTransformProps,
     AF_OT_NameQuickSCPHook,
+    AF_OT_QuickFiber,
     AF_OT_RebindLocalTransformProps,
     AF_OT_RemoveLocalTransformProps,
     AF_OT_QuickSCPHook,
@@ -139,6 +140,10 @@ from .properties.topology_properties import AF_TopologySettings_Property
 
 from .core.visualization.sync import register_sync, unregister_sync
 from .core.visualization.fiber_sync import register_fiber_sync, unregister_fiber_sync
+from .core.visualization.fiber_refinement import (
+    register_fiber_refinement_runtime,
+    unregister_fiber_refinement_runtime,
+)
 from .core.visualization.muscle_sync import register_muscle_sync, unregister_muscle_sync
 from .core.visualization.blob_sync import register_blob_sync, unregister_blob_sync
 from .core.visualization.sync_runner import (
@@ -250,6 +255,7 @@ classes = (
     AF_OT_CreateCurveLoftGroup,
     AF_OT_CreateLocalTransformProps,
     AF_OT_NameQuickSCPHook,
+    AF_OT_QuickFiber,
     AF_OT_RebindLocalTransformProps,
     AF_OT_RemoveLocalTransformProps,
     AF_OT_QuickSCPHook,
@@ -315,6 +321,7 @@ def _ensure_scene_props():
 def _register_runtime_hooks():
     register_sync()
     register_fiber_sync()
+    register_fiber_refinement_runtime()
     register_muscle_sync()
     register_blob_sync()
     register_sync_runner_runtime()
@@ -324,13 +331,9 @@ def _register_runtime_hooks():
 
 
 def _unregister_runtime_hooks():
-    from .adapters.draft_skin.jobs import shutdown_jobs
-    from .adapters.topology.jobs import shutdown_jobs as shutdown_topology_jobs
-    from .adapters.warm_update.jobs import shutdown_jobs as shutdown_warm_jobs
-    shutdown_warm_jobs()
-    shutdown_topology_jobs()
-    shutdown_jobs()
+    _shutdown_background_jobs()
     _clear_transient_sessions()
+    unregister_fiber_refinement_runtime()
     unregister_proxy_session_runtime()
     unregister_delete_reconcile()
     unregister_control_runtime()
@@ -339,6 +342,15 @@ def _unregister_runtime_hooks():
     unregister_muscle_sync()
     unregister_fiber_sync()
     unregister_sync()
+
+
+def _shutdown_background_jobs():
+    from .adapters.draft_skin.jobs import shutdown_jobs
+    from .adapters.topology.jobs import shutdown_jobs as shutdown_topology_jobs
+    from .adapters.warm_update.jobs import shutdown_jobs as shutdown_warm_jobs
+    shutdown_warm_jobs()
+    shutdown_topology_jobs()
+    shutdown_jobs()
 
 
 def _clear_transient_sessions():

@@ -1,28 +1,14 @@
-import time
-
 try:
-    from ...core.vcp.fiber_modes import is_solved_loop
     from ...core.vcp.runtime_state import (
-        fiber_eps_disp,
-        fiber_eps_pen,
         fiber_invalid_reason,
-        fiber_not_converged,
         fiber_recompute_status,
         reset_fiber_runtime,
-        set_fiber_recompute_ms,
-        set_fiber_recompute_status,
     )
 except ImportError:
-    from core.vcp.fiber_modes import is_solved_loop
     from core.vcp.runtime_state import (
-        fiber_eps_disp,
-        fiber_eps_pen,
         fiber_invalid_reason,
-        fiber_not_converged,
         fiber_recompute_status,
         reset_fiber_runtime,
-        set_fiber_recompute_ms,
-        set_fiber_recompute_status,
     )
 from ..queries.root import root_for_context
 from .results import failure, success
@@ -39,17 +25,15 @@ def clear_fiber_warm_start(context, fiber_id=""):
 
 
 def recompute_fiber(context, fiber_id="", max_passes=12):
+    _ = max_passes
     root = root_for_context(context)
     fiber, error = _resolved_fiber(root, fiber_id)
     if fiber is None:
         return failure(error)
-    _set_prefer_bake(fiber, True)
-    elapsed_ms, converged = _recompute(root, context.scene, fiber, int(max_passes))
-    if _invalid_attachment(fiber):
-        set_fiber_recompute_ms(fiber, elapsed_ms)
-        return failure(_invalid_message(fiber))
-    _set_recompute_state(fiber, elapsed_ms, converged)
-    return success(_recompute_message(fiber.id, converged, max_passes), _recompute_level(converged), fiber)
+    request = _request_refinement()(root, context.scene, fiber, show_preview=False)
+    if not request.ok:
+        return failure(request.error or _invalid_message(fiber))
+    return success(f"Refining {fiber.id} in the background", value=fiber)
 
 
 def add_fiber_touch_point(context, fiber_id=""):
@@ -124,51 +108,12 @@ def _set_prefer_bake(fiber, enabled):
         return
 
 
-def _set_recompute_state(fiber, elapsed_ms, converged):
-    set_fiber_recompute_ms(fiber, elapsed_ms)
-    set_fiber_recompute_status(fiber, "CONVERGED" if converged else "NOT_CONVERGED")
-
-
 def _invalid_attachment(fiber):
     return fiber_recompute_status(fiber) == "INVALID_ATTACHMENT"
 
 
 def _invalid_message(fiber):
     return fiber_invalid_reason(fiber) or "Fiber attachment invalid."
-
-
-def _recompute(root, scene, fiber, max_passes):
-    t0 = time.perf_counter()
-    converged = _run_bake_passes(root, scene, fiber, max_passes)
-    return (time.perf_counter() - t0) * 1000.0, converged
-
-
-def _run_bake_passes(root, scene, fiber, max_passes):
-    last = None
-    for _ in range(_bake_pass_total(fiber, max_passes)):
-        _sync_entity(root, scene, "FIBER", {fiber.id}, bake=True)
-        if not fiber_not_converged(fiber):
-            return True
-        state = _fiber_residual_state(fiber)
-        if _stalled_bake_state(last, state):
-            break
-        last = state
-    return False
-
-
-def _fiber_residual_state(fiber):
-    return round(float(fiber_eps_disp(fiber)), 9), round(float(fiber_eps_pen(fiber)), 9)
-
-
-def _bake_pass_total(fiber, max_passes):
-    limit = 3 if is_solved_loop(fiber) else int(max_passes)
-    return max(1, min(int(max_passes), limit))
-
-
-def _stalled_bake_state(previous, current, tol=1.0e-9):
-    if previous is None:
-        return False
-    return abs(previous[0] - current[0]) <= tol and abs(previous[1] - current[1]) <= tol
 
 
 def _resolved_touches(context, root, fiber_id):
@@ -330,14 +275,6 @@ def _proxy_spec(root, scene, pick):
     return None if raw is None else (pick.scp_id, raw)
 
 
-def _recompute_message(fiber_id, converged, max_passes):
-    return f"Fiber {fiber_id} converged" if converged else f"Fiber {fiber_id} not converged after {max_passes} passes"
-
-
-def _recompute_level(converged):
-    return "INFO" if converged else "WARNING"
-
-
 def _sync_entity(root, scene, kind, entity_ids, bake=False):
     hints = _dirty_hints_for()(kind, entity_ids)
     _sync_scene()(root=root, scene=scene, dirty_hints=hints, bake=bake)
@@ -365,6 +302,14 @@ def _fiber_sync():
     except ImportError:
         from core.visualization.fiber_sync import register_fiber_sync
     return register_fiber_sync()
+
+
+def _request_refinement():
+    try:
+        from ...core.visualization.fiber_refinement import request_fiber_refinement
+    except ImportError:
+        from core.visualization.fiber_refinement import request_fiber_refinement
+    return request_fiber_refinement
 
 
 def _find_geometry_mesh_scp_obj():

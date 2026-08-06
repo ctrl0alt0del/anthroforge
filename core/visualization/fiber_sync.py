@@ -27,6 +27,7 @@ from .fiber_sync_runtime import (
     refresh_selection as _refresh_selection_runtime,
     sync_root_to_scene as _sync_root_to_scene_runtime,
     on_depsgraph_update as _on_depsgraph_update_runtime,
+    apply_fiber_points as _apply_fiber_points_runtime,
 )
 
 DEFAULT_FIBER_COLOR = (0.85, 0.55, 0.20, 1.0)
@@ -130,6 +131,9 @@ class FiberSceneSync:
         return _sync_root_to_scene_runtime(
             self, root=root, scene=scene, bake=bake, target_fiber_ids=target_fiber_ids, window_manager=window_manager
         )
+
+    def apply_points(self, root, scene, fiber, points, bake=False):
+        return _apply_fiber_points_runtime(self, root, scene, fiber, points, bake=bake)
 
     def on_depsgraph_update(self, scene, depsgraph):
         return _on_depsgraph_update_runtime(self, scene, depsgraph)

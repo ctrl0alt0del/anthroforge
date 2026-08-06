@@ -10,8 +10,10 @@ except ImportError:
 
 try:
     from ..use_cases.action_library_quick_hook import quick_hook_draft
+    from ..use_cases.action_library_quick_fiber import quick_fiber_context_error
 except ImportError:
     from app.use_cases.action_library_quick_hook import quick_hook_draft
+    from app.use_cases.action_library_quick_fiber import quick_fiber_context_error
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,12 @@ class QuickHookPanelState:
     button_text: str = "Create Quick Hook"
 
 
+@dataclass(frozen=True)
+class QuickFiberPanelState:
+    can_create: bool = False
+    message: str = ""
+
+
 def local_transform_panel_state(context):
     obj = None if context is None else getattr(context, "active_object", None)
     state = local_transform_state(obj)
@@ -80,6 +88,12 @@ def quick_hook_panel_state(context):
     message = _quick_hook_message(error, enabled, target)
     button = "Add Hook Layer" if target else "Create Quick Hook"
     return QuickHookPanelState(not error, message, enabled, target, button)
+
+
+def quick_fiber_panel_state(context):
+    error = quick_fiber_context_error(context)
+    message = error or "Click origin and insertion; Shift-click adds surface guides."
+    return QuickFiberPanelState(not error, message)
 
 
 def _quick_hook_message(error, enabled, target):

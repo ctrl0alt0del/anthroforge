@@ -149,6 +149,20 @@ def _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake):
     sync._clear_curve_points(obj)
 
 
+def apply_fiber_points(sync, root, scene, fiber, points, bake=False):
+    vis_col = sync._get_vis_collection(scene)
+    if vis_col is None or fiber is None or len(tuple(points or ())) < 2:
+        return None
+    sync._object_index = build_vcp_object_index(vis_col, root.name)
+    try:
+        obj = sync._find_fiber_proxy(vis_col, root.name, fiber.id)
+        obj = obj or sync._create_fiber_proxy(vis_col, root, fiber.id)
+        sync._update_curve_points(obj, points, fiber.thickness, bake=bake, cyclic=sync._fiber_cyclic(fiber))
+        return obj
+    finally:
+        sync._object_index = None
+
+
 def _cleanup_stale_fiber_proxies(vis_col, root_name, live_ids):
     for obj in list(vis_col.objects):
         if obj.get("af_fiber_proxy") and obj.get("af_root_name") == root_name and obj.get("af_fiber_id") not in live_ids:

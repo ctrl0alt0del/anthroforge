@@ -45,9 +45,12 @@ def matrix_flat16(matrix):
 
 
 def is_matrix_close(a, b, eps=_EPS):
-    valid = isinstance(a, (list, tuple)) and isinstance(b, (list, tuple))
-    valid = valid and len(a) == 16 and len(b) == 16
-    return valid and all(abs(float(av) - float(bv)) <= float(eps) for av, bv in zip(a, b))
+    try:
+        av, bv = tuple(a), tuple(b)
+    except (TypeError, ValueError):
+        return False
+    valid = len(av) == 16 and len(bv) == 16
+    return valid and all(abs(float(x) - float(y)) <= float(eps) for x, y in zip(av, bv))
 
 
 def mark_applied_matrix(obj):

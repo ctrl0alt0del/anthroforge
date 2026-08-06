@@ -24,8 +24,8 @@ from .runtime_state import (
     set_fiber_route_mode,
 )
 
-_SURFACE_ROUTE_MAX_LENGTH_RATIO = 1.35
-_SURFACE_ROUTE_MAX_DEVIATION_RATIO = 0.45
+_SURFACE_ROUTE_MAX_LENGTH_RATIO = 1.5
+_SURFACE_ROUTE_MAX_DEVIATION_RATIO = 0.5
 _SURFACE_ROUTE_EPS = 1.0e-8
 
 
@@ -602,14 +602,24 @@ class FiberSolver:
 
     def _build_level_nodes(self, fiber_prop, anchors, guide_worlds, node_count, seed):
         route = self._route_seed_points(anchors, guide_worlds)
-        nodes_init = self._resample_polyline(route, node_count)
-        targets = self._anchor_pin_targets(route, anchors, node_count)
+        nodes_init, _guide_targets = self._build_chain_with_anchors(
+            route[0], route[-1], route[1:-1], node_count)
+        targets = self._level_pin_targets(route, anchors, node_count)
         seed_nodes = None if seed is None else self._resample_polyline(seed, node_count)
         nodes = self._seed_or_cache_nodes(fiber_prop, nodes_init, node_count, seed_nodes)
         pinned = [False] * node_count
         for idx, pt in targets.items():
             nodes[idx], pinned[idx] = pt.copy(), True
         return nodes, pinned, targets
+
+    def _level_pin_targets(self, route, anchors, count):
+        owners = {str(anchor.owner_id or "") for anchor in anchors}
+        return self._route_pin_targets(route, count) if len(owners) == 1 and "" not in owners else self._anchor_pin_targets(route, anchors, count)
+
+    def _route_pin_targets(self, route, count):
+        edges = self._distribute_segment_edges(route, len(route) - 1, count - 1)
+        _nodes, targets = self._compose_nodes_from_edges(route, edges)
+        return targets
 
     def _route_seed_points(self, anchors, guide_worlds):
         if not guide_worlds:
@@ -735,13 +745,16 @@ class FiberSolver:
         return self._path_length(candidate, cyclic) < self._path_length(current, cyclic) - 1.0e-9
 
     def _snapshot_clear(self, nodes, oracle, colliders, params, cyclic, skip_ends, pinned):
-        if not self._segments_clear(nodes, oracle, colliders, params, cyclic, skip_ends):
+        if not self._snapshot_segments_clear(nodes, oracle, colliders, params, cyclic, skip_ends):
             return False
         return self._free_nodes_clear(nodes, oracle, colliders, params, cyclic, skip_ends, pinned)
 
+    def _snapshot_segments_clear(self, nodes, oracle, colliders, params, cyclic, skip_ends):
+        safe_params = dict(params)
+        safe_params["segment_collisions"] = True
+        return self._segments_clear(nodes, oracle, colliders, safe_params, cyclic, skip_ends)
+
     def _free_nodes_clear(self, nodes, oracle, colliders, params, cyclic, skip_ends, pinned):
-        if not params["segment_collisions"]:
-            return True
         indices = self._free_node_indices(len(nodes), pinned, cyclic, skip_ends)
         zones = self._owner_zone_limits(nodes, oracle, colliders, params)
         return all(self._sample_penetration(nodes[i], oracle, self._node_colliders(nodes, i, oracle, colliders, params, zones)) <= 0.0 for i in indices)
@@ -939,9 +952,14 @@ class FiberSolver:
         return cache[key]
 
     def _compute_owner_zone_limits(self, nodes, oracle, colliders, owners):
+        if owners[0] and owners[0] == owners[1]:
+            return self._same_owner_zone(owners[0], len(nodes))
         start = self._owner_start_limit(nodes, oracle, self._collider_by_sid(colliders, owners[0]))
         end = self._owner_end_limit(nodes, oracle, self._collider_by_sid(colliders, owners[1]))
         return (owners[0], start), (owners[1], end)
+
+    def _same_owner_zone(self, owner_id, count):
+        return (owner_id, min(1, count)), (owner_id, max(0, count - 1))
 
     def _owner_zone_key(self, nodes, colliders, owners):
         return tuple(owners), self._nodes_key(nodes), self._colliders_key(colliders)

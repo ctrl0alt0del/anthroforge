@@ -1,11 +1,5 @@
 import bpy
-from bpy_extras import view3d_utils
-
-from ..core.scp_proxy.consts import ATTR_SLOT, FLAG as PROXY_FLAG, SIDE_KEY, SIDE_MIRRORED
-from ..core.scp_proxy.session import proxy_sources
-from ..core.scp_runtime.common import scp_prop_map
-from ..core.scp_runtime.runtime_state import mirror_effective_axis, mirror_source_id
-from ..core.visualization.mirror_rules import mirror_matrix
+from ..core.scp_runtime.viewport_picker import pick_candidates, raycast_scp
 from ..app.use_cases.fiber_tools import (
     add_fiber_touch_point,
     add_fiber_touch_point_at_world,
@@ -54,142 +48,13 @@ def _view_window(context):
     return region, getattr(space, "region_3d", None)
 
 
-def _ray_from_event(context, event):
-    region, rv3d = _view_window(context)
-    if region is None or rv3d is None:
-        return None
-    coord = (event.mouse_x - region.x, event.mouse_y - region.y)
-    origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, coord)
-    direction = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
-    return origin, direction
-
-
-def _scp_id_from_obj(root, obj):
-    valid = obj.get("af_root_name") == root.name and obj.get("af_scp_bound")
-    valid = valid and obj.get("af_scp_geometry") and not obj.get("af_scp_mirror")
-    return str(obj.get("af_scp_id", "") or "") if valid else ""
-
-
 def _raycast_scp(context, event, candidates=()):
-    ray = _ray_from_event(context, event)
-    return None if ray is None else _closest_scp_hit(ray, candidates)
+    return raycast_scp(context, event, candidates)
 
 
 def _pick_candidates(context):
     root = root_for_context(context)
-    if root is None:
-        return ()
-    return tuple(_candidate_row(root, obj) for obj in context.scene.objects if _is_pick_candidate(context, root, obj))
-
-
-def _is_pick_candidate(context, root, obj):
-    if _is_proxy_candidate(root, obj):
-        return _visible_for_pick(context, obj)
-    valid = getattr(obj, "type", "") == "MESH" and _scp_id_from_obj(root, obj)
-    return bool(valid and _visible_for_pick(context, obj))
-
-
-def _is_proxy_candidate(root, obj):
-    valid = getattr(obj, "type", "") == "MESH" and obj.get(PROXY_FLAG)
-    return bool(valid and obj.get("af_root_name") == root.name)
-
-
-def _visible_for_pick(context, obj):
-    try:
-        return bool(obj.visible_get(view_layer=context.view_layer))
-    except Exception:
-        return not bool(obj.hide_get())
-
-
-def _candidate_row(root, obj):
-    payload = _proxy_slot_payload(root, obj) if _is_proxy_candidate(root, obj) else _scp_id_from_obj(root, obj)
-    kind = "PROXY" if _is_proxy_candidate(root, obj) else "SCP"
-    return (kind, obj, obj.matrix_world.copy(), obj.matrix_world.inverted().copy(), payload)
-
-
-def _closest_scp_hit(ray, candidates):
-    hits = tuple(hit for hit in (_object_scp_hit(row, *ray) for row in tuple(candidates or ())) if hit is not None)
-    return None if not hits else _pick_payload(min(hits, key=lambda item: item[2]))
-
-
-def _object_scp_hit(row, origin, direction):
-    kind, obj, matrix_world, world_inv, payload = row
-    local_ray = _local_ray(world_inv, origin, direction)
-    if local_ray is None:
-        return None
-    hit, loc, _normal, face = obj.ray_cast(*local_ray)
-    if not hit:
-        return None
-    world = matrix_world @ loc
-    scp_id, attach_world = _row_pick(kind, obj, payload, face, world)
-    return None if not scp_id else (scp_id, attach_world, (world - origin).length, world)
-
-
-def _local_ray(world_inv, origin, direction):
-    local_origin = world_inv @ origin
-    local_direction = world_inv.to_3x3() @ direction
-    if local_direction.length <= 1.0e-9:
-        return None
-    return local_origin, local_direction.normalized()
-
-
-def _row_pick(kind, obj, payload, face, world):
-    if kind == "SCP":
-        return payload, world
-    source = _proxy_source_for_face(obj, payload, face)
-    return ("", world) if source is None else (source[0], _proxy_world_to_source(source, world))
-
-
-def _pick_payload(hit):
-    return hit[0], hit[1].copy(), hit[3].copy()
-
-
-def _proxy_slot_payload(root, obj):
-    rows = (_proxy_slot_row(root, obj, row) for row in proxy_sources(obj))
-    return {slot: data for slot, data in rows if slot >= 0 and data[0]}
-
-
-def _proxy_slot_row(root, obj, row):
-    try:
-        slot = int(row.get("slot", -1))
-    except Exception:
-        slot = -1
-    sid = str(row.get("scp_id", "") or "")
-    return slot, (sid, _proxy_unmirror_matrix(root, obj, sid))
-
-
-def _proxy_unmirror_matrix(root, obj, scp_id):
-    if obj.get(SIDE_KEY) != SIDE_MIRRORED:
-        return None
-    scp = scp_prop_map(root).get(str(scp_id))
-    source = None if scp is None else scp_prop_map(root).get(mirror_source_id(scp))
-    origin = (0.0, 0.0, 0.0) if source is None else tuple(getattr(source, "mirror_origin", (0.0, 0.0, 0.0)))
-    return None if source is None else mirror_matrix(mirror_effective_axis(scp), origin)
-
-
-def _proxy_source_for_face(obj, payload, face_index):
-    slot = _proxy_face_slot(obj, face_index)
-    return None if slot is None else payload.get(int(slot))
-
-
-def _proxy_face_slot(obj, face_index):
-    poly = _face_poly(obj, face_index)
-    attr = None if poly is None else obj.data.attributes.get(ATTR_SLOT)
-    if attr is None:
-        return None
-    slots = [int(attr.data[int(v)].value) for v in poly.vertices]
-    return None if not slots else max(set(slots), key=slots.count)
-
-
-def _face_poly(obj, face_index):
-    index = int(face_index)
-    polys = getattr(getattr(obj, "data", None), "polygons", ())
-    return polys[index] if 0 <= index < len(polys) else None
-
-
-def _proxy_world_to_source(source, world):
-    matrix = source[1]
-    return world if matrix is None else matrix @ world
+    return pick_candidates(context, root)
 
 
 def _set_modal_cursor(context):
@@ -362,7 +227,7 @@ class AF_OT_RemoveFiberTouchPoint(bpy.types.Operator):
 class AF_OT_MoveFiberTouchPoint(bpy.types.Operator):
     bl_idname = "af.move_fiber_touch_point"
     bl_label = "Move Mid Touch Point"
-    bl_options = {"REGISTER", "UNDO"}
+    bl_options = {"REGISTER"}
 
     fiber_id: bpy.props.StringProperty(default="")
     touch_index: bpy.props.IntProperty(default=-1)
