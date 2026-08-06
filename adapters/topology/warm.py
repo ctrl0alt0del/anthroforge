@@ -11,7 +11,6 @@ try:
         WarmUpdateStatus, WarmValidationReport,
     )
     from ...core.warm_start.signatures import guide_layout_signature
-    from ...core.warm_start.topology_solver import project_and_rebind_topology, reproject_topology
 except ImportError:
     from core.topology.model import TopologyGuide
     from core.warm_start.model import (
@@ -19,10 +18,10 @@ except ImportError:
         WarmUpdateStatus, WarmValidationReport,
     )
     from core.warm_start.signatures import guide_layout_signature
-    from core.warm_start.topology_solver import project_and_rebind_topology, reproject_topology
 
 
 def update_topology(root, scene, depsgraph, capture=None):
+    reproject_topology = _topology_solvers()[1]
     obj = _topology(root, scene)
     vertices, quads = _mesh_arrays(obj)
     skin_binding, guide_binding = _read_bindings(obj.data)
@@ -54,6 +53,7 @@ def _guide_fallback(vertices):
 
 
 def rebind_after_skin(root, scene, depsgraph, predicted=None, capture=None):
+    project_and_rebind_topology = _topology_solvers()[0]
     obj = _topology(root, scene)
     vertices, quads = _mesh_arrays(obj)
     capture = capture or capture_topology(root, scene, depsgraph)
@@ -66,6 +66,16 @@ def rebind_after_skin(root, scene, depsgraph, predicted=None, capture=None):
         apply_topology_vertices(obj, result[0])
         _write_rebindings(obj.data, result[1], result[2])
     return result
+
+
+def _topology_solvers():
+    from ..draft_skin.vendor import ensure_worker_dependencies
+    ensure_worker_dependencies()
+    if __package__.startswith("anthroforge."):
+        from ...core.warm_start.topology_solver import project_and_rebind_topology, reproject_topology
+    else:
+        from core.warm_start.topology_solver import project_and_rebind_topology, reproject_topology
+    return project_and_rebind_topology, reproject_topology
 
 
 def apply_topology_vertices(obj, vertices):

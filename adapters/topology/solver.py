@@ -169,11 +169,19 @@ def _weld_labeled(parts, tolerance):
     keys = np.round(vertices / tolerance).astype(np.int64)
     _unique, first, inverse = np.unique(keys, axis=0, return_index=True, return_inverse=True)
     remapped = inverse[faces]
-    valid = np.asarray([len(set(map(int, face))) == 4 for face in remapped])
+    valid = _valid_weld_faces(remapped)
     used = np.unique(remapped[valid])
     compact = np.full(len(first), -1, dtype=np.int32); compact[used] = np.arange(len(used))
     points, faces = vertices[first][used], compact[remapped[valid]]
     return points, _orient_faces(points, faces), regions[valid], indices[valid]
+
+
+def _valid_weld_faces(faces):
+    distinct = np.asarray([len(set(map(int, face))) == 4 for face in faces])
+    _values, reversed_indices = np.unique(np.sort(faces, axis=1)[::-1], axis=0, return_index=True)
+    unique = np.zeros(len(faces), dtype=bool)
+    unique[len(faces) - 1 - reversed_indices] = True
+    return distinct & unique
 
 
 def _orient_faces(vertices, faces):

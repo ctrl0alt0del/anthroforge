@@ -57,3 +57,10 @@ class ArchitectureGuardrailTests(unittest.TestCase):
         offenders = [path.name for path in folder.glob("*.py")
                      if "import bpy" in path.read_text(encoding="utf-8")]
         self.assertEqual(offenders, [])
+
+    def test_warm_ui_adapters_do_not_import_numerical_solvers_at_module_load(self):
+        paths = (ADDON_ROOT / "adapters" / "topology" / "warm.py",
+                 ADDON_ROOT / "adapters" / "warm_update" / "migration.py")
+        headers = [path.read_text(encoding="utf-8").split("\ndef ", 1)[0] for path in paths]
+        self.assertNotIn("topology_solver", headers[0])
+        self.assertNotIn("warm_start.migration", headers[1])

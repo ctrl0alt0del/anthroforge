@@ -15,7 +15,7 @@ from adapters.topology.capture import capture_topology
 from adapters.topology.engine import annuli, instant
 from adapters.topology.output import replace_topology
 from core.topology.model import TopologyResult
-from core.topology.validation import validate_topology
+from core.topology.validation import max_valence, validate_topology
 
 
 def cube_arrays():
@@ -92,6 +92,27 @@ class TopologyIntegrationTests(BlenderTestCase):
         ring = boundary + np.asarray((2, 0, 0)); plane = instant.SymmetryPlane(np.zeros(3), np.asarray((1, 0, 0)))
         with self.assertRaisesRegex(RuntimeError, "EyeGuide"):
             instant.make_transition("EyeGuide", (boundary, ring), 4.0, plane)
+
+    def test_centered_transition_limits_valence_across_large_count_change(self):
+        from adapters.draft_skin.vendor import ensure_worker_dependencies
+        ensure_worker_dependencies()
+        angles_a = np.linspace(0.0, 2.0 * np.pi, 16, endpoint=False)
+        angles_b = np.linspace(0.0, 2.0 * np.pi, 52, endpoint=False)
+        boundary = np.column_stack((np.sin(angles_a), np.zeros(16), np.cos(angles_a)))
+        ring = 1.3 * np.column_stack((np.sin(angles_b), np.zeros(52), np.cos(angles_b)))
+        plane = instant.SymmetryPlane(np.zeros(3), np.asarray((1.0, 0.0, 0.0)))
+        result = instant.make_transition("MouthGuide", (boundary, ring), 4.0, plane)
+        self.assertLessEqual(max_valence(len(result.vertices), result.faces), 7)
+
+    def test_welding_discards_duplicate_quads_and_keeps_later_region(self):
+        from adapters.draft_skin.vendor import ensure_worker_dependencies
+        ensure_worker_dependencies()
+        from adapters.topology.solver import _weld_labeled
+        points = np.asarray(((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)), dtype=float)
+        faces = np.asarray(((0, 1, 2, 3),), dtype=np.int32)
+        result = _weld_labeled(((points, faces, 0, -1), (points, faces, 1, 2)), 1.0e-6)
+        self.assertEqual(len(result[1]), 1)
+        self.assertEqual((int(result[2][0]), int(result[3][0])), (1, 2))
 
     def test_local_guide_closure_keeps_points(self):
         points = np.asarray(((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)))

@@ -318,12 +318,54 @@ def make_transition(name, pair, diagonal, plane):
         return side_transition(name, boundary, ring)
     first = cube_test.canonical_loop(boundary)
     second = cube_test.align_loop(first, ring)
-    vertices = np.vstack((first, second))
+    return centered_transition(name, first, second, plane)
+
+
+def centered_transition(name, first, second, plane):
+    loops = centered_transition_loops(first, second, plane)
+    parts = tuple(centered_transition_strip(a, b, plane) for a, b in zip(loops, loops[1:]))
+    diagonal = max(float(np.linalg.norm(np.ptp(np.vstack((first, second)), axis=0))), 1.0e-9)
+    merged = cube_test.welded_hybrid(parts, 1.0e-7 * diagonal)
+    return cube_test.Transition(name, merged.vertices, merged.faces)
+
+
+def centered_transition_loops(first, second, plane):
+    stages = transition_stage_count(len(first), len(second))
+    values = [first]
+    for index in range(1, stages):
+        alpha = index / stages
+        values.append(blended_transition_loop(first, second, alpha, plane))
+    return tuple((*values, second))
+
+
+def transition_stage_count(first, second):
+    ratio = max(first, second) / max(min(first, second), 1)
+    return max(1, int(np.ceil(np.log(ratio) / np.log(1.5))))
+
+
+def blended_transition_loop(first, second, alpha, plane):
+    estimate = len(first) * ((len(second) / len(first)) ** alpha)
+    count = max(4, 2 * int(round(estimate / 2.0)))
+    a = cube_test.loop_samples(first, count)
+    b = cube_test.loop_samples(second, count)
+    points = ((1.0 - alpha) * a) + (alpha * b)
+    return enforce_transition_symmetry(points, plane)
+
+
+def enforce_transition_symmetry(points, plane):
+    reflected = reflect_points(points, plane)
+    distances = np.linalg.norm(points[None, :, :] - reflected[:, None, :], axis=2)
+    mapping = np.argmin(distances, axis=1)
+    partners = reflect_points(points[mapping], plane)
+    return 0.5 * (points + partners)
+
+
+def centered_transition_strip(first, second, plane):
     local = tuple(plane_coordinates(loop, plane) for loop in (first, second))
     faces = equal_transition_faces(len(first)) if len(first) == len(second) else (
         cube_test.centered_transition_faces(*local))
     cube_test.validate_transition_boundary(faces, len(first), len(second))
-    return cube_test.Transition(name, vertices, faces)
+    return np.vstack((first, second)), faces
 
 
 def loop_is_centered(points, plane, diagonal):

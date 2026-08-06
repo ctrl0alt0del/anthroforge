@@ -5,12 +5,6 @@ import numpy as np
 from ..draft_skin.warm import _mesh_arrays as _skin_arrays
 from ..topology.warm import _face_values, _mesh_arrays as _topology_arrays
 
-try:
-    from ...core.warm_start.migration import prepare_legacy_skin, prepare_legacy_topology
-except ImportError:
-    from core.warm_start.migration import prepare_legacy_skin, prepare_legacy_topology
-
-
 SKIN_BINDING_ATTRIBUTES = tuple(
     [f"af_skin_bind_{kind}_{index}" for kind in ("source", "triangle", "barycentric", "weight")
      for index in range(4)] + ["af_skin_bind_normal_offset", "af_skin_bind_support", "af_skin_bind_schema"])
@@ -27,6 +21,7 @@ def migration_state(root, scene):
 
 
 def prepare_skin(root, scene, capture):
+    prepare_legacy_skin = _migration_solvers()[0]
     obj = _output(root, scene, "af_draft_skin")
     vertices, triangles = _skin_arrays(obj)
     collagen = _point(obj.data, "af_skin_collagen", np.float32, 0.0)
@@ -34,6 +29,7 @@ def prepare_skin(root, scene, capture):
 
 
 def prepare_topology(root, scene, capture):
+    prepare_legacy_topology = _migration_solvers()[1]
     obj = _output(root, scene, "af_topology")
     vertices, quads = _topology_arrays(obj)
     regions = _face_or_default(obj.data, "af_topology_region", 0)
@@ -42,6 +38,16 @@ def prepare_topology(root, scene, capture):
     lengths = _point_optional(obj.data, "af_topology_target_edge_length", np.float32)
     return prepare_legacy_topology(vertices, quads, regions, guides, capture,
                                    owners, lengths, _stats(obj))
+
+
+def _migration_solvers():
+    from ..draft_skin.vendor import ensure_worker_dependencies
+    ensure_worker_dependencies()
+    if __package__.startswith("anthroforge."):
+        from ...core.warm_start.migration import prepare_legacy_skin, prepare_legacy_topology
+    else:
+        from core.warm_start.migration import prepare_legacy_skin, prepare_legacy_topology
+    return prepare_legacy_skin, prepare_legacy_topology
 
 
 def _outputs(root, scene):
