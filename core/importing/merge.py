@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 
 from ..deps.dirty_hints import empty_dirty_hints
 from ..id_utils import next_prefixed_id
+from ..scp_proxy.signature import mesh_topology_signature
 from ..scp_runtime.bound_objects import find_bound_entry_by_object, sync_all_scp_roles
 from ..scp_runtime.common import set_prop_raw
 from ..scp_runtime.prop_update_guard import set_parent_id_raw, suppress_scp_prop_updates
@@ -29,6 +30,7 @@ class MergeState:
     fibers: dict = field(default_factory=dict)
     muscles: dict = field(default_factory=dict)
     blobs: dict = field(default_factory=dict)
+    soft_tissues: dict = field(default_factory=dict)
     imported_scps: set[str] = field(default_factory=set)
     shortcut_count: int = 0
     kept_objects: list[object] = field(default_factory=list)
@@ -53,7 +55,8 @@ def _remap(mapping, source_id):
 
 
 def _shortcut_owner_id(state, owner_type, owner_id):
-    maps = {"SCP": state.scps, "FIBER": state.fibers, "MUSCLE": state.muscles, "BLOB": state.blobs}
+    maps = {"SCP": state.scps, "FIBER": state.fibers, "MUSCLE": state.muscles, "BLOB": state.blobs,
+            "SOFT_TISSUE": state.soft_tissues}
     return _remap(maps.get(str(owner_type or "NONE"), {}), owner_id)
 
 
@@ -295,6 +298,65 @@ def _create_blobs(state):
         _create_one_blob(state, snap)
 
 
+def _stage_tissue_base(state, snap):
+    source_id = str(snap.source_id or "")
+    items = getattr(state.stage_root.af_vcp_system, "soft_tissues", ())
+    source = next((item for item in items if str(item.id or "") == source_id), None)
+    return None if source is None else getattr(source, "base_object_ref", None)
+
+
+def _create_one_soft_tissue(state, snap):
+    host = _remap(state.scps, snap.host_scp_id) if snap.host_scp_id else ""
+    base = _stage_tissue_base(state, snap)
+    if snap.host_scp_id and not host:
+        return _warn(state, f"Skipped soft tissue {snap.source_id}: host SCP was not imported.")
+    if base is None:
+        return _warn(state, f"Skipped soft tissue {snap.source_id}: base object is missing.")
+    if host and not _soft_host_compatible(state, host, snap):
+        return _warn(state, f"Skipped soft tissue {snap.source_id}: host topology is incompatible.")
+    dst = _new_vcp_item(state.root.af_vcp_system.soft_tissues, "TISSUE")
+    state.soft_tissues[str(snap.source_id or "")] = str(dst.id or "")
+    dst.name = str(snap.name or dst.id)
+    apply_scalar_dict(dst, snap.props)
+    dst.host_scp_id, dst.base_object_ref = host, base
+    _copy_soft_attachments(dst, snap)
+    _keep_tissue_base(state, base, dst)
+
+
+def _soft_host_compatible(state, host_id, snap):
+    expected = str(dict(snap.props or {}).get("host_topology_signature", "") or "")
+    scp = _scp_by_id(state.root, host_id)
+    obj = None if scp is None else getattr(scp, "geometry_object_ref", None)
+    current = "" if obj is None or getattr(obj, "type", "") != "MESH" else mesh_topology_signature(obj.data)
+    return bool(current and (not expected or current == expected))
+
+
+def _copy_soft_attachments(dst, snap):
+    for source in snap.attachments:
+        row = dst.attachments.add()
+        apply_scalar_dict(row, source.props)
+
+
+def _keep_tissue_base(state, base, tissue):
+    _link_object(state, base)
+    base["af_soft_tissue_base"] = True
+    base["af_soft_tissue_id"] = str(tissue.id)
+    base["af_root_name"] = str(state.root.name)
+    if base not in state.kept_objects:
+        state.kept_objects.append(base)
+
+
+def _create_soft_tissues(state):
+    for snap in state.snapshot.soft_tissues:
+        _create_one_soft_tissue(state, snap)
+
+
+def _create_diff_soft_tissues(state):
+    for snap in state.snapshot.soft_tissues:
+        if not snap.host_scp_id or str(snap.host_scp_id) in state.imported_scps:
+            _create_one_soft_tissue(state, snap)
+
+
 def _blob_object_scp_id(snap):
     scp_id, _bound_id = split_bound_entity_id(getattr(snap, "attach_object_entity", ""))
     return scp_id
@@ -345,7 +407,8 @@ def _shortcut_owner_imported(state, snap):
     oid = str(snap.owner_id or "")
     if kind == "SCP":
         return oid in state.imported_scps
-    maps = {"FIBER": state.fibers, "MUSCLE": state.muscles, "BLOB": state.blobs}
+    maps = {"FIBER": state.fibers, "MUSCLE": state.muscles, "BLOB": state.blobs,
+            "SOFT_TISSUE": state.soft_tissues}
     return bool(_remap(maps.get(kind, {}), oid))
 
 
@@ -380,6 +443,7 @@ def _create_vcps(state):
         _create_fibers(state)
         _create_muscles(state)
         _create_blobs(state)
+        _create_soft_tissues(state)
 
 
 def _create_diff_vcps(state):
@@ -387,10 +451,12 @@ def _create_diff_vcps(state):
         _create_diff_fibers(state)
         _create_diff_muscles(state)
         _create_diff_blobs(state)
+        _create_diff_soft_tissues(state)
 
 
 def _result(state):
-    return ImportResult(len(state.imported_scps), len(state.fibers), len(state.muscles), len(state.blobs), state.shortcut_count, state.warnings, state.kept_objects)
+    return ImportResult(len(state.imported_scps), len(state.fibers), len(state.muscles), len(state.blobs),
+                        len(state.soft_tissues), state.shortcut_count, state.warnings, state.kept_objects)
 
 
 def _dirty_for_diff(state):
@@ -399,6 +465,7 @@ def _dirty_for_diff(state):
     dirty["FIBER"] = set(state.fibers.values())
     dirty["MUSCLE"] = set(state.muscles.values())
     dirty["BLOB"] = set(state.blobs.values())
+    dirty["SOFT_TISSUE"] = set(state.soft_tissues.values())
     return dirty
 
 
@@ -409,7 +476,9 @@ def _has_dirty(dirty):
 def _schedule_diff_sync(state):
     dirty = _dirty_for_diff(state)
     if _has_dirty(dirty):
-        schedule_sync_from_dirty_hints(root=state.root, scene=state.scene, dirty_hints=dirty, source="operator", event_type="IMPORT")
+        payload = {"soft_tissue_force": True} if state.soft_tissues else None
+        schedule_sync_from_dirty_hints(root=state.root, scene=state.scene, dirty_hints=dirty,
+                                       source="operator", event_type="IMPORT", payload=payload)
 
 
 def _apply_draft_skin_settings(state):

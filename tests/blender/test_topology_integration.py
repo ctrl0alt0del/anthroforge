@@ -12,7 +12,7 @@ for value in (str(Path(__file__).parent), str(TEST_ROOT), str(ADDON_ROOT)):
 
 from _helpers import BlenderTestCase, mesh_object, root, scp_with_object
 from adapters.topology.capture import capture_topology
-from adapters.topology.engine import annuli, instant
+from adapters.topology.engine import annuli, cube, instant
 from adapters.topology.output import replace_topology
 from core.topology.model import TopologyResult
 from core.topology.validation import max_valence, validate_topology
@@ -70,13 +70,30 @@ def closure_fixture(connected=True):
     return points, graph, cKDTree(vertices), vertices
 
 
+def side_transition_loops(boundary_count, ring_count):
+    first = np.linspace(0.0, 2.0 * np.pi, boundary_count, endpoint=False)
+    second = np.linspace(0.0, 2.0 * np.pi, ring_count, endpoint=False)
+    boundary = np.column_stack((np.full(boundary_count, 2.0), 1.3 * np.cos(first), np.sin(first)))
+    ring = np.column_stack((np.full(ring_count, 2.0), np.cos(second), 0.8 * np.sin(second)))
+    return boundary, ring
+
+
 class TopologyIntegrationTests(BlenderTestCase):
-    def test_guide_cut_stops_at_authored_outer_ring(self):
+    def test_guide_cut_uses_bounded_transition_margin(self):
         ring = np.asarray(((-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)), dtype=float)
         vertices = np.asarray(((0.8, -.1, 0), (.9, .1, 0), (1, 0, 0),
-                               (1.05, -.1, 0), (1.15, .1, 0), (1.1, 0, 0)))
-        faces = np.asarray(((0, 1, 2), (3, 4, 5)), dtype=np.int32)
-        np.testing.assert_array_equal(instant.guide_face_mask(vertices, faces, ring), (True, False))
+                               (1.02, -.1, 0), (1.06, .1, 0), (1.04, 0, 0),
+                               (1.09, -.1, 0), (1.15, .1, 0), (1.12, 0, 0)))
+        faces = np.asarray(((0, 1, 2), (3, 4, 5), (6, 7, 8)), dtype=np.int32)
+        mask = instant.guide_face_mask(vertices, faces, ring, instant.GUIDE_CUT_SCALE)
+        np.testing.assert_array_equal(mask, (True, True, False))
+
+    def test_centered_guide_keeps_authored_cut_scale(self):
+        plane = instant.SymmetryPlane(np.zeros(3), np.asarray((1.0, 0.0, 0.0)))
+        centered = np.asarray(((0, -1, -1), (0, 1, -1), (0, 1, 1), (0, -1, 1)))
+        side = centered + np.asarray((2.0, 0.0, 0.0))
+        self.assertEqual(instant.guide_cut_scale(centered, plane, 4.0), 1.0)
+        self.assertEqual(instant.guide_cut_scale(side, plane, 4.0), instant.GUIDE_CUT_SCALE)
 
     def test_plane_coordinates_support_arbitrary_symmetry(self):
         normal = np.asarray((1.0, 1.0, 0.0)); normal /= np.linalg.norm(normal)
@@ -103,6 +120,60 @@ class TopologyIntegrationTests(BlenderTestCase):
         plane = instant.SymmetryPlane(np.zeros(3), np.asarray((1.0, 0.0, 0.0)))
         result = instant.make_transition("MouthGuide", (boundary, ring), 4.0, plane)
         self.assertLessEqual(max_valence(len(result.vertices), result.faces), 7)
+
+    def test_sparse_transition_has_no_extra_rows(self):
+        boundary, ring = side_transition_loops(50, 40)
+        result = instant.side_transition("EyeGuide", boundary, ring)
+        self.assertEqual((len(result.vertices), len(result.faces)), (90, 45))
+        self.assertEqual(result.diagnostics["mode"], "SPARSE")
+        self.assertEqual(cube.face_boundary_set(result.faces),
+                         cube.expected_transition_boundary(50, 40))
+
+    def test_sparse_transition_is_deterministic(self):
+        boundary, ring = side_transition_loops(50, 40)
+        first = instant.side_transition("EyeGuide", boundary, ring)
+        second = instant.side_transition("EyeGuide", boundary, ring)
+        np.testing.assert_array_equal(first.faces, second.faces)
+        self.assertEqual(first.diagnostics, second.diagnostics)
+
+    def test_sparse_transition_reflects_across_rotated_plane(self):
+        normal = np.asarray((1.0, 1.0, 0.0)); normal /= np.linalg.norm(normal)
+        plane = instant.SymmetryPlane(np.asarray((0.2, -0.1, 0.3)), normal)
+        source = instant.side_transition("LeftEye", *side_transition_loops(50, 40))
+        points = instant.reflect_points(source.vertices, plane)
+        target = cube.Transition("RightEye", points, source.faces)
+        result = instant.mirrored_transition(source, target, plane)
+        np.testing.assert_allclose(result.vertices, points, atol=1e-12)
+        self.assertEqual(result.diagnostics["guide_name"], "RightEye")
+
+    def test_equal_count_transition_uses_sparse_path(self):
+        boundary, ring = side_transition_loops(40, 40)
+        result = instant.side_transition("EqualEye", boundary, ring)
+        self.assertEqual((len(result.vertices), len(result.faces)), (80, 40))
+        self.assertEqual(result.diagnostics["mode"], "SPARSE")
+
+    def test_sparse_quality_failure_uses_staged_fallback(self):
+        from unittest.mock import patch
+        boundary, ring = side_transition_loops(50, 40)
+        with patch.object(instant, "sparse_quality_ok", return_value=False):
+            result = instant.side_transition("PoorEye", boundary, ring)
+        self.assertEqual(result.diagnostics["mode"], "STAGED")
+        self.assertIn("quality", result.diagnostics["fallback_reason"])
+
+    def test_large_transition_uses_named_staged_fallback(self):
+        from adapters.draft_skin.vendor import ensure_worker_dependencies
+        ensure_worker_dependencies()
+        from adapters.topology.solver import transition_warnings
+        boundary, ring = side_transition_loops(52, 16)
+        result = instant.side_transition("LargeEye", boundary, ring)
+        self.assertEqual(result.diagnostics["mode"], "STAGED")
+        self.assertIn("difference", result.diagnostics["fallback_reason"])
+        self.assertIn("LargeEye", transition_warnings((result.diagnostics,))[0])
+
+    def test_transition_parity_mismatch_fails_cleanly(self):
+        boundary, ring = side_transition_loops(40, 41)
+        with self.assertRaisesRegex(RuntimeError, "OddGuide.*parity"):
+            instant.side_transition("OddGuide", boundary, ring)
 
     def test_welding_discards_duplicate_quads_and_keeps_later_region(self):
         from adapters.draft_skin.vendor import ensure_worker_dependencies

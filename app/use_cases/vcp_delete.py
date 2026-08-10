@@ -25,11 +25,16 @@ def _resolved_target(root, node_type, node_id):
 def _target_key(node_type, node_id):
     kind = str(node_type or "").upper()
     entity_id = str(node_id or "")
-    return (kind if kind in {"FIBER", "MUSCLE"} else "", entity_id)
+    return (kind if kind in {"FIBER", "MUSCLE", "SOFT_TISSUE"} else "", entity_id)
 
 
 def _has_target(vcp, kind, entity_id):
-    items = vcp.fibers if kind == "FIBER" else vcp.muscles
+    if kind == "FIBER":
+        items = vcp.fibers
+    elif kind == "MUSCLE":
+        items = vcp.muscles
+    else:
+        items = getattr(vcp, "soft_tissues", ())
     return any(str(getattr(item, "id", "")) == entity_id for item in items)
 
 
@@ -43,7 +48,48 @@ def _clear_runtime_cache(kind, entity_id):
 
 
 def _delete_target(root, scene, kind, entity_id):
+    if kind == "SOFT_TISSUE":
+        return _delete_soft_tissue(root, scene, entity_id)
     return _delete_reconcile()(root, scene, {_delete_key(kind, entity_id)})
+
+
+def _delete_soft_tissue(root, scene, entity_id):
+    vcp = root.af_vcp_system
+    tissues = vcp.soft_tissues
+    index = next((i for i, item in enumerate(tissues) if item.id == entity_id), -1)
+    if index < 0:
+        return False
+    tissue = tissues[index]
+    _remove_tissue_objects(scene, root.name, tissue)
+    tissues.remove(index)
+    if vcp.active_vcp_type == "SOFT_TISSUE" and vcp.active_vcp_id == entity_id:
+        vcp.active_vcp_type, vcp.active_vcp_id = "NONE", ""
+    return True
+
+
+def _remove_tissue_objects(scene, root_name, tissue):
+    for obj in tuple(scene.objects):
+        owned_proxy = obj.get("af_root_name") == root_name and obj.get("af_soft_tissue_id") == tissue.id
+        if owned_proxy and (obj.get("af_soft_tissue_proxy") or obj.get("af_soft_tissue_rest_proxy")):
+            _remove_object(obj)
+    if tissue.base_owned and tissue.base_object_ref is not None:
+        _remove_object(tissue.base_object_ref)
+    elif tissue.base_object_ref is not None:
+        _clear_tissue_tags(tissue.base_object_ref)
+
+
+def _clear_tissue_tags(obj):
+    for key in ("af_soft_tissue_base", "af_soft_tissue_id", "af_root_name"):
+        if key in obj:
+            del obj[key]
+
+
+def _remove_object(obj):
+    import bpy
+    data = getattr(obj, "data", None)
+    bpy.data.objects.remove(obj, do_unlink=True)
+    if data is not None and data.users == 0:
+        bpy.data.meshes.remove(data)
 
 
 def _delete_key(kind, entity_id):

@@ -35,6 +35,10 @@ def active_blob_from_context(context):
     return _active_vcp_item(context, "blobs")
 
 
+def active_soft_tissue_from_context(context):
+    return _active_vcp_item(context, "soft_tissues")
+
+
 def blob_proxy(scene, root_name, blob_id):
     for obj in scene.objects:
         if obj.get("af_blob_proxy") and not obj.get("af_blob_mirror_proxy") and obj.get("af_root_name") == root_name and obj.get("af_blob_id") == blob_id:
@@ -48,3 +52,17 @@ def blob_proxy_for_context(context, blob):
     if root is None or scene is None or blob is None:
         return None
     return blob_proxy(scene, root.name, blob.id)
+
+
+def soft_tissue_proxy(scene, root_name, tissue_id):
+    return next((obj for obj in scene.objects if obj.get("af_soft_tissue_proxy")
+                 and not obj.get("af_soft_tissue_mirror_proxy") and obj.get("af_root_name") == root_name
+                 and obj.get("af_soft_tissue_id") == tissue_id), None)
+
+
+def soft_tissue_proxy_for_context(context, tissue):
+    root = root_for_context(context)
+    scene = scene_from_context(context)
+    if root is None or scene is None or tissue is None:
+        return None
+    return soft_tissue_proxy(scene, root.name, tissue.id)

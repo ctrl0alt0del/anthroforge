@@ -19,6 +19,7 @@ def _build_vcp_tree(root):
     muscles = list(v.muscles)
     fibers = list(v.fibers)
     blobs = list(v.blobs)
+    tissues = list(v.soft_tissues)
 
     by_muscle = {}
     free_fibers = []
@@ -30,7 +31,7 @@ def _build_vcp_tree(root):
         else:
             free_fibers.append(f)
 
-    return muscles, by_muscle, free_fibers, blobs
+    return muscles, by_muscle, free_fibers, blobs, tissues
 
 
 def _draw_indent(row, depth):
@@ -114,9 +115,17 @@ def _draw_blob_rows(layout, blobs, selected_blob_ids):
         _draw_blob_row(layout, blob, selected_blob_ids)
 
 
-def draw_vcp_tree_section(layout, scene, root, selected_fiber_ids, selected_muscle_ids, selected_blob_ids):
-    muscles, by_muscle, free_fibers, blobs = _build_vcp_tree(root)
-    if not muscles and not free_fibers and not blobs:
+def _draw_soft_tissue_row(layout, tissue, selected_ids):
+    row = layout.row(align=True)
+    row.label(text="", icon="MOD_CLOTH")
+    _draw_select_op(row, tissue.id, "SOFT_TISSUE", tissue.name or tissue.id, tissue.id in selected_ids)
+    _draw_delete_op(row, tissue.id, "SOFT_TISSUE")
+    _draw_right_hint(row, tissue.base_domain)
+
+
+def draw_vcp_tree_section(layout, scene, root, selected_fiber_ids, selected_muscle_ids, selected_blob_ids, selected_tissue_ids=()):
+    muscles, by_muscle, free_fibers, blobs, tissues = _build_vcp_tree(root)
+    if not muscles and not free_fibers and not blobs and not tissues:
         layout.label(text="No VCPs")
         return
     for m in muscles:
@@ -126,3 +135,7 @@ def draw_vcp_tree_section(layout, scene, root, selected_fiber_ids, selected_musc
     if blobs:
         layout.separator()
         _draw_blob_rows(layout, blobs, selected_blob_ids)
+    if tissues:
+        layout.separator()
+        for tissue in tissues:
+            _draw_soft_tissue_row(layout, tissue, selected_tissue_ids)

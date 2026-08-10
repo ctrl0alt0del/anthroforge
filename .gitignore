@@ -39,3 +39,4 @@ build/
 # Virtual environments (if you experiment with one)
 venv/
 .env/
+artifacts/

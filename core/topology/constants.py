@@ -1,5 +1,5 @@
 PROTOCOL_VERSION = 4
-SOLVER_VERSION = "guided-instant-meshes-warm-bindings-4.0.0"
+SOLVER_VERSION = "guided-instant-meshes-warm-bindings-4.1.0"
 BINDING_SCHEMA = 1
 DEFAULT_TARGET_QUADS = 8100
 MIN_TARGET_QUADS = 1000

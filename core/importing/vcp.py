@@ -19,6 +19,9 @@ class VcpImportState:
     fibers: dict[str, str] = field(default_factory=dict)
     muscles: dict[str, str] = field(default_factory=dict)
     blobs: dict[str, str] = field(default_factory=dict)
+    soft_tissues: dict[str, str] = field(default_factory=dict)
+    stage_root: object = None
+    kept_objects: list[object] = field(default_factory=list)
 
 
 def _scp_map(root):
@@ -182,8 +185,52 @@ def _create_blobs(state):
         _create_one_blob(state, snap)
 
 
+def _stage_tissue_base(state, source_id):
+    if state.stage_root is None:
+        return None
+    items = getattr(state.stage_root.af_vcp_system, "soft_tissues", ())
+    source = next((item for item in items if str(item.id or "") == str(source_id)), None)
+    return None if source is None else getattr(source, "base_object_ref", None)
+
+
+def _create_one_soft_tissue(state, snap):
+    missing = _incompatible_scps(state, {snap.host_scp_id}) if snap.host_scp_id else set()
+    base = _stage_tissue_base(state, snap.source_id)
+    if missing or base is None:
+        return _warn_skip(state, "soft tissue", snap.source_id, missing or {"base object"})
+    dst = _new_vcp_item(state.root.af_vcp_system.soft_tissues, "TISSUE")
+    state.soft_tissues[str(snap.source_id or "")] = str(dst.id or "")
+    dst.name = str(snap.name or dst.id)
+    apply_scalar_dict(dst, snap.props)
+    dst.host_scp_id, dst.base_object_ref = str(snap.host_scp_id or ""), base
+    _copy_soft_attachments(dst, snap)
+    _keep_base(state, base, dst)
+
+
+def _copy_soft_attachments(dst, snap):
+    for source in snap.attachments:
+        row = dst.attachments.add()
+        apply_scalar_dict(row, source.props)
+
+
+def _keep_base(state, base, tissue):
+    if not base.users_collection:
+        state.scene.collection.objects.link(base)
+    base["af_soft_tissue_base"] = True
+    base["af_soft_tissue_id"] = str(tissue.id)
+    base["af_root_name"] = str(state.root.name)
+    if base not in state.kept_objects:
+        state.kept_objects.append(base)
+
+
+def _create_soft_tissues(state):
+    for snap in state.snapshot.soft_tissues:
+        _create_one_soft_tissue(state, snap)
+
+
 def _result(state):
-    return ImportResult(0, len(state.fibers), len(state.muscles), len(state.blobs), 0, state.warnings, [])
+    return ImportResult(0, len(state.fibers), len(state.muscles), len(state.blobs),
+                        len(state.soft_tissues), 0, state.warnings, state.kept_objects)
 
 
 def _dirty_for_imported(state):
@@ -191,6 +238,7 @@ def _dirty_for_imported(state):
     dirty["FIBER"] = set(state.fibers.values())
     dirty["MUSCLE"] = set(state.muscles.values())
     dirty["BLOB"] = set(state.blobs.values())
+    dirty["SOFT_TISSUE"] = set(state.soft_tissues.values())
     return dirty
 
 
@@ -201,15 +249,18 @@ def _has_dirty(dirty):
 def _schedule_imported_sync(state):
     dirty = _dirty_for_imported(state)
     if _has_dirty(dirty):
-        schedule_sync_from_dirty_hints(root=state.root, scene=state.scene, dirty_hints=dirty, source="operator", event_type="IMPORT")
+        payload = {"soft_tissue_force": True} if state.soft_tissues else None
+        schedule_sync_from_dirty_hints(root=state.root, scene=state.scene, dirty_hints=dirty,
+                                       source="operator", event_type="IMPORT", payload=payload)
 
 
-def apply_vcp_snapshot(snapshot, root, context):
-    state = VcpImportState(root, context.scene, snapshot, _compatible_scp_ids(snapshot, root))
+def apply_vcp_snapshot(snapshot, root, context, stage_root=None):
+    state = VcpImportState(root, context.scene, snapshot, _compatible_scp_ids(snapshot, root), stage_root=stage_root)
     with suppress_vcp_prop_updates():
         _create_fibers(state)
         _create_muscles(state)
         _create_blobs(state)
+        _create_soft_tissues(state)
     cleanup_scp_dependents(root)
     _schedule_imported_sync(state)
     return _result(state)

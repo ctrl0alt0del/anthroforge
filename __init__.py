@@ -54,6 +54,15 @@ from .operators.muscle_tools import (
     AF_OT_SelectMuscleInflationCtrl,
 )
 from .operators.blob_tools import AF_OT_SelectBlobControl
+from .operators.soft_tissue import (
+    AF_OT_AddSoftTissueVCP,
+    AF_OT_ApplySoftTissuePreset,
+    AF_OT_DuplicateSoftTissueSnapshot,
+    AF_OT_ConvertBlobToSoftTissue,
+    AF_OT_RebindSoftTissue,
+    AF_OT_RecomputeSoftTissue,
+    AF_OT_SelectSoftTissueBase,
+)
 from .operators.import_package import AF_OT_ImportPackage, AF_OT_ImportSCPDiff, AF_OT_ImportVCP
 from .operators.proxy_view import AF_OT_ExitProxyView, AF_OT_SwitchToProxyView
 from .operators.shortcuts import (
@@ -108,6 +117,8 @@ from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
 from .ui.panels.vcp_edit_panel import AF_PT_VCPEditPanel
 from .ui.panels.blob_create_panel import AF_PT_BlobCreatePanel
 from .ui.panels.blob_edit_panel import AF_PT_BlobEditPanel
+from .ui.panels.soft_tissue_create_panel import AF_PT_SoftTissueCreatePanel
+from .ui.panels.soft_tissue_edit_panel import AF_PT_SoftTissueEditPanel
 from .ui.panels.shortcut_panel import AF_PT_ShortcutPanel, AF_UL_ShortcutWizardItems
 from .ui.panels.action_library_panel import AF_PT_ActionLibraryPanel
 from .ui.panels.control_objects_panel import AFPTControlObjectsPanel
@@ -127,6 +138,8 @@ from .properties.vcp_properties import (
     AF_FiberLoopAnchor_Property,
     AF_FiberVCP_Property,
     AF_BlobVCP_Property,
+    AF_SoftTissueAttachment_Property,
+    AF_SoftTissueVCP_Property,
     AF_VCP_System_Property,
 )
 from .properties.shortcut_properties import (
@@ -146,6 +159,7 @@ from .core.visualization.fiber_refinement import (
 )
 from .core.visualization.muscle_sync import register_muscle_sync, unregister_muscle_sync
 from .core.visualization.blob_sync import register_blob_sync, unregister_blob_sync
+from .core.visualization.soft_tissue_sync import register_soft_tissue_sync, unregister_soft_tissue_sync
 from .core.visualization.sync_runner import (
     register_sync_runner_runtime,
     unregister_sync_runner_runtime,
@@ -222,6 +236,8 @@ classes = (
     AF_FiberLoopAnchor_Property,
     AF_FiberVCP_Property,
     AF_BlobVCP_Property,
+    AF_SoftTissueAttachment_Property,
+    AF_SoftTissueVCP_Property,
     AF_VCP_System_Property,
 
     AF_OT_AddFiberVCP,
@@ -230,6 +246,13 @@ classes = (
     AF_OT_CreateSymmetricLoopFiberFromSelectedVertices,
     AF_OT_AddMuscleVCP,
     AF_OT_AddBlobVCP,
+    AF_OT_AddSoftTissueVCP,
+    AF_OT_ApplySoftTissuePreset,
+    AF_OT_RecomputeSoftTissue,
+    AF_OT_RebindSoftTissue,
+    AF_OT_SelectSoftTissueBase,
+    AF_OT_DuplicateSoftTissueSnapshot,
+    AF_OT_ConvertBlobToSoftTissue,
     AF_OT_ToggleVCPCollapse,
     AF_OT_SelectVCPInTree,
     AF_OT_DeleteVCPInTree,
@@ -237,8 +260,9 @@ classes = (
     AF_OT_FlipMuscleNormals,
     AF_OT_SelectMuscleInflationCtrl,
     AF_OT_SelectBlobControl,
-    AF_PT_BlobCreatePanel,
     AF_PT_BlobEditPanel,
+    AF_PT_SoftTissueCreatePanel,
+    AF_PT_SoftTissueEditPanel,
     AF_OT_ImportPackage,
     AF_OT_ImportSCPDiff,
     AF_OT_ImportVCP,
@@ -324,6 +348,7 @@ def _register_runtime_hooks():
     register_fiber_refinement_runtime()
     register_muscle_sync()
     register_blob_sync()
+    register_soft_tissue_sync()
     register_sync_runner_runtime()
     register_control_runtime()
     register_delete_reconcile()
@@ -338,6 +363,7 @@ def _unregister_runtime_hooks():
     unregister_delete_reconcile()
     unregister_control_runtime()
     unregister_sync_runner_runtime()
+    unregister_soft_tissue_sync()
     unregister_blob_sync()
     unregister_muscle_sync()
     unregister_fiber_sync()

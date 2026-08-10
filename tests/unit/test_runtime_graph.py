@@ -48,14 +48,18 @@ def muscle(mid, fiber_ids):
 class RuntimeGraphTests(unittest.TestCase):
     def test_runtime_graph_connects_scp_vcp_chain(self):
         scps = [SimpleNamespace(id="S1", parent_id=""), SimpleNamespace(id="S2", parent_id="S1")]
-        vcp = SimpleNamespace(fibers=[fiber("F1", "S1", "S2")], muscles=[muscle("M1", ["F1"])], blobs=[])
+        tissue = SimpleNamespace(id="T1", host_scp_id="S2")
+        vcp = SimpleNamespace(fibers=[fiber("F1", "S1", "S2")], muscles=[muscle("M1", ["F1"])],
+                              blobs=[], soft_tissues=[tissue])
         vcp.blobs.append(SimpleNamespace(id="B1", attach_target_type="MUSCLE", attach_target_id="M1"))
         root = SimpleNamespace(af_scp_system=SimpleNamespace(scps=scps), af_vcp_system=vcp)
         graph = runtime_graph.RuntimeGraph()
         entity_sets = adapters.build_runtime_graph(root, graph)
         impacted = graph.downstream_entities({("SCP", "S1")})
         self.assertEqual(entity_sets["SCP"], {"S1", "S2"})
-        self.assertTrue({("SCP", "S2"), ("FIBER", "F1"), ("MUSCLE", "M1"), ("BLOB", "B1")} <= impacted)
+        expected = {("SCP", "S2"), ("FIBER", "F1"), ("MUSCLE", "M1"), ("BLOB", "B1"),
+                    ("SOFT_TISSUE", "T1")}
+        self.assertTrue(expected <= impacted)
 
     def test_tarjan_scc_groups_cycle(self):
         adjacency = {"A": {"B"}, "B": {"A"}, "C": {"D"}, "D": set()}

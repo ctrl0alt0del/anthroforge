@@ -22,7 +22,8 @@ _RUNNING = False
 _PENDING = []
 _TIMER_ARMED = False
 _TIMER_DUE_AT = 0.0
-_ID_PAYLOAD_KEYS = ("scp_recapture_ids", "scp_apply_parent_ids", "scp_apply_target_ids")
+_ID_PAYLOAD_KEYS = ("scp_recapture_ids", "scp_apply_parent_ids", "scp_apply_target_ids",
+                    "soft_tissue_recapture_ids")
 _FALSE_VALUES = {"0", "false", "no", "off"}
 _DEFER_ENV = "AF_DEPS_DEFER"
 _DEFER_MS_ENV = "AF_DEPS_DEFER_MS"
@@ -126,7 +127,13 @@ def _max_defer_seconds():
 
 
 def _deferable(request):
-    return bool(_env_enabled(_DEFER_ENV) and request and not request.bake and str(request.source) == "depsgraph" and str(request.event_type) == "SCP_UPDATE")
+    if not _env_enabled(_DEFER_ENV) or not request or request.bake:
+        return False
+    source = str(request.source)
+    event = str(request.event_type)
+    if event == "SCP_UPDATE":
+        return source == "depsgraph"
+    return event == "SOFT_TISSUE_UPDATE" and source in {"depsgraph", "property"}
 
 
 def _enqueue_item(ctx, request):

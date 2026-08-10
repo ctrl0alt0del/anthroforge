@@ -98,4 +98,12 @@ def import_vcp_from_blend(filepath, context):
     root = get_af_root(context.scene)
     if root is None:
         raise RuntimeError("No AnthroForge root found in target file.")
-    return apply_vcp_snapshot(snapshot, root, context)
+    if not snapshot.soft_tissues:
+        return apply_vcp_snapshot(snapshot, root, context)
+    stage = _stage_snapshot(filepath, snapshot)
+    result = None
+    try:
+        result = apply_vcp_snapshot(snapshot, root, context, stage.root)
+        return result
+    finally:
+        _cleanup_stage(stage, getattr(result, "kept_objects", ()), context.scene)

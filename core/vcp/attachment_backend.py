@@ -83,6 +83,11 @@ def resolve_attachment_normal(root, scene, parent_id, raw, runtime=None):
     return None if frame is None else frame["normal_world"].copy()
 
 
+def resolve_attachment_basis(root, scene, parent_id, raw, runtime=None):
+    frame = _resolved_frame(root, scene, parent_id, raw, runtime)
+    return None if frame is None else frame["basis_world"].copy()
+
+
 def attachment_issue(root, scene, parent_id, raw, runtime=None):
     if not as_id(parent_id):
         return "Missing parent SCP."

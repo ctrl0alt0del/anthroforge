@@ -1,7 +1,7 @@
 import argparse
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import bpy
@@ -18,6 +18,7 @@ class Transition:
     name: str
     vertices: np.ndarray
     faces: np.ndarray
+    diagnostics: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -18,6 +18,8 @@ from .model import (
     ScpSnapshot,
     ShortcutSnapshot,
     ShortcutOverrideSnapshot,
+    SoftTissueAttachmentSnapshot,
+    SoftTissueSnapshot,
 )
 from .rna import scalar_dict
 
@@ -26,6 +28,7 @@ _SCP_SKIP = {"id", "name", "parent_id", "bound_objects", "transform_object_ref",
 _FIBER_SKIP = {"id", "name", "a_parent_id", "b_parent_id", "mid_touches", "loop_anchors", "muscle_id", "not_converged", "last_recompute_ms", "last_recompute_status", "last_eps_disp", "last_eps_pen"}
 _MUSCLE_SKIP = {"id", "name", "fiber_refs"}
 _BLOB_SKIP = {"id", "name", "attach_target_type", "attach_target_id", "attach_target_object_name", "last_solve_converged", "last_solve_max_disp", "last_solve_iterations"}
+_SOFT_SKIP = {"id", "name", "base_object_ref", "host_scp_id", "attachments", "active_attachment_index"}
 
 
 def _bound_objects(scp):
@@ -114,6 +117,13 @@ def _blob_snapshot(root, blob):
     return BlobSnapshot(str(blob.id or ""), str(blob.name or ""), scalar_dict(blob, _BLOB_SKIP), str(blob.attach_target_type or "NONE"), str(blob.attach_target_id or ""), str(blob.attach_target_object_name or ""), _blob_entity(root, blob))
 
 
+def _soft_tissue_snapshot(tissue):
+    base = getattr(tissue, "base_object_ref", None)
+    rows = [SoftTissueAttachmentSnapshot(scalar_dict(row)) for row in tissue.attachments]
+    return SoftTissueSnapshot(str(tissue.id or ""), str(tissue.name or ""), scalar_dict(tissue, _SOFT_SKIP),
+                              str(tissue.host_scp_id or ""), "" if base is None else str(base.name), rows)
+
+
 def _shortcut_snapshot(root, shortcut):
     return ShortcutSnapshot(str(shortcut.name or ""), str(shortcut.owner_type or "NONE"), str(shortcut.owner_id or ""), _canonical_path(root, shortcut.data_path), str(getattr(shortcut, "vector_mode", "DEFAULT") or "DEFAULT"), owner_backsolve_enabled(shortcut), _shortcut_overrides(shortcut))
 
@@ -132,6 +142,7 @@ def root_snapshot(root):
         fibers=[_fiber_snapshot(fiber) for fiber in vcp.fibers],
         muscles=[_muscle_snapshot(muscle) for muscle in vcp.muscles],
         blobs=[_blob_snapshot(root, blob) for blob in vcp.blobs],
+        soft_tissues=[_soft_tissue_snapshot(tissue) for tissue in vcp.soft_tissues],
         shortcuts=[_shortcut_snapshot(root, item) for item in root.af_shortcut_system.shortcuts],
     )
 

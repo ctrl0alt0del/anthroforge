@@ -49,6 +49,10 @@ def _blob_map(root):
     return {_as_id(b.id): b for b in root.af_vcp_system.blobs}
 
 
+def _soft_tissue_map(root):
+    return {_as_id(item.id): item for item in root.af_vcp_system.soft_tissues}
+
+
 def _source_id_for_scp(scp_id, scp_by_id):
     sid = _as_id(scp_id)
     if not sid:
@@ -126,6 +130,10 @@ def _rule_for_blob(blob, muscles_by_id, fibers_by_id, scp_by_id):
         return _rule_for_muscle(muscle, fibers_by_id, scp_by_id)
 
     return None
+
+
+def _rule_for_soft_tissue(tissue, scp_by_id):
+    return _rule_for_scp(_as_id(getattr(tissue, "host_scp_id", "")), scp_by_id)
 
 
 def _ensure_vcp_collection(scene, name="AF_VCP_VIS"):
@@ -232,6 +240,18 @@ def _find_mirror_blob_obj(vis_col, root_name, source_blob_id):
         ):
             return obj
     return None
+
+
+def _find_source_soft_obj(vis_col, root_name, tissue_id):
+    return next((obj for obj in vis_col.objects if obj.get("af_soft_tissue_proxy")
+                 and not obj.get("af_soft_tissue_mirror_proxy") and obj.get("af_root_name") == root_name
+                 and _as_id(obj.get("af_soft_tissue_id")) == _as_id(tissue_id)), None)
+
+
+def _find_mirror_soft_obj(vis_col, root_name, tissue_id):
+    return next((obj for obj in vis_col.objects if obj.get("af_soft_tissue_proxy")
+                 and obj.get("af_soft_tissue_mirror_proxy") and obj.get("af_root_name") == root_name
+                 and _as_id(obj.get("af_source_soft_tissue_id")) == _as_id(tissue_id)), None)
 
 
 def _sync_fiber_mirrors(root, vis_col, fibers_by_id, scp_by_id, target_fiber_ids=None):
@@ -370,33 +390,69 @@ def _sync_blob_mirrors(root, vis_col, blobs_by_id, muscles_by_id, fibers_by_id, 
         remove_obj(obj)
 
 
-def sync_vcp_mirrors(root=None, scene=None, target_fiber_ids=None, target_muscle_ids=None, target_blob_ids=None):
+def _sync_soft_tissue_mirrors(root, vis_col, tissues, scps, target_ids=None):
+    targets = None if target_ids is None else {_as_id(value) for value in set(target_ids)}
+    desired = set()
+    for tissue_id, tissue in tissues.items():
+        if targets is None or tissue_id in targets:
+            _sync_one_soft_mirror(root, vis_col, tissue_id, tissue, scps, desired)
+    _remove_stale_soft_mirrors(root, vis_col, desired, targets)
+
+
+def _sync_one_soft_mirror(root, vis_col, tissue_id, tissue, scps, desired):
+    source = _find_source_soft_obj(vis_col, root.name, tissue_id)
+    mirror = _find_mirror_soft_obj(vis_col, root.name, tissue_id)
+    rule = _rule_for_soft_tissue(tissue, scps)
+    if rule is None or source is None:
+        if mirror is not None:
+            remove_obj(mirror)
+        return
+    mirror = _ensure_vcp_mirror(vis_col, source, mirror, rule)
+    if mirror is not None:
+        _tag_soft_mirror(mirror, root.name, tissue_id)
+        desired.add(tissue_id)
+
+
+def _ensure_vcp_mirror(vis_col, source, mirror, rule):
+    mirror = _ensure_mirror_from_source(vis_col, source, mirror)
+    if mirror is not None:
+        _copy_mirror_transform(source, mirror, *rule)
+    return mirror
+
+
+def _tag_soft_mirror(obj, root_name, tissue_id):
+    obj["af_soft_tissue_proxy"] = True
+    obj["af_soft_tissue_mirror_proxy"] = True
+    obj["af_root_name"] = str(root_name)
+    obj["af_source_soft_tissue_id"] = str(tissue_id)
+    obj["af_soft_tissue_id"] = str(tissue_id)
+
+
+def _remove_stale_soft_mirrors(root, vis_col, desired, targets):
+    for obj in tuple(vis_col.objects):
+        if not obj.get("af_soft_tissue_mirror_proxy") or obj.get("af_root_name") != root.name:
+            continue
+        tissue_id = _as_id(obj.get("af_source_soft_tissue_id"))
+        if tissue_id not in desired and (targets is None or tissue_id in targets):
+            remove_obj(obj)
+
+
+def sync_vcp_mirrors(root=None, scene=None, target_fiber_ids=None, target_muscle_ids=None, target_blob_ids=None, target_soft_tissue_ids=None):
     root, scene = _resolve_inputs(root, scene)
     if root is None:
         return
+    targets = target_fiber_ids, target_muscle_ids, target_blob_ids, target_soft_tissue_ids
+    _sync_all_mirror_types(root, scene, targets)
 
+
+def _sync_all_mirror_types(root, scene, targets):
     vis_col = _ensure_vcp_collection(scene, name="AF_VCP_VIS")
-
     scp_by_id = _scp_map(root)
     fibers_by_id = _fiber_map(root)
     muscles_by_id = _muscle_map(root)
     blobs_by_id = _blob_map(root)
-
-    _sync_fiber_mirrors(root, vis_col, fibers_by_id, scp_by_id, target_fiber_ids=target_fiber_ids)
-    _sync_muscle_mirrors(
-        root,
-        vis_col,
-        muscles_by_id,
-        fibers_by_id,
-        scp_by_id,
-        target_muscle_ids=target_muscle_ids,
-    )
-    _sync_blob_mirrors(
-        root,
-        vis_col,
-        blobs_by_id,
-        muscles_by_id,
-        fibers_by_id,
-        scp_by_id,
-        target_blob_ids=target_blob_ids,
-    )
+    tissues_by_id = _soft_tissue_map(root)
+    _sync_fiber_mirrors(root, vis_col, fibers_by_id, scp_by_id, target_fiber_ids=targets[0])
+    _sync_muscle_mirrors(root, vis_col, muscles_by_id, fibers_by_id, scp_by_id, target_muscle_ids=targets[1])
+    _sync_blob_mirrors(root, vis_col, blobs_by_id, muscles_by_id, fibers_by_id, scp_by_id, target_blob_ids=targets[2])
+    _sync_soft_tissue_mirrors(root, vis_col, tissues_by_id, scp_by_id, targets[3])

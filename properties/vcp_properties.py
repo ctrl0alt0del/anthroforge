@@ -1,8 +1,9 @@
 import bpy
 
-from ..app.runtime_api import sync_context
+from ..app.runtime_api import schedule_context, sync_context
 from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
-from ..core.vcp.prop_update_guard import vcp_prop_updates_suppressed
+from ..core.vcp.prop_update_guard import suppress_vcp_prop_updates, vcp_prop_updates_suppressed
+from ..core.vcp.soft_tissue_model import construction_mode_for_domain
 
 
 def _sync_vcp_scene(_self, context):
@@ -21,6 +22,81 @@ def _on_blob_prop_update(self, context):
     if vcp_prop_updates_suppressed():
         return
     sync_context(context, dirty_hints=dirty_hints_for("BLOB", {self.id}))
+
+
+def _on_soft_tissue_prop_update(self, context):
+    _queue_soft_tissue_update(self, context, False)
+
+
+def _on_soft_binding_update(self, context):
+    if vcp_prop_updates_suppressed():
+        return
+    _normalize_soft_domain(self)
+    _queue_soft_tissue_update(self, context, True)
+
+
+def _on_soft_inflation_update(self, context):
+    if vcp_prop_updates_suppressed():
+        return
+    _normalize_soft_domain(self)
+    _queue_soft_tissue_update(self, context, False)
+
+
+def _normalize_soft_domain(tissue):
+    source = getattr(tissue, "base_object_ref", None)
+    domain = {"EMPTY": "POINT", "CURVE": "CURVE", "MESH": "SURFACE"}.get(getattr(source, "type", ""))
+    domain = domain or str(getattr(tissue, "base_domain", "SURFACE"))
+    expected = construction_mode_for_domain(domain).value
+    with suppress_vcp_prop_updates():
+        tissue.base_domain, tissue.inflation_mode = domain, expected
+        if domain == "POINT":
+            tissue.boundary_mode = "CLOSED"
+
+
+def _queue_soft_tissue_update(self, context, recapture):
+    if vcp_prop_updates_suppressed() or not str(getattr(self, "id", "") or ""):
+        return
+    _mark_soft_tissue_dirty(self)
+    hints = dirty_hints_for("SOFT_TISSUE", {self.id})
+    payload = {"soft_tissue_recapture_ids": [self.id]} if recapture else {}
+    schedule_context(context, dirty_hints=hints, event_type="SOFT_TISSUE_UPDATE", payload=payload)
+
+
+def _on_soft_attachment_update(self, context):
+    owner = _soft_attachment_owner(getattr(self, "id_data", None), self)
+    if owner is not None:
+        _on_soft_tissue_prop_update(owner, context)
+
+
+def _on_soft_attachment_binding_update(self, context):
+    owner = _soft_attachment_owner(getattr(self, "id_data", None), self)
+    if owner is not None:
+        _on_soft_binding_update(owner, context)
+
+
+def _on_soft_rest_update(self, context):
+    scene = None if context is None else getattr(context, "scene", None)
+    if scene is None:
+        return
+    for obj in scene.objects:
+        if obj.get("af_soft_tissue_rest_proxy") and obj.get("af_soft_tissue_id") == self.id:
+            obj.hide_viewport = not bool(self.show_rest)
+
+
+def _soft_attachment_owner(root, attachment):
+    vcp = None if root is None else getattr(root, "af_vcp_system", None)
+    for tissue in (() if vcp is None else vcp.soft_tissues):
+        if any(item.as_pointer() == attachment.as_pointer() for item in tissue.attachments):
+            return tissue
+    return None
+
+
+def _mark_soft_tissue_dirty(tissue):
+    try:
+        from ..core.vcp.runtime_state import set_soft_tissue_status
+        set_soft_tissue_status(tissue, "DIRTY")
+    except Exception:
+        return
 
 
 def _on_fiber_prop_update(self, context):
@@ -228,10 +304,94 @@ class AF_BlobVCP_Property(bpy.types.PropertyGroup):
     iterations: bpy.props.IntProperty(name="Iterations", default=20, min=1, max=200, update=_on_blob_prop_update)
 
 
+class AF_SoftTissueAttachment_Property(bpy.types.PropertyGroup):
+    mode: bpy.props.EnumProperty(
+        name="Mode", items=(("FIXED", "Fixed", ""), ("SOFT", "Soft", "")),
+        default="SOFT", update=_on_soft_attachment_update,
+    )
+    strength: bpy.props.FloatProperty(
+        name="Strength", default=0.5, min=0.0, max=1.0, update=_on_soft_attachment_update,
+    )
+    mask_attribute: bpy.props.StringProperty(
+        name="Mask", default="ALL", update=_on_soft_attachment_binding_update,
+    )
+    normal_offset: bpy.props.FloatProperty(
+        name="Normal Offset", default=0.0, update=_on_soft_attachment_update,
+    )
+    bindings_json: bpy.props.StringProperty(name="Bindings", default="[]", options={"HIDDEN"})
+
+
+class AF_SoftTissueVCP_Property(bpy.types.PropertyGroup):
+    id: bpy.props.StringProperty(name="ID")
+    name: bpy.props.StringProperty(name="Name", default="Soft Tissue", update=_on_soft_tissue_prop_update)
+    schema_version: bpy.props.IntProperty(name="Schema", default=1, min=1)
+    preset: bpy.props.EnumProperty(
+        name="Preset", items=(("CUSTOM", "Custom", ""), ("CLOSED_BULK", "Closed Bulk", ""),
+        ("RIM", "Rim", ""), ("LAYER", "Layer", ""), ("POUCH", "Pouch", "")),
+        default="CUSTOM",
+    )
+    base_domain: bpy.props.EnumProperty(
+        name="Domain", items=(("POINT", "Point", ""), ("CURVE", "Curve", ""),
+        ("SURFACE", "Surface", "")), default="SURFACE", update=_on_soft_binding_update,
+    )
+    base_object_ref: bpy.props.PointerProperty(
+        name="Base Object", type=bpy.types.Object, update=_on_soft_binding_update,
+    )
+    base_owned: bpy.props.BoolProperty(name="Owned Base", default=False)
+    base_resolution: bpy.props.IntProperty(
+        name="Resolution", default=24, min=3, max=512, update=_on_soft_binding_update,
+    )
+    base_closed: bpy.props.BoolProperty(name="Closed Base", default=False)
+    base_signature: bpy.props.StringProperty(name="Base Signature", default="", options={"HIDDEN"})
+    host_scp_id: bpy.props.StringProperty(name="Host SCP", default="", update=_on_soft_binding_update)
+    host_surface: bpy.props.EnumProperty(
+        name="Host Surface", items=(("SCP_GEOMETRY", "SCP Geometry", ""),),
+        default="SCP_GEOMETRY", update=_on_soft_binding_update,
+    )
+    host_topology_signature: bpy.props.StringProperty(name="Host Signature", default="", options={"HIDDEN"})
+    control_bindings_json: bpy.props.StringProperty(name="Control Bindings", default="[]", options={"HIDDEN"})
+    base_bindings_json: bpy.props.StringProperty(name="Base Bindings", default="[]", options={"HIDDEN"})
+    boundary_mode: bpy.props.EnumProperty(
+        name="Boundary", items=(("CLOSED", "Closed", ""), ("HOST_SEALED", "Host Sealed", "")),
+        default="HOST_SEALED", update=_on_soft_tissue_prop_update,
+    )
+    inflation_mode: bpy.props.EnumProperty(
+        name="Inflation", items=(("RADIAL", "Radial", ""),
+        ("NORMAL", "Normal", ""), ("PROFILE", "Profile", "")),
+        default="NORMAL", update=_on_soft_inflation_update,
+    )
+    inflation_amount: bpy.props.FloatProperty(name="Amount", default=0.2, min=0.0, update=_on_soft_tissue_prop_update)
+    minimum_amount: bpy.props.FloatProperty(name="Minimum", default=0.0, min=0.0, update=_on_soft_tissue_prop_update)
+    axis_scale: bpy.props.FloatVectorProperty(name="Axis Scale", size=3, default=(1.0, 1.0, 1.0), min=0.001, update=_on_soft_tissue_prop_update)
+    field_attribute: bpy.props.StringProperty(name="Inflation Field", default="AF_ST_INFLATION", update=_on_soft_tissue_prop_update)
+    field_power: bpy.props.FloatProperty(name="Field Power", default=1.0, min=0.01, update=_on_soft_tissue_prop_update)
+    profile_width: bpy.props.FloatProperty(name="Profile Width", default=0.08, min=0.001, update=_on_soft_tissue_prop_update)
+    profile_power: bpy.props.FloatProperty(name="Profile Power", default=0.65, min=0.01, update=_on_soft_tissue_prop_update)
+    profile_segments: bpy.props.IntProperty(name="Profile Segments", default=9, min=3, max=64, update=_on_soft_tissue_prop_update)
+    endpoint_taper: bpy.props.FloatProperty(name="Endpoint Taper", default=0.16, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)
+    shape_retention: bpy.props.FloatProperty(name="Shape Retention", description="Local edge-length retention; controls stretching, not the amount of sag", default=0.5, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)
+    volume_retention: bpy.props.FloatProperty(name="Volume Retention", description="Volume stiffness; high values resist Static PBD deformation", default=0.9, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)
+    relaxation_mode: bpy.props.EnumProperty(
+        name="Relaxation", items=(("NONE", "None", ""), ("GEOMETRIC", "Geometric", ""),
+        ("STATIC_PBD", "Static PBD", "")), default="NONE", update=_on_soft_tissue_prop_update,
+    )
+    sagginess: bpy.props.FloatProperty(name="Sagginess", description="Direct sag amount in Geometric mode; gravity strength in Static PBD", default=0.35, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)
+    gravity: bpy.props.FloatVectorProperty(name="Gravity", size=3, default=(0.0, 0.0, -1.0), update=_on_soft_tissue_prop_update)
+    sag_limit: bpy.props.FloatProperty(name="Sag Limit", default=0.0, min=0.0, update=_on_soft_tissue_prop_update)
+    iterations: bpy.props.IntProperty(name="Iterations", default=24, min=1, max=1000, update=_on_soft_tissue_prop_update)
+    constraint_passes: bpy.props.IntProperty(name="Constraint Passes", default=2, min=1, max=16, update=_on_soft_tissue_prop_update)
+    tolerance: bpy.props.FloatProperty(name="Tolerance", description="Solver convergence threshold; automatically capped relative to gravity", default=1.0e-5, min=1.0e-9, max=1.0e-2, update=_on_soft_tissue_prop_update)
+    attachments: bpy.props.CollectionProperty(type=AF_SoftTissueAttachment_Property)
+    active_attachment_index: bpy.props.IntProperty(name="Active Attachment", default=-1)
+    auto_recompute: bpy.props.BoolProperty(name="Auto Recompute", default=True, update=_on_soft_tissue_prop_update)
+    show_rest: bpy.props.BoolProperty(name="Show Rest Shape", default=False, update=_on_soft_rest_update)
+
+
 class AF_VCP_System_Property(bpy.types.PropertyGroup):
     muscles: bpy.props.CollectionProperty(type=AF_MuscleVCP_Property)
     fibers: bpy.props.CollectionProperty(type=AF_FiberVCP_Property)
     blobs: bpy.props.CollectionProperty(type=AF_BlobVCP_Property)
+    soft_tissues: bpy.props.CollectionProperty(type=AF_SoftTissueVCP_Property)
 
     active_vcp_id: bpy.props.StringProperty(name="Active VCP ID", default="")
     active_vcp_type: bpy.props.EnumProperty(
@@ -241,6 +401,7 @@ class AF_VCP_System_Property(bpy.types.PropertyGroup):
             ("MUSCLE", "Muscle", ""),
             ("FIBER", "Fiber", ""),
             ("BLOB", "Blob", ""),
+            ("SOFT_TISSUE", "Soft Tissue", ""),
         ),
         default="NONE",
     )

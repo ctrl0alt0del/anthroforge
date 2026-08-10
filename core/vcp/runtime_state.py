@@ -12,6 +12,11 @@ _BLOB_OK = "_af_rt_blob_last_solve_converged"
 _BLOB_DISP = "_af_rt_blob_last_solve_max_disp"
 _BLOB_ITERS = "_af_rt_blob_last_solve_iterations"
 _MUSCLE_CTRL = "_af_rt_muscle_inflation_ctrl_world"
+_SOFT_STATUS = "_af_rt_soft_tissue_status"
+_SOFT_MS = "_af_rt_soft_tissue_ms"
+_SOFT_ITERS = "_af_rt_soft_tissue_iterations"
+_SOFT_DISP = "_af_rt_soft_tissue_max_disp"
+_SOFT_ERROR = "_af_rt_soft_tissue_error"
 
 
 def fiber_not_converged(fiber):
@@ -149,6 +154,31 @@ def reset_muscle_runtime(muscle):
     set_muscle_inflation_ctrl_world(muscle, (0.0, 0.0, 0.0))
 
 
+def soft_tissue_status(tissue):
+    return str(_read(tissue, _SOFT_STATUS, "DIRTY") or "DIRTY")
+
+
+def set_soft_tissue_status(tissue, value):
+    _write(tissue, _SOFT_STATUS, str(value or "DIRTY"))
+
+
+def soft_tissue_diagnostic(tissue):
+    return (float(_read(tissue, _SOFT_MS, 0.0)), int(_read(tissue, _SOFT_ITERS, 0)),
+            float(_read(tissue, _SOFT_DISP, 0.0)), str(_read(tissue, _SOFT_ERROR, "") or ""))
+
+
+def set_soft_tissue_diagnostic(tissue, milliseconds=0.0, iterations=0, displacement=0.0, error=""):
+    _write(tissue, _SOFT_MS, float(milliseconds))
+    _write(tissue, _SOFT_ITERS, int(iterations))
+    _write(tissue, _SOFT_DISP, float(displacement))
+    _write(tissue, _SOFT_ERROR, str(error or ""))
+
+
+def reset_soft_tissue_runtime(tissue):
+    set_soft_tissue_status(tissue, "DIRTY")
+    set_soft_tissue_diagnostic(tissue)
+
+
 def reset_vcp_runtime_state(root):
     vcp = None if root is None else getattr(root, "af_vcp_system", None)
     if vcp is None:
@@ -159,6 +189,8 @@ def reset_vcp_runtime_state(root):
         reset_muscle_runtime(muscle)
     for blob in getattr(vcp, "blobs", ()):
         reset_blob_runtime(blob)
+    for tissue in getattr(vcp, "soft_tissues", ()):
+        reset_soft_tissue_runtime(tissue)
 
 
 def _vec3(value):

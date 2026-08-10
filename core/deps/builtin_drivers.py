@@ -8,6 +8,7 @@ from ..visualization.sync import register_sync
 from ..visualization.fiber_sync import register_fiber_sync
 from ..visualization.muscle_sync import register_muscle_sync
 from ..visualization.blob_sync import register_blob_sync
+from ..visualization.soft_tissue_sync import register_soft_tissue_sync
 from ..visualization.vcp_mirror_runtime import sync_vcp_mirrors
 
 
@@ -90,7 +91,7 @@ class RuntimeGraphDriver(DependencyDriver):
     name = "runtime_graph_driver"
 
     def entity_types(self):
-        return ("SCP", "FIBER", "MUSCLE", "BLOB", "CONTROL")
+        return ("SCP", "FIBER", "MUSCLE", "BLOB", "SOFT_TISSUE", "CONTROL")
 
     def build_graph(self, root, graph, entity_sets):
         built = build_runtime_graph(root, graph)
@@ -102,7 +103,7 @@ class RuntimeIntentDriver(DependencyDriver):
     name = "runtime_intent_driver"
 
     def entity_types(self):
-        return ("CONTROL", "SCP", "FIBER", "MUSCLE", "BLOB")
+        return ("CONTROL", "SCP", "FIBER", "MUSCLE", "BLOB", "SOFT_TISSUE")
 
     def apply_constraints(self, ctx):
         merged = {}
@@ -229,35 +230,55 @@ class BlobSyncDriver(DependencyDriver):
             register_blob_sync().sync_root_to_scene(root=root, scene=scene, target_blob_ids=ids)
 
 
+class SoftTissueSyncDriver(DependencyDriver):
+    name = "soft_tissue_sync_driver"
+
+    def entity_types(self):
+        return ("SOFT_TISSUE",)
+
+    def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
+        _ = bake
+        if not len(root.af_vcp_system.soft_tissues):
+            return
+        ids = set(impacted.get("SOFT_TISSUE", set()) or set())
+        payload = _meta_payload(dict(gate_meta or {}))
+        recapture = _payload_id_set(payload, "soft_tissue_recapture_ids")
+        force = bool(payload.get("soft_tissue_force"))
+        targets = None if is_full else ids
+        register_soft_tissue_sync().sync_root_to_scene(root, scene, targets, recapture, force or is_full)
+
+
 class VCPMirrorSyncDriver(DependencyDriver):
     name = "vcp_mirror_sync_driver"
 
     def entity_types(self):
-        return ("SCP", "FIBER", "MUSCLE", "BLOB")
+        return ("SCP", "FIBER", "MUSCLE", "BLOB", "SOFT_TISSUE")
 
     def _impacted_ids(self, impacted):
         return (
             set(impacted.get("FIBER", set()) or set()),
             set(impacted.get("MUSCLE", set()) or set()),
             set(impacted.get("BLOB", set()) or set()),
+            set(impacted.get("SOFT_TISSUE", set()) or set()),
         )
 
-    def _sync_targets(self, root, scene, fiber_ids, muscle_ids, blob_ids):
+    def _sync_targets(self, root, scene, fiber_ids, muscle_ids, blob_ids, tissue_ids):
         sync_vcp_mirrors(
             root=root,
             scene=scene,
             target_fiber_ids=fiber_ids,
             target_muscle_ids=muscle_ids,
             target_blob_ids=blob_ids,
+            target_soft_tissue_ids=tissue_ids,
         )
 
     def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
         _ = bake
         _ = gate_meta
-        fiber_ids, muscle_ids, blob_ids = self._impacted_ids(impacted)
+        fiber_ids, muscle_ids, blob_ids, tissue_ids = self._impacted_ids(impacted)
         if is_full:
             sync_vcp_mirrors(root=root, scene=scene)
             return
-        if not fiber_ids and not muscle_ids and not blob_ids:
+        if not fiber_ids and not muscle_ids and not blob_ids and not tissue_ids:
             return
-        self._sync_targets(root, scene, fiber_ids, muscle_ids, blob_ids)
+        self._sync_targets(root, scene, fiber_ids, muscle_ids, blob_ids, tissue_ids)

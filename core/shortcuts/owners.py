@@ -2,7 +2,8 @@ from ..selection import get_active_af_entity, get_active_scp
 from ..scp_runtime.common import scp_prop_map
 from ..scp_runtime.tree import ancestor_ids
 
-_OWNER_KEYS = {"SCP": "scps", "FIBER": "fibers", "MUSCLE": "muscles", "BLOB": "blobs"}
+_OWNER_KEYS = {"SCP": "scps", "FIBER": "fibers", "MUSCLE": "muscles", "BLOB": "blobs",
+               "SOFT_TISSUE": "soft_tissues"}
 
 
 def current_shortcut_owner(root, context):

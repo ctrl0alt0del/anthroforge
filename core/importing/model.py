@@ -110,6 +110,31 @@ class BlobSnapshot:
 
 
 @dataclass
+class SoftTissueAttachmentSnapshot:
+    props: dict
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(**dict(data or {}))
+
+
+@dataclass
+class SoftTissueSnapshot:
+    source_id: str
+    name: str
+    props: dict
+    host_scp_id: str = ""
+    base_object_name: str = ""
+    attachments: list[SoftTissueAttachmentSnapshot] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data):
+        values = dict(data or {})
+        rows = [SoftTissueAttachmentSnapshot.from_dict(x) for x in values.pop("attachments", ())]
+        return cls(attachments=rows, **values)
+
+
+@dataclass
 class ShortcutOverrideSnapshot:
     target_scp_id: str
     parent_anchor_mode: str = "KEEP"
@@ -146,6 +171,7 @@ class PackageSnapshot:
     fibers: list[FiberSnapshot] = field(default_factory=list)
     muscles: list[MuscleSnapshot] = field(default_factory=list)
     blobs: list[BlobSnapshot] = field(default_factory=list)
+    soft_tissues: list[SoftTissueSnapshot] = field(default_factory=list)
     shortcuts: list[ShortcutSnapshot] = field(default_factory=list)
     draft_skin_settings: dict = field(default_factory=_default_draft_skin_settings)
     topology_settings: dict = field(default_factory=default_topology_settings)
@@ -159,6 +185,7 @@ class PackageSnapshot:
         data["fibers"] = [FiberSnapshot.from_dict(x) for x in data.get("fibers", ())]
         data["muscles"] = [MuscleSnapshot.from_dict(x) for x in data.get("muscles", ())]
         data["blobs"] = [BlobSnapshot.from_dict(x) for x in data.get("blobs", ())]
+        data["soft_tissues"] = [SoftTissueSnapshot.from_dict(x) for x in data.get("soft_tissues", ())]
         data["shortcuts"] = [ShortcutSnapshot.from_dict(x) for x in data.get("shortcuts", ())]
         return cls(**data)
 
@@ -169,6 +196,7 @@ class ImportResult:
     fiber_count: int = 0
     muscle_count: int = 0
     blob_count: int = 0
+    soft_tissue_count: int = 0
     shortcut_count: int = 0
     warnings: list[str] = field(default_factory=list)
     kept_objects: list[object] = field(default_factory=list, repr=False)

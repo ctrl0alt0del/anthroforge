@@ -16,7 +16,7 @@ from ..utils import depsgraph_for_scene, get_af_root, view_layer_for_scene
 from ..vcp.runtime_state import reset_vcp_runtime_state
 
 
-ENTITY_TYPES = ("SCP", "FIBER", "MUSCLE", "BLOB")
+ENTITY_TYPES = ("SCP", "FIBER", "MUSCLE", "BLOB", "SOFT_TISSUE")
 _HISTORY_SUSPENDED = False
 
 
@@ -49,7 +49,10 @@ def _entity_from_control(obj):
 
 
 def _entity_from_proxy(obj):
-    checks = (("af_fiber_proxy", "af_fiber_id", "FIBER"), ("af_muscle_proxy", "af_muscle_id", "MUSCLE"), ("af_blob_proxy", "af_blob_id", "BLOB"))
+    checks = (("af_fiber_proxy", "af_fiber_id", "FIBER"), ("af_muscle_proxy", "af_muscle_id", "MUSCLE"),
+              ("af_blob_proxy", "af_blob_id", "BLOB"), ("af_soft_tissue_proxy", "af_soft_tissue_id", "SOFT_TISSUE"),
+              ("af_soft_tissue_rest_proxy", "af_soft_tissue_id", "SOFT_TISSUE"),
+              ("af_soft_tissue_base", "af_soft_tissue_id", "SOFT_TISSUE"))
     for flag, id_key, kind in checks:
         if obj.get(flag) and obj.get(id_key):
             return kind, str(obj.get(id_key))

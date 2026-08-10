@@ -7,6 +7,7 @@ from .builtin_drivers import (
     SCPAttachmentCaptureDriver,
     SCPMirrorRoleDriver,
     SCPSyncDriver,
+    SoftTissueSyncDriver,
     VCPMirrorSyncDriver,
 )
 from .drivers import register_dependency_driver
@@ -15,7 +16,7 @@ from .drivers import register_dependency_driver
 def _builtin_drivers():
     return (
         RuntimeGraphDriver(), RuntimeIntentDriver(), SCPMirrorRoleDriver(), SCPAttachmentCaptureDriver(), SCPSyncDriver(),
-        FiberSyncDriver(), MuscleSyncDriver(), BlobSyncDriver(), VCPMirrorSyncDriver(),
+        FiberSyncDriver(), MuscleSyncDriver(), BlobSyncDriver(), SoftTissueSyncDriver(), VCPMirrorSyncDriver(),
     )
 
 

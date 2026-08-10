@@ -101,15 +101,38 @@ def _add_blob_entities(root, graph, entity_sets):
             _add_dependency_edge(graph, ("MUSCLE", b.attach_target_id), ("BLOB", bid))
 
 
+def _add_soft_tissue_entities(root, graph, entity_sets):
+    if not hasattr(root, "af_vcp_system"):
+        return
+    for tissue in getattr(root.af_vcp_system, "soft_tissues", ()):
+        tid = str(tissue.id)
+        entity_sets["SOFT_TISSUE"].add(tid)
+        source = graph.add_port(PortRef("SOFT_TISSUE", tid, "input", PHASE_INPUT, MUT_INPUT))
+        evaluated = graph.add_port(PortRef("SOFT_TISSUE", tid, "local_eval", PHASE_LOCAL_EVAL, MUT_DERIVED))
+        graph.add_edge(Edge(source, evaluated, EDGE_EVAL))
+        _add_soft_tissue_host(graph, tissue, evaluated)
+
+
+def _add_soft_tissue_host(graph, tissue, evaluated):
+    sid = str(tissue.host_scp_id or "")
+    if not sid:
+        return
+    probe = graph.add_port(PortRef("SCP", sid, "probe", PHASE_PROBES, MUT_PROBE))
+    graph.add_edge(Edge(probe, evaluated, EDGE_ATTACHMENT))
+    _add_dependency_edge(graph, ("SCP", sid), ("SOFT_TISSUE", str(tissue.id)))
+
+
 def build_runtime_graph(root, graph):
     entity_sets = {
         "SCP": set(),
         "FIBER": set(),
         "MUSCLE": set(),
         "BLOB": set(),
+        "SOFT_TISSUE": set(),
     }
     _add_scp_entities(root, graph, entity_sets)
     _add_fiber_entities(root, graph, entity_sets)
     _add_muscle_entities(root, graph, entity_sets)
     _add_blob_entities(root, graph, entity_sets)
+    _add_soft_tissue_entities(root, graph, entity_sets)
     return entity_sets

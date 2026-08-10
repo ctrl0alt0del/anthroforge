@@ -15,6 +15,7 @@ class TreeSelection:
     fiber_ids: frozenset = field(default_factory=frozenset)
     muscle_ids: frozenset = field(default_factory=frozenset)
     blob_ids: frozenset = field(default_factory=frozenset)
+    soft_tissue_ids: frozenset = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True)
@@ -58,11 +59,17 @@ def selected_vcp_ids(context, root):
 
 def _tree_selection(context, root):
     fibers, muscles, blobs = selected_vcp_ids(context, root)
+    soft = set()
+    for obj in _selected_objects(context):
+        _collect_selected_id(obj, root, "af_soft_tissue_proxy", "af_soft_tissue_id", soft)
+        _collect_selected_id(obj, root, "af_soft_tissue_rest_proxy", "af_soft_tissue_id", soft)
+        _collect_selected_id(obj, root, "af_soft_tissue_base", "af_soft_tissue_id", soft)
     return TreeSelection(
         scp_ids=frozenset(selected_scp_ids(context, root)),
         fiber_ids=frozenset(fibers),
         muscle_ids=frozenset(muscles),
         blob_ids=frozenset(blobs),
+        soft_tissue_ids=frozenset(soft),
     )
 
 

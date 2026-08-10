@@ -235,6 +235,7 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
             ("MUSCLE", "Muscle", ""),
             ("FIBER", "Fiber", ""),
             ("BLOB", "Blob", ""),
+            ("SOFT_TISSUE", "Soft Tissue", ""),
         )
     )
     extend: bpy.props.BoolProperty(default=False, options={"HIDDEN", "SKIP_SAVE"})
@@ -250,6 +251,8 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
             return obj.get("af_muscle_proxy") and obj.get("af_root_name") == root_name and obj.get("af_muscle_id") == self.node_id
         if self.node_type == "BLOB":
             return obj.get("af_blob_proxy") and obj.get("af_root_name") == root_name and obj.get("af_blob_id") == self.node_id
+        if self.node_type == "SOFT_TISSUE":
+            return obj.get("af_soft_tissue_proxy") and obj.get("af_root_name") == root_name and obj.get("af_soft_tissue_id") == self.node_id
         return False
 
     def _find_target_obj(self, context, root_name):
@@ -290,7 +293,8 @@ class AF_OT_DeleteVCPInTree(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     node_id: bpy.props.StringProperty()
-    node_type: bpy.props.EnumProperty(items=(("MUSCLE", "Muscle", ""), ("FIBER", "Fiber", "")))
+    node_type: bpy.props.EnumProperty(items=(("MUSCLE", "Muscle", ""), ("FIBER", "Fiber", ""),
+                                            ("SOFT_TISSUE", "Soft Tissue", "")))
 
     def execute(self, context):
         result = delete_vcp_in_tree(context, self.node_type, self.node_id)

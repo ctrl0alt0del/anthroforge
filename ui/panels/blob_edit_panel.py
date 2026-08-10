@@ -78,6 +78,7 @@ class AF_PT_BlobEditPanel(bpy.types.Panel):
         if blob is None:
             layout.label(text="Blob not found")
             return
+        layout.operator("af.convert_blob_to_soft_tissue", icon="FILE_REFRESH")
 
         self._draw_identity(layout, blob)
         self._draw_geometry(layout, blob)

@@ -7,12 +7,13 @@ from ..core.importing import import_package_from_blend, import_scp_diff_from_ble
 
 def _summary(result):
     parts = [f"{result.scp_count} SCP", f"{result.fiber_count} Fiber", f"{result.muscle_count} Muscle"]
-    parts += [f"{result.blob_count} Blob", f"{result.shortcut_count} Shortcut"]
+    parts += [f"{result.blob_count} Blob", f"{result.soft_tissue_count} Soft Tissue", f"{result.shortcut_count} Shortcut"]
     return "Imported " + ", ".join(parts) + "."
 
 
 def _vcp_summary(result):
-    parts = [f"{result.fiber_count} Fiber", f"{result.muscle_count} Muscle", f"{result.blob_count} Blob"]
+    parts = [f"{result.fiber_count} Fiber", f"{result.muscle_count} Muscle", f"{result.blob_count} Blob",
+             f"{result.soft_tissue_count} Soft Tissue"]
     return "Imported " + ", ".join(parts) + "."
 
 

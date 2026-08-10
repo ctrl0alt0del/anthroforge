@@ -26,6 +26,13 @@ class SymmetryPlane:
     normal: np.ndarray
 
 
+SPARSE_COUNT_DIFFERENCE = 12
+SPARSE_COUNT_RATIO = 1.5
+SPARSE_P95_LIMIT = 4.0
+SPARSE_MAX_LIMIT = 12.0
+GUIDE_CUT_SCALE = 1.08
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
@@ -52,7 +59,7 @@ def symmetry_plane(args):
 def remesh_arrays(work, anchors, vendor, count, plane):
     bisect_left_half(work, plane)
     vertices, faces, _normals = guide_test.mesh_arrays(work)
-    faces = cut_guide_holes(vertices, faces, anchors)
+    faces = cut_guide_holes(vertices, faces, anchors, plane)
     with tempfile.TemporaryDirectory(prefix="af_instant_") as folder:
         input_path, output_path = write_worker_input(folder, vertices, faces)
         run_worker(input_path, output_path, vendor, count)
@@ -219,9 +226,9 @@ def local_points(points, center, first, second):
     return np.column_stack((relative @ first, relative @ second))
 
 
-def guide_face_mask(vertices, faces, ring):
+def guide_face_mask(vertices, faces, ring, scale=1.0):
     center, first, second, normal = ring_frame(ring)
-    polygon = local_points(ring, center, first, second)
+    polygon = local_points(ring, center, first, second) * scale
     centers = vertices[faces].mean(axis=1)
     local = local_points(centers, center, first, second)
     radius = np.linalg.norm(ring - center, axis=1).max()
@@ -231,13 +238,19 @@ def guide_face_mask(vertices, faces, ring):
     return nearby & depth & inside
 
 
-def cut_guide_holes(vertices, faces, anchors):
+def cut_guide_holes(vertices, faces, anchors, plane):
     if not anchors:
         return faces
-    masks = [guide_face_mask(vertices, faces, global_test.outer_ring(anchor))
-             for anchor in anchors]
+    diagonal = max(float(np.linalg.norm(np.ptp(vertices, axis=0))), 1.0e-9)
+    rings = tuple(global_test.outer_ring(anchor) for anchor in anchors)
+    scales = tuple(guide_cut_scale(ring, plane, diagonal) for ring in rings)
+    masks = [guide_face_mask(vertices, faces, ring, scale) for ring, scale in zip(rings, scales)]
     removed = np.logical_or.reduce(masks)
     return faces[~removed]
+
+
+def guide_cut_scale(ring, plane, diagonal):
+    return 1.0 if loop_is_centered(ring, plane, diagonal) else GUIDE_CUT_SCALE
 
 
 def write_worker_input(folder, vertices, faces):
@@ -326,7 +339,8 @@ def centered_transition(name, first, second, plane):
     parts = tuple(centered_transition_strip(a, b, plane) for a, b in zip(loops, loops[1:]))
     diagonal = max(float(np.linalg.norm(np.ptp(np.vstack((first, second)), axis=0))), 1.0e-9)
     merged = cube_test.welded_hybrid(parts, 1.0e-7 * diagonal)
-    return cube_test.Transition(name, merged.vertices, merged.faces)
+    details = transition_details("CENTERED", name, first, second, merged.vertices, merged.faces)
+    return cube_test.Transition(name, merged.vertices, merged.faces, details)
 
 
 def centered_transition_loops(first, second, plane):
@@ -395,15 +409,91 @@ def equal_transition_faces(count):
 def side_transition(name, boundary, ring):
     first = cube_test.canonical_loop(boundary)
     second = cube_test.align_loop(first, ring)
-    if abs(len(first) - len(second)) < 4:
-        return cube_test.transition_mesh(name, first, second)
+    reason = sparse_rejection(first, second)
+    if reason == "parity mismatch":
+        raise RuntimeError(f"Topology guide '{name}' has incompatible boundary parity.")
+    if reason:
+        return staged_side_transition(name, first, second, reason)
+    result = best_sparse_transition(name, first, second)
+    if sparse_quality_ok(result.diagnostics):
+        return result
+    return staged_side_transition(name, first, second, "sparse quality limits exceeded")
+
+
+def sparse_rejection(first, second):
+    smaller, larger = sorted((len(first), len(second)))
+    if smaller < 4:
+        return "fewer than four boundary vertices"
+    if (larger - smaller) % 2:
+        return "parity mismatch"
+    if larger - smaller > SPARSE_COUNT_DIFFERENCE:
+        return "boundary count difference exceeds 12"
+    return "boundary count ratio exceeds 1.5" if larger / smaller > SPARSE_COUNT_RATIO else ""
+
+
+def seam_shifts(count):
+    radius = min(3, max(1, count // 12))
+    values = [0]
+    for shift in range(1, radius + 1):
+        values.extend((-shift, shift))
+    return tuple(values)
+
+
+def sparse_candidate(name, first, second, shift, total):
+    ring = np.roll(second, shift, axis=0)
+    vertices = np.vstack((first, ring))
+    faces = cube_test.regular_transition_faces(first, ring)
+    validate_sparse_arrays(name, vertices, faces)
+    cube_test.validate_transition_boundary(faces, len(first), len(ring))
+    details = transition_details("SPARSE", name, first, ring, vertices, faces)
+    details.update(candidate_count=total, selected_seam_shift=shift, fallback_reason="")
+    return cube_test.Transition(name, vertices, faces, details)
+
+
+def validate_sparse_arrays(name, vertices, faces):
+    valid_faces = faces.ndim == 2 and faces.shape[1] == 4 and len(faces) > 0
+    if not np.isfinite(vertices).all() or not valid_faces:
+        raise RuntimeError(f"Topology guide '{name}' produced an invalid sparse transition.")
+
+
+def best_sparse_transition(name, first, second):
+    shifts = seam_shifts(min(len(first), len(second)))
+    values = tuple(sparse_candidate(name, first, second, shift, len(shifts)) for shift in shifts)
+    return min(values, key=sparse_score)
+
+
+def sparse_score(item):
+    values = item.diagnostics
+    shift = int(values["selected_seam_shift"])
+    return (values["local_intersections"], values["aspect_p95"],
+            values["aspect_max"], abs(shift), shift)
+
+
+def sparse_quality_ok(values):
+    return bool(values["local_intersections"] == 0
+                and values["aspect_p95"] <= SPARSE_P95_LIMIT
+                and values["aspect_max"] <= SPARSE_MAX_LIMIT)
+
+
+def transition_details(mode, name, first, second, vertices, faces):
+    aspects = quad_aspects(vertices, faces)
+    return {"guide_name": name, "mode": mode, "boundary_count": len(first),
+            "annulus_count": len(second), "candidate_count": 1,
+            "selected_seam_shift": 0, "local_intersections": self_intersection_count(vertices, faces),
+            "aspect_p95": float(np.quantile(aspects, 0.95)),
+            "aspect_max": float(aspects.max()), "fallback_reason": ""}
+
+
+def staged_side_transition(name, first, second, reason):
     middle = intermediate_ring(first, second)
     outer = cube_test.transition_mesh(name, first, middle)
     inner = cube_test.transition_mesh(name, middle, second)
     diagonal = float(np.linalg.norm(first.max(axis=0) - first.min(axis=0)))
     merged = cube_test.welded_hybrid(
         ((outer.vertices, outer.faces), (inner.vertices, inner.faces)), 1.0e-7 * diagonal)
-    return cube_test.Transition(name, merged.vertices, merged.faces)
+    details = transition_details("STAGED", name, first, second, merged.vertices, merged.faces)
+    details["fallback_reason"] = reason
+    return cube_test.Transition(name, merged.vertices, merged.faces, details)
 
 
 def intermediate_ring(first, second):
@@ -455,7 +545,8 @@ def mirrored_transition(source, target, plane):
     distances, indices = cKDTree(target.vertices).query(points, workers=-1)
     if float(distances.max()) > 1.0e-4:
         raise RuntimeError("Transition pair is not symmetric across the requested plane.")
-    return cube_test.Transition(target.name, target.vertices, indices[source.faces][:, ::-1])
+    details = dict(source.diagnostics); details["guide_name"] = target.name
+    return cube_test.Transition(target.name, target.vertices, indices[source.faces][:, ::-1], details)
 
 
 def stitched_mesh(obj, anchors, collection, plane):

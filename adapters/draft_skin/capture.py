@@ -45,6 +45,8 @@ def _role(obj):
         return "MUSCLE"
     if obj.get("af_blob_proxy"):
         return "BLOB"
+    if obj.get("af_soft_tissue_proxy"):
+        return "SOFT_TISSUE"
     return "FIBER" if obj.get("af_fiber_proxy") else ""
 
 
@@ -123,13 +125,15 @@ def _entity_id(obj, role):
         "SCP": ("af_source_scp_id", "af_scp_id"),
         "MUSCLE": ("af_source_muscle_id", "af_muscle_id"),
         "BLOB": ("af_source_blob_id", "af_blob_id"),
+        "SOFT_TISSUE": ("af_source_soft_tissue_id", "af_soft_tissue_id"),
         "FIBER": ("af_source_fiber_id", "af_fiber_id"),
     }
     return next((str(obj.get(key)) for key in fields[role] if obj.get(key)), "")
 
 
 def _mirror_role(obj):
-    flags = ("af_scp_mirror", "af_muscle_mirror_proxy", "af_blob_mirror_proxy", "af_fiber_mirror_proxy")
+    flags = ("af_scp_mirror", "af_muscle_mirror_proxy", "af_blob_mirror_proxy", "af_fiber_mirror_proxy",
+             "af_soft_tissue_mirror_proxy")
     return "MIRROR" if any(obj.get(key) for key in flags) else "ORIGINAL"
 
 

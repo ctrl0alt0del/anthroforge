@@ -155,7 +155,9 @@ def _assemble(vertices, faces, anchors, plane):
     parts.extend((*cube.anchor_mesh(anchor), REGION_GUIDE, i)
                  for i, anchor in enumerate(anchors))
     diagonal = max(float(np.linalg.norm(np.ptp(vertices, axis=0))), 1e-9)
-    return _weld_labeled(parts, 1e-6 * diagonal)
+    mesh = _weld_labeled(parts, 1e-6 * diagonal)
+    diagnostics = tuple(dict(item.diagnostics) for item in transitions)
+    return (*mesh, diagnostics)
 
 
 def _instant_plane(plane):
@@ -209,18 +211,23 @@ def _combined_labeled(parts):
 
 def _finish(capture, result, anchors, guide_map, warnings, target, density, update):
     update("Validation", 0.9, "Validating topology and guide preservation.")
-    vertices, faces, regions, indices = result
+    vertices, faces, regions, indices, transitions = result
     owners, lengths = sample_density(capture, density[0], density[1], vertices)
     metrics = _metrics(capture, vertices, faces, regions, anchors)
     report = validate_topology(vertices, faces, metrics)
     budgets = budget_statistics(capture, owners, faces, density[2])
-    all_warnings = _result_warnings(capture, warnings, density, metrics, budgets)
+    all_warnings = _result_warnings(capture, warnings, density, metrics, budgets, transitions)
     stats = _result_stats(capture, metrics, target, guide_map, all_warnings,
-                          budgets, density[4])
+                          budgets, density[4], transitions)
     stats.update(_warm_statistics(capture, vertices, faces, guide_map))
     if not report.valid:
         raise RuntimeError(report.message)
     bindings = _result_bindings(capture, vertices, faces, regions, indices, anchors)
+    return _topology_result(result, stats, report, owners, lengths, bindings)
+
+
+def _topology_result(result, stats, report, owners, lengths, bindings):
+    vertices, faces, regions, indices, _transitions = result
     return TopologyResult(vertices, faces, regions, indices, stats, report,
                           owners, lengths, *bindings)
 
@@ -232,15 +239,23 @@ def _result_bindings(capture, vertices, faces, regions, indices, anchors):
     return skin, guides
 
 
-def _result_warnings(capture, warnings, density, metrics, budgets):
+def _result_warnings(capture, warnings, density, metrics, budgets, transitions=()):
     values = list(capture.warnings) + list(warnings) + list(density[3])
     values.extend(budget_warnings(budgets))
+    values.extend(transition_warnings(transitions))
     if metrics["self_intersections"]:
         values.append(f"Detected {metrics['self_intersections']} local self-intersections.")
     return values
 
 
-def _result_stats(capture, metrics, target, guide_map, warnings, budgets, refinement):
+def transition_warnings(transitions):
+    staged = [item for item in transitions if item.get("mode") == "STAGED"]
+    return [f"Topology guide '{item['guide_name']}' used staged transition: "
+            f"{item['fallback_reason']}." for item in staged]
+
+
+def _result_stats(capture, metrics, target, guide_map, warnings, budgets, refinement,
+                  transitions=()):
     return dict(metrics, input_hash=capture.input_hash, internal_target=target,
                 requested_quads=capture.settings.target_quad_count,
                 guide_map=guide_map, warnings=warnings,
@@ -248,7 +263,8 @@ def _result_stats(capture, metrics, target, guide_map, warnings, budgets, refine
                 density_backend=_density_backend(capture), topology_budgets=budgets,
                 owner_map={item.scp_index: item.scp_id for item in capture.density_rules},
                 refinement_strategy=capture.settings.refinement_strategy,
-                refinement_statistics=refinement)
+                refinement_statistics=refinement,
+                transition_statistics=list(transitions))
 
 
 def _warm_statistics(capture, vertices, faces, guide_map):

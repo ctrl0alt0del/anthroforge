@@ -16,6 +16,12 @@ def sync_scene(root=None, scene=None, dirty_hints=None, bake=False, source="manu
     emit_sync(_sync_fn(), ctx, req)
 
 
+def schedule_context(context=None, dirty_hints=None, source="property", event_type="UPDATE", payload=None):
+    ctx = context_from_blender(context)
+    req = runtime_request(dirty_hints=dirty_hints, source=source, event_type=event_type, payload=payload)
+    emit_sync(_schedule_fn(), ctx, req)
+
+
 def dispatch_intent_context(context=None, *, intent_type="", entity_type="", entity_id="", payload=None, dirty_hints=None, source="manual", event_type="UPDATE"):
     ctx = context_from_blender(context)
     dispatch_app_runtime_intent(ctx, _enqueue_fn(), _sync_fn(), _dirty_hints_for(), _empty_dirty_hints(), intent_type=intent_type, entity_type=entity_type, entity_id=entity_id, payload=payload, dirty_hints=dirty_hints, source=source, event_type=event_type)
@@ -27,6 +33,14 @@ def _sync_fn():
     except ImportError:
         from core.visualization.sync_runner import sync_from_dirty_hints
     return sync_from_dirty_hints
+
+
+def _schedule_fn():
+    try:
+        from ..core.visualization.sync_runner import schedule_sync_from_dirty_hints
+    except ImportError:
+        from core.visualization.sync_runner import schedule_sync_from_dirty_hints
+    return schedule_sync_from_dirty_hints
 
 
 def _enqueue_fn():
