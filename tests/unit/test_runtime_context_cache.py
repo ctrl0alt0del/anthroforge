@@ -46,11 +46,14 @@ class RecorderDriver:
         self.calls += 1
         entity_sets["SCP"].add("S1")
         graph.add_entity_edge(("SCP", "S1"), ("SCP", "S2"))
+        for tissue in getattr(_root.af_vcp_system, "soft_tissues", ()):
+            entity_sets.setdefault("SOFT_TISSUE", set()).add(tissue.id)
+            graph.add_entity_edge(("SCP", tissue.host_scp_id), ("SOFT_TISSUE", tissue.id))
 
 
 def _root():
     scps = [SimpleNamespace(id="S1", parent_id=""), SimpleNamespace(id="S2", parent_id="S1")]
-    vcp = SimpleNamespace(fibers=[], muscles=[], blobs=[])
+    vcp = SimpleNamespace(fibers=[], muscles=[], blobs=[], soft_tissues=[])
     return SimpleNamespace(af_scp_system=SimpleNamespace(scps=scps), af_vcp_system=vcp)
 
 
@@ -75,3 +78,15 @@ class RuntimeContextCacheTests(unittest.TestCase):
             root.af_scp_system.scps.append(SimpleNamespace(id="S3", parent_id="S2"))
             runtime_context_build.build_runtime_context(root, None, {"SCP": {"S1"}})
         self.assertEqual(driver.calls, 2)
+
+    def test_cache_invalidation_adds_new_soft_tissue_dependency(self):
+        driver, root = RecorderDriver(), _root()
+        runtime_context_build.clear_runtime_context_cache()
+        allow = SimpleNamespace(allow=True, filtered_ids=None)
+        with patch.object(runtime_context_build, "get_dependency_drivers", return_value=[driver]), patch.object(runtime_context_build, "get_registered_entity_types", return_value=("SCP", "SOFT_TISSUE")), patch.object(runtime_context_build, "evaluate_gates", return_value=allow):
+            runtime_context_build.build_runtime_context(root, None, {"SCP": {"S1"}})
+            root.af_vcp_system.soft_tissues.append(SimpleNamespace(id="T1", host_scp_id="S1"))
+            build = runtime_context_build.build_runtime_context(root, None, {"SCP": {"S1"}})
+        impacted = build.graph.downstream_entities({("SCP", "S1")})
+        self.assertEqual(driver.calls, 2)
+        self.assertIn(("SOFT_TISSUE", "T1"), impacted)

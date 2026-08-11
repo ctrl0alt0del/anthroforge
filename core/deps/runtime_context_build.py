@@ -123,8 +123,14 @@ def _blob_stamp(root):
     return tuple((str(b.id or ""), str(getattr(b, "attach_target_type", "") or ""), str(getattr(b, "attach_target_id", "") or "")) for b in items)
 
 
+def _soft_tissue_stamp(root):
+    items = getattr(getattr(root, "af_vcp_system", None), "soft_tissues", ())
+    return tuple((str(t.id or ""), str(getattr(t, "host_scp_id", "") or "")) for t in items)
+
+
 def _graph_stamp(root):
-    return (_driver_stamp(), _scp_stamp(root), _fiber_stamp(root), _muscle_stamp(root), _blob_stamp(root))
+    return (_driver_stamp(), _scp_stamp(root), _fiber_stamp(root), _muscle_stamp(root),
+            _blob_stamp(root), _soft_tissue_stamp(root))
 
 
 def clear_runtime_context_cache(root=None):

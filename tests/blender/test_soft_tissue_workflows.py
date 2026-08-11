@@ -50,8 +50,8 @@ class SoftTissueWorkflowTests(unittest.TestCase):
 
     def test_scp_transform_event_updates_surface_tissue(self):
         host, _scp, base, tissue = _create_surface_tissue()
-        from core.visualization import sync_runner
-        from core.visualization.sync import register_sync
+        from anthroforge.core.visualization import sync_runner
+        from anthroforge.core.visualization.sync import register_sync
         register_sync()
         sync_runner.clear_pending_runtime()
         before = (_centroid_x(base), _centroid_x(_proxy(tissue.id)))
