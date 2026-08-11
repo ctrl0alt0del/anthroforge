@@ -39,18 +39,27 @@ add-on are owned controls.
 - A boundary-only Surface base, including a single Plane, is deterministically
   refined in the evaluated sample using Base Resolution. The artist's source
   mesh remains unchanged while the generated tissue gains free interior vertices.
-- Relaxation modes are `NONE`, `GEOMETRIC`, and `STATIC_PBD`. Static PBD applies
-  gravity during a one-off iterative solve and projects edge, attachment,
-  sag-limit, and (only for watertight output) global-volume constraints.
+- Relaxation modes are `NONE`, `GEOMETRIC`, and `STATIC_PBD`. Surface Static PBD
+  treats the host-sealed shell as a flexible envelope containing retained volume.
+  Inflation supplies the target volume but is not preserved as the final profile.
+- Volume growth and gravity are solved together. Stretch is resisted, compression
+  can redistribute material toward gravity, surface tension rounds the envelope,
+  and the backing and fixed rim remain exact. A gravity-support inequality prevents
+  tangential pouches from expanding above their unsagged surface while allowing
+  normal inflation on upward-facing bases.
+- Static load scales with tissue thickness relative to the unchanged base, so
+  larger Amount values naturally sag more instead of receiving the same tip offset.
 - Pouch calibration preserves the accepted mapping: sagginess `0.58` maps to a
   gravity step of `0.0015`.
 
-Shape retention preserves local edge lengths, so it controls stretching and the
-distribution of sag; it is not a second sag-amplitude control. Volume retention
-drives only the watertight volume constraint. The convergence threshold is capped
-relative to the gravity step so an oversized tolerance cannot cancel relaxation.
-Preset numbers are artistic defaults rather than biological constants. Layer's
-Geometric mode maps sagginess directly to a visible rest-scale displacement.
+Shape retention controls tensile edge memory and envelope surface tension. It
+changes how load is distributed but remains distinct from Sagginess. Volume
+retention drives the watertight volume constraint. Pouch fixes `BOUNDARY` and
+`BACKING`; additional soft suspension masks are authored explicitly. The
+convergence threshold is capped relative to the gravity step so an oversized
+tolerance cannot cancel relaxation. Preset numbers are artistic defaults rather
+than biological constants. Layer's Geometric mode maps sagginess directly to a
+visible rest-scale displacement.
 
 ## SCP attachment
 

@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
 
 from .soft_tissue_model import SolverMode, Vec3
-from .soft_tissue_static_pouch import StaticPouchSettings, StaticTether, solve_static_pouch
+from .soft_tissue_static_envelope import StaticEnvelopeSettings, solve_static_envelope
+from .soft_tissue_static_pouch import StaticPouchSettings, StaticTether
 from .soft_tissue_surface_inflation import SurfaceLayerMesh, SurfaceLayerProfile, inflate_surface_layer
 
 
@@ -48,8 +49,17 @@ def _relax_surface(rest, normals, weights, spec):
     if spec.mode == SolverMode.GEOMETRIC:
         return _geometric_vertices(rest, normals, weights, spec.geometric)
     if spec.mode == SolverMode.STATIC_PBD:
-        return solve_static_pouch(rest.vertices, rest.faces, spec.fixed_indices, spec.static, spec.tethers)
+        settings = _envelope_settings(spec.static)
+        return solve_static_envelope(rest.vertices, rest.faces, spec.fixed_indices,
+                                     rest.base_vertex_count, settings, spec.tethers).vertices
     raise NotImplementedError(f"surface relaxation mode {spec.mode.value} is not implemented")
+
+
+def _envelope_settings(settings):
+    return StaticEnvelopeSettings(
+        int(settings.iterations), int(settings.constraint_passes), float(settings.gravity_step),
+        float(settings.edge_stiffness), float(settings.volume_stiffness), tuple(settings.gravity),
+    )
 
 
 def _geometric_vertices(rest, normals, weights, spec):

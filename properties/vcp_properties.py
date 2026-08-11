@@ -369,8 +369,8 @@ class AF_SoftTissueVCP_Property(bpy.types.PropertyGroup):
     profile_power: bpy.props.FloatProperty(name="Profile Power", default=0.65, min=0.01, update=_on_soft_tissue_prop_update)
     profile_segments: bpy.props.IntProperty(name="Profile Segments", default=9, min=3, max=64, update=_on_soft_tissue_prop_update)
     endpoint_taper: bpy.props.FloatProperty(name="Endpoint Taper", default=0.16, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)
-    shape_retention: bpy.props.FloatProperty(name="Shape Retention", description="Local edge-length retention; controls stretching, not the amount of sag", default=0.5, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)
-    volume_retention: bpy.props.FloatProperty(name="Volume Retention", description="Volume stiffness; high values resist Static PBD deformation", default=0.9, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)
+    shape_retention: bpy.props.FloatProperty(name="Shape Retention", description="Membrane tension and semisolid shape memory; higher values resist stretching and sag", default=0.5, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)
+    volume_retention: bpy.props.FloatProperty(name="Volume Retention", description="Incompressibility of the sealed tissue envelope", default=0.9, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)
     relaxation_mode: bpy.props.EnumProperty(
         name="Relaxation", items=(("NONE", "None", ""), ("GEOMETRIC", "Geometric", ""),
         ("STATIC_PBD", "Static PBD", "")), default="NONE", update=_on_soft_tissue_prop_update,

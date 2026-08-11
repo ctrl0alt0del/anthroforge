@@ -55,9 +55,8 @@ _PRESETS = {
         BaseDomain.SURFACE, BoundaryMode.HOST_SEALED, InflationMode.NORMAL,
         SolverMode.STATIC_PBD,
         (("inflation_amount", 0.62), ("minimum_amount", 0.012), ("field_power", 0.58),
-         ("sagginess", 0.58), ("sag_limit", 0.3), ("shape_retention", 0.48),
+         ("sagginess", 0.58), ("sag_limit", 0.0), ("shape_retention", 0.48),
          ("volume_retention", 0.88), ("iterations", 110), ("constraint_passes", 4)),
-        (("BOUNDARY", "FIXED", 1.0), ("BACKING", "SOFT", 0.7),
-         ("SUSPENSION", "SOFT", 0.4)),
+        (("BOUNDARY", "FIXED", 1.0), ("BACKING", "FIXED", 1.0)),
     ),
 }

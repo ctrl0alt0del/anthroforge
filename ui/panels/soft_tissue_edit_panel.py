@@ -72,12 +72,19 @@ def _inflation_fields(tissue):
 def _draw_relaxation(layout, tissue):
     box = layout.box()
     box.label(text="Relaxation")
-    for key in ("relaxation_mode", "sagginess", "gravity", "sag_limit"):
+    fields = ("relaxation_mode", "sagginess", "gravity")
+    fields += () if _is_surface_static(tissue) else ("sag_limit",)
+    for key in fields:
         box.prop(tissue, key)
-    if tissue.relaxation_mode == "STATIC_PBD":
+    if _is_surface_static(tissue):
         step = 0.0015 * float(tissue.sagginess) / 0.58
         box.label(text=f"Gravity step: {step:.6f}")
-        box.label(text="Shape retention controls stretch, not sag amount", icon="INFO")
+        box.label(text="Amount sets volume and size-dependent load", icon="INFO")
+        box.label(text="Shape retention sets envelope tension", icon="INFO")
+
+
+def _is_surface_static(tissue):
+    return tissue.base_domain == "SURFACE" and tissue.relaxation_mode == "STATIC_PBD"
 
 
 def _draw_material(layout, tissue):

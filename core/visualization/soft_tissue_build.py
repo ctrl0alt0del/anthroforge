@@ -12,6 +12,7 @@ from ..vcp.soft_tissue_curve_inflation import (
 from ..vcp.soft_tissue_static_pouch import (
     StaticPouchSettings, StaticTether, gravity_step_from_sagginess, solve_static_tissue,
 )
+from ..vcp.soft_tissue_static_envelope import StaticEnvelopeSettings, solve_static_envelope
 from ..vcp.soft_tissue_surface_inflation import (
     SurfaceLayerProfile, backing_vertex_indices as surface_backing,
     inflate_surface_layer, perimeter_vertex_indices,
@@ -139,6 +140,8 @@ def _geometric_surface(tissue, rest):
 
 
 def _static_shape(tissue, rest, anchors):
+    if str(tissue.base_domain) == "SURFACE":
+        return _static_envelope_shape(tissue, rest, anchors)
     settings = StaticPouchSettings(
         int(tissue.iterations), int(tissue.constraint_passes), gravity_step_from_sagginess(tissue.sagginess),
         float(tissue.shape_retention), float(tissue.volume_retention), tuple(tissue.gravity),
@@ -147,6 +150,18 @@ def _static_shape(tissue, rest, anchors):
     fixed = _fixed_indices(tissue, rest)
     tethers = tuple(_tether(item, rest) for item in anchors if item[0] == "SOFT")
     result = solve_static_tissue(rest.vertices, rest.faces, fixed, settings, tethers, tissue.tolerance)
+    return FinalShape(result.vertices, result.iterations, result.max_displacement)
+
+
+def _static_envelope_shape(tissue, rest, anchors):
+    settings = StaticEnvelopeSettings(
+        int(tissue.iterations), int(tissue.constraint_passes), gravity_step_from_sagginess(tissue.sagginess),
+        float(tissue.shape_retention), float(tissue.volume_retention), tuple(tissue.gravity),
+    )
+    fixed = _fixed_indices(tissue, rest)
+    tethers = tuple(_tether(item, rest) for item in anchors if item[0] == "SOFT")
+    count = len(rest.groups.get("BACKING", ()))
+    result = solve_static_envelope(rest.vertices, rest.faces, fixed, count, settings, tethers, tissue.tolerance)
     return FinalShape(result.vertices, result.iterations, result.max_displacement)
 
 

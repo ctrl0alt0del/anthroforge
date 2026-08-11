@@ -96,6 +96,24 @@ class SoftTissueWorkflowTests(unittest.TestCase):
         self.assertGreater(len(zero), len(base.data.vertices) * 2)
         self.assertGreater(max((Vector(a) - Vector(b)).length for a, b in zip(zero, sagged)), 1.0e-3)
 
+    def test_vertical_pouch_sags_from_first_free_band_without_rising(self):
+        host, base = _cube("Envelope Host"), _x_quad("Envelope Base")
+        scp_with_object(root(), "Envelope Host", host)
+        scene = bpy.context.scene
+        scene.af_new_soft_tissue_preset = "POUCH"
+        scene.af_new_soft_tissue_base_obj, scene.af_new_soft_tissue_host_obj = base, host
+        self.assertTrue(create_soft_tissue_vcp(bpy.context).ok)
+        tissue = root().af_vcp_system.soft_tissues[-1]
+        rest, final = _rest_proxy(tissue.id), _proxy(tissue.id)
+        fixed, count, edges = _surface_constraint_data(tissue)
+        near = _first_free_band(fixed, count, edges)
+        gravity = Vector(tissue.gravity).normalized()
+        drops = [(final.data.vertices[i].co - rest.data.vertices[i].co).dot(gravity)
+                 for i in range(count)]
+        self.assertGreater(len(near), 0)
+        self.assertGreaterEqual(min(drops), -1.0e-6)
+        self.assertGreater(sum(drops[i] for i in near) / len(near), 1.0e-4)
+
     def test_artist_painted_inflation_field_is_preserved(self):
         host = _quad("Paint Host", 0.0)
         scp_with_object(root(), "Paint Host", host)
@@ -416,6 +434,23 @@ def _solve_with_sagginess(tissue, value):
     tissue.sagginess = float(value)
     register_soft_tissue_sync().sync_root_to_scene(root(), bpy.context.scene, {tissue.id}, force=True)
     return tuple(tuple(vertex.co) for vertex in _proxy(tissue.id).data.vertices)
+
+
+def _surface_constraint_data(tissue):
+    from core.visualization.soft_tissue_build import _fixed_indices, build_rest_shape
+    from core.visualization.soft_tissue_source import sample_base
+    shape = build_rest_shape(tissue, sample_base(tissue.base_object_ref, tissue, scene=bpy.context.scene))
+    count = len(shape.groups.get("BACKING", ()))
+    edges = {tuple(sorted((face[index], face[(index + 1) % len(face)])))
+             for face in shape.faces for index in range(len(face))
+             if face[index] < count and face[(index + 1) % len(face)] < count}
+    return set(_fixed_indices(tissue, shape)), count, edges
+
+
+def _first_free_band(fixed, count, edges):
+    front_fixed = fixed & set(range(count))
+    return {second for first, second in edges if first in front_fixed and second not in fixed} | {
+            first for first, second in edges if second in front_fixed and first not in fixed}
 
 
 def _rest_proxy(tissue_id):

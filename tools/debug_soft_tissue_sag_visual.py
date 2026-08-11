@@ -14,6 +14,7 @@ from anthroforge.app.use_cases.soft_tissue_create import _ensure_surface_field
 from anthroforge.app.use_cases.soft_tissue_create import _assign_preset
 from anthroforge.core.vcp.soft_tissue_presets import preset_values
 from anthroforge.core.vcp.runtime_state import soft_tissue_diagnostic
+from anthroforge.core.vcp.soft_tissue_static_pouch import mesh_volume, triangulate_faces
 
 
 def main():
@@ -57,7 +58,7 @@ def _apply_cli_overrides(tissue):
 def _run_amount_comparison(root, tissue, proxy, output):
     _set_amount_state(root, tissue, 4.0)
     _configure_scene(root.af_scp_system.scps[0].geometry_object_ref, proxy)
-    metrics = [_render_amount(root, tissue, proxy, output, amount) for amount in (2.0, 4.0)]
+    metrics = [_render_amount(root, tissue, proxy, output, amount) for amount in (2.0, 4.0, 8.0)]
     _print_stats(tissue)
     print("AF_AMOUNT_COMPARISON", metrics)
 
@@ -70,6 +71,7 @@ def _set_tissue_value(root, tissue, attribute, value):
 
 def _render_amount(root, tissue, proxy, output, amount):
     _set_amount_state(root, tissue, amount)
+    _refresh_camera(root, proxy)
     rest = _tagged("af_soft_tissue_rest_proxy", tissue.id)
     _show_rest_overlay(rest)
     rest_points, final_points = _world_vertices(rest), _world_vertices(proxy)
@@ -78,7 +80,22 @@ def _render_amount(root, tissue, proxy, output, amount):
     bpy.ops.render.render(write_still=True)
     metrics = _tip_metrics(tissue, amount, tip, rest_points, final_points)
     metrics.update(_mask_metrics(tissue, rest_points, final_points))
+    metrics["relative_volume_error"] = _relative_volume_error(rest, proxy)
     return metrics
+
+
+def _relative_volume_error(rest, final):
+    faces = tuple(tuple(poly.vertices) for poly in rest.data.polygons)
+    triangles = triangulate_faces(faces)
+    before = abs(mesh_volume(_world_vertices(rest), triangles))
+    after = abs(mesh_volume(_world_vertices(final), triangles))
+    return abs(after - before) / max(before, 1.0e-12)
+
+
+def _refresh_camera(root, proxy):
+    host = root.af_scp_system.scps[0].geometry_object_ref
+    bpy.context.view_layer.update()
+    _camera_for((host, proxy))
 
 
 def _show_rest_overlay(rest):
