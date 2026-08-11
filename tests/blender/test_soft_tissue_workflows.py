@@ -142,6 +142,27 @@ class SoftTissueWorkflowTests(unittest.TestCase):
         self.assertLess(relative, 5.0e-5)
         self.assertGreater(drop, 0.0)
 
+    def test_attachment_feather_adds_weighted_soft_ring(self):
+        tissue = _create_grid_tissue("POUCH")
+        row = next(item for item in tissue.attachments if item.mask_attribute == "BOUNDARY")
+        before = len(json.loads(row.bindings_json)["bindings"])
+        row.feather = 0.4
+        _sync_tissue(tissue, True)
+        bindings = json.loads(row.bindings_json)["bindings"]
+        soft = [item for item in bindings if item["mode"] == "SOFT"]
+        self.assertGreater(len(bindings), before)
+        self.assertTrue(soft)
+        self.assertTrue(all(0.0 < item["influence"] < 1.0 for item in soft))
+
+    def test_surface_slack_changes_static_rest_distribution(self):
+        tissue = _create_grid_tissue("POUCH")
+        taut = tuple(tuple(vertex.co) for vertex in _proxy(tissue.id).data.vertices)
+        tissue.surface_slack = 0.6
+        _sync_tissue(tissue)
+        slack = tuple(tuple(vertex.co) for vertex in _proxy(tissue.id).data.vertices)
+        delta = max((Vector(a) - Vector(b)).length for a, b in zip(taut, slack))
+        self.assertGreater(delta, 1.0e-3)
+
     def test_topology_change_keeps_last_valid_proxy(self):
         host, _scp, _base, tissue = _create_surface_tissue()
         proxy = _proxy(tissue.id)
@@ -434,6 +455,13 @@ def _solve_with_sagginess(tissue, value):
     tissue.sagginess = float(value)
     register_soft_tissue_sync().sync_root_to_scene(root(), bpy.context.scene, {tissue.id}, force=True)
     return tuple(tuple(vertex.co) for vertex in _proxy(tissue.id).data.vertices)
+
+
+def _sync_tissue(tissue, recapture=False):
+    from core.visualization.soft_tissue_sync import register_soft_tissue_sync
+    values = {tissue.id}
+    register_soft_tissue_sync().sync_root_to_scene(root(), bpy.context.scene, values,
+                                                   values if recapture else set(), True)
 
 
 def _surface_constraint_data(tissue):

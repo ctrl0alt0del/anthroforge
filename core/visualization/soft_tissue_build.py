@@ -12,6 +12,7 @@ from ..vcp.soft_tissue_curve_inflation import (
 from ..vcp.soft_tissue_static_pouch import (
     StaticPouchSettings, StaticTether, gravity_step_from_sagginess, solve_static_tissue,
 )
+from ..vcp.soft_tissue_attachment_feather import attachment_feather_weights
 from ..vcp.soft_tissue_static_envelope import StaticEnvelopeSettings, solve_static_envelope
 from ..vcp.soft_tissue_surface_inflation import (
     SurfaceLayerProfile, backing_vertex_indices as surface_backing,
@@ -55,9 +56,9 @@ def relax_shape(tissue, rest, target_obj=None, anchors=()):
 def capture_attachment_payload(root, scene, tissue, rest, capture_fn):
     runtime = _attachment_runtime(scene)
     for attachment in tissue.attachments:
-        indices = rest.groups.get(str(attachment.mask_attribute).upper(), ())
-        values = [_captured_row(root, scene, tissue, rest, index, runtime, capture_fn) for index in indices]
-        attachment.bindings_json = json.dumps({"version": 1, "bindings": values}, separators=(",", ":"))
+        rows = _attachment_influences(rest, attachment)
+        values = [_captured_row(root, scene, tissue, rest, row, runtime, capture_fn) for row in rows]
+        attachment.bindings_json = json.dumps({"version": 2, "bindings": values}, separators=(",", ":"))
 
 
 def resolve_attachment_anchors(root, scene, tissue, rest, point_fn, normal_fn):
@@ -157,6 +158,7 @@ def _static_envelope_shape(tissue, rest, anchors):
     settings = StaticEnvelopeSettings(
         int(tissue.iterations), int(tissue.constraint_passes), gravity_step_from_sagginess(tissue.sagginess),
         float(tissue.shape_retention), float(tissue.volume_retention), tuple(tissue.gravity),
+        surface_slack=float(tissue.surface_slack),
     )
     fixed = _fixed_indices(tissue, rest)
     tethers = tuple(_tether(item, rest) for item in anchors if item[0] == "SOFT")
@@ -179,11 +181,27 @@ def _tether(item, rest):
     return StaticTether(index, tuple(anchor), distance, float(strength))
 
 
-def _captured_row(root, scene, tissue, rest, index, runtime, capture_fn):
+def _attachment_influences(rest, attachment):
+    mask = str(attachment.mask_attribute).upper()
+    core = tuple(rest.groups.get(mask, ()))
+    core_set = set(core)
+    scale = tuple(rest.groups.get("BACKING", ()))
+    weights = attachment_feather_weights(rest.vertices, rest.faces, core, attachment.feather, scale)
+    return tuple(_influence_row(attachment.mode, index, weight, core_set)
+                 for index, weight in enumerate(weights) if weight > 1.0e-8)
+
+
+def _influence_row(mode, index, weight, core):
+    fixed = str(mode) == "FIXED" and int(index) in core
+    return int(index), "FIXED" if fixed else "SOFT", 1.0 if fixed else float(weight)
+
+
+def _captured_row(root, scene, tissue, rest, row, runtime, capture_fn):
+    index, mode, influence = row
     raw = capture_fn(root, scene, tissue.host_scp_id, Vector(rest.vertices[index]), runtime)
     if raw is None:
         raise ValueError("Could not capture a tissue attachment.")
-    return {"index": int(index), "raw": raw}
+    return {"index": int(index), "mode": mode, "influence": float(influence), "raw": raw}
 
 
 def _resolved_attachment(root, scene, tissue, rest, attachment, runtime, point_fn, normal_fn):
@@ -201,7 +219,9 @@ def _resolved_row(root, scene, tissue, rest, attachment, runtime, row, point_fn,
     if point is None or normal is None:
         raise ValueError("Attachment binding no longer resolves.")
     anchor = Vector(point) + Vector(normal) * float(attachment.normal_offset)
-    return str(attachment.mode), index, tuple(anchor), float(attachment.strength)
+    mode = str(row.get("mode", attachment.mode))
+    strength = float(attachment.strength) * float(row.get("influence", 1.0))
+    return mode, index, tuple(anchor), strength
 
 
 def _attachment_runtime(scene):

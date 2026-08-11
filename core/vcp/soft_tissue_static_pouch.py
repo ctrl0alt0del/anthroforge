@@ -133,7 +133,7 @@ def _final_volume_projection(points, triangles, target, inverse_mass, settings):
 
 def _project_constraints(points, rest, triangles, edges, lengths, inverse_mass, target, settings, tethers):
     _project_edges(points, edges, lengths, inverse_mass, settings.edge_stiffness)
-    _project_tethers(points, inverse_mass, tethers)
+    _project_tethers(points, inverse_mass, tethers, settings)
     _project_volume(points, triangles, target, inverse_mass, settings.volume_stiffness)
     _apply_sag_limit(points, rest, inverse_mass, settings.sag_limit)
 
@@ -193,19 +193,27 @@ def _scatter_edge_corrections(points, first, second, correction, inverse_mass):
     points += updates / np.maximum(1.0, degree)[:, None]
 
 
-def _project_tethers(points, inverse_mass, tethers):
+def _project_tethers(points, inverse_mass, tethers, settings):
     for tether in tethers:
-        _project_tether(points, inverse_mass, tether)
+        strength = constraint_pass_stiffness(tether.stiffness, settings.iterations,
+                                             settings.constraint_passes)
+        _project_tether(points, inverse_mass, tether, strength)
 
 
-def _project_tether(points, inverse_mass, tether):
+def _project_tether(points, inverse_mass, tether, strength):
     index = int(tether.vertex_index)
     if inverse_mass[index] <= 0.0:
         return
     delta = points[index] - np.asarray(tether.anchor, dtype=np.float64)
     length = max(float(np.linalg.norm(delta)), 1.0e-12)
-    correction = float(tether.stiffness) * (length - float(tether.rest_length)) * delta / length
+    correction = float(strength) * (length - float(tether.rest_length)) * delta / length
     points[index] -= correction
+
+
+def constraint_pass_stiffness(value, iterations, passes):
+    strength = max(0.0, min(1.0, float(value)))
+    count = max(1, int(iterations) * int(passes))
+    return 1.0 - (1.0 - strength) ** (1.0 / count)
 
 
 def _project_volume(points, triangles, target, inverse_mass, stiffness):

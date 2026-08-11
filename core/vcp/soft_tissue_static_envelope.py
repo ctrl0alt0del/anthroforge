@@ -3,10 +3,14 @@ from dataclasses import dataclass
 import numpy as np
 
 from .soft_tissue_model import Vec3
-from .soft_tissue_static_pouch import StaticSolveResult, StaticTether, mesh_volume, triangulate_faces
+from .soft_tissue_static_pouch import (
+    StaticSolveResult, StaticTether, constraint_pass_stiffness, mesh_volume, triangulate_faces,
+)
 
 
 _EPS = 1.0e-12
+_MAX_EDGE_SLACK = 0.25
+_MIN_TENSION_FACTOR = 0.5
 
 
 @dataclass(frozen=True)
@@ -20,6 +24,7 @@ class StaticEnvelopeSettings:
     seed_fraction: float = 0.35
     growth_fraction: float = 0.55
     velocity_retention: float = 0.15
+    surface_slack: float = 0.0
 
 
 @dataclass
@@ -57,7 +62,7 @@ def solve_static_envelope(vertices, faces, fixed_indices, surface_count, setting
 def validate_static_envelope(vertices, faces, fixed_indices, count, settings, tethers):
     errors = _topology_errors(vertices, faces, fixed_indices, count, tethers)
     values = (settings.shape_retention, settings.volume_retention, settings.seed_fraction,
-              settings.growth_fraction, settings.velocity_retention)
+              settings.growth_fraction, settings.velocity_retention, settings.surface_slack)
     if settings.iterations < 1 or settings.constraint_passes < 1 or settings.gravity_step < 0.0:
         errors.append("static envelope iteration settings are invalid")
     if any(not 0.0 <= float(value) <= 1.0 for value in values):
@@ -210,7 +215,7 @@ def _project_passes(state, target, settings, tethers):
             _project_volume(state, target, settings.volume_retention)
         _project_edges(state, settings)
         _project_surface_tension(state, settings)
-        _project_tethers(state, tethers)
+        _project_tethers(state, tethers, settings)
         if not pass_index % 2:
             _project_volume(state, target, settings.volume_retention)
         _project_host_side(state)
@@ -222,11 +227,17 @@ def _project_edges(state, settings):
     first, second = state.edges[:, 0], state.edges[:, 1]
     delta = state.points[second] - state.points[first]
     lengths = np.maximum(np.linalg.norm(delta, axis=1), _EPS)
-    strain = lengths - state.rest_lengths
+    strain = _slack_strain(lengths, state.rest_lengths, settings.surface_slack)
     strength = _edge_strength(strain, settings.shape_retention, settings.constraint_passes)
     weight = state.inverse_mass[first] + state.inverse_mass[second]
     scale = strength * strain / (lengths * np.maximum(weight, _EPS))
     _scatter_edges(state, first, second, delta * scale[:, None])
+
+
+def _slack_strain(lengths, rest_lengths, slack):
+    original = lengths - rest_lengths
+    permitted = lengths - rest_lengths * (1.0 + _MAX_EDGE_SLACK * float(slack))
+    return np.where(original > 0.0, np.maximum(permitted, 0.0), original)
 
 
 def _edge_strength(strain, retention, passes):
@@ -263,7 +274,8 @@ def _project_volume(state, target, retention):
 
 def _project_surface_tension(state, settings):
     gradients, counts = _area_gradients(state.points, state.surface)
-    total = 0.10 + 0.40 * float(settings.shape_retention)
+    factor = 1.0 - (1.0 - _MIN_TENSION_FACTOR) * float(settings.surface_slack)
+    total = (0.10 + 0.40 * float(settings.shape_retention)) * factor
     strength = 1.0 - (1.0 - total) ** (1.0 / max(1, settings.constraint_passes))
     movable = state.inverse_mass > 0.0
     direction = gradients / np.maximum(counts, 1.0)[:, None]
@@ -299,19 +311,21 @@ def _volume_gradients(points, triangles):
     return gradients
 
 
-def _project_tethers(state, tethers):
+def _project_tethers(state, tethers, settings):
     for tether in tethers:
-        _project_tether(state, tether)
+        strength = constraint_pass_stiffness(tether.stiffness, settings.iterations,
+                                             settings.constraint_passes)
+        _project_tether(state, tether, strength)
 
 
-def _project_tether(state, tether):
+def _project_tether(state, tether, strength):
     index = int(tether.vertex_index)
     if state.inverse_mass[index] <= 0.0:
         return
     delta = state.points[index] - np.asarray(tether.anchor, dtype=np.float64)
     length = max(float(np.linalg.norm(delta)), _EPS)
     excess = length - float(tether.rest_length)
-    state.points[index] -= float(tether.stiffness) * excess * delta / length
+    state.points[index] -= float(strength) * excess * delta / length
 
 
 def _project_host_side(state):

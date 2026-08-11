@@ -312,6 +312,10 @@ class AF_SoftTissueAttachment_Property(bpy.types.PropertyGroup):
     strength: bpy.props.FloatProperty(
         name="Strength", default=0.5, min=0.0, max=1.0, update=_on_soft_attachment_update,
     )
+    feather: bpy.props.FloatProperty(
+        name="Attachment Feather", description="Geodesic soft-falloff width relative to the base surface size",
+        default=0.0, min=0.0, max=1.0, subtype="FACTOR", update=_on_soft_attachment_binding_update,
+    )
     mask_attribute: bpy.props.StringProperty(
         name="Mask", default="ALL", update=_on_soft_attachment_binding_update,
     )
@@ -371,6 +375,7 @@ class AF_SoftTissueVCP_Property(bpy.types.PropertyGroup):
     endpoint_taper: bpy.props.FloatProperty(name="Endpoint Taper", default=0.16, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)
     shape_retention: bpy.props.FloatProperty(name="Shape Retention", description="Membrane tension and semisolid shape memory; higher values resist stretching and sag", default=0.5, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)
     volume_retention: bpy.props.FloatProperty(name="Volume Retention", description="Incompressibility of the sealed tissue envelope", default=0.9, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)
+    surface_slack: bpy.props.FloatProperty(name="Surface Slack", description="Extra membrane length available before the surface becomes taut", default=0.0, min=0.0, max=1.0, subtype="FACTOR", update=_on_soft_tissue_prop_update)
     relaxation_mode: bpy.props.EnumProperty(
         name="Relaxation", items=(("NONE", "None", ""), ("GEOMETRIC", "Geometric", ""),
         ("STATIC_PBD", "Static PBD", "")), default="NONE", update=_on_soft_tissue_prop_update,

@@ -3,6 +3,7 @@ import unittest
 from core.vcp.soft_tissue_static_pouch import (
     StaticPouchSettings,
     StaticTether,
+    constraint_pass_stiffness,
     mesh_volume,
     solve_static_pouch,
     solve_static_tissue,
@@ -19,6 +20,12 @@ def cube_fixture():
 
 
 class SoftTissueStaticPouchTests(unittest.TestCase):
+    def test_tether_strength_is_iteration_independent(self):
+        expected, iterations, passes = 0.65, 110, 4
+        per_pass = constraint_pass_stiffness(expected, iterations, passes)
+        aggregate = 1.0 - (1.0 - per_pass) ** (iterations * passes)
+        self.assertAlmostEqual(aggregate, expected, places=12)
+
     def test_gravity_moves_free_vertices_and_keeps_fixed_vertices(self):
         vertices, faces = cube_fixture()
         settings = StaticPouchSettings(20, 2, 0.01, 0.25, 0.0, (1.0, 0.0, 0.0))

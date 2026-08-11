@@ -81,6 +81,7 @@ class MaterialSpec:
     preset: str = "GENERIC"
     shape_retention: float = 0.5
     volume_retention: float = 0.9
+    surface_slack: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,7 @@ class AttachmentSpec:
     strength: float = 0.0
     mask_attribute: str = ""
     normal_offset: float = 0.0
+    feather: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -186,7 +188,7 @@ def _inflation_domain_errors(domain, inflation):
 
 
 def _material_errors(material):
-    names = ("shape_retention", "volume_retention")
+    names = ("shape_retention", "volume_retention", "surface_slack")
     return [_range_error(name) for name in names if not _unit_value(getattr(material, name))]
 
 
@@ -214,6 +216,8 @@ def _one_attachment_errors(item):
         errors.append("attachment target surface is invalid")
     if not _unit_value(item.strength):
         errors.append(_range_error("attachment strength"))
+    if not _unit_value(item.feather):
+        errors.append(_range_error("attachment feather"))
     return errors
 
 

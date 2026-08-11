@@ -62,6 +62,12 @@ class StaticEnvelopeTests(unittest.TestCase):
         large_drop = _centroid_drop(large, large_result)
         self.assertGreater(large_drop, small_drop * 1.25)
 
+    def test_surface_slack_allows_more_gravity_redistribution(self):
+        mesh, fixed = envelope_fixture(1.6)
+        taut = _solve_with_slack(mesh, fixed, 0.0)
+        slack = _solve_with_slack(mesh, fixed, 0.5)
+        self.assertGreater(_centroid_drop(mesh, slack), _centroid_drop(mesh, taut) * 1.05)
+
     def test_zero_sagginess_retains_a_pressure_shape(self):
         mesh, _fixed, result = solve_fixture(0.8, sagginess=0.0)
         count = mesh.base_vertex_count
@@ -81,6 +87,12 @@ def _centroid_drop(mesh, result):
     before = sum(mesh.vertices[index][2] for index in range(count)) / count
     after = sum(result.vertices[index][2] for index in range(count)) / count
     return before - after
+
+
+def _solve_with_slack(mesh, fixed, slack):
+    settings = StaticEnvelopeSettings(160, 6, 0.0015, 0.48, 0.88, surface_slack=slack)
+    return solve_static_envelope(mesh.vertices, mesh.faces, fixed, mesh.base_vertex_count,
+                                 settings, tolerance=1.0e-6)
 
 
 if __name__ == "__main__":

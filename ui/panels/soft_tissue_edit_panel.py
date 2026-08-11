@@ -92,6 +92,8 @@ def _draw_material(layout, tissue):
     box.label(text="Material")
     box.prop(tissue, "shape_retention")
     box.prop(tissue, "volume_retention")
+    if _is_surface_static(tissue):
+        box.prop(tissue, "surface_slack")
 
 
 def _draw_solver(layout, tissue):
@@ -117,6 +119,8 @@ def _draw_attachments(layout, tissue):
         col.prop(row, "mode")
         col.prop(row, "mask_attribute")
         col.prop(row, "strength")
+        if tissue.relaxation_mode == "STATIC_PBD":
+            col.prop(row, "feather")
         col.prop(row, "normal_offset")
 
 

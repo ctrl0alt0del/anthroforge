@@ -43,6 +43,7 @@ def _prepare_tissue(root, subdivide):
     if "--reference-constraints" in sys.argv:
         _apply_reference_constraints(root, tissue)
     _apply_cli_overrides(tissue)
+    _apply_attachment_feather(root, tissue)
     return tissue
 
 
@@ -53,6 +54,23 @@ def _apply_cli_overrides(tissue):
     _apply_numeric_override(tissue, "--amount", "inflation_amount")
     _apply_numeric_override(tissue, "--field-power", "field_power")
     _apply_numeric_override(tissue, "--sag-limit", "sag_limit")
+    _apply_numeric_override(tissue, "--surface-slack", "surface_slack")
+
+
+def _apply_attachment_feather(root, tissue):
+    if "--attachment-feather" not in sys.argv:
+        return
+    value = float(sys.argv[sys.argv.index("--attachment-feather") + 1])
+    mask = _string_option("--attachment-mask")
+    with suppress_vcp_prop_updates():
+        for row in tissue.attachments:
+            if not mask or str(row.mask_attribute).upper() == mask.upper():
+                row.feather = value
+    register_soft_tissue_sync().sync_root_to_scene(root, bpy.context.scene, {tissue.id}, {tissue.id}, True)
+
+
+def _string_option(option):
+    return "" if option not in sys.argv else str(sys.argv[sys.argv.index(option) + 1])
 
 
 def _run_amount_comparison(root, tissue, proxy, output):
@@ -140,7 +158,8 @@ def _mask_metrics(tissue, rest_points, final_points):
     fixed, count = set(_fixed_indices(tissue, shape)), len(shape.groups.get("BACKING", ()))
     gravity = Vector(tissue.gravity).normalized()
     drops = tuple((final_points[i] - rest_points[i]).dot(gravity) for i in range(len(rest_points)))
-    return {"attachments": [(row.mode, row.mask_attribute, row.strength) for row in tissue.attachments],
+    return {"attachments": [(row.mode, row.mask_attribute, row.strength, row.feather)
+                            for row in tissue.attachments],
             "front": _drop_summary(drops, range(count)), "backing": _drop_summary(drops, range(count, count * 2)),
             "fixed": _drop_summary(drops, fixed), "free": _drop_summary(drops, set(range(len(drops))) - fixed)}
 
@@ -212,7 +231,8 @@ def _override_suffix():
     values = []
     options = (("--shape-retention", "shape"), ("--volume-retention", "volume"),
                ("--tolerance", "tolerance"), ("--amount", "amount"),
-               ("--field-power", "field"), ("--sag-limit", "limit"))
+               ("--field-power", "field"), ("--sag-limit", "limit"),
+               ("--surface-slack", "slack"), ("--attachment-feather", "feather"))
     for option, label in options:
         if option in sys.argv:
             values.append(f"_{label}_{float(sys.argv[sys.argv.index(option) + 1]):.2f}")
@@ -299,6 +319,7 @@ def _print_stats(tissue):
           "fixed": len(_fixed_indices(tissue, rest)), "relaxation": tissue.relaxation_mode,
           "preset": tissue.preset, "field_power": tissue.field_power,
           "shape_retention": tissue.shape_retention, "volume_retention": tissue.volume_retention,
+          "surface_slack": tissue.surface_slack,
           "sagginess": tissue.sagginess, "sag_limit": tissue.sag_limit, "tolerance": tissue.tolerance,
           "gravity": tuple(tissue.gravity)})
 

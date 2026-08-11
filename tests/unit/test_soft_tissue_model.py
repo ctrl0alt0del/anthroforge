@@ -35,6 +35,11 @@ class SoftTissueModelTests(unittest.TestCase):
         errors = validate_model(replace(model, base=replace(model.base, reference="")))
         self.assertIn("curve and surface bases require a reference", errors)
 
+    def test_surface_slack_is_normalized(self):
+        model = prototype_models()[2]
+        material = replace(model.material, surface_slack=1.1)
+        self.assertIn("surface_slack must be between 0 and 1", validate_model(replace(model, material=material)))
+
 
 if __name__ == "__main__":
     unittest.main()
