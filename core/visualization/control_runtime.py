@@ -16,7 +16,7 @@ from ..utils import depsgraph_for_scene, get_af_root, view_layer_for_scene
 from ..vcp.runtime_state import reset_vcp_runtime_state
 
 
-ENTITY_TYPES = ("SCP", "FIBER", "MUSCLE", "BLOB", "SOFT_TISSUE")
+ENTITY_TYPES = ("SCP", "FIBER", "FIBER_SURFACE", "MUSCLE", "BLOB", "SOFT_TISSUE")
 _HISTORY_SUSPENDED = False
 
 
@@ -49,7 +49,9 @@ def _entity_from_control(obj):
 
 
 def _entity_from_proxy(obj):
-    checks = (("af_fiber_proxy", "af_fiber_id", "FIBER"), ("af_muscle_proxy", "af_muscle_id", "MUSCLE"),
+    checks = (("af_fiber_proxy", "af_fiber_id", "FIBER"),
+              ("af_fiber_surface_proxy", "af_fiber_surface_id", "FIBER_SURFACE"),
+              ("af_muscle_proxy", "af_muscle_id", "MUSCLE"),
               ("af_blob_proxy", "af_blob_id", "BLOB"), ("af_soft_tissue_proxy", "af_soft_tissue_id", "SOFT_TISSUE"),
               ("af_soft_tissue_rest_proxy", "af_soft_tissue_id", "SOFT_TISSUE"),
               ("af_soft_tissue_base", "af_soft_tissue_id", "SOFT_TISSUE"))
@@ -80,6 +82,20 @@ def _set_active_scp_index(root, scene, index):
 def _sync_active_scp_state(root, scene, entity):
     if entity[0] == "SCP":
         _set_active_scp_index(root, scene, _scp_index(root, entity[1]))
+
+
+def _sync_active_vcp_state(root, entity):
+    if entity[0] not in ENTITY_TYPES[1:]:
+        return
+    vcp = root.af_vcp_system
+    current = (str(vcp.active_vcp_type), str(vcp.active_vcp_id))
+    if current != entity:
+        vcp.active_vcp_type, vcp.active_vcp_id = entity
+
+
+def _sync_active_entity_state(root, scene, entity):
+    _sync_active_scp_state(root, scene, entity)
+    _sync_active_vcp_state(root, entity)
 
 
 def _active_scp_entity(root):
@@ -203,7 +219,7 @@ class ControlRuntimeOrchestrator:
         if root is None:
             self._clear_last_active()
             return None
-        _sync_active_scp_state(root, scene, current)
+        _sync_active_entity_state(root, scene, current)
         if not force and current == self._last_active:
             return None
         prev = self._last_active
@@ -260,7 +276,7 @@ def _load_scene():
 
 def _hydrate_load_state(root, scene, current):
     retrofit_owner_backsolve_defaults(root)
-    _sync_active_scp_state(root, scene, current)
+    _sync_active_entity_state(root, scene, current)
     _hydrate_runtime_state(root, scene)
     _ensure_runtime_handlers()
 

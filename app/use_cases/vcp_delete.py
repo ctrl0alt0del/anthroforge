@@ -8,6 +8,9 @@ def delete_vcp_in_tree(context, node_type, node_id):
     if target is None:
         return failure("VCP not found.")
     kind, entity_id = target
+    blocked = _consumer_error(root, kind, entity_id)
+    if blocked:
+        return failure(blocked)
     _clear_runtime_cache(kind, entity_id)
     if not _delete_target(root, context.scene, kind, entity_id):
         return failure("VCP not found.")
@@ -25,12 +28,14 @@ def _resolved_target(root, node_type, node_id):
 def _target_key(node_type, node_id):
     kind = str(node_type or "").upper()
     entity_id = str(node_id or "")
-    return (kind if kind in {"FIBER", "MUSCLE", "SOFT_TISSUE"} else "", entity_id)
+    return (kind if kind in {"FIBER", "FIBER_SURFACE", "MUSCLE", "SOFT_TISSUE"} else "", entity_id)
 
 
 def _has_target(vcp, kind, entity_id):
     if kind == "FIBER":
         items = vcp.fibers
+    elif kind == "FIBER_SURFACE":
+        items = vcp.fiber_surfaces
     elif kind == "MUSCLE":
         items = vcp.muscles
     else:
@@ -50,7 +55,53 @@ def _clear_runtime_cache(kind, entity_id):
 def _delete_target(root, scene, kind, entity_id):
     if kind == "SOFT_TISSUE":
         return _delete_soft_tissue(root, scene, entity_id)
+    if kind == "FIBER_SURFACE":
+        return _delete_fiber_surface(root, scene, entity_id)
     return _delete_reconcile()(root, scene, {_delete_key(kind, entity_id)})
+
+
+def _consumer_error(root, kind, entity_id):
+    if kind == "FIBER":
+        users = [surface.id for surface in getattr(root.af_vcp_system, "fiber_surfaces", ())
+                 if any(ref.fiber_id == entity_id for ref in surface.fiber_refs)]
+        return "Fiber is used by: " + ", ".join(users) if users else ""
+    if kind == "FIBER_SURFACE":
+        users = _surface_consumers(root, entity_id)
+        return "Fiber Surface is used by: " + ", ".join(users) if users else ""
+    return ""
+
+
+def _surface_consumers(root, surface_id):
+    muscles = [muscle.id for muscle in root.af_vcp_system.muscles
+               if str(getattr(muscle, "surface_source_mode", "")) == "FIBER_SURFACE"
+               and str(getattr(muscle, "fiber_surface_id", "")) == surface_id]
+    tissues = [tissue.id for tissue in root.af_vcp_system.soft_tissues
+               if str(getattr(tissue, "base_source_type", "")) == "FIBER_SURFACE"
+               and str(getattr(tissue, "base_source_id", "")) == surface_id]
+    return muscles + tissues
+
+
+def _delete_fiber_surface(root, scene, entity_id):
+    surfaces = root.af_vcp_system.fiber_surfaces
+    index = next((i for i, item in enumerate(surfaces) if item.id == entity_id), -1)
+    if index < 0:
+        return False
+    _remove_surface_proxy(scene, root.name, entity_id)
+    surfaces.remove(index)
+    _clear_active_surface(root.af_vcp_system, entity_id)
+    return True
+
+
+def _remove_surface_proxy(scene, root_name, entity_id):
+    for obj in tuple(scene.objects):
+        owned = obj.get("af_fiber_surface_proxy") and obj.get("af_root_name") == root_name
+        if owned and obj.get("af_fiber_surface_id") == entity_id:
+            _remove_object(obj)
+
+
+def _clear_active_surface(vcp, entity_id):
+    if vcp.active_vcp_type == "FIBER_SURFACE" and vcp.active_vcp_id == entity_id:
+        vcp.active_vcp_type, vcp.active_vcp_id = "NONE", ""
 
 
 def _delete_soft_tissue(root, scene, entity_id):

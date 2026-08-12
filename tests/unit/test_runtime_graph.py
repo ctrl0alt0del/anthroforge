@@ -67,3 +67,18 @@ class RuntimeGraphTests(unittest.TestCase):
         self.assertIn({"A", "B"}, sccs)
         self.assertIn({"C"}, sccs)
         self.assertIn({"D"}, sccs)
+
+    def test_fiber_surface_is_authoritative_dependency(self):
+        scps = [SimpleNamespace(id="S1", parent_id="")]
+        surface = SimpleNamespace(id="FS1", fiber_refs=[SimpleNamespace(fiber_id="F1")])
+        muscle = SimpleNamespace(id="M1", fiber_refs=[SimpleNamespace(fiber_id="IGNORED")],
+                                 surface_source_mode="FIBER_SURFACE", fiber_surface_id="FS1")
+        tissue = SimpleNamespace(id="T1", host_scp_id="", base_source_type="FIBER_SURFACE", base_source_id="FS1")
+        vcp = SimpleNamespace(fibers=[fiber("F1", "S1", "S1")], fiber_surfaces=[surface],
+                              muscles=[muscle], blobs=[], soft_tissues=[tissue])
+        root = SimpleNamespace(af_scp_system=SimpleNamespace(scps=scps), af_vcp_system=vcp)
+        graph = runtime_graph.RuntimeGraph()
+        adapters.build_runtime_graph(root, graph)
+        impacted = graph.downstream_entities({("FIBER", "F1")})
+        self.assertTrue({("FIBER_SURFACE", "FS1"), ("MUSCLE", "M1"), ("SOFT_TISSUE", "T1")} <= impacted)
+        self.assertNotIn(("FIBER", "IGNORED"), graph.entity_adjacency())

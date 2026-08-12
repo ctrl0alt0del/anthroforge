@@ -63,7 +63,8 @@ def effective_rule_for_fiber(fiber_prop, scp_map, fibers_by_id=None):
 
 
 def effective_rule_for_muscle(muscle_prop, fibers_by_id, scp_map):
-    for ref in muscle_prop.fiber_refs:
+    source = _muscle_surface_source(muscle_prop)
+    for ref in source.fiber_refs:
         f = fibers_by_id.get(ref.fiber_id)
         if f is None:
             continue
@@ -71,6 +72,15 @@ def effective_rule_for_muscle(muscle_prop, fibers_by_id, scp_map):
         if r is not None:
             return r
     return None
+
+
+def _muscle_surface_source(muscle):
+    if str(getattr(muscle, "surface_source_mode", "LEGACY_FIBERS")) != "FIBER_SURFACE":
+        return muscle
+    root = getattr(muscle, "id_data", None)
+    target = str(getattr(muscle, "fiber_surface_id", "") or "")
+    surfaces = getattr(getattr(root, "af_vcp_system", None), "fiber_surfaces", ())
+    return next((surface for surface in surfaces if str(surface.id) == target), muscle)
 
 
 def axis_index(axis):

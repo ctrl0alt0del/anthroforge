@@ -1,6 +1,7 @@
 from mathutils import Vector
 
 from .fiber_loop import resample_closed
+from .fiber_surface import build_loft_topology, flatten_surface_rows, prepare_loft_rows
 
 
 def build_surface_topology(m, n, closed_v=False, closed_u=False):
@@ -8,20 +9,7 @@ def build_surface_topology(m, n, closed_v=False, closed_u=False):
     Build quad topology for a grid of M fibers x N nodes.
     vertex_index = i * n + j
     """
-    if m < 2 or n < 2:
-        return []
-
-    faces = []
-
-    v_pairs = [(i, i + 1) for i in range(m - 1)]
-    if closed_v and m > 2:
-        v_pairs.append((m - 1, 0))
-
-    for i0, i1 in v_pairs:
-        for j in _u_columns(n, closed_u):
-            faces.append(_quad(i0, i1, j, n))
-
-    return faces
+    return build_loft_topology(m, n, close_across=closed_v, closed_along=closed_u)
 
 
 def _u_columns(n, closed_u):
@@ -37,14 +25,7 @@ def flatten_fiber_points(ordered_fiber_points):
     """
     Convert [[Vector,...],[Vector,...],...] -> [(x,y,z),...]
     """
-    verts = []
-    for pts in ordered_fiber_points:
-        for p in pts:
-            if isinstance(p, Vector):
-                verts.append((p.x, p.y, p.z))
-            else:
-                verts.append((float(p[0]), float(p[1]), float(p[2])))
-    return verts
+    return flatten_surface_rows(ordered_fiber_points)
 
 
 def validate_fiber_point_grid(ordered_fiber_points):
@@ -266,16 +247,8 @@ def prepare_surface_rows(ordered_fiber_points, target_n=None, densify_v=True, cl
     """
     if not ordered_fiber_points:
         return ordered_fiber_points
-
-    if target_n is None:
-        target_n = len(ordered_fiber_points[0])
-
-    rows = normalize_fibers_uniform(ordered_fiber_points, target_n, closed_u=closed_u)
-    if closed_u:
-        rows = align_closed_rows(rows)
-    if densify_v:
-        rows = densify_between_fibers(rows, min_inserts=_min_v_inserts(closed_u))
-    return rows
+    rows = prepare_loft_rows(ordered_fiber_points, target_n or 0, closed_u, densify_v)
+    return [[Vector(point) for point in row] for row in rows]
 
 
 def _min_v_inserts(closed_u):

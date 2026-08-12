@@ -12,6 +12,9 @@ def _default_draft_skin_settings():
     return root_settings_percentages()
 
 
+PACKAGE_SCHEMA_VERSION = 2
+
+
 @dataclass
 class BoundObjectSnapshot:
     bound_id: str
@@ -88,6 +91,7 @@ class MuscleSnapshot:
     name: str
     props: dict
     fiber_ids: list[str] = field(default_factory=list)
+    fiber_surface_id: str = ""
 
     @classmethod
     def from_dict(cls, data):
@@ -110,6 +114,18 @@ class BlobSnapshot:
 
 
 @dataclass
+class FiberSurfaceSnapshot:
+    source_id: str
+    name: str
+    props: dict
+    fiber_ids: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(**dict(data or {}))
+
+
+@dataclass
 class SoftTissueAttachmentSnapshot:
     props: dict
 
@@ -125,6 +141,8 @@ class SoftTissueSnapshot:
     props: dict
     host_scp_id: str = ""
     base_object_name: str = ""
+    base_source_type: str = "OBJECT"
+    base_source_id: str = ""
     attachments: list[SoftTissueAttachmentSnapshot] = field(default_factory=list)
 
     @classmethod
@@ -167,8 +185,10 @@ class ShortcutSnapshot:
 @dataclass
 class PackageSnapshot:
     root_name: str
+    schema_version: int = PACKAGE_SCHEMA_VERSION
     scps: list[ScpSnapshot] = field(default_factory=list)
     fibers: list[FiberSnapshot] = field(default_factory=list)
+    fiber_surfaces: list[FiberSurfaceSnapshot] = field(default_factory=list)
     muscles: list[MuscleSnapshot] = field(default_factory=list)
     blobs: list[BlobSnapshot] = field(default_factory=list)
     soft_tissues: list[SoftTissueSnapshot] = field(default_factory=list)
@@ -183,6 +203,7 @@ class PackageSnapshot:
         data.setdefault("topology_settings", default_topology_settings())
         data["scps"] = [ScpSnapshot.from_dict(x) for x in data.get("scps", ())]
         data["fibers"] = [FiberSnapshot.from_dict(x) for x in data.get("fibers", ())]
+        data["fiber_surfaces"] = [FiberSurfaceSnapshot.from_dict(x) for x in data.get("fiber_surfaces", ())]
         data["muscles"] = [MuscleSnapshot.from_dict(x) for x in data.get("muscles", ())]
         data["blobs"] = [BlobSnapshot.from_dict(x) for x in data.get("blobs", ())]
         data["soft_tissues"] = [SoftTissueSnapshot.from_dict(x) for x in data.get("soft_tissues", ())]
@@ -198,5 +219,6 @@ class ImportResult:
     blob_count: int = 0
     soft_tissue_count: int = 0
     shortcut_count: int = 0
+    fiber_surface_count: int = 0
     warnings: list[str] = field(default_factory=list)
     kept_objects: list[object] = field(default_factory=list, repr=False)

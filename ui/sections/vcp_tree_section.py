@@ -123,19 +123,38 @@ def _draw_soft_tissue_row(layout, tissue, selected_ids):
     _draw_right_hint(row, tissue.base_domain)
 
 
-def draw_vcp_tree_section(layout, scene, root, selected_fiber_ids, selected_muscle_ids, selected_blob_ids, selected_tissue_ids=()):
+def _draw_fiber_surface_rows(layout, surfaces, selected_ids):
+    for surface in surfaces:
+        row = layout.row(align=True)
+        row.label(text="", icon="MESH_GRID")
+        _draw_select_op(row, surface.id, "FIBER_SURFACE", surface.name or surface.id, surface.id in selected_ids)
+        _draw_delete_op(row, surface.id, "FIBER_SURFACE")
+        _draw_right_hint(row, surface.construction_mode)
+
+
+def draw_vcp_tree_section(layout, scene, root, selected_fiber_ids, selected_surface_ids, selected_muscle_ids, selected_blob_ids, selected_tissue_ids=()):
     muscles, by_muscle, free_fibers, blobs, tissues = _build_vcp_tree(root)
-    if not muscles and not free_fibers and not blobs and not tissues:
+    surfaces = list(getattr(root.af_vcp_system, "fiber_surfaces", ()))
+    if not muscles and not surfaces and not free_fibers and not blobs and not tissues:
         layout.label(text="No VCPs")
         return
+    _draw_fiber_surface_rows(layout, surfaces, selected_surface_ids)
+    _draw_main_vcp_rows(layout, scene, muscles, by_muscle, free_fibers, selected_muscle_ids, selected_fiber_ids)
+    _draw_tail_vcp_rows(layout, blobs, tissues, selected_blob_ids, selected_tissue_ids)
+
+
+def _draw_main_vcp_rows(layout, scene, muscles, by_muscle, free_fibers, selected_muscles, selected_fibers):
     for m in muscles:
-        _draw_muscle_node(layout, scene, m, by_muscle, selected_muscle_ids, selected_fiber_ids)
+        _draw_muscle_node(layout, scene, m, by_muscle, selected_muscles, selected_fibers)
     for f in free_fibers:
-        _draw_fiber_row(layout, f, depth=0, selected_fiber_ids=selected_fiber_ids)
+        _draw_fiber_row(layout, f, depth=0, selected_fiber_ids=selected_fibers)
+
+
+def _draw_tail_vcp_rows(layout, blobs, tissues, selected_blobs, selected_tissues):
     if blobs:
         layout.separator()
-        _draw_blob_rows(layout, blobs, selected_blob_ids)
+        _draw_blob_rows(layout, blobs, selected_blobs)
     if tissues:
         layout.separator()
         for tissue in tissues:
-            _draw_soft_tissue_row(layout, tissue, selected_tissue_ids)
+            _draw_soft_tissue_row(layout, tissue, selected_tissues)

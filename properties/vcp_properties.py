@@ -18,6 +18,12 @@ def _on_muscle_prop_update(self, context):
     sync_context(context, dirty_hints=dirty_hints_for("MUSCLE", {self.id}))
 
 
+def _on_fiber_surface_prop_update(self, context):
+    if vcp_prop_updates_suppressed():
+        return
+    sync_context(context, dirty_hints=dirty_hints_for("FIBER_SURFACE", {self.id}))
+
+
 def _on_blob_prop_update(self, context):
     if vcp_prop_updates_suppressed():
         return
@@ -109,9 +115,34 @@ class AF_MuscleFiberRef_Property(bpy.types.PropertyGroup):
     fiber_id: bpy.props.StringProperty(name="Fiber ID", default="")
 
 
+class AF_FiberSurfaceFiberRef_Property(bpy.types.PropertyGroup):
+    fiber_id: bpy.props.StringProperty(name="Fiber ID", default="")
+
+
+class AF_FiberSurfaceVCP_Property(bpy.types.PropertyGroup):
+    id: bpy.props.StringProperty(name="ID")
+    name: bpy.props.StringProperty(name="Name", default="Fiber Surface", update=_on_fiber_surface_prop_update)
+    schema_version: bpy.props.IntProperty(name="Schema", default=1, min=1)
+    construction_mode: bpy.props.EnumProperty(
+        name="Construction", items=(("LOFT", "Loft", ""), ("LOOP_PATCH", "Loop Patch", "")),
+        default="LOFT", update=_on_fiber_surface_prop_update,
+    )
+    fiber_refs: bpy.props.CollectionProperty(type=AF_FiberSurfaceFiberRef_Property)
+    active_fiber_ref_index: bpy.props.IntProperty(name="Active Fiber Ref", default=-1)
+    close_across_fibers: bpy.props.BoolProperty(name="Close Across Fibers", default=False, update=_on_fiber_surface_prop_update)
+    use_mirrored_rows: bpy.props.BoolProperty(name="Use Mirrored Rows", default=False, update=_on_fiber_surface_prop_update)
+    flip_normals: bpy.props.BoolProperty(name="Flip Normals", default=False, update=_on_fiber_surface_prop_update)
+    patch_resolution: bpy.props.IntProperty(name="Patch Resolution", default=4, min=1, max=64, update=_on_fiber_surface_prop_update)
+
+
 class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="Muscle", update=_on_muscle_prop_update)
+    surface_source_mode: bpy.props.EnumProperty(
+        name="Surface Source", items=(("LEGACY_FIBERS", "Legacy Fibers", ""),
+        ("FIBER_SURFACE", "Fiber Surface", "")), default="LEGACY_FIBERS", update=_on_muscle_prop_update,
+    )
+    fiber_surface_id: bpy.props.StringProperty(name="Fiber Surface ID", default="", update=_on_muscle_prop_update)
 
     closed_v: bpy.props.BoolProperty(name="Closed Ring (V)", default=False, update=_on_muscle_prop_update)
     use_mirrored_rows: bpy.props.BoolProperty(name="Use Mirrored Rows", default=False, update=_on_muscle_prop_update)
@@ -329,6 +360,11 @@ class AF_SoftTissueVCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="Soft Tissue", update=_on_soft_tissue_prop_update)
     schema_version: bpy.props.IntProperty(name="Schema", default=1, min=1)
+    base_source_type: bpy.props.EnumProperty(
+        name="Base Source", items=(("OBJECT", "Object", ""), ("FIBER", "Fiber", ""),
+        ("FIBER_SURFACE", "Fiber Surface", "")), default="OBJECT", update=_on_soft_binding_update,
+    )
+    base_source_id: bpy.props.StringProperty(name="Base Source ID", default="", update=_on_soft_binding_update)
     preset: bpy.props.EnumProperty(
         name="Preset", items=(("CUSTOM", "Custom", ""), ("CLOSED_BULK", "Closed Bulk", ""),
         ("RIM", "Rim", ""), ("LAYER", "Layer", ""), ("POUCH", "Pouch", "")),
@@ -395,6 +431,7 @@ class AF_SoftTissueVCP_Property(bpy.types.PropertyGroup):
 class AF_VCP_System_Property(bpy.types.PropertyGroup):
     muscles: bpy.props.CollectionProperty(type=AF_MuscleVCP_Property)
     fibers: bpy.props.CollectionProperty(type=AF_FiberVCP_Property)
+    fiber_surfaces: bpy.props.CollectionProperty(type=AF_FiberSurfaceVCP_Property)
     blobs: bpy.props.CollectionProperty(type=AF_BlobVCP_Property)
     soft_tissues: bpy.props.CollectionProperty(type=AF_SoftTissueVCP_Property)
 
@@ -405,6 +442,7 @@ class AF_VCP_System_Property(bpy.types.PropertyGroup):
             ("NONE", "None", ""),
             ("MUSCLE", "Muscle", ""),
             ("FIBER", "Fiber", ""),
+            ("FIBER_SURFACE", "Fiber Surface", ""),
             ("BLOB", "Blob", ""),
             ("SOFT_TISSUE", "Soft Tissue", ""),
         ),

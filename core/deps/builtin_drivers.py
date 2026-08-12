@@ -6,6 +6,7 @@ from .mirror_roles import apply_scp_mirror_roles
 from ..visualization.scp_attachment_runtime import capture_authored_scp_attachments, capture_dirty_scp_attachments
 from ..visualization.sync import register_sync
 from ..visualization.fiber_sync import register_fiber_sync
+from ..visualization.fiber_surface_sync import register_fiber_surface_sync
 from ..visualization.muscle_sync import register_muscle_sync
 from ..visualization.blob_sync import register_blob_sync
 from ..visualization.soft_tissue_sync import register_soft_tissue_sync
@@ -91,7 +92,7 @@ class RuntimeGraphDriver(DependencyDriver):
     name = "runtime_graph_driver"
 
     def entity_types(self):
-        return ("SCP", "FIBER", "MUSCLE", "BLOB", "SOFT_TISSUE", "CONTROL")
+        return ("SCP", "FIBER", "FIBER_SURFACE", "MUSCLE", "BLOB", "SOFT_TISSUE", "CONTROL")
 
     def build_graph(self, root, graph, entity_sets):
         built = build_runtime_graph(root, graph)
@@ -103,7 +104,7 @@ class RuntimeIntentDriver(DependencyDriver):
     name = "runtime_intent_driver"
 
     def entity_types(self):
-        return ("CONTROL", "SCP", "FIBER", "MUSCLE", "BLOB", "SOFT_TISSUE")
+        return ("CONTROL", "SCP", "FIBER", "FIBER_SURFACE", "MUSCLE", "BLOB", "SOFT_TISSUE")
 
     def apply_constraints(self, ctx):
         merged = {}
@@ -213,6 +214,20 @@ class MuscleSyncDriver(DependencyDriver):
             register_muscle_sync().sync_root_to_scene(root=root, scene=scene)
         elif ids:
             register_muscle_sync().sync_root_to_scene(root=root, scene=scene, target_muscle_ids=ids)
+
+
+class FiberSurfaceSyncDriver(DependencyDriver):
+    name = "fiber_surface_sync_driver"
+
+    def entity_types(self):
+        return ("FIBER_SURFACE",)
+
+    def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
+        _ = bake, gate_meta
+        ids = set(impacted.get("FIBER_SURFACE", set()) or set())
+        targets = None if is_full else ids
+        if is_full or ids:
+            register_fiber_surface_sync().sync_root_to_scene(root, scene, targets)
 
 
 class BlobSyncDriver(DependencyDriver):

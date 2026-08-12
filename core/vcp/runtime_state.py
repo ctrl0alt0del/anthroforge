@@ -12,6 +12,9 @@ _BLOB_OK = "_af_rt_blob_last_solve_converged"
 _BLOB_DISP = "_af_rt_blob_last_solve_max_disp"
 _BLOB_ITERS = "_af_rt_blob_last_solve_iterations"
 _MUSCLE_CTRL = "_af_rt_muscle_inflation_ctrl_world"
+_SURFACE_STATUS = "_af_rt_fiber_surface_status"
+_SURFACE_MS = "_af_rt_fiber_surface_ms"
+_SURFACE_ERROR = "_af_rt_fiber_surface_error"
 _SOFT_STATUS = "_af_rt_soft_tissue_status"
 _SOFT_MS = "_af_rt_soft_tissue_ms"
 _SOFT_ITERS = "_af_rt_soft_tissue_iterations"
@@ -154,6 +157,24 @@ def reset_muscle_runtime(muscle):
     set_muscle_inflation_ctrl_world(muscle, (0.0, 0.0, 0.0))
 
 
+def fiber_surface_status(surface):
+    return str(_read(surface, _SURFACE_STATUS, "DIRTY") or "DIRTY")
+
+
+def fiber_surface_diagnostic(surface):
+    return float(_read(surface, _SURFACE_MS, 0.0)), str(_read(surface, _SURFACE_ERROR, "") or "")
+
+
+def set_fiber_surface_runtime(surface, status, milliseconds=0.0, error=""):
+    _write(surface, _SURFACE_STATUS, str(status or "DIRTY"))
+    _write(surface, _SURFACE_MS, float(milliseconds))
+    _write(surface, _SURFACE_ERROR, str(error or ""))
+
+
+def reset_fiber_surface_runtime(surface):
+    set_fiber_surface_runtime(surface, "DIRTY")
+
+
 def soft_tissue_status(tissue):
     return str(_read(tissue, _SOFT_STATUS, "DIRTY") or "DIRTY")
 
@@ -187,6 +208,8 @@ def reset_vcp_runtime_state(root):
         reset_fiber_runtime(fiber)
     for muscle in getattr(vcp, "muscles", ()):
         reset_muscle_runtime(muscle)
+    for surface in getattr(vcp, "fiber_surfaces", ()):
+        reset_fiber_surface_runtime(surface)
     for blob in getattr(vcp, "blobs", ()):
         reset_blob_runtime(blob)
     for tissue in getattr(vcp, "soft_tissues", ()):

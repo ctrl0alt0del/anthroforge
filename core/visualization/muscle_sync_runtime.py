@@ -3,6 +3,7 @@ from mathutils import Vector
 
 from ..vcp.runtime_state import muscle_inflation_ctrl_world, set_muscle_inflation_ctrl_world
 from .fiber_sync_helpers import cached_fiber_points
+from .muscle_sync_helpers import mark_inflation_ctrl_location
 from .mirror_rules import axis_index, effective_rule_for_muscle
 
 
@@ -44,6 +45,11 @@ def _json_fiber_points(fobj):
 def collect_muscle_rows(root, scene, muscle, fiber_props):
     rows = collect_fiber_points(root, scene, fiber_props)
     return _expanded_rows(root, muscle, rows)
+
+
+def collect_surface_rows(root, scene, surface, fiber_props):
+    rows = collect_fiber_points(root, scene, fiber_props)
+    return _expanded_rows(root, surface, rows)
 
 
 def _expanded_rows(root, muscle, rows):
@@ -128,6 +134,7 @@ def ensure_inflation_ctrl(
     _ensure_initial_ctrl_world(muscle, base_points)
     target = _snap_ctrl_to_surface(muscle, base_obj, nearest_on_mesh_surface_fn)
     ctrl.location = target
+    mark_inflation_ctrl_location(ctrl)
     ctrl.show_in_front = True
     ctrl.hide_render = True
     return ctrl

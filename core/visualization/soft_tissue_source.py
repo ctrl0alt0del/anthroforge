@@ -65,6 +65,80 @@ def sample_base(obj, tissue, resolved=None, scene=None):
     return _surface_sample(obj, tissue, resolved, scene)
 
 
+def sample_entity_base(root, scene, tissue):
+    source_type = str(getattr(tissue, "base_source_type", "OBJECT") or "OBJECT")
+    if source_type == "FIBER":
+        return _fiber_entity_sample(root, scene, tissue)
+    if source_type == "FIBER_SURFACE":
+        return _fiber_surface_entity_sample(root, scene, tissue)
+    return sample_base(tissue.base_object_ref, tissue, scene=scene)
+
+
+def validate_entity_source(root, tissue):
+    source_type = str(getattr(tissue, "base_source_type", "OBJECT") or "OBJECT")
+    if source_type == "OBJECT":
+        return validate_source(tissue.base_object_ref, tissue.base_domain)
+    collection = "fibers" if source_type == "FIBER" else "fiber_surfaces"
+    found = any(str(item.id) == str(tissue.base_source_id) for item in getattr(root.af_vcp_system, collection, ()))
+    return () if found else (f"Missing {source_type.replace('_', ' ').title()} source.",)
+
+
+def _fiber_entity_sample(root, scene, tissue):
+    from .fiber_sync_helpers import cached_fiber_points
+    fiber = _entity_by_id(root.af_vcp_system.fibers, tissue.base_source_id)
+    points = None if fiber is None else cached_fiber_points(scene, root.name, fiber.id)
+    if not points:
+        raise ValueError("Fiber source geometry is unavailable.")
+    values = tuple(tuple(point) for point in points)
+    return BaseSample(values, _curve_frame_normals(values), cyclic=str(fiber.topology_mode) == "LOOP")
+
+
+def _fiber_surface_entity_sample(root, scene, tissue):
+    from .fiber_surface_sync import find_fiber_surface_proxy
+    proxy = find_fiber_surface_proxy(scene, root.name, str(tissue.base_source_id))
+    if proxy is None or not len(proxy.data.vertices):
+        raise ValueError("Fiber Surface source geometry is unavailable.")
+    return _mesh_proxy_sample(proxy, tissue)
+
+
+def _mesh_proxy_sample(proxy, tissue):
+    points = tuple(tuple(proxy.matrix_world @ vertex.co) for vertex in proxy.data.vertices)
+    normals = tuple(tuple(_world_normal(proxy, vertex.normal)) for vertex in proxy.data.vertices)
+    faces = tuple(tuple(poly.vertices) for poly in proxy.data.polygons)
+    edges = tuple(tuple(edge.vertices) for edge in proxy.data.edges)
+    bounds = boundary_edges(edges, faces)
+    weights = boundary_falloff_weights(len(points), edges, faces, points)
+    return BaseSample(points, normals, faces, bounds, weights, False, {})
+
+
+def _entity_by_id(items, entity_id):
+    return next((item for item in items if str(item.id) == str(entity_id)), None)
+
+
+def _curve_frame_normals(points):
+    tangents = [_curve_tangent(points, index) for index in range(len(points))]
+    normals = []
+    for tangent in tangents:
+        normal = _frame_normal(tangent, normals[-1] if normals else None)
+        normals.append(normal)
+    return tuple(tuple(normal) for normal in normals)
+
+
+def _curve_tangent(points, index):
+    first = Vector(points[max(0, index - 1)])
+    second = Vector(points[min(len(points) - 1, index + 1)])
+    value = second - first
+    return value.normalized() if value.length > 1.0e-12 else Vector((1.0, 0.0, 0.0))
+
+
+def _frame_normal(tangent, previous):
+    axis = Vector((0.0, 0.0, 1.0)) if abs(tangent.z) < 0.9 else Vector((0.0, 1.0, 0.0))
+    normal = tangent.cross(axis).cross(tangent).normalized()
+    if previous is not None and normal.dot(previous) < 0.0:
+        normal.negate()
+    return normal
+
+
 def capture_sample_bindings(root, scene, tissue, sample):
     runtime = attachment_runtime(scene)
     values = [capture_attachment_from_world(root, scene, tissue.host_scp_id, Vector(point), runtime)

@@ -17,6 +17,7 @@ class VcpImportState:
     compatible_scps: set[str]
     warnings: list[str] = field(default_factory=list)
     fibers: dict[str, str] = field(default_factory=dict)
+    fiber_surfaces: dict[str, str] = field(default_factory=dict)
     muscles: dict[str, str] = field(default_factory=dict)
     blobs: dict[str, str] = field(default_factory=dict)
     soft_tissues: dict[str, str] = field(default_factory=dict)
@@ -112,6 +113,24 @@ def _create_fibers(state):
         _create_one_fiber(state, snap)
 
 
+def _create_one_fiber_surface(state, snap):
+    missing = [source_id for source_id in snap.fiber_ids if str(source_id) not in state.fibers]
+    if missing:
+        return _warn_skip(state, "fiber surface", snap.source_id, missing)
+    dst = _new_vcp_item(state.root.af_vcp_system.fiber_surfaces, "SURFACE")
+    state.fiber_surfaces[str(snap.source_id or "")] = str(dst.id or "")
+    dst.name = str(snap.name or dst.id)
+    apply_scalar_dict(dst, snap.props)
+    for source_id in snap.fiber_ids:
+        dst.fiber_refs.add().fiber_id = state.fibers[str(source_id)]
+    dst.active_fiber_ref_index = 0 if dst.fiber_refs else -1
+
+
+def _create_fiber_surfaces(state):
+    for snap in getattr(state.snapshot, "fiber_surfaces", ()):
+        _create_one_fiber_surface(state, snap)
+
+
 def _missing_fiber_refs(state, snap):
     return [fid for fid in snap.fiber_ids if str(fid or "") not in state.fibers]
 
@@ -134,15 +153,22 @@ def _fiber_by_id(root, fiber_id):
 
 
 def _create_one_muscle(state, snap):
-    missing = _missing_fiber_refs(state, snap)
+    surface_source = str(getattr(snap, "fiber_surface_id", "") or "")
+    missing = _missing_fiber_refs(state, snap) if not surface_source else _missing_surface_ref(state, surface_source)
     if missing:
         return _warn_skip(state, "muscle", snap.source_id, missing)
     dst = _new_vcp_item(state.root.af_vcp_system.muscles, "MUSCLE")
     state.muscles[str(snap.source_id or "")] = str(dst.id or "")
     dst.name = str(snap.name or dst.id)
     apply_scalar_dict(dst, snap.props)
-    _copy_refs(dst, snap, state)
-    _assign_fiber_muscles(state, dst.id, snap)
+    dst.fiber_surface_id = state.fiber_surfaces.get(surface_source, "")
+    if not surface_source:
+        _copy_refs(dst, snap, state)
+        _assign_fiber_muscles(state, dst.id, snap)
+
+
+def _missing_surface_ref(state, source_id):
+    return [] if source_id in state.fiber_surfaces else [source_id]
 
 
 def _create_muscles(state):
@@ -195,16 +221,28 @@ def _stage_tissue_base(state, source_id):
 
 def _create_one_soft_tissue(state, snap):
     missing = _incompatible_scps(state, {snap.host_scp_id}) if snap.host_scp_id else set()
-    base = _stage_tissue_base(state, snap.source_id)
-    if missing or base is None:
-        return _warn_skip(state, "soft tissue", snap.source_id, missing or {"base object"})
+    source_type = str(getattr(snap, "base_source_type", "OBJECT") or "OBJECT")
+    base = _stage_tissue_base(state, snap.source_id) if source_type == "OBJECT" else None
+    source_id = _mapped_soft_source(state, source_type, getattr(snap, "base_source_id", ""))
+    if missing or (source_type == "OBJECT" and base is None) or (source_type != "OBJECT" and not source_id):
+        return _warn_skip(state, "soft tissue", snap.source_id, missing or {"base source"})
     dst = _new_vcp_item(state.root.af_vcp_system.soft_tissues, "TISSUE")
     state.soft_tissues[str(snap.source_id or "")] = str(dst.id or "")
     dst.name = str(snap.name or dst.id)
     apply_scalar_dict(dst, snap.props)
+    dst.base_source_type, dst.base_source_id = source_type, source_id
     dst.host_scp_id, dst.base_object_ref = str(snap.host_scp_id or ""), base
     _copy_soft_attachments(dst, snap)
-    _keep_base(state, base, dst)
+    if base is not None:
+        _keep_base(state, base, dst)
+
+
+def _mapped_soft_source(state, source_type, source_id):
+    if source_type == "FIBER":
+        return state.fibers.get(str(source_id or ""), "")
+    if source_type == "FIBER_SURFACE":
+        return state.fiber_surfaces.get(str(source_id or ""), "")
+    return ""
 
 
 def _copy_soft_attachments(dst, snap):
@@ -229,13 +267,16 @@ def _create_soft_tissues(state):
 
 
 def _result(state):
-    return ImportResult(0, len(state.fibers), len(state.muscles), len(state.blobs),
-                        len(state.soft_tissues), 0, state.warnings, state.kept_objects)
+    return ImportResult(scp_count=0, fiber_count=len(state.fibers), muscle_count=len(state.muscles),
+                        blob_count=len(state.blobs), soft_tissue_count=len(state.soft_tissues),
+                        shortcut_count=0, fiber_surface_count=len(state.fiber_surfaces),
+                        warnings=state.warnings, kept_objects=state.kept_objects)
 
 
 def _dirty_for_imported(state):
     dirty = empty_dirty_hints()
     dirty["FIBER"] = set(state.fibers.values())
+    dirty["FIBER_SURFACE"] = set(state.fiber_surfaces.values())
     dirty["MUSCLE"] = set(state.muscles.values())
     dirty["BLOB"] = set(state.blobs.values())
     dirty["SOFT_TISSUE"] = set(state.soft_tissues.values())
@@ -258,6 +299,7 @@ def apply_vcp_snapshot(snapshot, root, context, stage_root=None):
     state = VcpImportState(root, context.scene, snapshot, _compatible_scp_ids(snapshot, root), stage_root=stage_root)
     with suppress_vcp_prop_updates():
         _create_fibers(state)
+        _create_fiber_surfaces(state)
         _create_muscles(state)
         _create_blobs(state)
         _create_soft_tissues(state)

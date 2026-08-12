@@ -45,7 +45,11 @@ def _draw_identity(layout, tissue):
 def _draw_base(layout, tissue):
     box = layout.box()
     box.label(text="Base")
-    box.prop(tissue, "base_object_ref")
+    box.label(text=f"Source: {str(tissue.base_source_type).replace('_', ' ').title()}")
+    if str(tissue.base_source_type) == "OBJECT":
+        box.prop(tissue, "base_object_ref")
+    else:
+        box.label(text=f"ID: {tissue.base_source_id}")
     box.label(text=f"Domain: {str(tissue.base_domain).title()} (inferred)")
     box.prop(tissue, "base_resolution")
     box.prop(tissue, "host_scp_id")

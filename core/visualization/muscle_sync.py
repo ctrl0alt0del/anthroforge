@@ -1,4 +1,5 @@
 import bpy
+from mathutils import Vector
 
 from ..deps.dirty_hints import dirty_hints_for
 from ..deps.controls import classify_control_object, enqueue_control_intent
@@ -15,6 +16,8 @@ from .muscle_sync_helpers import (
     get_vis_collection,
     find_muscle_proxy,
     find_inflation_ctrl,
+    inflation_ctrl_location_changed,
+    mark_inflation_ctrl_location,
     create_muscle_proxy,
     create_inflation_ctrl,
     ensure_material,
@@ -26,6 +29,7 @@ from .muscle_sync_helpers import (
 )
 from .muscle_inflation_modes import muscle_inflation_behavior, uses_inflation_control
 from .muscle_sync_runtime import collect_muscle_rows, ensure_inflation_ctrl
+from .fiber_surface_sync import evaluate_surface_record
 from .control_runtime import active_entity_id
 from .vcp_object_index import build_vcp_object_index
 
@@ -149,7 +153,7 @@ class MuscleSceneSync:
             return None, None
         return verts, faces_raw
 
-    def _surface_base_points(self, root, scene, muscle, ordered_fibers, missing):
+    def _legacy_surface_base_points(self, root, scene, muscle, ordered_fibers, missing):
         if missing or not ordered_fibers:
             return None
         points = self._collect_points_with_fallback(root, scene, muscle, ordered_fibers)
@@ -159,18 +163,21 @@ class MuscleSceneSync:
             return None
         return prepare_surface_rows(points, int(ordered_fibers[0].node_count), densify_v=True, closed_u=self._closed_u(ordered_fibers))
 
-    def _surface_mesh_data(self, base_points, muscle, closed_u):
-        base_verts, faces_raw = self._build_surface(base_points, muscle.closed_v, closed_u)
+    def _surface_mesh_data(self, base_points, config, closed_u):
+        base_verts, faces_raw = self._build_surface(base_points, self._closed_v(config), closed_u)
         if base_verts is None:
             return None
-        flip = bool(getattr(muscle, "flip_normals", False))
+        flip = bool(getattr(config, "flip_normals", False))
         faces = [(f[0], f[3], f[2], f[1]) for f in faces_raw] if flip else faces_raw
         return base_verts, faces
 
-    def _inflated_surface_verts(self, base_points, muscle, closed_u):
+    def _inflated_surface_verts(self, base_points, muscle, config, closed_u):
         infl_points = self._inflation_behavior(muscle).field.inflate(base_points, muscle)
-        infl_verts, _faces_raw = self._build_surface(infl_points, muscle.closed_v, closed_u)
+        infl_verts, _faces_raw = self._build_surface(infl_points, self._closed_v(config), closed_u)
         return infl_verts
+
+    def _closed_v(self, config):
+        return bool(getattr(config, "close_across_fibers", getattr(config, "closed_v", False)))
 
     def _closed_u(self, fibers):
         return bool(fibers and is_loop_fiber(fibers[0]))
@@ -183,26 +190,44 @@ class MuscleSceneSync:
 
     def _sync_single_muscle(self, vis_col, root, scene, vcp, muscle):
         base_obj, infl_obj = self._ensure_muscle_meshes(vis_col, root, muscle.id)
-        ordered_fibers, missing = self._collect_fiber_props(root, muscle)
-        base_points = self._surface_base_points(root, scene, muscle, ordered_fibers, missing)
-        if base_points is None:
+        surface_input = self._muscle_surface_input(root, scene, muscle)
+        if surface_input is None:
             self._clear_muscle_meshes(vcp, muscle.id, base_obj, infl_obj)
             return
-        self._apply_synced_surface(vis_col, root, scene, vcp, muscle, base_obj, infl_obj, base_points, self._closed_u(ordered_fibers))
+        base_points, closed_u, config = surface_input
+        self._apply_synced_surface(vis_col, root, scene, vcp, muscle, base_obj, infl_obj, base_points, closed_u, config)
 
-    def _apply_synced_surface(self, vis_col, root, scene, vcp, muscle, base_obj, infl_obj, base_points, closed_u):
+    def _muscle_surface_input(self, root, scene, muscle):
+        if str(getattr(muscle, "surface_source_mode", "LEGACY_FIBERS")) == "FIBER_SURFACE":
+            return self._fiber_surface_input(root, scene, muscle)
+        fibers, missing = self._collect_fiber_props(root, muscle)
+        points = self._legacy_surface_base_points(root, scene, muscle, fibers, missing)
+        return None if points is None else (points, self._closed_u(fibers), muscle)
+
+    def _fiber_surface_input(self, root, scene, muscle):
+        surface = next((item for item in root.af_vcp_system.fiber_surfaces if item.id == muscle.fiber_surface_id), None)
+        if surface is None or str(surface.construction_mode) != "LOFT":
+            return None
+        try:
+            result = evaluate_surface_record(root, scene, surface)
+        except Exception:
+            return None
+        rows = [[Vector(point) for point in row] for row in result.rows]
+        return None if not rows else (rows, bool(result.closed_along_fibers), surface)
+
+    def _apply_synced_surface(self, vis_col, root, scene, vcp, muscle, base_obj, infl_obj, base_points, closed_u, config):
         ensure = self._selected_muscle_id(vcp, root, scene) == muscle.id
-        self._apply_muscle_surface(vis_col, root, vcp, muscle, base_obj, infl_obj, base_points, ensure, closed_u)
+        self._apply_muscle_surface(vis_col, root, vcp, muscle, base_obj, infl_obj, base_points, ensure, closed_u, config)
 
-    def _apply_muscle_surface(self, vis_col, root, vcp, muscle, base_obj, infl_obj, base_points, ensure_control, closed_u):
-        surface = self._surface_mesh_data(base_points, muscle, closed_u)
+    def _apply_muscle_surface(self, vis_col, root, vcp, muscle, base_obj, infl_obj, base_points, ensure_control, closed_u, config):
+        surface = self._surface_mesh_data(base_points, config, closed_u)
         if surface is None:
             self._clear_muscle_meshes(vcp, muscle.id, base_obj, infl_obj)
             return
         base_verts, faces_final = surface
         self._update_mesh(base_obj, base_verts, faces_final)
         self._sync_inflation_control(vis_col, root, muscle, base_obj, base_points, ensure_control)
-        infl_verts = self._inflated_surface_verts(base_points, muscle, closed_u)
+        infl_verts = self._inflated_surface_verts(base_points, muscle, config, closed_u)
         self._update_mesh(infl_obj, list(base_verts) if infl_verts is None else infl_verts, faces_final)
         self._set_muscle_active_materials(vcp, muscle.id, base_obj, infl_obj)
 
@@ -312,6 +337,7 @@ class MuscleSceneSync:
     def _set_ctrl_location(self, obj, value):
         try:
             obj.location = value
+            mark_inflation_ctrl_location(obj)
         except ReferenceError:
             return False
         return True
@@ -381,6 +407,8 @@ class MuscleSceneSync:
 
     def _collect_one_depsgraph_update(self, root, vis_col, obj, changed_muscle_ids):
         if not self._is_relevant_inflation_update(root, vis_col, obj):
+            return
+        if not inflation_ctrl_location_changed(obj):
             return
         classified = classify_control_object(obj)
         if not classified or str(classified["control_type"]) != "MUSCLE_INFLATION":

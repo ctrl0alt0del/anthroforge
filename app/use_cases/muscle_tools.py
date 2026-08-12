@@ -12,9 +12,18 @@ def flip_muscle_normals(context, muscle_id=""):
     vcp, muscle, error = _resolved_muscle(root, muscle_id)
     if muscle is None:
         return failure(error)
-    muscle.flip_normals = not muscle.flip_normals
-    _sync_entity(root, context.scene, "MUSCLE", {muscle.id})
+    target, kind = _normal_target(vcp, muscle)
+    target.flip_normals = not target.flip_normals
+    _sync_entity(root, context.scene, kind, {target.id})
     return success(value=muscle)
+
+
+def _normal_target(vcp, muscle):
+    if str(getattr(muscle, "surface_source_mode", "LEGACY_FIBERS")) != "FIBER_SURFACE":
+        return muscle, "MUSCLE"
+    target = str(getattr(muscle, "fiber_surface_id", "") or "")
+    surface = next((item for item in vcp.fiber_surfaces if item.id == target), None)
+    return (surface, "FIBER_SURFACE") if surface is not None else (muscle, "MUSCLE")
 
 
 def select_muscle_inflation_ctrl(context, muscle_id=""):

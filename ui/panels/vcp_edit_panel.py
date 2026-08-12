@@ -21,8 +21,11 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
         row.enabled = False
         row.prop(muscle, "id", text="ID")
         layout.prop(muscle, "name", text="Name")
-        layout.prop(muscle, "closed_v", text="Closed Ring (V)")
-        layout.prop(muscle, "use_mirrored_rows", text="Use Mirrored Rows")
+        if str(getattr(muscle, "surface_source_mode", "LEGACY_FIBERS")) == "LEGACY_FIBERS":
+            layout.prop(muscle, "closed_v", text="Closed Ring (V)")
+            layout.prop(muscle, "use_mirrored_rows", text="Use Mirrored Rows")
+        else:
+            layout.label(text=f"Fiber Surface: {muscle.fiber_surface_id}")
 
     def _draw_inflation(self, layout, muscle):
         infl = layout.box()
@@ -40,6 +43,9 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
     def _draw_actions(self, layout, infl, muscle):
         op = layout.operator("af.flip_muscle_normals", icon="ARROW_LEFTRIGHT")
         op.muscle_id = muscle.id
+        if str(getattr(muscle, "surface_source_mode", "LEGACY_FIBERS")) == "LEGACY_FIBERS":
+            convert = layout.operator("af.convert_muscle_to_fiber_surface", icon="MESH_GRID")
+            convert.muscle_id = muscle.id
         if muscle_inflation_mode(muscle) != CTRL_POINT_MODE:
             return
         info = infl.column()

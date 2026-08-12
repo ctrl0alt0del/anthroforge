@@ -214,7 +214,9 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         register_muscle_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
         muscle = root_obj.af_vcp_system.muscles[0]
         base = find_flagged("af_muscle_proxy", muscle.id, "af_muscle_id")
-        self.assertEqual((len(muscle.fiber_refs), base is not None), (2, True))
+        surface = root_obj.af_vcp_system.fiber_surfaces[0]
+        self.assertEqual((muscle.fiber_surface_id, len(surface.fiber_refs), base is not None),
+                         (surface.id, 2, True))
 
     def test_muscle_rows_use_cached_fiber_points(self):
         root_obj, first, second = _muscle_setup()
@@ -259,8 +261,9 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         xs = [(base.matrix_world @ vert.co).x for vert in base.data.vertices]
         sync_vcp_mirrors(root=root_obj, scene=bpy.context.scene, target_muscle_ids={muscle.id})
         mirror = next((obj for obj in bpy.context.scene.objects if obj.get("af_muscle_mirror_proxy") and obj.get("af_source_muscle_id") == muscle.id), None)
-        self.assertEqual([ref.fiber_id for ref in muscle.fiber_refs], [root_obj.af_vcp_system.fibers[0].id])
-        self.assertTrue(muscle.use_mirrored_rows)
+        surface = root_obj.af_vcp_system.fiber_surfaces[0]
+        self.assertEqual([ref.fiber_id for ref in surface.fiber_refs], [root_obj.af_vcp_system.fibers[0].id])
+        self.assertTrue(surface.use_mirrored_rows)
         self.assertGreater(len(base.data.vertices), 0)
         self.assertLess(min(xs), -1.0e-6)
         self.assertGreater(max(xs), 1.0e-6)
@@ -299,21 +302,21 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         ctrl = find_flagged("af_muscle_inflation_ctrl", muscle.id, "af_muscle_id")
         ctrl = ctrl or sync._create_inflation_ctrl(sync._get_vis_collection(bpy.context.scene), root_obj, muscle.id)
         select_only(ctrl)
-        self.assertTrue(muscle.flip_normals)
+        self.assertTrue(root_obj.af_vcp_system.fiber_surfaces[0].flip_normals)
         self.assertEqual(bpy.context.active_object.get("af_muscle_id"), muscle.id)
 
-    def test_reassigning_fiber_detaches_it_from_older_muscle(self):
+    def test_fiber_can_feed_multiple_muscle_surfaces(self):
         root_obj, proxies = _three_fiber_setup()
         select_only(proxies[0])
         proxies[1].select_set(True)
         bpy.ops.af.add_muscle_vcp()
-        first_muscle = root_obj.af_vcp_system.muscles[0]
         select_only(proxies[1])
         proxies[2].select_set(True)
         bpy.ops.af.add_muscle_vcp()
-        second_muscle = root_obj.af_vcp_system.muscles[1]
-        self.assertEqual([ref.fiber_id for ref in first_muscle.fiber_refs], [root_obj.af_vcp_system.fibers[0].id])
-        self.assertEqual({ref.fiber_id for ref in second_muscle.fiber_refs}, {root_obj.af_vcp_system.fibers[1].id, root_obj.af_vcp_system.fibers[2].id})
+        first, second = root_obj.af_vcp_system.fiber_surfaces[:2]
+        self.assertEqual({ref.fiber_id for ref in first.fiber_refs}, {fiber.id for fiber in root_obj.af_vcp_system.fibers[:2]})
+        self.assertEqual({ref.fiber_id for ref in second.fiber_refs}, {fiber.id for fiber in root_obj.af_vcp_system.fibers[1:3]})
+        self.assertTrue(all(not fiber.muscle_id for fiber in root_obj.af_vcp_system.fibers))
 
     def test_add_muscle_uses_tracked_selection_order(self):
         root_obj, proxies = _three_fiber_setup()
@@ -322,7 +325,7 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         proxies[0].select_set(True)
         proxies[1].select_set(True)
         bpy.ops.af.add_muscle_vcp()
-        refs = [ref.fiber_id for ref in root_obj.af_vcp_system.muscles[0].fiber_refs]
+        refs = [ref.fiber_id for ref in root_obj.af_vcp_system.fiber_surfaces[0].fiber_refs]
         want = [fiber.id for fiber in root_obj.af_vcp_system.fibers[:3]]
         self.assertEqual(refs, want)
 
@@ -331,7 +334,7 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         select_only(first)
         second.select_set(True)
         bpy.ops.af.add_muscle_vcp()
-        root_obj.af_vcp_system.muscles[0].fiber_refs[0].fiber_id = "MISSING"
+        root_obj.af_vcp_system.fiber_surfaces[0].fiber_refs[0].fiber_id = "MISSING"
         sync = register_muscle_sync()
         sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
         base = find_flagged("af_muscle_proxy", root_obj.af_vcp_system.muscles[0].id, "af_muscle_id")
@@ -344,7 +347,7 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         sync = register_muscle_sync()
         sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
         before = len(_surface_obj(root_obj, muscle, "BASE").data.vertices)
-        muscle.use_mirrored_rows = True
+        root_obj.af_vcp_system.fiber_surfaces[0].use_mirrored_rows = True
         sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
         base = _surface_obj(root_obj, muscle, "BASE")
         xs = [(base.matrix_world @ vert.co).x for vert in base.data.vertices]

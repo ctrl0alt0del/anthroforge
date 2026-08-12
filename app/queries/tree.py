@@ -13,6 +13,7 @@ except ImportError:
 class TreeSelection:
     scp_ids: frozenset = field(default_factory=frozenset)
     fiber_ids: frozenset = field(default_factory=frozenset)
+    fiber_surface_ids: frozenset = field(default_factory=frozenset)
     muscle_ids: frozenset = field(default_factory=frozenset)
     blob_ids: frozenset = field(default_factory=frozenset)
     soft_tissue_ids: frozenset = field(default_factory=frozenset)
@@ -57,6 +58,13 @@ def selected_vcp_ids(context, root):
     return fibers, muscles, blobs
 
 
+def selected_fiber_surface_ids(context, root):
+    surfaces = set()
+    for obj in _selected_objects(context):
+        _collect_selected_id(obj, root, "af_fiber_surface_proxy", "af_fiber_surface_id", surfaces)
+    return surfaces
+
+
 def _tree_selection(context, root):
     fibers, muscles, blobs = selected_vcp_ids(context, root)
     soft = set()
@@ -67,6 +75,7 @@ def _tree_selection(context, root):
     return TreeSelection(
         scp_ids=frozenset(selected_scp_ids(context, root)),
         fiber_ids=frozenset(fibers),
+        fiber_surface_ids=frozenset(selected_fiber_surface_ids(context, root)),
         muscle_ids=frozenset(muscles),
         blob_ids=frozenset(blobs),
         soft_tissue_ids=frozenset(soft),

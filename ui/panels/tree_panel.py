@@ -5,14 +5,14 @@ from ..sections.tree_section import draw_tree_section
 from ..sections.vcp_tree_section import draw_vcp_tree_section
 
 
-def _draw_vcp_box(box, scene, root, selected_fibers, selected_muscles, selected_blobs, selected_tissues):
+def _draw_vcp_box(box, scene, root, selected_fibers, selected_surfaces, selected_muscles, selected_blobs, selected_tissues):
     _ = scene
     box.separator()
     box.label(text="VCPs")
     row = box.row(align=True)
     row.operator("af.add_muscle_vcp", icon="MESH_UVSPHERE")
     row.operator("af.add_soft_tissue_vcp", icon="MOD_CLOTH")
-    draw_vcp_tree_section(box, scene, root, selected_fibers, selected_muscles, selected_blobs, selected_tissues)
+    draw_vcp_tree_section(box, scene, root, selected_fibers, selected_surfaces, selected_muscles, selected_blobs, selected_tissues)
 
 
 class AF_PT_TreePanel(bpy.types.Panel):
@@ -33,5 +33,5 @@ class AF_PT_TreePanel(bpy.types.Panel):
         box.label(text="SCPs")
         draw_tree_section(box, state.scene, state.root, state.active_scp_id, state.isolated_scp_id, state.selection.scp_ids)
         selected = state.selection
-        _draw_vcp_box(box, state.scene, state.root, selected.fiber_ids, selected.muscle_ids,
+        _draw_vcp_box(box, state.scene, state.root, selected.fiber_ids, selected.fiber_surface_ids, selected.muscle_ids,
                       selected.blob_ids, selected.soft_tissue_ids)

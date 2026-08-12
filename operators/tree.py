@@ -234,6 +234,7 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
         items=(
             ("MUSCLE", "Muscle", ""),
             ("FIBER", "Fiber", ""),
+            ("FIBER_SURFACE", "Fiber Surface", ""),
             ("BLOB", "Blob", ""),
             ("SOFT_TISSUE", "Soft Tissue", ""),
         )
@@ -249,6 +250,8 @@ class AF_OT_SelectVCPInTree(bpy.types.Operator):
             return obj.get("af_fiber_proxy") and obj.get("af_root_name") == root_name and obj.get("af_fiber_id") == self.node_id
         if self.node_type == "MUSCLE":
             return obj.get("af_muscle_proxy") and obj.get("af_root_name") == root_name and obj.get("af_muscle_id") == self.node_id
+        if self.node_type == "FIBER_SURFACE":
+            return obj.get("af_fiber_surface_proxy") and obj.get("af_root_name") == root_name and obj.get("af_fiber_surface_id") == self.node_id
         if self.node_type == "BLOB":
             return obj.get("af_blob_proxy") and obj.get("af_root_name") == root_name and obj.get("af_blob_id") == self.node_id
         if self.node_type == "SOFT_TISSUE":
@@ -294,6 +297,7 @@ class AF_OT_DeleteVCPInTree(bpy.types.Operator):
 
     node_id: bpy.props.StringProperty()
     node_type: bpy.props.EnumProperty(items=(("MUSCLE", "Muscle", ""), ("FIBER", "Fiber", ""),
+                                            ("FIBER_SURFACE", "Fiber Surface", ""),
                                             ("SOFT_TISSUE", "Soft Tissue", "")))
 
     def execute(self, context):

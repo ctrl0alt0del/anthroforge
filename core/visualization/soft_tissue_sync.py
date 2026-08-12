@@ -13,7 +13,7 @@ from ..vcp.runtime_state import set_soft_tissue_diagnostic, set_soft_tissue_stat
 from ..vcp.soft_tissue_model import construction_mode_for_domain
 from .blob_sync_helpers import get_vis_collection, remove_proxy, update_mesh_from_world
 from .soft_tissue_build import build_rest_shape, capture_attachment_payload, relax_shape, resolve_attachment_anchors
-from .soft_tissue_source import apply_control_bindings, capture_control_bindings, capture_sample_bindings, host_object, host_signature, infer_base_domain, resolve_sample_bindings, sample_base, validate_source
+from .soft_tissue_source import apply_control_bindings, capture_control_bindings, capture_sample_bindings, host_object, host_signature, infer_base_domain, resolve_sample_bindings, sample_base, sample_entity_base, validate_entity_source
 
 
 class SoftTissueSceneSync:
@@ -69,8 +69,7 @@ def _sync_one(root, scene, collection, tissue, recapture, force):
 
 
 def _normalize_construction(tissue):
-    source = tissue.base_object_ref
-    domain = infer_base_domain(source) or str(tissue.base_domain)
+    domain = _source_domain(tissue)
     expected = construction_mode_for_domain(domain).value
     with suppress_vcp_prop_updates():
         tissue.base_domain, tissue.inflation_mode = domain, expected
@@ -79,18 +78,32 @@ def _normalize_construction(tissue):
             tissue.boundary_mode = "CLOSED"
 
 
+def _source_domain(tissue):
+    source_type = str(getattr(tissue, "base_source_type", "OBJECT") or "OBJECT")
+    if source_type == "FIBER":
+        return "CURVE"
+    if source_type == "FIBER_SURFACE":
+        return "SURFACE"
+    return infer_base_domain(tissue.base_object_ref) or str(tissue.base_domain)
+
+
 def _evaluate_tissue(root, scene, tissue, recapture):
-    source = tissue.base_object_ref
-    errors = validate_source(source, tissue.base_domain)
+    errors = validate_entity_source(root, tissue)
     errors += _construction_errors(tissue)
     if errors:
         raise ValueError(" ".join(errors))
     target = host_object(root, scene, tissue)
     resolved = _prepare_host_bindings(root, scene, tissue, target, recapture)
-    sample = sample_base(source, tissue, resolved, scene)
+    sample = _sample_tissue_base(root, scene, tissue, resolved)
     rest = build_rest_shape(tissue, sample)
     anchors = _prepare_attachments(root, scene, tissue, rest, recapture)
     return rest, relax_shape(tissue, rest, target, anchors)
+
+
+def _sample_tissue_base(root, scene, tissue, resolved):
+    if str(getattr(tissue, "base_source_type", "OBJECT")) != "OBJECT":
+        return sample_entity_base(root, scene, tissue)
+    return sample_base(tissue.base_object_ref, tissue, resolved, scene)
 
 
 def _construction_errors(tissue):
@@ -104,6 +117,8 @@ def _construction_errors(tissue):
 
 
 def _prepare_host_bindings(root, scene, tissue, target, recapture):
+    if str(getattr(tissue, "base_source_type", "OBJECT")) != "OBJECT":
+        return None
     if not str(tissue.host_scp_id or ""):
         return None
     if target is None:
@@ -200,6 +215,8 @@ def _remove_stale_proxies(collection, root_name, live):
 
 def _tag_base(root, tissue):
     obj = tissue.base_object_ref
+    if obj is None or str(getattr(tissue, "base_source_type", "OBJECT")) != "OBJECT":
+        return
     obj["af_soft_tissue_base"] = True
     obj["af_soft_tissue_id"] = str(tissue.id)
     obj["af_root_name"] = str(root.name)

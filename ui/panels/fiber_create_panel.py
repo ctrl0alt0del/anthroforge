@@ -58,3 +58,4 @@ class AF_PT_FiberCreatePanel(bpy.types.Panel):
         _draw_proxy_box(self.layout, context)
         _draw_loop_box(self.layout, context)
         _draw_symmetric_loop_box(self.layout, context)
+        self.layout.operator("af.create_fiber_surface", icon="MESH_GRID")

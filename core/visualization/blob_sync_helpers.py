@@ -123,10 +123,11 @@ def _find_scp_target(scene, root_name, scp_id):
 def target_object_for_blob(scene, root, blob_prop):
     t = blob_prop.attach_target_type
     if t == "MUSCLE" and blob_prop.attach_target_id:
-        infl = _find_muscle_surface(scene, root.name, blob_prop.attach_target_id, "INFL")
+        from .muscle_sync_helpers import resolve_muscle_surface
+        infl = resolve_muscle_surface(root, blob_prop.attach_target_id, "INFL", scene)
         if infl is not None:
             return infl
-        return _find_muscle_surface(scene, root.name, blob_prop.attach_target_id, "BASE")
+        return resolve_muscle_surface(root, blob_prop.attach_target_id, "BASE", scene)
     if t == "SCP" and blob_prop.attach_target_id:
         return _find_scp_target(scene, root.name, blob_prop.attach_target_id)
     if t == "OBJECT" and blob_prop.attach_target_object_name:

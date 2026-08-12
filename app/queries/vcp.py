@@ -31,6 +31,10 @@ def active_muscle_from_context(context):
     return _active_vcp_item(context, "muscles")
 
 
+def active_fiber_surface_from_context(context):
+    return _active_vcp_item(context, "fiber_surfaces")
+
+
 def active_blob_from_context(context):
     return _active_vcp_item(context, "blobs")
 

@@ -17,6 +17,12 @@ def create_muscle_vcp(context, name="", closed_v=False, use_mirrored_rows=False)
     root = root_for_context(context)
     if root is None:
         return failure("No AF_ROOT found.")
+    if hasattr(root.af_vcp_system, "fiber_surfaces"):
+        return _create_surface_muscle(context, name, closed_v, use_mirrored_rows)
+    return _create_legacy_muscle(context, root, name, closed_v, use_mirrored_rows)
+
+
+def _create_legacy_muscle(context, root, name, closed_v, use_mirrored_rows):
     payload = _creation_payload(context, root)
     if payload is None:
         return failure("Select at least 2 fiber proxies in viewport (Shift-select).")
@@ -28,6 +34,14 @@ def create_muscle_vcp(context, name="", closed_v=False, use_mirrored_rows=False)
     _activate(root.af_vcp_system, "MUSCLE", muscle.id)
     _sync_and_select_ctrl(context, root, muscle.id)
     return success(f"Created {muscle.id} from {len(fiber_ids)} fibers", value=muscle)
+
+
+def _create_surface_muscle(context, name, closed_v, use_mirrored_rows):
+    from .fiber_surface_create import create_fiber_surface, create_muscle_from_fiber_surface
+    surface_result = create_fiber_surface(context, name, closed_v, use_mirrored_rows)
+    if not surface_result.ok:
+        return surface_result
+    return create_muscle_from_fiber_surface(context, surface_result.value.id, name)
 
 
 def _creation_payload(context, root):

@@ -16,8 +16,8 @@ Evaluation is selected by the base domain, never by anatomy or preset name.
 | Domain | Source | Construction |
 | --- | --- | --- |
 | `POINT` | Empty | Legacy-compatible radial sphere/ellipsoid |
-| `CURVE` | One Poly, Bézier, or NURBS spline | Closed profile sweep; open and cyclic splines |
-| `SURFACE` | One connected manifold Mesh | Painted/boundary-weighted normal inflation and backing shell |
+| `CURVE` | One Curve spline or one Fiber | Closed profile sweep; open and cyclic sources |
+| `SURFACE` | One connected manifold Mesh or Fiber Surface | Painted/boundary-weighted normal inflation and backing shell |
 
 `CLOSED_BULK`, `RIM`, `LAYER`, and `POUCH` assign defaults only. `CUSTOM`
 exposes the same compatible fields without an anatomical evaluator branch.
@@ -83,9 +83,34 @@ enters `ERROR` until explicit Rebind. Missing base or host objects behave the
 same way. A guarded host-driven base rewrite is not treated as an artist edit;
 an artist edit schedules one coalesced recapture.
 
+## Fiber Surface sources
+
+Fiber Surface is a persistent construction entity between Fiber and its tissue
+consumers. `LOFT` evaluates two or more compatible OPEN Fibers or two or more
+compatible LOOP Fibers; one mirrorable OPEN Fiber may expand into mirrored rows.
+`LOOP_PATCH` fills one literal LOOP Fiber using deterministic best-fit-plane
+projection, constrained triangulation, subdivision, and fixed-boundary fairing.
+
+Fiber Surface owns row order, cross-row closure, mirrored-row expansion, normal
+orientation, and patch resolution. It owns no inflation, tissue material, or SCP
+attachment. Its locked Mesh proxy is a derived cache and is never persisted as a
+source object reference.
+
+New Muscles store only `fiber_surface_id` and inflation controls. Legacy Muscles
+remain readable through `LEGACY_FIBERS`; manual conversion commits only after
+topology, winding, and world geometry match within `2e-6`. A Fiber or Fiber
+Surface can feed multiple Muscles and Soft Tissues without ownership transfer.
+Deleting a referenced source is blocked until its consumers are removed.
+
+Soft Tissue records use `OBJECT`, `FIBER`, or `FIBER_SURFACE` source identity.
+Derived sources are sampled from evaluated geometry and are never rewritten by
+the SCP recapture path.
+
 ## Runtime and integration
 
-The dependency graph contains `SCP → SOFT_TISSUE`. Property/base edits schedule
+The dependency graph contains `SCP → Fiber → Fiber Surface → Muscle`,
+`Fiber → Soft Tissue`, and `Fiber Surface → Soft Tissue` paths in addition to
+object-based `SCP → Soft Tissue`. Property/base edits schedule
 coalesced `SOFT_TISSUE_UPDATE` work on Blender's main thread. Manual mode remains
 `DIRTY` until Recompute. Final proxies are transform-locked caches; deleting one
 causes recreation on sync. Explicit VCP deletion removes both caches and an

@@ -12,6 +12,7 @@ from .model import (
     BoundObjectSnapshot,
     FiberLoopAnchorSnapshot,
     FiberSnapshot,
+    FiberSurfaceSnapshot,
     FiberTouchSnapshot,
     MuscleSnapshot,
     PackageSnapshot,
@@ -26,9 +27,10 @@ from .rna import scalar_dict
 _FULL_OBJECT_RE = re.compile(r"^bpy\.data\.objects\[(['\"])(.+?)\1\](.+)$")
 _SCP_SKIP = {"id", "name", "parent_id", "bound_objects", "transform_object_ref", "geometry_object_ref"}
 _FIBER_SKIP = {"id", "name", "a_parent_id", "b_parent_id", "mid_touches", "loop_anchors", "muscle_id", "not_converged", "last_recompute_ms", "last_recompute_status", "last_eps_disp", "last_eps_pen"}
-_MUSCLE_SKIP = {"id", "name", "fiber_refs"}
+_MUSCLE_SKIP = {"id", "name", "fiber_refs", "fiber_surface_id"}
+_FIBER_SURFACE_SKIP = {"id", "name", "fiber_refs", "active_fiber_ref_index"}
 _BLOB_SKIP = {"id", "name", "attach_target_type", "attach_target_id", "attach_target_object_name", "last_solve_converged", "last_solve_max_disp", "last_solve_iterations"}
-_SOFT_SKIP = {"id", "name", "base_object_ref", "host_scp_id", "attachments", "active_attachment_index"}
+_SOFT_SKIP = {"id", "name", "base_object_ref", "host_scp_id", "base_source_type", "base_source_id", "attachments", "active_attachment_index"}
 
 
 def _bound_objects(scp):
@@ -110,7 +112,14 @@ def _fiber_snapshot(fiber):
 
 def _muscle_snapshot(muscle):
     ids = [str(ref.fiber_id or "") for ref in muscle.fiber_refs if str(ref.fiber_id or "")]
-    return MuscleSnapshot(str(muscle.id or ""), str(muscle.name or ""), scalar_dict(muscle, _MUSCLE_SKIP), ids)
+    return MuscleSnapshot(str(muscle.id or ""), str(muscle.name or ""), scalar_dict(muscle, _MUSCLE_SKIP), ids,
+                          str(getattr(muscle, "fiber_surface_id", "") or ""))
+
+
+def _fiber_surface_snapshot(surface):
+    ids = [str(ref.fiber_id or "") for ref in surface.fiber_refs if str(ref.fiber_id or "")]
+    return FiberSurfaceSnapshot(str(surface.id or ""), str(surface.name or ""),
+                                scalar_dict(surface, _FIBER_SURFACE_SKIP), ids)
 
 
 def _blob_snapshot(root, blob):
@@ -121,7 +130,9 @@ def _soft_tissue_snapshot(tissue):
     base = getattr(tissue, "base_object_ref", None)
     rows = [SoftTissueAttachmentSnapshot(scalar_dict(row)) for row in tissue.attachments]
     return SoftTissueSnapshot(str(tissue.id or ""), str(tissue.name or ""), scalar_dict(tissue, _SOFT_SKIP),
-                              str(tissue.host_scp_id or ""), "" if base is None else str(base.name), rows)
+                              str(tissue.host_scp_id or ""), "" if base is None else str(base.name),
+                              str(getattr(tissue, "base_source_type", "OBJECT")),
+                              str(getattr(tissue, "base_source_id", "") or ""), rows)
 
 
 def _shortcut_snapshot(root, shortcut):
@@ -140,6 +151,7 @@ def root_snapshot(root):
         topology_settings=scalar_dict(root.af_topology_settings),
         scps=[_scp_snapshot(scp) for scp in root.af_scp_system.scps],
         fibers=[_fiber_snapshot(fiber) for fiber in vcp.fibers],
+        fiber_surfaces=[_fiber_surface_snapshot(surface) for surface in getattr(vcp, "fiber_surfaces", ())],
         muscles=[_muscle_snapshot(muscle) for muscle in vcp.muscles],
         blobs=[_blob_snapshot(root, blob) for blob in vcp.blobs],
         soft_tissues=[_soft_tissue_snapshot(tissue) for tissue in vcp.soft_tissues],

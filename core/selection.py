@@ -3,6 +3,7 @@ from .scp_runtime.common import find_primary_scp_obj, is_bound_scp_obj
 
 _PROXY_CHECKS = (
     ("af_fiber_proxy", "af_fiber_id", "FIBER"),
+    ("af_fiber_surface_proxy", "af_fiber_surface_id", "FIBER_SURFACE"),
     ("af_muscle_proxy", "af_muscle_id", "MUSCLE"),
     ("af_blob_proxy", "af_blob_id", "BLOB"),
     ("af_soft_tissue_proxy", "af_soft_tissue_id", "SOFT_TISSUE"),
@@ -36,7 +37,7 @@ def _active_scp_from_tree(root):
 
 def _active_vcp_from_tree(root):
     v = root.af_vcp_system
-    if v.active_vcp_type in {"FIBER", "MUSCLE", "BLOB", "SOFT_TISSUE"} and v.active_vcp_id:
+    if v.active_vcp_type in {"FIBER", "FIBER_SURFACE", "MUSCLE", "BLOB", "SOFT_TISSUE"} and v.active_vcp_id:
         return v.active_vcp_type, v.active_vcp_id
     return None
 

@@ -10,15 +10,15 @@ from ...core.visualization.soft_tissue_source import infer_base_domain, validate
 
 
 def create_soft_tissue_vcp(context):
-    root, preset, source, domain, host = _creation_inputs(context)
-    error = "No AF_ROOT found." if root is None else _preflight_source(root, source, domain, preset)
+    root, preset, source, domain, host, source_type, source_id = _creation_inputs(context)
+    error = "No AF_ROOT found." if root is None else _preflight_source(root, source, domain, preset, source_type, source_id)
     if error:
         return failure(error)
     error = _preflight_host(host, preset)
     if error:
         return failure(error)
-    source, owned = _ensure_source(context, source, preset)
-    tissue = _create_record(root, source, owned, host, preset)
+    source, owned = _ensure_source(context, source, preset) if source_type == "OBJECT" else (None, False)
+    tissue = _create_record(root, source, owned, host, preset, source_type, source_id, domain)
     _ensure_surface_field(source, tissue.field_attribute)
     _activate(root, tissue)
     _sync_tissue(root, context.scene, tissue.id, True)
@@ -28,10 +28,22 @@ def create_soft_tissue_vcp(context):
 def _creation_inputs(context):
     root = root_for_context(context)
     preset = str(context.scene.af_new_soft_tissue_preset)
-    source = getattr(context.scene, "af_new_soft_tissue_base_obj", None)
-    domain = "POINT" if source is None and preset == "CLOSED_BULK" else infer_base_domain(source)
+    source_type, source_id, domain = _selected_entity_source(context, root)
+    source = getattr(context.scene, "af_new_soft_tissue_base_obj", None) if source_type == "OBJECT" else None
+    domain = domain or ("POINT" if source is None and preset == "CLOSED_BULK" else infer_base_domain(source))
     host = getattr(context.scene, "af_new_soft_tissue_host_obj", None)
-    return root, preset, source, domain, host
+    return root, preset, source, domain, host, source_type, source_id
+
+
+def _selected_entity_source(context, root):
+    obj = getattr(context, "active_object", None)
+    if root is None or obj is None or obj.get("af_root_name") != root.name:
+        return "OBJECT", "", ""
+    if obj.get("af_fiber_surface_proxy"):
+        return "FIBER_SURFACE", str(obj.get("af_fiber_surface_id") or ""), "SURFACE"
+    if obj.get("af_fiber_proxy"):
+        return "FIBER", str(obj.get("af_fiber_id") or ""), "CURVE"
+    return "OBJECT", "", ""
 
 
 def apply_soft_tissue_preset(context, preset, tissue=None):
@@ -49,7 +61,9 @@ def apply_soft_tissue_preset(context, preset, tissue=None):
     return success(f"Applied {preset} preset.", value=tissue)
 
 
-def _preflight_source(root, source, domain, preset):
+def _preflight_source(root, source, domain, preset, source_type="OBJECT", source_id=""):
+    if source_type != "OBJECT":
+        return _preflight_entity_source(root, source_type, source_id, domain, preset)
     if source is None and preset != "CLOSED_BULK":
         return "Select an Empty, Curve, or Mesh base object."
     if source is None:
@@ -60,6 +74,15 @@ def _preflight_source(root, source, domain, preset):
     owned = any(getattr(item, "base_object_ref", None) == source for item in root.af_vcp_system.soft_tissues)
     if source.get("af_soft_tissue_id") or owned:
         return "The selected base already belongs to a Soft Tissue VCP."
+    required = preset_values(preset).domain.value
+    return "" if preset == "CUSTOM" or domain == required else f"{preset} requires a {required.title()} base."
+
+
+def _preflight_entity_source(root, source_type, source_id, domain, preset):
+    collection = "fibers" if source_type == "FIBER" else "fiber_surfaces"
+    found = any(str(item.id) == str(source_id) for item in getattr(root.af_vcp_system, collection, ()))
+    if not found:
+        return f"Selected {source_type.replace('_', ' ').title()} is missing."
     required = preset_values(preset).domain.value
     return "" if preset == "CUSTOM" or domain == required else f"{preset} requires a {required.title()} base."
 
@@ -83,15 +106,16 @@ def _ensure_source(context, source, preset):
     return source, True
 
 
-def _create_record(root, source, owned, host, preset):
+def _create_record(root, source, owned, host, preset, source_type="OBJECT", source_id="", domain=""):
     tissues = root.af_vcp_system.soft_tissues
     tissue = tissues.add()
     with suppress_vcp_prop_updates():
         tissue.id = next_prefixed_id(tissues, "TISSUE")
         tissue.name = tissue.id
+        tissue.base_source_type, tissue.base_source_id = str(source_type), str(source_id)
         tissue.base_object_ref = source
         tissue.base_owned = bool(owned)
-        tissue.base_domain = infer_base_domain(source)
+        tissue.base_domain = str(domain or infer_base_domain(source))
         tissue.host_scp_id = "" if host is None else str(host.get("af_scp_id", ""))
         _assign_preset(tissue, preset, preset_values(preset))
         if preset == "CUSTOM":

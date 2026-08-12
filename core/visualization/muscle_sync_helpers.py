@@ -36,6 +36,12 @@ def find_muscle_proxy(vis_col, root_name, muscle_id, surface_type="BASE", index=
     return None
 
 
+def resolve_muscle_surface(root, muscle_id, surface_role, scene=None):
+    scene = scene or scene_for_id(root)
+    collection = None if scene is None else get_vis_collection(scene, "AF_VCP_VIS")
+    return None if collection is None else find_muscle_proxy(collection, root.name, muscle_id, surface_role)
+
+
 def find_inflation_ctrl(vis_col, root_name, muscle_id, index=None):
     indexed = _indexed(index, "inflation", str(muscle_id or ""))
     if indexed is not None:
@@ -97,6 +103,18 @@ def mark_inflation_ctrl(obj, root, muscle_id, apply_visual_defaults=False):
     obj["af_root_name"] = root.name
     obj["af_muscle_id"] = muscle_id
     return obj
+
+
+def mark_inflation_ctrl_location(obj):
+    if obj is not None:
+        obj["af_muscle_ctrl_sync_location"] = [float(value) for value in obj.location]
+
+
+def inflation_ctrl_location_changed(obj, epsilon=1.0e-7):
+    stored = None if obj is None else obj.get("af_muscle_ctrl_sync_location")
+    if stored is None or len(stored) != 3:
+        return True
+    return any(abs(float(obj.location[i]) - float(stored[i])) > epsilon for i in range(3))
 
 
 def ensure_material(obj, active=False):

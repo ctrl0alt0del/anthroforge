@@ -64,21 +64,59 @@ def _add_fiber_entities(root, graph, entity_sets):
 def _add_muscle_entities(root, graph, entity_sets):
     if not hasattr(root, "af_vcp_system"):
         return
-    for m in root.af_vcp_system.muscles:
-        mid = m.id
-        entity_sets["MUSCLE"].add(mid)
-        mp_in = graph.add_port(PortRef("MUSCLE", mid, "input", PHASE_INPUT, MUT_INPUT))
-        mp_local = graph.add_port(PortRef("MUSCLE", mid, "local_eval", PHASE_LOCAL_EVAL, MUT_DERIVED))
-        mp_probe = graph.add_port(PortRef("MUSCLE", mid, "probe", PHASE_PROBES, MUT_PROBE))
-        graph.add_edge(Edge(mp_in, mp_local, EDGE_EVAL))
-        graph.add_edge(Edge(mp_local, mp_probe, EDGE_EVAL))
+    for muscle in root.af_vcp_system.muscles:
+        _add_one_muscle(graph, entity_sets, muscle)
 
-        for ref in m.fiber_refs:
-            if not ref.fiber_id:
-                continue
-            fp = graph.add_port(PortRef("FIBER", ref.fiber_id, "probe", PHASE_PROBES, MUT_PROBE))
-            graph.add_edge(Edge(fp, mp_local, EDGE_EVAL))
-            _add_dependency_edge(graph, ("FIBER", ref.fiber_id), ("MUSCLE", mid))
+
+def _add_one_muscle(graph, entity_sets, muscle):
+    entity_sets["MUSCLE"].add(muscle.id)
+    source = graph.add_port(PortRef("MUSCLE", muscle.id, "input", PHASE_INPUT, MUT_INPUT))
+    evaluated = graph.add_port(PortRef("MUSCLE", muscle.id, "local_eval", PHASE_LOCAL_EVAL, MUT_DERIVED))
+    probe = graph.add_port(PortRef("MUSCLE", muscle.id, "probe", PHASE_PROBES, MUT_PROBE))
+    graph.add_edge(Edge(source, evaluated, EDGE_EVAL))
+    graph.add_edge(Edge(evaluated, probe, EDGE_EVAL))
+    if not _add_muscle_surface_source(graph, muscle, evaluated):
+        _add_legacy_muscle_edges(graph, muscle, evaluated)
+
+
+def _add_legacy_muscle_edges(graph, muscle, target_port):
+    for ref in muscle.fiber_refs:
+        if not ref.fiber_id:
+            continue
+        probe = graph.add_port(PortRef("FIBER", ref.fiber_id, "probe", PHASE_PROBES, MUT_PROBE))
+        graph.add_edge(Edge(probe, target_port, EDGE_EVAL))
+        _add_dependency_edge(graph, ("FIBER", ref.fiber_id), ("MUSCLE", str(muscle.id)))
+
+
+def _add_muscle_surface_source(graph, muscle, target_port):
+    source_id = str(getattr(muscle, "fiber_surface_id", "") or "")
+    if str(getattr(muscle, "surface_source_mode", "LEGACY_FIBERS")) != "FIBER_SURFACE" or not source_id:
+        return False
+    probe = graph.add_port(PortRef("FIBER_SURFACE", source_id, "probe", PHASE_PROBES, MUT_PROBE))
+    graph.add_edge(Edge(probe, target_port, EDGE_EVAL))
+    _add_dependency_edge(graph, ("FIBER_SURFACE", source_id), ("MUSCLE", str(muscle.id)))
+    return True
+
+
+def _add_fiber_surface_entities(root, graph, entity_sets):
+    for surface in getattr(root.af_vcp_system, "fiber_surfaces", ()):
+        sid = str(surface.id)
+        entity_sets["FIBER_SURFACE"].add(sid)
+        source = graph.add_port(PortRef("FIBER_SURFACE", sid, "input", PHASE_INPUT, MUT_INPUT))
+        evaluated = graph.add_port(PortRef("FIBER_SURFACE", sid, "local_eval", PHASE_LOCAL_EVAL, MUT_DERIVED))
+        probe = graph.add_port(PortRef("FIBER_SURFACE", sid, "probe", PHASE_PROBES, MUT_PROBE))
+        graph.add_edge(Edge(source, evaluated, EDGE_EVAL))
+        graph.add_edge(Edge(evaluated, probe, EDGE_EVAL))
+        _add_surface_fiber_edges(graph, surface, evaluated)
+
+
+def _add_surface_fiber_edges(graph, surface, target_port):
+    for ref in surface.fiber_refs:
+        if not ref.fiber_id:
+            continue
+        probe = graph.add_port(PortRef("FIBER", ref.fiber_id, "probe", PHASE_PROBES, MUT_PROBE))
+        graph.add_edge(Edge(probe, target_port, EDGE_EVAL))
+        _add_dependency_edge(graph, ("FIBER", ref.fiber_id), ("FIBER_SURFACE", str(surface.id)))
 
 
 def _add_blob_entities(root, graph, entity_sets):
@@ -110,7 +148,18 @@ def _add_soft_tissue_entities(root, graph, entity_sets):
         source = graph.add_port(PortRef("SOFT_TISSUE", tid, "input", PHASE_INPUT, MUT_INPUT))
         evaluated = graph.add_port(PortRef("SOFT_TISSUE", tid, "local_eval", PHASE_LOCAL_EVAL, MUT_DERIVED))
         graph.add_edge(Edge(source, evaluated, EDGE_EVAL))
-        _add_soft_tissue_host(graph, tissue, evaluated)
+        _add_soft_tissue_dependency(graph, tissue, evaluated)
+
+
+def _add_soft_tissue_dependency(graph, tissue, evaluated):
+    source_type = str(getattr(tissue, "base_source_type", "OBJECT") or "OBJECT")
+    source_id = str(getattr(tissue, "base_source_id", "") or "")
+    if source_type in {"FIBER", "FIBER_SURFACE"} and source_id:
+        probe = graph.add_port(PortRef(source_type, source_id, "probe", PHASE_PROBES, MUT_PROBE))
+        graph.add_edge(Edge(probe, evaluated, EDGE_EVAL))
+        _add_dependency_edge(graph, (source_type, source_id), ("SOFT_TISSUE", str(tissue.id)))
+        return
+    _add_soft_tissue_host(graph, tissue, evaluated)
 
 
 def _add_soft_tissue_host(graph, tissue, evaluated):
@@ -126,12 +175,14 @@ def build_runtime_graph(root, graph):
     entity_sets = {
         "SCP": set(),
         "FIBER": set(),
+        "FIBER_SURFACE": set(),
         "MUSCLE": set(),
         "BLOB": set(),
         "SOFT_TISSUE": set(),
     }
     _add_scp_entities(root, graph, entity_sets)
     _add_fiber_entities(root, graph, entity_sets)
+    _add_fiber_surface_entities(root, graph, entity_sets)
     _add_muscle_entities(root, graph, entity_sets)
     _add_blob_entities(root, graph, entity_sets)
     _add_soft_tissue_entities(root, graph, entity_sets)

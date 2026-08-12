@@ -41,6 +41,13 @@ from .operators.fiber_proxy import (
     AF_OT_CreateSymmetricLoopFiberFromSelectedVertices,
 )
 from .operators.add_muscle_vcp import AF_OT_AddMuscleVCP
+from .operators.fiber_surface import (
+    AF_OT_CreateFiberSurface,
+    AF_OT_CreateMuscleFromFiberSurface,
+    AF_OT_ConvertMuscleToFiberSurface,
+    AF_OT_RecomputeFiberSurface,
+    AF_OT_SelectFiberSurfaceSources,
+)
 from .operators.add_blob_vcp import AF_OT_AddBlobVCP
 from .operators.fiber_tools import (
     AF_OT_ClearFiberWarmStart,
@@ -113,6 +120,7 @@ from .ui.panels.create_panel import AF_PT_CreatePanel
 from .ui.panels.tree_panel import AF_PT_TreePanel
 from .ui.panels.edit_panel import AF_PT_EditPanel
 from .ui.panels.fiber_edit_panel import AF_PT_FiberEditPanel
+from .ui.panels.fiber_surface_edit_panel import AF_PT_FiberSurfaceEditPanel
 from .ui.panels.fiber_create_panel import AF_PT_FiberCreatePanel
 from .ui.panels.vcp_edit_panel import AF_PT_VCPEditPanel
 from .ui.panels.blob_create_panel import AF_PT_BlobCreatePanel
@@ -133,6 +141,8 @@ from .properties.scp_properties import (
 )
 from .properties.vcp_properties import (
     AF_MuscleFiberRef_Property,
+    AF_FiberSurfaceFiberRef_Property,
+    AF_FiberSurfaceVCP_Property,
     AF_MuscleVCP_Property,
     AF_FiberTouchPoint_Property,
     AF_FiberLoopAnchor_Property,
@@ -153,6 +163,7 @@ from .properties.topology_properties import AF_TopologySettings_Property
 
 from .core.visualization.sync import register_sync, unregister_sync
 from .core.visualization.fiber_sync import register_fiber_sync, unregister_fiber_sync
+from .core.visualization.fiber_surface_sync import register_fiber_surface_sync, unregister_fiber_surface_sync
 from .core.visualization.fiber_refinement import (
     register_fiber_refinement_runtime,
     unregister_fiber_refinement_runtime,
@@ -228,9 +239,12 @@ classes = (
     AF_OT_MoveFiberTouchPoint,
 
     AF_PT_FiberEditPanel,
+    AF_PT_FiberSurfaceEditPanel,
     AF_PT_FiberCreatePanel,
 
     AF_MuscleFiberRef_Property,
+    AF_FiberSurfaceFiberRef_Property,
+    AF_FiberSurfaceVCP_Property,
     AF_MuscleVCP_Property,
     AF_FiberTouchPoint_Property,
     AF_FiberLoopAnchor_Property,
@@ -245,6 +259,11 @@ classes = (
     AF_OT_CreateLoopFiberFromSelectedVertices,
     AF_OT_CreateSymmetricLoopFiberFromSelectedVertices,
     AF_OT_AddMuscleVCP,
+    AF_OT_CreateFiberSurface,
+    AF_OT_CreateMuscleFromFiberSurface,
+    AF_OT_ConvertMuscleToFiberSurface,
+    AF_OT_RecomputeFiberSurface,
+    AF_OT_SelectFiberSurfaceSources,
     AF_OT_AddBlobVCP,
     AF_OT_AddSoftTissueVCP,
     AF_OT_ApplySoftTissuePreset,
@@ -345,6 +364,7 @@ def _ensure_scene_props():
 def _register_runtime_hooks():
     register_sync()
     register_fiber_sync()
+    register_fiber_surface_sync()
     register_fiber_refinement_runtime()
     register_muscle_sync()
     register_blob_sync()
@@ -366,6 +386,7 @@ def _unregister_runtime_hooks():
     unregister_soft_tissue_sync()
     unregister_blob_sync()
     unregister_muscle_sync()
+    unregister_fiber_surface_sync()
     unregister_fiber_sync()
     unregister_sync()
 

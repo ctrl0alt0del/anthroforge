@@ -10,6 +10,7 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 import bpy
 
 from _helpers import BlenderTestCase, empty_object, root, scp_with_object, select_only
+from anthroforge.core.visualization import control_runtime
 from anthroforge.core.visualization.control_runtime import notify_selection_changed
 
 
@@ -48,3 +49,16 @@ class ControlServiceTests(BlenderTestCase):
         select_only(ctrl)
         notify_selection_changed(bpy.context.scene, force=True)
         self.assertEqual(root_obj.af_scp_system.scps[root_obj.af_scp_system.active_scp_index].id, right.id)
+
+    def test_viewport_fiber_selection_updates_active_vcp(self):
+        root_obj = root()
+        fiber = root_obj.af_vcp_system.fibers.add()
+        fiber.id = "FIBER_1"
+        proxy = empty_object("FiberProxy")
+        proxy["af_fiber_proxy"] = True
+        proxy["af_root_name"], proxy["af_fiber_id"] = root_obj.name, fiber.id
+        control_runtime.register_control_runtime().reset()
+        select_only(proxy)
+        bpy.context.view_layer.update()
+        active = root_obj.af_vcp_system
+        self.assertEqual((active.active_vcp_type, active.active_vcp_id), ("FIBER", fiber.id))
