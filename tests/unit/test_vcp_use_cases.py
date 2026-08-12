@@ -95,11 +95,12 @@ def _vcp_root(fibers=(), muscles=(), blobs=(), active_type="NONE", active_id="")
 
 
 def _run_delete(root_obj, node_type, node_id):
-    synced, cleared = [], []
+    synced, cleared, cleaned = [], [], []
+    muscle_sync = SimpleNamespace(sync_root_to_scene=lambda **kwargs: cleaned.append(kwargs))
     with patch("app.use_cases.vcp_delete._fiber_sync", return_value=SimpleNamespace(clear_solver_cache=cleared.append)):
-        with patch("app.use_cases.vcp_delete._empty_dirty_hints", return_value=lambda: "HINTS"), patch("app.use_cases.vcp_delete._sync_scene", return_value=lambda **kwargs: synced.append(kwargs)):
+        with patch("app.use_cases.vcp_delete._muscle_sync", return_value=muscle_sync), patch("app.use_cases.vcp_delete._empty_dirty_hints", return_value=lambda: "HINTS"), patch("app.use_cases.vcp_delete._sync_scene", return_value=lambda **kwargs: synced.append(kwargs)):
             result = delete_vcp_in_tree(context(scene(root_obj)), node_type, node_id)
-    return result, synced, cleared
+    return result, synced, cleared, cleaned
 
 
 class VcpUseCaseTests(unittest.TestCase):
@@ -371,19 +372,20 @@ class VcpUseCaseTests(unittest.TestCase):
         fiber = Bag(id="F1", muscle_id="M1", mid_touches=FakeCollection())
         muscle = Bag(id="M1", fiber_refs=FakeCollection([Bag(fiber_id="F1")]))
         root_obj = _vcp_root([fiber], [muscle], active_type="FIBER", active_id="F1")
-        result, synced, cleared = _run_delete(root_obj, "FIBER", "F1")
+        result, synced, cleared, cleaned = _run_delete(root_obj, "FIBER", "F1")
         self.assertTrue(result.ok)
-        self.assertEqual((len(root_obj.af_vcp_system.fibers), len(muscle.fiber_refs), cleared), (0, 0, ["F1"]))
+        self.assertEqual((len(root_obj.af_vcp_system.fibers), len(muscle.fiber_refs), cleared, cleaned), (0, 0, ["F1"], []))
         self.assertEqual((root_obj.af_vcp_system.active_vcp_type, synced[0]["event_type"]), ("NONE", "DELETE"))
 
     def test_delete_vcp_in_tree_removes_muscle_and_clears_fibers(self):
         fibers = [Bag(id="F1", muscle_id="M1"), Bag(id="F2", muscle_id="M1")]
         refs = FakeCollection([Bag(fiber_id="F1"), Bag(fiber_id="F2")])
         root_obj = _vcp_root(fibers, [Bag(id="M1", fiber_refs=refs)], active_type="MUSCLE", active_id="M1")
-        result, synced, cleared = _run_delete(root_obj, "MUSCLE", "M1")
+        result, synced, cleared, cleaned = _run_delete(root_obj, "MUSCLE", "M1")
         self.assertTrue(result.ok)
         self.assertEqual((len(root_obj.af_vcp_system.muscles), [f.muscle_id for f in fibers], cleared), (0, ["", ""], []))
-        self.assertEqual((root_obj.af_vcp_system.active_vcp_type, synced[0]["source"]), ("NONE", "operator"))
+        self.assertEqual((root_obj.af_vcp_system.active_vcp_type, synced), ("NONE", []))
+        self.assertEqual(cleaned[0]["target_muscle_ids"], set())
 
 
 if __name__ == "__main__":

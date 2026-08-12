@@ -18,7 +18,7 @@ def delete_vcp_in_tree(context, node_type, node_id):
     _clear_runtime_cache(kind, entity_id)
     if not _delete_target(root, context.scene, kind, entity_id):
         return failure("VCP not found.")
-    _sync_delete(root, context.scene)
+    _sync_delete(root, context.scene, kind)
     return success(value=entity_id)
 
 
@@ -171,7 +171,10 @@ def _delete_key(kind, entity_id):
     return kind, entity_id, role
 
 
-def _sync_delete(root, scene):
+def _sync_delete(root, scene, kind):
+    if kind == "MUSCLE":
+        _muscle_sync().sync_root_to_scene(root=root, scene=scene, target_muscle_ids=set())
+        return
     hints = _empty_dirty_hints()()
     _sync_scene()(root=root, scene=scene, dirty_hints=hints, source="operator", event_type="DELETE")
 
@@ -206,3 +209,11 @@ def _fiber_sync():
     except ImportError:
         from core.visualization.fiber_sync import register_fiber_sync
     return register_fiber_sync()
+
+
+def _muscle_sync():
+    try:
+        from ...core.visualization.muscle_sync import register_muscle_sync
+    except ImportError:
+        from core.visualization.muscle_sync import register_muscle_sync
+    return register_muscle_sync()

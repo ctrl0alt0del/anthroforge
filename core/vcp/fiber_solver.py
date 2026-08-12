@@ -556,7 +556,7 @@ class FiberSolver:
         a_world, b_world = anchors[0].point, anchors[-1].point
         params = self._with_endpoint_owners(params, anchors)
         route_seed = None if seed is None else [p.copy() for p in seed]
-        counts = self._level_counts(params["node_count"], len(guide_worlds) + 2)
+        counts = self._level_counts(params["node_count"], max(len(anchors), len(guide_worlds) + 2))
         iters = self._split_iterations(params["iterations"], len(counts))
         converged, max_disp, max_pen, max_active = False, 0.0, 0.0, 0
         for i, count in enumerate(counts):
@@ -585,10 +585,11 @@ class FiberSolver:
         return out
 
     def _level_counts(self, node_count, anchor_count):
-        count = min(node_count, max(8, anchor_count))
+        target = max(int(node_count), int(anchor_count))
+        count = min(target, max(8, int(anchor_count)))
         out = [count]
-        while out[-1] < node_count:
-            out.append(min(node_count, out[-1] * 2))
+        while out[-1] < target:
+            out.append(min(target, out[-1] * 2))
         return out
 
     def _split_iterations(self, total, level_count):
@@ -601,6 +602,7 @@ class FiberSolver:
         return out
 
     def _build_level_nodes(self, fiber_prop, anchors, guide_worlds, node_count, seed):
+        node_count = max(int(node_count), len(anchors), len(guide_worlds) + 2)
         route = self._route_seed_points(anchors, guide_worlds)
         nodes_init, _guide_targets = self._build_chain_with_anchors(
             route[0], route[-1], route[1:-1], node_count)

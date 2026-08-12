@@ -7,6 +7,7 @@ except ImportError:
     from app.runtime_api import sync_scene
 from ..deps.dirty_hints import empty_dirty_hints
 from ..scp_runtime.bound_objects import sync_all_scp_roles
+from ..scp_runtime.prop_update_guard import suppress_scp_prop_updates
 from ..utils import get_af_root
 from ..scp_runtime.common import as_id, scp_prop_map
 from ..scp_runtime.marking import normalize_active_index
@@ -154,13 +155,14 @@ def cleanup_scp_dependents(root):
 
 
 def reconcile_deleted_entities(root, scene, removed_keys, explicit=False):
-    _ = scene
-    with suppress_vcp_prop_updates():
+    _ = scene, explicit
+    with suppress_vcp_prop_updates(), suppress_scp_prop_updates():
         muscle_ids = _removed_ids(removed_keys, "MUSCLE")
-        changed = _remove_muscles(root, muscle_ids) if explicit else bool(muscle_ids)
+        changed = _remove_muscles(root, muscle_ids)
         changed = _remove_blobs(root, _removed_ids(removed_keys, "BLOB")) or changed
         changed = _remove_fibers(root, _removed_ids(removed_keys, "FIBER")) or changed
-        changed = _reconcile_scp_objects(root) or changed
+        if _removed_ids(removed_keys, "SCP"):
+            changed = _reconcile_scp_objects(root) or changed
         return _reconcile_scp_dependents(root) or changed
 
 

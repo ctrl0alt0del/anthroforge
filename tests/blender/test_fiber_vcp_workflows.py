@@ -684,6 +684,15 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(set(targets), {0, 4, 8})
         self.assertLess((nodes[4] - anchors[1].point).length, 1.0e-6)
 
+    def test_multilevel_first_pass_fits_all_mid_anchors(self):
+        solver = FiberSolver()
+        anchors = [fiber_planner.PlannerAnchor(Vector((float(i), 0.0, 0.0)), str(i)) for i in range(9)]
+        fiber = type("Fiber", (), {"id": "F", "use_warm_start": False})()
+        params = {"node_count": 64, "iterations": 4, "margin": 0.0}
+        with patch.object(solver, "_active_colliders", return_value=()), patch.object(solver, "_run_iterations", return_value=(True, 0.0, 0.0)):
+            nodes, *_rest = solver._solve_multilevel(fiber, anchors, [], object(), params, None)
+        self.assertEqual(len(nodes), 64)
+
     def test_surface_route_toggle_skips_guides_when_disabled(self):
         raw_a = encode_fiber_surface_param({"tri_vidx": (0, 1, 2), "tri_weights": (1.0, 0.0, 0.0)})
         raw_b = encode_fiber_surface_param({"tri_vidx": (0, 1, 2), "tri_weights": (0.0, 1.0, 0.0)})
