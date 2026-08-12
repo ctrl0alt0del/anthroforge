@@ -86,6 +86,13 @@ def _draw_quick_fiber_box(layout, context):
     row.operator("af.quick_fiber", text="Create Quick Fiber", icon="CURVE_DATA")
 
 
+def _draw_fiber_utilities_box(layout):
+    box = layout.box()
+    box.label(text="Fiber Utilities")
+    box.label(text="Apply settings to every Fiber in this file.", icon="CURVE_DATA")
+    box.operator("af.disable_all_fiber_surface_routing", text="Disable Surface Routing for All Fibers", icon="X")
+
+
 def _draw_split_corner_status(box, state):
     box.label(text=state.message, icon="CHECKMARK" if state.can_split else "INFO")
     box.label(text="Run this from Curve Edit Mode on the bound curve object.", icon="OUTLINER_OB_CURVE")
@@ -167,6 +174,7 @@ class AF_PT_ActionLibraryPanel(bpy.types.Panel):
     def draw(self, context):
         _draw_local_transform_box(self.layout, context)
         _draw_quick_fiber_box(self.layout, context)
+        _draw_fiber_utilities_box(self.layout)
         _draw_proxy_box(self.layout, context)
         _draw_curve_loft_box(self.layout, context)
         _draw_quick_hook_box(self.layout, context)

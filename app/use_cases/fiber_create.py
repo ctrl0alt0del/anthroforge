@@ -359,7 +359,7 @@ def _append_loop_anchor(fiber, parent_id, attach_param):
 def _fiber_defaults():
     return {
         "use_warm_start": True,
-        "use_surface_routing": True,
+        "use_surface_routing": False,
         "use_segment_collisions": False,
         "preview_planner_route": False,
         "node_count": 64,

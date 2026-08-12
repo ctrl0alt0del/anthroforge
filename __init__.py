@@ -81,6 +81,7 @@ from .operators.shortcuts import (
 from .operators.action_library import (
     AF_OT_CreateCurveLoftGroup,
     AF_OT_CreateLocalTransformProps,
+    AF_OT_DisableAllFiberSurfaceRouting,
     AF_OT_NameQuickSCPHook,
     AF_OT_QuickFiber,
     AF_OT_RebindLocalTransformProps,
@@ -297,6 +298,7 @@ classes = (
     AF_OT_ShortcutWizard,
     AF_OT_CreateCurveLoftGroup,
     AF_OT_CreateLocalTransformProps,
+    AF_OT_DisableAllFiberSurfaceRouting,
     AF_OT_NameQuickSCPHook,
     AF_OT_QuickFiber,
     AF_OT_RebindLocalTransformProps,

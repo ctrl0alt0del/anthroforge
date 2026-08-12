@@ -1,6 +1,7 @@
 import bpy
 
 from ..app.use_cases.action_library_gn import create_curve_loft_group, curve_loft_exists, curve_loft_name
+from ..app.use_cases.action_library_fibers import disable_surface_routing_for_all_fibers
 from ..app.use_cases.action_library_split_corner import split_scp_by_corner
 from ..app.use_cases.local_transform_props import create_local_transform_props, rebind_local_transform_props, remove_local_transform_props
 from .action_library_quick_hook import (
@@ -62,6 +63,18 @@ class AF_OT_CreateCurveLoftGroup(bpy.types.Operator):
 
     def execute(self, context):
         return _finish(self, context, lambda ctx: create_curve_loft_group(ctx, overwrite=self.overwrite_existing))
+
+
+class AF_OT_DisableAllFiberSurfaceRouting(bpy.types.Operator):
+    bl_idname = "af.disable_all_fiber_surface_routing"
+    bl_label = "Disable Surface Routing for All Fibers"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        _ = context
+        result = disable_surface_routing_for_all_fibers()
+        self.report({result.level}, result.message)
+        return {"FINISHED"}
 
 
 class AF_OT_SplitSCPByCorner(bpy.types.Operator):

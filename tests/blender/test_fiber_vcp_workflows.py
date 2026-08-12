@@ -872,12 +872,12 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         _recompute_and_drain()
         self.assertLess(fiber_active_colliders(fiber), 5)
 
-    def test_new_fiber_defaults_warm_start_on(self):
+    def test_new_fiber_defaults_surface_routing_off(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup()
         self.assertTrue(hasattr(fiber, "use_warm_start"))
         self.assertTrue(fiber.use_warm_start)
         self.assertTrue(hasattr(fiber, "use_surface_routing"))
-        self.assertTrue(fiber.use_surface_routing)
+        self.assertFalse(fiber.use_surface_routing)
         self.assertTrue(hasattr(fiber, "use_segment_collisions"))
         self.assertFalse(fiber.use_segment_collisions)
         self.assertTrue(hasattr(fiber, "preview_planner_route"))

@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 from math import pi
+from unittest.mock import patch
 
 TEST_ROOT = Path(__file__).resolve().parents[1]
 ADDON_ROOT = Path(__file__).resolve().parents[2]
@@ -11,10 +12,13 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 import bpy
 
 from _helpers import BlenderTestCase, add_shortcut, empty_object, mesh_object, root, scp_with_object, select_only
+from anthroforge.app.use_cases import action_library_fibers
 from core.scp_runtime.bound_objects import iter_bound_objects, sync_scp_roles
 from core.scp_runtime.common import find_scp_by_id, set_prop_raw
 from core.scp_runtime.object_roles import add_bound_object_to_scp
 from core.local_transform_props import local_transform_keys
+from core.utils import ensure_af_root
+from core.vcp.prop_update_guard import suppress_vcp_prop_updates
 
 _CURVE_GROUP = "AF_CurveGroup_v1"
 _LOFT_GROUP = "AF_LoftTwoCurves_v1"
@@ -97,6 +101,12 @@ def _socket_keys(mod):
     keys = [key for key in keys if not str(key).endswith("_use_attribute")]
     keys = [key for key in keys if not str(key).endswith("_attribute_name")]
     return sorted(keys, key=lambda item: int(str(item).split("_")[1]))
+
+
+def _test_fiber(root_obj, fiber_id, routing=True):
+    fiber = root_obj.af_vcp_system.fibers.add()
+    fiber.id, fiber.use_surface_routing = fiber_id, bool(routing)
+    return fiber
 
 
 def _bounds(obj):
@@ -200,6 +210,19 @@ def _assert_split_result(case, root_obj, parent_id, geo, curve_obj, expected_tot
 
 
 class ActionLibraryTests(BlenderTestCase):
+    def test_disable_surface_routing_updates_every_file_root(self):
+        current = root()
+        other_scene = bpy.data.scenes.new("OtherScene")
+        other = ensure_af_root(other_scene)
+        with suppress_vcp_prop_updates():
+            fibers = (_test_fiber(current, "F1"), _test_fiber(current, "F2", False),
+                      _test_fiber(other, "F3"))
+        with patch.object(action_library_fibers, "sync_scene") as sync:
+            result = bpy.ops.af.disable_all_fiber_surface_routing()
+        self.assertEqual(result, {"FINISHED"})
+        self.assertFalse(any(fiber.use_surface_routing for fiber in fibers))
+        self.assertEqual(sync.call_count, 2)
+
     def test_create_local_transform_props_drives_location_in_local_space(self):
         obj = empty_object("Guide")
         obj.rotation_euler.z = pi / 2.0
