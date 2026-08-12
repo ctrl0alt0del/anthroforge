@@ -82,3 +82,17 @@ class RuntimeGraphTests(unittest.TestCase):
         impacted = graph.downstream_entities({("FIBER", "F1")})
         self.assertTrue({("FIBER_SURFACE", "FS1"), ("MUSCLE", "M1"), ("SOFT_TISSUE", "T1")} <= impacted)
         self.assertNotIn(("FIBER", "IGNORED"), graph.entity_adjacency())
+
+    def test_soft_tissue_source_and_muscle_target_are_independent_edges(self):
+        scps = [SimpleNamespace(id="S1", parent_id="")]
+        surface = SimpleNamespace(id="FS1", fiber_refs=[])
+        muscle = SimpleNamespace(id="M1", fiber_refs=[], surface_source_mode="FIBER_SURFACE", fiber_surface_id="FS1")
+        tissue = SimpleNamespace(id="T1", schema_version=2, base_source_type="FIBER_SURFACE",
+                                 base_source_id="FS1", attachment_target_type="MUSCLE",
+                                 attachment_target_id="M1", attachment_target_surface="MUSCLE_INFL")
+        vcp = SimpleNamespace(fibers=[], fiber_surfaces=[surface], muscles=[muscle], blobs=[], soft_tissues=[tissue])
+        root = SimpleNamespace(af_scp_system=SimpleNamespace(scps=scps), af_vcp_system=vcp)
+        graph = runtime_graph.RuntimeGraph()
+        adapters.build_runtime_graph(root, graph)
+        self.assertIn(("SOFT_TISSUE", "T1"), graph.downstream_entities({("FIBER_SURFACE", "FS1")}))
+        self.assertIn(("SOFT_TISSUE", "T1"), graph.downstream_entities({("MUSCLE", "M1")}))

@@ -19,6 +19,10 @@ from ..vcp.soft_tissue_surface_inflation import (
     inflate_surface_layer, perimeter_vertex_indices,
 )
 from ..vcp.soft_tissue_surface_pipeline import GeometricRelaxationSpec, SurfaceTissuePipelineSpec, run_surface_tissue_pipeline
+from ..vcp.attachment_backend import capture_surface_param, resolve_surface_frame
+from ..vcp.surface_binding_codec import (
+    decode_binding_envelope, encode_binding_envelope, require_matching_envelope, rest_topology_signature,
+)
 from .blob_sync_helpers import unit_local_mesh
 
 
@@ -67,6 +71,56 @@ def resolve_attachment_anchors(root, scene, tissue, rest, point_fn, normal_fn):
     for attachment in tissue.attachments:
         rows += _resolved_attachment(root, scene, tissue, rest, attachment, runtime, point_fn, normal_fn)
     return tuple(rows)
+
+
+def capture_target_attachment_payloads(tissue, rest, target, runtime):
+    signature = rest_topology_signature(len(rest.vertices), rest.faces)
+    return tuple(_capture_target_attachment(rest, row, target, runtime, signature)
+                 for row in tissue.attachments)
+
+
+def resolve_target_attachment_anchors(tissue, rest, target, runtime, payloads=None):
+    rows, signature = [], rest_topology_signature(len(rest.vertices), rest.faces)
+    values = tuple(payloads) if payloads is not None else tuple(row.bindings_json for row in tissue.attachments)
+    for attachment, raw in zip(tissue.attachments, values):
+        rows += _resolve_target_attachment(rest, attachment, target, runtime, raw, signature)
+    return tuple(rows)
+
+
+def _capture_target_attachment(rest, attachment, target, runtime, rest_signature):
+    rows = _attachment_influences(rest, attachment)
+    core = set(rest.groups.get(str(attachment.mask_attribute).upper(), ()))
+    values = [_capture_target_region_row(rest, row, target, runtime, core) for row in rows]
+    if any(value is None for value in values):
+        raise ValueError("Could not capture a tissue attachment region.")
+    return encode_binding_envelope(target.reference, target.topology_signature, values, rest_signature)
+
+
+def _capture_target_region_row(rest, row, target, runtime, core):
+    index, _mode, influence = row
+    raw = capture_surface_param(target.mesh_object, Vector(rest.vertices[index]), runtime)
+    if raw is None:
+        return None
+    return {"index": int(index), "influence": float(influence), "core": int(index) in core, "raw": raw}
+
+
+def _resolve_target_attachment(rest, attachment, target, runtime, raw, rest_signature):
+    envelope = decode_binding_envelope(raw, target.reference, target.topology_signature)
+    require_matching_envelope(envelope, target.reference, target.topology_signature, rest_signature)
+    return [_resolve_target_region_row(rest, attachment, target, runtime, row) for row in envelope.bindings]
+
+
+def _resolve_target_region_row(rest, attachment, target, runtime, row):
+    index = int(row.get("index", -1))
+    if not 0 <= index < len(rest.vertices):
+        raise ValueError("Attachment vertex index no longer resolves.")
+    frame = resolve_surface_frame(target.mesh_object, row.get("raw", ""), runtime)
+    if frame is None:
+        raise ValueError("Attachment binding no longer resolves.")
+    anchor = frame["point_world"] + frame["normal_world"] * float(attachment.normal_offset)
+    mode = "FIXED" if str(attachment.mode) == "FIXED" and bool(row.get("core")) else "SOFT"
+    strength = float(attachment.strength) * float(row.get("influence", 1.0))
+    return mode, index, tuple(anchor), strength
 
 
 def _point_rest(tissue, sample):

@@ -70,9 +70,12 @@ def _map_blob(tissue, tissues, point, blob):
     model = closed_bulk_model_from_legacy(_legacy_spec(blob))
     tissue.id = next_prefixed_id(tissues, "TISSUE")
     tissue.name, tissue.preset = model.name, model.preset.value
+    tissue.schema_version = 2
     tissue.base_domain, tissue.base_object_ref, tissue.base_owned = "POINT", point, True
     tissue.boundary_mode = model.boundary.value
-    tissue.host_scp_id = str(blob.attach_target_id) if blob.attach_target_type == "SCP" else ""
+    tissue.attachment_target_type = "SCP" if blob.attach_target_type == "SCP" else "NONE"
+    tissue.attachment_target_id = str(blob.attach_target_id) if blob.attach_target_type == "SCP" else ""
+    tissue.attachment_target_surface = "SCP_GEOMETRY" if blob.attach_target_type == "SCP" else "AUTO"
     _assign_closed_bulk_fields(tissue, model)
 
 

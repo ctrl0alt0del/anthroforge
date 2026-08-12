@@ -1,4 +1,5 @@
 import bpy
+from types import SimpleNamespace
 
 from ..queries.root import root_for_context
 from .results import failure, success
@@ -7,22 +8,34 @@ from ...core.vcp.prop_update_guard import suppress_vcp_prop_updates
 from ...core.vcp.soft_tissue_presets import preset_values
 from ...core.vcp.soft_tissue_surface_field import boundary_falloff_weights
 from ...core.visualization.soft_tissue_source import infer_base_domain, validate_source
+from ...core.visualization.vcp_mirror_runtime import surface_target_mirror_rule, tissue_source_mirror_rule
+from ...core.vcp.surface_target import target_ref
+from .soft_tissue_target import target_ref_from_object
 
 
 def create_soft_tissue_vcp(context):
-    root, preset, source, domain, host, source_type, source_id = _creation_inputs(context)
-    error = "No AF_ROOT found." if root is None else _preflight_source(root, source, domain, preset, source_type, source_id)
-    if error:
-        return failure(error)
-    error = _preflight_host(host, preset)
+    root, preset, source, domain, target_obj, source_type, source_id = _creation_inputs(context)
+    target, error = _preflight_creation(root, source, domain, target_obj, preset, source_type, source_id)
     if error:
         return failure(error)
     source, owned = _ensure_source(context, source, preset) if source_type == "OBJECT" else (None, False)
-    tissue = _create_record(root, source, owned, host, preset, source_type, source_id, domain)
+    tissue = _create_record(root, source, owned, target, preset, source_type, source_id, domain)
     _ensure_surface_field(source, tissue.field_attribute)
     _activate(root, tissue)
     _sync_tissue(root, context.scene, tissue.id, True)
     return success(f"Added {tissue.id}", value=tissue)
+
+
+def _preflight_creation(root, source, domain, target_obj, preset, source_type, source_id):
+    if root is None:
+        return target_ref(), "No AF_ROOT found."
+    error = _preflight_source(root, source, domain, preset, source_type, source_id)
+    if error:
+        return target_ref(), error
+    target, error = _preflight_target(root, target_obj, preset)
+    if error:
+        return target, error
+    return target, _preflight_mirror(root, source_type, source_id, target)
 
 
 def _creation_inputs(context):
@@ -31,8 +44,9 @@ def _creation_inputs(context):
     source_type, source_id, domain = _selected_entity_source(context, root)
     source = getattr(context.scene, "af_new_soft_tissue_base_obj", None) if source_type == "OBJECT" else None
     domain = domain or ("POINT" if source is None and preset == "CLOSED_BULK" else infer_base_domain(source))
-    host = getattr(context.scene, "af_new_soft_tissue_host_obj", None)
-    return root, preset, source, domain, host, source_type, source_id
+    target = getattr(context.scene, "af_new_soft_tissue_target_obj", None)
+    target = target or getattr(context.scene, "af_new_soft_tissue_host_obj", None)
+    return root, preset, source, domain, target, source_type, source_id
 
 
 def _selected_entity_source(context, root):
@@ -87,11 +101,20 @@ def _preflight_entity_source(root, source_type, source_id, domain, preset):
     return "" if preset == "CUSTOM" or domain == required else f"{preset} requires a {required.title()} base."
 
 
-def _preflight_host(host, preset):
-    if preset in {"RIM", "LAYER", "POUCH"} and host is None:
-        return "This preset requires a host SCP geometry object."
-    if host is not None and not host.get("af_scp_geometry"):
-        return "Host must be an SCP geometry object."
+def _preflight_target(root, obj, preset):
+    if obj is None:
+        required = preset in {"RIM", "LAYER", "POUCH"}
+        return target_ref(), "This preset requires an SCP or Muscle surface target." if required else ""
+    ref, error = target_ref_from_object(root, obj)
+    return ref, error
+
+
+def _preflight_mirror(root, source_type, source_id, target):
+    tissue = SimpleNamespace(base_source_type=source_type, base_source_id=source_id, id_data=root)
+    source_rule = tissue_source_mirror_rule(root, tissue)
+    target_rule = surface_target_mirror_rule(root, target)
+    if source_rule is not None and target_rule is not None and source_rule != target_rule:
+        return "Source and attachment target use incompatible mirror rules."
     return ""
 
 
@@ -106,21 +129,30 @@ def _ensure_source(context, source, preset):
     return source, True
 
 
-def _create_record(root, source, owned, host, preset, source_type="OBJECT", source_id="", domain=""):
+def _create_record(root, source, owned, target, preset, source_type="OBJECT", source_id="", domain=""):
     tissues = root.af_vcp_system.soft_tissues
     tissue = tissues.add()
     with suppress_vcp_prop_updates():
-        tissue.id = next_prefixed_id(tissues, "TISSUE")
-        tissue.name = tissue.id
-        tissue.base_source_type, tissue.base_source_id = str(source_type), str(source_id)
-        tissue.base_object_ref = source
-        tissue.base_owned = bool(owned)
-        tissue.base_domain = str(domain or infer_base_domain(source))
-        tissue.host_scp_id = "" if host is None else str(host.get("af_scp_id", ""))
+        _assign_record_identity(tissue, tissues, source, owned, source_type, source_id, domain)
+        _assign_record_target(tissue, target)
         _assign_preset(tissue, preset, preset_values(preset))
         if preset == "CUSTOM":
             _assign_custom_domain(tissue)
     return tissue
+
+
+def _assign_record_identity(tissue, tissues, source, owned, source_type, source_id, domain):
+    tissue.id = next_prefixed_id(tissues, "TISSUE")
+    tissue.name, tissue.schema_version = tissue.id, 2
+    tissue.base_source_type, tissue.base_source_id = str(source_type), str(source_id)
+    tissue.base_object_ref, tissue.base_owned = source, bool(owned)
+    tissue.base_domain = str(domain or infer_base_domain(source))
+
+
+def _assign_record_target(tissue, target):
+    tissue.attachment_target_type = target.kind.value
+    tissue.attachment_target_id = target.entity_id
+    tissue.attachment_target_surface = target.surface.value
 
 
 def _assign_preset(tissue, preset, values):

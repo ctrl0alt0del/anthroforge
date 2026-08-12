@@ -23,7 +23,8 @@ _PENDING = []
 _TIMER_ARMED = False
 _TIMER_DUE_AT = 0.0
 _ID_PAYLOAD_KEYS = ("scp_recapture_ids", "scp_apply_parent_ids", "scp_apply_target_ids",
-                    "soft_tissue_recapture_ids")
+                    "soft_tissue_recapture_ids", "soft_tissue_base_recapture_ids",
+                    "soft_tissue_region_recapture_ids")
 _FALSE_VALUES = {"0", "false", "no", "off"}
 _DEFER_ENV = "AF_DEPS_DEFER"
 _DEFER_MS_ENV = "AF_DEPS_DEFER_MS"

@@ -153,10 +153,11 @@ def cleanup_scp_dependents(root):
     return changed
 
 
-def reconcile_deleted_entities(root, scene, removed_keys):
+def reconcile_deleted_entities(root, scene, removed_keys, explicit=False):
     _ = scene
     with suppress_vcp_prop_updates():
-        changed = _remove_muscles(root, _removed_ids(removed_keys, "MUSCLE"))
+        muscle_ids = _removed_ids(removed_keys, "MUSCLE")
+        changed = _remove_muscles(root, muscle_ids) if explicit else bool(muscle_ids)
         changed = _remove_blobs(root, _removed_ids(removed_keys, "BLOB")) or changed
         changed = _remove_fibers(root, _removed_ids(removed_keys, "FIBER")) or changed
         changed = _reconcile_scp_objects(root) or changed

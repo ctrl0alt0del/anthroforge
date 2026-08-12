@@ -27,8 +27,8 @@ PackageSnapshot = _load_model().PackageSnapshot
 
 
 class ImportModelTests(unittest.TestCase):
-    def test_current_package_schema_is_version_two(self):
-        self.assertEqual(PackageSnapshot("Root").schema_version, 2)
+    def test_current_package_schema_is_version_three(self):
+        self.assertEqual(PackageSnapshot("Root").schema_version, 3)
 
     def test_package_snapshot_rehydrates_nested_items(self):
         data = _snapshot_dict()

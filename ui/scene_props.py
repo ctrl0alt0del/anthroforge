@@ -37,6 +37,16 @@ def _poll_soft_tissue_base(self, obj):
     return bool(obj and obj.type in {"EMPTY", "CURVE", "MESH"})
 
 
+def _poll_soft_tissue_target(self, obj):
+    scene = getattr(bpy.context, "scene", None)
+    root = get_af_root(scene)
+    if root is None or obj is None or obj.get("af_root_name") != root.name:
+        return False
+    scp = obj.get("af_scp_geometry") and not obj.get("af_scp_mirror")
+    muscle = obj.get("af_muscle_proxy") and not obj.get("af_muscle_mirror_proxy")
+    return bool(scp or muscle)
+
+
 def _poll_scp_obj(self, obj):
     scene = getattr(bpy.context, "scene", None)
     root = get_af_root(scene)
@@ -78,6 +88,7 @@ def _register_scene_pointer_props():
     bpy.types.Scene.af_new_fiber_insertion_obj = bpy.props.PointerProperty(name="Fiber Insertion", type=bpy.types.Object, poll=_poll_geometry_scp_mesh)
     bpy.types.Scene.af_new_blob_target_obj = bpy.props.PointerProperty(name="Blob Target", type=bpy.types.Object, poll=_poll_any_obj)
     bpy.types.Scene.af_new_soft_tissue_base_obj = bpy.props.PointerProperty(name="Soft Tissue Base", type=bpy.types.Object, poll=_poll_soft_tissue_base)
+    bpy.types.Scene.af_new_soft_tissue_target_obj = bpy.props.PointerProperty(name="Soft Tissue Target", type=bpy.types.Object, poll=_poll_soft_tissue_target)
     bpy.types.Scene.af_new_soft_tissue_host_obj = bpy.props.PointerProperty(name="Soft Tissue Host", type=bpy.types.Object, poll=_poll_geometry_scp_mesh)
     bpy.types.Scene.af_new_soft_tissue_preset = bpy.props.EnumProperty(name="Preset", items=(("CUSTOM", "Custom", ""), ("CLOSED_BULK", "Closed Bulk", ""), ("RIM", "Rim", ""), ("LAYER", "Layer", ""), ("POUCH", "Pouch", "")), default="CUSTOM")
 
@@ -131,5 +142,5 @@ def _delete_scene_prop(name):
 
 
 def unregister_scene_props():
-    for name in ("af_last_update_diagnostic", "af_last_update_seconds", "af_last_update_type", "af_warm_update_diagnostic", "af_warm_update_message", "af_warm_update_stage", "af_warm_update_progress", "af_warm_update_running", "af_topology_diagnostic", "af_topology_message", "af_topology_stage", "af_topology_progress", "af_topology_running", "af_draft_skin_diagnostic", "af_draft_skin_message", "af_draft_skin_stage", "af_draft_skin_progress", "af_draft_skin_running", "af_shortcut_wizard_active_index", "af_shortcut_wizard_items", "af_shortcut_wizard_wildcard_value", "af_shortcut_view_mode", "af_new_shortcut_path", "af_new_shortcut_name", "af_action_quick_hook_reuse", "af_action_single_angle", "af_action_curve_count", "af_action_gn_name", "af_vcp_tree_collapsed_json", "af_tree_collapsed_json", "af_new_soft_tissue_preset", "af_new_soft_tissue_host_obj", "af_new_soft_tissue_base_obj", "af_new_blob_target_obj", "af_new_fiber_insertion_obj", "af_new_fiber_origin_obj", "af_control_scp_obj", "af_scp_object_picker", "af_scp_parent_obj", "af_selection_order_json", "af_selection_sync_lock", "af_attachments_enabled"):
+    for name in ("af_last_update_diagnostic", "af_last_update_seconds", "af_last_update_type", "af_warm_update_diagnostic", "af_warm_update_message", "af_warm_update_stage", "af_warm_update_progress", "af_warm_update_running", "af_topology_diagnostic", "af_topology_message", "af_topology_stage", "af_topology_progress", "af_topology_running", "af_draft_skin_diagnostic", "af_draft_skin_message", "af_draft_skin_stage", "af_draft_skin_progress", "af_draft_skin_running", "af_shortcut_wizard_active_index", "af_shortcut_wizard_items", "af_shortcut_wizard_wildcard_value", "af_shortcut_view_mode", "af_new_shortcut_path", "af_new_shortcut_name", "af_action_quick_hook_reuse", "af_action_single_angle", "af_action_curve_count", "af_action_gn_name", "af_vcp_tree_collapsed_json", "af_tree_collapsed_json", "af_new_soft_tissue_preset", "af_new_soft_tissue_host_obj", "af_new_soft_tissue_target_obj", "af_new_soft_tissue_base_obj", "af_new_blob_target_obj", "af_new_fiber_insertion_obj", "af_new_fiber_origin_obj", "af_control_scp_obj", "af_scp_object_picker", "af_scp_parent_obj", "af_selection_order_json", "af_selection_sync_lock", "af_attachments_enabled"):
         _delete_scene_prop(name)

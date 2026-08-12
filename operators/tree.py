@@ -7,6 +7,7 @@ from ..core.utils import get_af_root
 from ..core.deps.dirty_hints import empty_dirty_hints
 from ..core.scp_runtime.copy import copy_scp_subtree
 from ..core.scp_runtime.delete import delete_scp
+from ..app.use_cases.vcp_delete import target_tissue_consumers
 from ..core.scp_runtime.common import as_id, find_primary_scp_obj, find_scp_by_id
 from ..core.scp_runtime.lookup import activate_scp
 from ..core.scp_runtime.object_colors import enable_object_color_view
@@ -108,6 +109,10 @@ class AF_OT_DeleteSCPInTree(bpy.types.Operator):
     def execute(self, context):
         root = get_af_root(context.scene)
         if root is None or not self.scp_id:
+            return {"CANCELLED"}
+        consumers = target_tissue_consumers(root, "SCP", self.scp_id)
+        if consumers:
+            self.report({"ERROR"}, "SCP is targeted by: " + ", ".join(consumers))
             return {"CANCELLED"}
         _restore_deleted_isolation(context, root, self.scp_id)
         if not delete_scp(root, context.scene, self.scp_id):
@@ -304,4 +309,14 @@ class AF_OT_DeleteVCPInTree(bpy.types.Operator):
         result = delete_vcp_in_tree(context, self.node_type, self.node_id)
         if result.ok:
             notify_selection_changed(context.scene, force=True, active_object=context.active_object)
+            _clear_deleted_vcp_selection(context, self.node_type, self.node_id)
         return _finish(self, result)
+
+
+def _clear_deleted_vcp_selection(context, node_type, node_id):
+    root = get_af_root(context.scene)
+    if root is None:
+        return
+    vcp = root.af_vcp_system
+    if str(vcp.active_vcp_type) == node_type and str(vcp.active_vcp_id) == node_id:
+        vcp.active_vcp_type, vcp.active_vcp_id = "NONE", ""

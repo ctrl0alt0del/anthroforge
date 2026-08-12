@@ -14,8 +14,10 @@ from .types import (
 
 try:
     from ..vcp.fiber_modes import fiber_parent_ids
+    from ..vcp.surface_target import SurfaceTargetKind, effective_tissue_target, target_dependency
 except ImportError:
     from core.vcp.fiber_modes import fiber_parent_ids
+    from core.vcp.surface_target import SurfaceTargetKind, effective_tissue_target, target_dependency
 
 
 def _add_dependency_edge(graph, src_entity, dst_entity):
@@ -158,17 +160,17 @@ def _add_soft_tissue_dependency(graph, tissue, evaluated):
         probe = graph.add_port(PortRef(source_type, source_id, "probe", PHASE_PROBES, MUT_PROBE))
         graph.add_edge(Edge(probe, evaluated, EDGE_EVAL))
         _add_dependency_edge(graph, (source_type, source_id), ("SOFT_TISSUE", str(tissue.id)))
-        return
-    _add_soft_tissue_host(graph, tissue, evaluated)
+    _add_soft_tissue_target(graph, tissue, evaluated)
 
 
-def _add_soft_tissue_host(graph, tissue, evaluated):
-    sid = str(tissue.host_scp_id or "")
-    if not sid:
+def _add_soft_tissue_target(graph, tissue, evaluated):
+    target = effective_tissue_target(tissue)
+    entity_type = target_dependency(target)
+    if target.kind == SurfaceTargetKind.NONE or not entity_type:
         return
-    probe = graph.add_port(PortRef("SCP", sid, "probe", PHASE_PROBES, MUT_PROBE))
+    probe = graph.add_port(PortRef(entity_type, target.entity_id, "probe", PHASE_PROBES, MUT_PROBE))
     graph.add_edge(Edge(probe, evaluated, EDGE_ATTACHMENT))
-    _add_dependency_edge(graph, ("SCP", sid), ("SOFT_TISSUE", str(tissue.id)))
+    _add_dependency_edge(graph, (entity_type, target.entity_id), ("SOFT_TISSUE", str(tissue.id)))
 
 
 def build_runtime_graph(root, graph):

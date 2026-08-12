@@ -115,7 +115,15 @@ def _fiber_stamp(root):
 
 def _muscle_stamp(root):
     items = getattr(getattr(root, "af_vcp_system", None), "muscles", ())
-    return tuple((str(m.id or ""), bool(getattr(m, "use_mirrored_rows", False)), tuple(str(ref.fiber_id or "") for ref in getattr(m, "fiber_refs", ()))) for m in items)
+    return tuple((str(m.id or ""), str(getattr(m, "surface_source_mode", "LEGACY_FIBERS")),
+                  str(getattr(m, "fiber_surface_id", "") or ""), bool(getattr(m, "use_mirrored_rows", False)),
+                  tuple(str(ref.fiber_id or "") for ref in getattr(m, "fiber_refs", ()))) for m in items)
+
+
+def _fiber_surface_stamp(root):
+    items = getattr(getattr(root, "af_vcp_system", None), "fiber_surfaces", ())
+    return tuple((str(item.id or ""), str(getattr(item, "construction_mode", "LOFT")),
+                  tuple(str(ref.fiber_id or "") for ref in getattr(item, "fiber_refs", ()))) for item in items)
 
 
 def _blob_stamp(root):
@@ -125,11 +133,20 @@ def _blob_stamp(root):
 
 def _soft_tissue_stamp(root):
     items = getattr(getattr(root, "af_vcp_system", None), "soft_tissues", ())
-    return tuple((str(t.id or ""), str(getattr(t, "host_scp_id", "") or "")) for t in items)
+    return tuple((str(t.id or ""), str(getattr(t, "base_source_type", "OBJECT")),
+                  str(getattr(t, "base_source_id", "") or ""), *_soft_target_stamp(t)) for t in items)
+
+
+def _soft_target_stamp(tissue):
+    if int(getattr(tissue, "schema_version", 1)) < 2:
+        return "SCP", str(getattr(tissue, "host_scp_id", "") or ""), "SCP_GEOMETRY"
+    return (str(getattr(tissue, "attachment_target_type", "NONE")),
+            str(getattr(tissue, "attachment_target_id", "") or ""),
+            str(getattr(tissue, "attachment_target_surface", "AUTO")))
 
 
 def _graph_stamp(root):
-    return (_driver_stamp(), _scp_stamp(root), _fiber_stamp(root), _muscle_stamp(root),
+    return (_driver_stamp(), _scp_stamp(root), _fiber_stamp(root), _fiber_surface_stamp(root), _muscle_stamp(root),
             _blob_stamp(root), _soft_tissue_stamp(root))
 
 

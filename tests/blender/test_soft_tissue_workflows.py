@@ -10,6 +10,7 @@ from app.runtime_api import sync_scene
 from core.deps.dirty_hints import dirty_hints_for
 from core.vcp.runtime_state import soft_tissue_status
 from core.vcp.soft_tissue_static_pouch import mesh_volume, triangulate_faces
+from core.vcp.prop_update_guard import suppress_vcp_prop_updates
 from tests.blender._helpers import ensure_addon_registered, reset_scene, root, scp_with_object
 from anthroforge.app.use_cases.soft_tissue_create import create_soft_tissue_vcp
 from anthroforge.app.use_cases.soft_tissue_convert import convert_blob_to_soft_tissue
@@ -42,6 +43,19 @@ class SoftTissueWorkflowTests(unittest.TestCase):
         after = (base.matrix_world @ base.data.vertices[0].co).z
         self.assertAlmostEqual(after - before, 0.4, places=5)
         self.assertEqual(soft_tissue_status(tissue), "CLEAN")
+
+    def test_schema_one_scp_adapter_matches_generic_scp_path(self):
+        _host, scp, _base, tissue = _create_surface_tissue()
+        generic = tuple(tuple(vertex.co) for vertex in _proxy(tissue.id).data.vertices)
+        with suppress_vcp_prop_updates():
+            tissue.schema_version, tissue.host_scp_id = 1, scp.id
+            tissue.control_bindings_json = tissue.base_bindings_json = "[]"
+            for row in tissue.attachments:
+                row.bindings_json = "[]"
+        self.assertEqual(bpy.ops.af.rebind_soft_tissue(), {"FINISHED"})
+        legacy = tuple(tuple(vertex.co) for vertex in _proxy(tissue.id).data.vertices)
+        error = max((Vector(a) - Vector(b)).length for a, b in zip(generic, legacy))
+        self.assertLessEqual(error, 2.0e-6)
 
     def test_surface_mode_and_domain_cannot_diverge(self):
         _host, _scp, _base, tissue = _create_surface_tissue()
@@ -149,9 +163,10 @@ class SoftTissueWorkflowTests(unittest.TestCase):
         row.feather = 0.4
         _sync_tissue(tissue, True)
         bindings = json.loads(row.bindings_json)["bindings"]
-        soft = [item for item in bindings if item["mode"] == "SOFT"]
+        soft = [item for item in bindings if not item["core"]]
         self.assertGreater(len(bindings), before)
         self.assertTrue(soft)
+        self.assertTrue(all("mode" not in item for item in bindings))
         self.assertTrue(all(0.0 < item["influence"] < 1.0 for item in soft))
 
     def test_surface_slack_changes_static_rest_distribution(self):

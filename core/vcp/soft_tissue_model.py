@@ -1,9 +1,11 @@
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 
+from .surface_target import SurfaceRole, SurfaceTargetKind
+
 
 Vec3 = tuple[float, float, float]
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class BaseDomain(str, Enum):
@@ -37,14 +39,8 @@ class AttachmentMode(str, Enum):
     SOFT = "SOFT"
 
 
-class TargetKind(str, Enum):
-    NONE = "NONE"
-    SCP = "SCP"
-
-
-class TargetSurface(str, Enum):
-    AUTO = "AUTO"
-    SCP_GEOMETRY = "SCP_GEOMETRY"
+TargetKind = SurfaceTargetKind
+TargetSurface = SurfaceRole
 
 
 class SolverMode(str, Enum):
@@ -244,4 +240,5 @@ _DOMAIN_MODES = {domain: {mode} for domain, mode in _DOMAIN_MODE.items()}
 _TARGET_SURFACES = {
     TargetKind.NONE: {TargetSurface.AUTO},
     TargetKind.SCP: {TargetSurface.SCP_GEOMETRY},
+    TargetKind.MUSCLE: {TargetSurface.MUSCLE_BASE, TargetSurface.MUSCLE_INFL},
 }

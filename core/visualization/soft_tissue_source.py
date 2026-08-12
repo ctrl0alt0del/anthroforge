@@ -11,8 +11,9 @@ from ..scp_runtime.common import find_geometry_mesh_scp_obj
 from ..utils import depsgraph_for_scene
 from ..vcp.attachment_backend import (
     attachment_runtime, capture_attachment_from_world, resolve_attachment_normal,
-    resolve_attachment_basis, resolve_attachment_world,
+    resolve_attachment_basis, resolve_attachment_world, capture_surface_param, resolve_surface_frame,
 )
+from ..vcp.surface_binding_codec import decode_binding_envelope, encode_binding_envelope, require_matching_envelope
 from ..vcp.soft_tissue_surface_field import boundary_edges, boundary_falloff_weights
 
 
@@ -25,6 +26,13 @@ class BaseSample:
     weights: tuple = ()
     cyclic: bool = False
     groups: dict = None
+
+
+@dataclass(frozen=True)
+class ControlPose:
+    points: tuple
+    handle_left: tuple = ()
+    handle_right: tuple = ()
 
 
 def infer_base_domain(obj):
@@ -177,6 +185,98 @@ def apply_control_bindings(root, scene, tissue):
         raise ValueError("Stored base control bindings no longer resolve.")
     _write_control_world_points(obj, points)
     _restore_bezier_handles(root, scene, tissue, obj, values, runtime)
+
+
+def capture_target_sample_bindings(target, sample, runtime):
+    rows = [_capture_target_row(target, Vector(point), runtime) for point in sample.points]
+    if any(row is None for row in rows):
+        raise ValueError("Could not bind every base sample to the attachment target.")
+    return encode_binding_envelope(target.reference, target.topology_signature, rows)
+
+
+def resolve_target_sample_bindings(target, raw, runtime):
+    envelope = _target_envelope(target, raw)
+    values = [_resolve_target_row(target, row, runtime) for row in envelope.bindings]
+    if any(value is None for value in values):
+        raise ValueError("Stored base bindings no longer resolve.")
+    return tuple(tuple(value[0]) for value in values), tuple(tuple(value[1]) for value in values)
+
+
+def capture_target_control_bindings(target, obj, runtime):
+    rows = [_capture_target_control(target, obj, index, point, runtime)
+            for index, point in enumerate(_control_world_points(obj))]
+    if any(row is None for row in rows):
+        raise ValueError("Could not bind every base control to the attachment target.")
+    return encode_binding_envelope(target.reference, target.topology_signature, rows)
+
+
+def resolve_target_control_pose(target, obj, raw, runtime):
+    envelope = _target_envelope(target, raw)
+    rows = [_resolve_target_control(target, row, runtime) for row in envelope.bindings]
+    if any(row is None for row in rows) or len(rows) != len(_control_world_points(obj)):
+        raise ValueError("Stored base control bindings no longer resolve.")
+    return ControlPose(tuple(row[0] for row in rows), tuple(row[1] for row in rows), tuple(row[2] for row in rows))
+
+
+def apply_control_pose(obj, pose):
+    _write_control_world_points(obj, pose.points)
+    if obj.type != "CURVE" or obj.data.splines[0].type != "BEZIER":
+        return
+    inverse = obj.matrix_world.inverted()
+    for control, left, right in zip(obj.data.splines[0].bezier_points, pose.handle_left, pose.handle_right):
+        if left is not None:
+            control.handle_left, control.handle_right = inverse @ Vector(left), inverse @ Vector(right)
+
+
+def _target_envelope(target, raw):
+    envelope = decode_binding_envelope(raw, target.reference, target.topology_signature)
+    require_matching_envelope(envelope, target.reference, target.topology_signature)
+    return envelope
+
+
+def _capture_target_row(target, point, runtime):
+    raw = capture_surface_param(target.mesh_object, point, runtime)
+    frame = None if raw is None else resolve_surface_frame(target.mesh_object, raw, runtime)
+    if frame is None:
+        return None
+    offset = frame["basis_world"].transposed() @ (Vector(point) - frame["point_world"])
+    return {"raw": raw, "offset": tuple(offset)}
+
+
+def _resolve_target_row(target, row, runtime):
+    raw = _row_raw(row)
+    frame = resolve_surface_frame(target.mesh_object, raw, runtime)
+    if frame is None:
+        return None
+    offset = Vector(row.get("offset", (0.0, 0.0, 0.0))) if isinstance(row, dict) else Vector((0.0, 0.0, 0.0))
+    return frame["point_world"] + frame["basis_world"] @ offset, frame["normal_world"]
+
+
+def _capture_target_control(target, obj, index, point, runtime):
+    row = _capture_target_row(target, point, runtime)
+    control = _control_at(obj, index)
+    if row is None or control is None or not hasattr(control, "handle_left"):
+        return row
+    frame = resolve_surface_frame(target.mesh_object, row["raw"], runtime)
+    row.update(_handle_payload(obj, control, point, frame["basis_world"]))
+    return row
+
+
+def _resolve_target_control(target, row, runtime):
+    resolved = _resolve_target_row(target, row, runtime)
+    if resolved is None:
+        return None
+    center, _normal = resolved
+    frame = resolve_surface_frame(target.mesh_object, _row_raw(row), runtime)
+    left = _resolved_handle(center, frame, row, "handle_left")
+    right = _resolved_handle(center, frame, row, "handle_right")
+    return tuple(center), left, right
+
+
+def _resolved_handle(center, frame, row, key):
+    if frame is None or not isinstance(row, dict) or key not in row:
+        return None
+    return tuple(Vector(center) + frame["basis_world"] @ Vector(row[key]))
 
 
 def _capture_control_row(root, scene, tissue, obj, index, point, runtime):
@@ -500,7 +600,7 @@ def _write_control_world_points(obj, points):
     inverse = obj.matrix_world.inverted()
     controls = tuple(obj.data.vertices) if obj.type == "MESH" else _curve_controls(obj)
     for control, world in zip(controls, points):
-        _move_control(control, inverse @ world)
+        _move_control(control, inverse @ Vector(world))
     _update_source_data(obj)
 
 

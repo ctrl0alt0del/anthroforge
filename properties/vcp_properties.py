@@ -31,21 +31,25 @@ def _on_blob_prop_update(self, context):
 
 
 def _on_soft_tissue_prop_update(self, context):
-    _queue_soft_tissue_update(self, context, False)
+    _queue_soft_tissue_update(self, context, "NONE")
 
 
 def _on_soft_binding_update(self, context):
     if vcp_prop_updates_suppressed():
         return
     _normalize_soft_domain(self)
-    _queue_soft_tissue_update(self, context, True)
+    _queue_soft_tissue_update(self, context, "ALL")
 
 
 def _on_soft_inflation_update(self, context):
     if vcp_prop_updates_suppressed():
         return
     _normalize_soft_domain(self)
-    _queue_soft_tissue_update(self, context, False)
+    _queue_soft_tissue_update(self, context, "NONE")
+
+
+def _on_soft_rest_topology_update(self, context):
+    _queue_soft_tissue_update(self, context, "REGIONS")
 
 
 def _normalize_soft_domain(tissue):
@@ -59,13 +63,20 @@ def _normalize_soft_domain(tissue):
             tissue.boundary_mode = "CLOSED"
 
 
-def _queue_soft_tissue_update(self, context, recapture):
+def _queue_soft_tissue_update(self, context, recapture_scope):
     if vcp_prop_updates_suppressed() or not str(getattr(self, "id", "") or ""):
         return
     _mark_soft_tissue_dirty(self)
     hints = dirty_hints_for("SOFT_TISSUE", {self.id})
-    payload = {"soft_tissue_recapture_ids": [self.id]} if recapture else {}
+    payload = _soft_recapture_payload(self.id, recapture_scope)
     schedule_context(context, dirty_hints=hints, event_type="SOFT_TISSUE_UPDATE", payload=payload)
+
+
+def _soft_recapture_payload(tissue_id, scope):
+    keys = {"ALL": "soft_tissue_recapture_ids", "BASE": "soft_tissue_base_recapture_ids",
+            "REGIONS": "soft_tissue_region_recapture_ids"}
+    key = keys.get(str(scope or "NONE"))
+    return {} if key is None else {key: [str(tissue_id)]}
 
 
 def _on_soft_attachment_update(self, context):
@@ -77,7 +88,7 @@ def _on_soft_attachment_update(self, context):
 def _on_soft_attachment_binding_update(self, context):
     owner = _soft_attachment_owner(getattr(self, "id_data", None), self)
     if owner is not None:
-        _on_soft_binding_update(owner, context)
+        _queue_soft_tissue_update(owner, context, "REGIONS")
 
 
 def _on_soft_rest_update(self, context):
@@ -359,7 +370,7 @@ class AF_SoftTissueAttachment_Property(bpy.types.PropertyGroup):
 class AF_SoftTissueVCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="Soft Tissue", update=_on_soft_tissue_prop_update)
-    schema_version: bpy.props.IntProperty(name="Schema", default=1, min=1)
+    schema_version: bpy.props.IntProperty(name="Schema", default=2, min=1, max=2)
     base_source_type: bpy.props.EnumProperty(
         name="Base Source", items=(("OBJECT", "Object", ""), ("FIBER", "Fiber", ""),
         ("FIBER_SURFACE", "Fiber Surface", "")), default="OBJECT", update=_on_soft_binding_update,
@@ -389,6 +400,17 @@ class AF_SoftTissueVCP_Property(bpy.types.PropertyGroup):
         default="SCP_GEOMETRY", update=_on_soft_binding_update,
     )
     host_topology_signature: bpy.props.StringProperty(name="Host Signature", default="", options={"HIDDEN"})
+    attachment_target_type: bpy.props.EnumProperty(
+        name="Target Type", items=(("NONE", "None", ""), ("SCP", "SCP", ""),
+        ("MUSCLE", "Muscle", "")), default="NONE", update=_on_soft_binding_update,
+    )
+    attachment_target_id: bpy.props.StringProperty(name="Target ID", default="", update=_on_soft_binding_update)
+    attachment_target_surface: bpy.props.EnumProperty(
+        name="Target Surface", items=(("AUTO", "Auto", ""), ("SCP_GEOMETRY", "SCP Geometry", ""),
+        ("MUSCLE_BASE", "Muscle Base", ""), ("MUSCLE_INFL", "Muscle Inflated", "")),
+        default="AUTO", update=_on_soft_binding_update,
+    )
+    attachment_topology_signature: bpy.props.StringProperty(name="Target Signature", default="", options={"HIDDEN"})
     control_bindings_json: bpy.props.StringProperty(name="Control Bindings", default="[]", options={"HIDDEN"})
     base_bindings_json: bpy.props.StringProperty(name="Base Bindings", default="[]", options={"HIDDEN"})
     boundary_mode: bpy.props.EnumProperty(
@@ -407,7 +429,7 @@ class AF_SoftTissueVCP_Property(bpy.types.PropertyGroup):
     field_power: bpy.props.FloatProperty(name="Field Power", default=1.0, min=0.01, update=_on_soft_tissue_prop_update)
     profile_width: bpy.props.FloatProperty(name="Profile Width", default=0.08, min=0.001, update=_on_soft_tissue_prop_update)
     profile_power: bpy.props.FloatProperty(name="Profile Power", default=0.65, min=0.01, update=_on_soft_tissue_prop_update)
-    profile_segments: bpy.props.IntProperty(name="Profile Segments", default=9, min=3, max=64, update=_on_soft_tissue_prop_update)
+    profile_segments: bpy.props.IntProperty(name="Profile Segments", default=9, min=3, max=64, update=_on_soft_rest_topology_update)
     endpoint_taper: bpy.props.FloatProperty(name="Endpoint Taper", default=0.16, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)
     shape_retention: bpy.props.FloatProperty(name="Shape Retention", description="Membrane tension and semisolid shape memory; higher values resist stretching and sag", default=0.5, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)
     volume_retention: bpy.props.FloatProperty(name="Volume Retention", description="Incompressibility of the sealed tissue envelope", default=0.9, min=0.0, max=1.0, update=_on_soft_tissue_prop_update)

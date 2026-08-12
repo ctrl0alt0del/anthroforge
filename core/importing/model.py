@@ -12,7 +12,7 @@ def _default_draft_skin_settings():
     return root_settings_percentages()
 
 
-PACKAGE_SCHEMA_VERSION = 2
+PACKAGE_SCHEMA_VERSION = 3
 
 
 @dataclass
@@ -140,6 +140,9 @@ class SoftTissueSnapshot:
     name: str
     props: dict
     host_scp_id: str = ""
+    attachment_target_type: str = "NONE"
+    attachment_target_id: str = ""
+    attachment_target_surface: str = "AUTO"
     base_object_name: str = ""
     base_source_type: str = "OBJECT"
     base_source_id: str = ""

@@ -1,24 +1,48 @@
 import hashlib
 import json
 import time
+from dataclasses import dataclass
 
 import bpy
 from mathutils import Vector
 
 from ..deps.dirty_hints import dirty_hints_for
 from ..utils import get_af_root, scene_for_id
-from ..vcp.attachment_backend import capture_attachment_from_world, resolve_attachment_normal, resolve_attachment_world
+from ..vcp.attachment_backend import attachment_runtime, capture_attachment_from_world, resolve_attachment_normal, resolve_attachment_world
 from ..vcp.prop_update_guard import suppress_vcp_prop_updates
 from ..vcp.runtime_state import set_soft_tissue_diagnostic, set_soft_tissue_status
 from ..vcp.soft_tissue_model import construction_mode_for_domain
+from ..vcp.surface_target import SurfaceTargetKind, effective_tissue_target
 from .blob_sync_helpers import get_vis_collection, remove_proxy, update_mesh_from_world
-from .soft_tissue_build import build_rest_shape, capture_attachment_payload, relax_shape, resolve_attachment_anchors
-from .soft_tissue_source import apply_control_bindings, capture_control_bindings, capture_sample_bindings, host_object, host_signature, infer_base_domain, resolve_sample_bindings, sample_base, sample_entity_base, validate_entity_source
+from .soft_tissue_build import (
+    build_rest_shape, capture_attachment_payload, capture_target_attachment_payloads, relax_shape,
+    resolve_attachment_anchors, resolve_target_attachment_anchors,
+)
+from .soft_tissue_source import (
+    apply_control_bindings, apply_control_pose, capture_control_bindings, capture_sample_bindings,
+    capture_target_control_bindings, capture_target_sample_bindings, host_object, host_signature,
+    infer_base_domain, resolve_sample_bindings, resolve_target_control_pose,
+    resolve_target_sample_bindings, sample_base, sample_entity_base, validate_entity_source,
+)
+from .surface_target_service import default_surface_target_service
+
+
+@dataclass(frozen=True)
+class TissueEvaluation:
+    rest: object
+    final: object
+    sample: object
+    target_signature: str = ""
+    control_bindings: str = None
+    base_bindings: str = None
+    region_bindings: tuple = None
+    control_pose: object = None
 
 
 class SoftTissueSceneSync:
-    def __init__(self, collection_name="AF_VCP_VIS"):
+    def __init__(self, collection_name="AF_VCP_VIS", target_service=None):
         self.collection_name = collection_name
+        self.target_service = target_service or default_surface_target_service()
         self._syncing = False
 
     def sync_root_to_scene(self, root=None, scene=None, target_ids=None, recapture_ids=None, force=False):
@@ -27,7 +51,7 @@ class SoftTissueSceneSync:
         if root is None or not hasattr(root, "af_vcp_system"):
             return
         ids = None if target_ids is None else set(target_ids)
-        recapture = set(recapture_ids or ())
+        recapture = _recapture_scopes(recapture_ids)
         self._syncing = True
         try:
             _sync_tissues(self, root, scene, ids, recapture, bool(force))
@@ -44,16 +68,22 @@ class SoftTissueSceneSync:
             _schedule_updates(root, scene, changed | missing, changed)
 
 
+def _recapture_scopes(value):
+    if isinstance(value, dict):
+        return {str(key): str(scope) for key, scope in value.items()}
+    return {str(tissue_id): "ALL" for tissue_id in set(value or ())}
+
+
 def _sync_tissues(sync, root, scene, ids, recapture, force):
     collection = get_vis_collection(scene, sync.collection_name)
     live = {str(item.id) for item in root.af_vcp_system.soft_tissues}
     _remove_stale_proxies(collection, root.name, live)
     for tissue in root.af_vcp_system.soft_tissues:
         if ids is None or str(tissue.id) in ids:
-            _sync_one(root, scene, collection, tissue, str(tissue.id) in recapture, force)
+            _sync_one(sync, root, scene, collection, tissue, recapture.get(str(tissue.id), "NONE"), force)
 
 
-def _sync_one(root, scene, collection, tissue, recapture, force):
+def _sync_one(sync, root, scene, collection, tissue, recapture, force):
     _normalize_construction(tissue)
     if not bool(tissue.auto_recompute) and not force:
         set_soft_tissue_status(tissue, "DIRTY")
@@ -61,9 +91,10 @@ def _sync_one(root, scene, collection, tissue, recapture, force):
     started = time.perf_counter()
     set_soft_tissue_status(tissue, "SOLVING")
     try:
-        final = _evaluate_tissue(root, scene, tissue, recapture)
-        _write_tissue_objects(root, collection, tissue, final[0], final[1])
-        _finish_success(tissue, started, final[1])
+        result = _evaluate_tissue(sync, root, scene, tissue, recapture)
+        _write_tissue_objects(root, collection, tissue, result.rest, result.final)
+        _commit_evaluation(tissue, result)
+        _finish_success(tissue, started, result.final)
     except Exception as exc:
         _finish_error(tissue, started, exc)
 
@@ -87,7 +118,13 @@ def _source_domain(tissue):
     return infer_base_domain(tissue.base_object_ref) or str(tissue.base_domain)
 
 
-def _evaluate_tissue(root, scene, tissue, recapture):
+def _evaluate_tissue(sync, root, scene, tissue, recapture):
+    if int(getattr(tissue, "schema_version", 1)) < 2:
+        return _evaluate_legacy_tissue(root, scene, tissue, recapture == "ALL")
+    return _evaluate_generic_tissue(sync, root, scene, tissue, recapture)
+
+
+def _evaluate_legacy_tissue(root, scene, tissue, recapture):
     errors = validate_entity_source(root, tissue)
     errors += _construction_errors(tissue)
     if errors:
@@ -97,7 +134,89 @@ def _evaluate_tissue(root, scene, tissue, recapture):
     sample = _sample_tissue_base(root, scene, tissue, resolved)
     rest = build_rest_shape(tissue, sample)
     anchors = _prepare_attachments(root, scene, tissue, rest, recapture)
-    return rest, relax_shape(tissue, rest, target, anchors)
+    return TissueEvaluation(rest, relax_shape(tissue, rest, target, anchors), sample)
+
+
+def _evaluate_generic_tissue(sync, root, scene, tissue, recapture):
+    errors = validate_entity_source(root, tissue) + _construction_errors(tissue)
+    if errors:
+        raise ValueError(" ".join(errors))
+    runtime = attachment_runtime(scene)
+    target = sync.target_service.resolve(root, scene, effective_tissue_target(tissue), runtime)
+    _require_target_topology(tissue, target, recapture)
+    sample, controls, base, pose = _prepare_generic_base(root, scene, tissue, target, runtime, recapture)
+    rest = build_rest_shape(tissue, sample)
+    anchors, regions = _prepare_generic_regions(tissue, rest, target, runtime, recapture)
+    final = relax_shape(tissue, rest, None if target is None else target.mesh_object, anchors)
+    signature = "" if target is None else target.topology_signature
+    return TissueEvaluation(rest, final, sample, signature, controls, base, regions, pose)
+
+
+def _require_target_topology(tissue, target, recapture):
+    if target is None or recapture == "ALL":
+        return
+    stored = str(getattr(tissue, "attachment_topology_signature", "") or "")
+    if not stored or stored != target.topology_signature:
+        raise ValueError("Attachment target topology changed. Use Rebind.")
+
+
+def _prepare_generic_base(root, scene, tissue, target, runtime, recapture):
+    if str(getattr(tissue, "base_source_type", "OBJECT")) != "OBJECT":
+        return sample_entity_base(root, scene, tissue), None, None, None
+    if target is None:
+        return sample_base(tissue.base_object_ref, tissue, scene=scene), None, None, None
+    if recapture in {"ALL", "BASE"}:
+        sample = sample_base(tissue.base_object_ref, tissue, scene=scene)
+        controls = capture_target_control_bindings(target, tissue.base_object_ref, runtime)
+        base = capture_target_sample_bindings(target, sample, runtime)
+    else:
+        controls, base = None, None
+    source = base or tissue.base_bindings_json
+    resolved = resolve_target_sample_bindings(target, source, runtime)
+    pose = resolve_target_control_pose(target, tissue.base_object_ref,
+                                       controls or tissue.control_bindings_json, runtime)
+    return sample_base(tissue.base_object_ref, tissue, resolved, scene), controls, base, pose
+
+
+def _prepare_generic_regions(tissue, rest, target, runtime, recapture):
+    if target is None or not len(tissue.attachments):
+        return (), None
+    payloads = None
+    if recapture in {"ALL", "REGIONS"}:
+        payloads = capture_target_attachment_payloads(tissue, rest, target, runtime)
+    anchors = resolve_target_attachment_anchors(tissue, rest, target, runtime, payloads)
+    return anchors, payloads
+
+
+def _commit_evaluation(tissue, result):
+    if int(getattr(tissue, "schema_version", 1)) < 2:
+        return
+    if result.control_pose is not None:
+        _commit_control_pose(tissue, result.control_pose)
+    with suppress_vcp_prop_updates():
+        tissue.attachment_topology_signature = result.target_signature
+        tissue.base_signature = _sample_signature(result.sample)
+        tissue.base_closed = bool(result.sample.cyclic or not result.sample.boundary_edges)
+        if result.control_bindings is not None:
+            tissue.control_bindings_json = result.control_bindings
+        if result.base_bindings is not None:
+            tissue.base_bindings_json = result.base_bindings
+        _commit_region_bindings(tissue, result.region_bindings)
+
+
+def _commit_control_pose(tissue, pose):
+    obj = tissue.base_object_ref
+    if obj is None:
+        return
+    _GUARDED_SOURCE_PTRS.add(int(obj.as_pointer()))
+    apply_control_pose(obj, pose)
+
+
+def _commit_region_bindings(tissue, payloads):
+    if payloads is None:
+        return
+    for attachment, raw in zip(tissue.attachments, payloads):
+        attachment.bindings_json = raw
 
 
 def _sample_tissue_base(root, scene, tissue, resolved):
@@ -299,7 +418,7 @@ _GUARDED_SOURCE_PTRS = set()
 def register_soft_tissue_sync():
     global _SOFT_TISSUE_SYNC
     if _SOFT_TISSUE_SYNC is None:
-        _SOFT_TISSUE_SYNC = SoftTissueSceneSync()
+        _SOFT_TISSUE_SYNC = SoftTissueSceneSync(target_service=default_surface_target_service())
     handler = _SOFT_TISSUE_SYNC.on_depsgraph_update
     if handler not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(handler)

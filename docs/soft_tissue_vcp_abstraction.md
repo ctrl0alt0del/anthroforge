@@ -23,7 +23,7 @@ Evaluation is selected by the base domain, never by anatomy or preset name.
 exposes the same compatible fields without an anatomical evaluator branch.
 
 The persistent record contains the base reference, construction parameters,
-SCP identity and topology signature, versioned base/control bindings, attachment
+surface-target identity and topology signature, versioned base/control bindings, attachment
 rows, and solver controls. Rest and final meshes are derived caches. User-owned
 Curve and Mesh bases remain visible in the hierarchy; Point bases created by the
 add-on are owned controls.
@@ -61,11 +61,13 @@ tolerance cannot cancel relaxation. Preset numbers are artistic defaults rather
 than biological constants. Layer's Geometric mode maps sagginess directly to a
 visible rest-scale displacement.
 
-## SCP attachment
+## Surface attachment
 
-V1 supports one SCP host. Raw base controls and deterministic evaluated samples
-are captured as triangle/barycentric bindings with signed normal offsets. On an
-SCP deformation, existing bindings resolve without selecting new triangles; the
+One tissue can target `SCP_GEOMETRY`, `MUSCLE_BASE`, or `MUSCLE_INFL`; Muscle
+INFL is the normal default and roles never silently fall back. Raw base controls
+and deterministic evaluated samples are captured as triangle/barycentric bindings
+with signed surface-frame offsets. On target deformation, existing bindings
+resolve without selecting new triangles; the
 resolved positions are written back to the original base under an update guard,
 then rest and final meshes rebuild.
 
@@ -78,10 +80,15 @@ Attachment masks can be `ALL`, `BACKING`, `BOUNDARY`, `ENDPOINTS`,
 vertices. `FIXED` rows set zero inverse mass; `SOFT` rows create weighted target
 tethers.
 
-If host topology changes, the last valid final mesh is retained and the VCP
-enters `ERROR` until explicit Rebind. Missing base or host objects behave the
-same way. A guarded host-driven base rewrite is not treated as an artist edit;
+If target topology changes, the last valid final mesh is retained and the VCP
+enters `ERROR` until explicit Rebind. Missing base or target objects behave the
+same way. A guarded target-driven base rewrite is not treated as an artist edit;
 an artist edit schedules one coalesced recapture.
+
+Schema-1 SCP tissues remain on a compatibility adapter until the user explicitly
+changes their target. New schema-2 bindings include target type, entity ID,
+surface role, exact evaluated triangle topology, and rest topology. Constraint
+mode, strength, and normal offset remain live settings and do not require recapture.
 
 ## Fiber Surface sources
 
@@ -104,13 +111,13 @@ Deleting a referenced source is blocked until its consumers are removed.
 
 Soft Tissue records use `OBJECT`, `FIBER`, or `FIBER_SURFACE` source identity.
 Derived sources are sampled from evaluated geometry and are never rewritten by
-the SCP recapture path.
+the surface-target recapture path.
 
 ## Runtime and integration
 
 The dependency graph contains `SCP → Fiber → Fiber Surface → Muscle`,
-`Fiber → Soft Tissue`, and `Fiber Surface → Soft Tissue` paths in addition to
-object-based `SCP → Soft Tissue`. Property/base edits schedule
+independent `Fiber/Fiber Surface → Soft Tissue` source edges, and
+`SCP/Muscle → Soft Tissue` attachment edges. Property/base edits schedule
 coalesced `SOFT_TISSUE_UPDATE` work on Blender's main thread. Manual mode remains
 `DIRTY` until Recompute. Final proxies are transform-locked caches; deleting one
 causes recreation on sync. Explicit VCP deletion removes both caches and an
@@ -118,7 +125,7 @@ owned Point control while preserving user Curve/Mesh bases.
 
 Soft Tissue participates in the VCP tree, selection, shortcuts, mirrors, Draft
 Skin capture, full-package import, and VCP-only import. Mirrors copy only the
-solved cache according to the host SCP's effective mirror rule.
+solved cache according to the attachment target's effective mirror rule.
 
 Legacy Blob remains readable/editable. Add Blob is hidden from normal creation.
 Manual conversion accepts centered sphere/ellipsoid Blobs with `NONE` or `SCP`
@@ -140,10 +147,10 @@ Their accepted checks are 33 samples per lip curve, abdominal thickness
 
 ## Future work (not shipped)
 
-- Muscle, arbitrary-object, or tissue-to-tissue attachment.
+- Arbitrary-object or tissue-to-tissue attachment.
 - Contact, compression, friction, self-collision, or sliding attachment.
 - XPBD, animation dynamics, or timeline simulation.
-- Multi-component bases or multiple hosts per tissue.
+- Multi-component bases or multiple targets per tissue.
 - Skin functionality; skin remains a separate system.
 
 These extensions must add target adapters or solver capabilities without adding

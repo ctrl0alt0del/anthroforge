@@ -30,7 +30,9 @@ _FIBER_SKIP = {"id", "name", "a_parent_id", "b_parent_id", "mid_touches", "loop_
 _MUSCLE_SKIP = {"id", "name", "fiber_refs", "fiber_surface_id"}
 _FIBER_SURFACE_SKIP = {"id", "name", "fiber_refs", "active_fiber_ref_index"}
 _BLOB_SKIP = {"id", "name", "attach_target_type", "attach_target_id", "attach_target_object_name", "last_solve_converged", "last_solve_max_disp", "last_solve_iterations"}
-_SOFT_SKIP = {"id", "name", "base_object_ref", "host_scp_id", "base_source_type", "base_source_id", "attachments", "active_attachment_index"}
+_SOFT_SKIP = {"id", "name", "base_object_ref", "host_scp_id", "attachment_target_type",
+              "attachment_target_id", "attachment_target_surface", "base_source_type", "base_source_id",
+              "attachments", "active_attachment_index"}
 
 
 def _bound_objects(scp):
@@ -129,10 +131,15 @@ def _blob_snapshot(root, blob):
 def _soft_tissue_snapshot(tissue):
     base = getattr(tissue, "base_object_ref", None)
     rows = [SoftTissueAttachmentSnapshot(scalar_dict(row)) for row in tissue.attachments]
-    return SoftTissueSnapshot(str(tissue.id or ""), str(tissue.name or ""), scalar_dict(tissue, _SOFT_SKIP),
-                              str(tissue.host_scp_id or ""), "" if base is None else str(base.name),
-                              str(getattr(tissue, "base_source_type", "OBJECT")),
-                              str(getattr(tissue, "base_source_id", "") or ""), rows)
+    return SoftTissueSnapshot(
+        str(tissue.id or ""), str(tissue.name or ""), scalar_dict(tissue, _SOFT_SKIP),
+        host_scp_id=str(tissue.host_scp_id or ""),
+        attachment_target_type=str(getattr(tissue, "attachment_target_type", "NONE")),
+        attachment_target_id=str(getattr(tissue, "attachment_target_id", "") or ""),
+        attachment_target_surface=str(getattr(tissue, "attachment_target_surface", "AUTO")),
+        base_object_name="" if base is None else str(base.name),
+        base_source_type=str(getattr(tissue, "base_source_type", "OBJECT")),
+        base_source_id=str(getattr(tissue, "base_source_id", "") or ""), attachments=rows)
 
 
 def _shortcut_snapshot(root, shortcut):

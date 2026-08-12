@@ -65,7 +65,8 @@ class SoftTissueImportTests(BlenderTestCase):
         tissue = root_obj.af_vcp_system.soft_tissues[-1]
         host = next(item for item in root_obj.af_scp_system.scps if item.name == "SourceHost")
         register_soft_tissue_sync().sync_root_to_scene(root_obj, bpy.context.scene, {tissue.id}, force=True)
-        self.assertEqual((result.scp_count, result.soft_tissue_count, tissue.host_scp_id), (1, 1, host.id))
+        self.assertEqual((result.scp_count, result.soft_tissue_count, tissue.attachment_target_id), (1, 1, host.id))
+        self.assertEqual((tissue.attachment_target_type, tissue.attachment_target_surface), ("SCP", "SCP_GEOMETRY"))
         self.assertEqual((tissue.base_object_ref.get("af_soft_tissue_id"), soft_tissue_status(tissue)), (tissue.id, "CLEAN"))
 
     def test_vcp_import_retains_referenced_base_and_rebuilds(self):
@@ -78,7 +79,7 @@ class SoftTissueImportTests(BlenderTestCase):
         result = import_vcp_from_blend(path, bpy.context)
         tissue = root_obj.af_vcp_system.soft_tissues[-1]
         register_soft_tissue_sync().sync_root_to_scene(root_obj, bpy.context.scene, {tissue.id}, force=True)
-        self.assertEqual((result.soft_tissue_count, tissue.host_scp_id), (1, target.id))
+        self.assertEqual((result.soft_tissue_count, tissue.attachment_target_id), (1, target.id))
         self.assertEqual(tissue.base_object_ref.get("af_soft_tissue_id"), tissue.id)
         self.assertIn(tissue.base_object_ref, tuple(bpy.context.scene.objects))
         self.assertEqual((soft_tissue_status(tissue), _proxy(tissue.id) is not None), ("CLEAN", True))

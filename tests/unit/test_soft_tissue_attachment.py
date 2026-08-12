@@ -23,8 +23,8 @@ class SoftTissueAttachmentTests(unittest.TestCase):
     def test_public_attachment_modes_exclude_sliding(self):
         self.assertEqual({item.value for item in AttachmentMode}, {"FREE", "FIXED", "SOFT"})
 
-    def test_v1_target_kinds_are_scp_only(self):
-        self.assertEqual({item.value for item in TargetKind}, {"NONE", "SCP"})
+    def test_surface_target_kinds_include_muscle(self):
+        self.assertEqual({item.value for item in TargetKind}, {"NONE", "SCP", "MUSCLE"})
 
     def test_barycentric_binding_preserves_normal_offset(self):
         binding = capture_surface_binding(_single_triangle(), _scp_attachment(), (0.25, 0.25, 0.1))

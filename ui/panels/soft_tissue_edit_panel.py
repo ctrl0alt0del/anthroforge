@@ -3,6 +3,7 @@ import bpy
 from ...app.queries.root import root_for_context
 from ...app.queries.vcp import active_soft_tissue_from_context, has_active_entity
 from ...core.vcp.runtime_state import soft_tissue_diagnostic, soft_tissue_status
+from ...core.vcp.surface_target import effective_tissue_target
 
 
 class AF_PT_SoftTissueEditPanel(bpy.types.Panel):
@@ -24,6 +25,7 @@ class AF_PT_SoftTissueEditPanel(bpy.types.Panel):
             return
         _draw_identity(self.layout, tissue)
         _draw_base(self.layout, tissue)
+        _draw_target(self.layout, context, tissue)
         _draw_inflation(self.layout, tissue)
         _draw_relaxation(self.layout, tissue)
         _draw_material(self.layout, tissue)
@@ -52,8 +54,26 @@ def _draw_base(layout, tissue):
         box.label(text=f"ID: {tissue.base_source_id}")
     box.label(text=f"Domain: {str(tissue.base_domain).title()} (inferred)")
     box.prop(tissue, "base_resolution")
-    box.prop(tissue, "host_scp_id")
-    box.prop(tissue, "host_surface")
+
+
+def _draw_target(layout, context, tissue):
+    box, target = layout.box(), effective_tissue_target(tissue)
+    box.label(text="Attachment Target")
+    label = "None" if target.kind.value == "NONE" else f"{target.kind.value}: {target.entity_id}"
+    box.label(text=label)
+    if target.kind.value != "NONE":
+        box.label(text=target.surface.value.replace("_", " ").title())
+    box.prop(context.scene, "af_new_soft_tissue_target_obj", text="Assign From")
+    row = box.row(align=True)
+    _target_operator(row, "af.assign_soft_tissue_target", "LINKED", tissue.id)
+    _target_operator(row, "af.select_soft_tissue_target", "RESTRICT_SELECT_OFF", tissue.id)
+    _target_operator(row, "af.clear_soft_tissue_target", "UNLINKED", tissue.id)
+    message = "Object base follows target controls." if tissue.base_source_type == "OBJECT" else "Upstream Fiber source remains independently driven."
+    box.label(text=message, icon="INFO")
+
+
+def _target_operator(row, operator, icon, tissue_id):
+    row.operator(operator, icon=icon).tissue_id = tissue_id
 
 
 def _draw_inflation(layout, tissue):

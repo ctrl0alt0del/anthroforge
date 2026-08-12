@@ -90,3 +90,20 @@ class RuntimeContextCacheTests(unittest.TestCase):
         impacted = build.graph.downstream_entities({("SCP", "S1")})
         self.assertEqual(driver.calls, 2)
         self.assertIn(("SOFT_TISSUE", "T1"), impacted)
+
+    def test_cache_invalidates_when_soft_target_role_changes(self):
+        driver, root = RecorderDriver(), _root()
+        tissue = SimpleNamespace(id="T1", schema_version=2, host_scp_id="S1", base_source_type="OBJECT",
+                                 base_source_id="", attachment_target_type="MUSCLE",
+                                 attachment_target_id="M1", attachment_target_surface="MUSCLE_INFL")
+        root.af_vcp_system.soft_tissues.append(tissue)
+        runtime_context_build.clear_runtime_context_cache()
+        allow = SimpleNamespace(allow=True, filtered_ids=None)
+        patches = (patch.object(runtime_context_build, "get_dependency_drivers", return_value=[driver]),
+                   patch.object(runtime_context_build, "get_registered_entity_types", return_value=("SCP",)),
+                   patch.object(runtime_context_build, "evaluate_gates", return_value=allow))
+        with patches[0], patches[1], patches[2]:
+            runtime_context_build.build_runtime_context(root, None, {"SCP": {"S1"}})
+            tissue.attachment_target_surface = "MUSCLE_BASE"
+            runtime_context_build.build_runtime_context(root, None, {"SCP": {"S1"}})
+        self.assertEqual(driver.calls, 2)

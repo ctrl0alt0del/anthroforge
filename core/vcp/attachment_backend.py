@@ -1,7 +1,10 @@
+import hashlib
+import json
+
 from ..attachment_codec import encode_fiber_surface_param, fiber_surface_param, is_fiber_legacy_attach
 from ..scp_proxy.signature import mesh_topology_signature, open_evaluated_mesh
 from ..scp_runtime.common import as_id, find_geometry_mesh_scp_obj
-from ..scp_runtime.surface import frame_from_parent_param, nearest_parent_param_from_world
+from ..scp_runtime.surface import build_mesh_surface_data, frame_from_parent_param, nearest_parent_param_from_world
 from ..utils import depsgraph_for_scene, scene_for_id
 
 
@@ -34,8 +37,36 @@ def _capture_raw(parent_obj, world_point, scene, runtime):
     return None if param is None else encode_fiber_surface_param(param)
 
 
+def capture_surface_param(mesh_object, world_point, runtime=None, scene=None):
+    if mesh_object is None:
+        return None
+    actual_scene = scene or scene_for_id(mesh_object)
+    return _capture_raw(mesh_object, world_point, actual_scene, runtime)
+
+
+def resolve_surface_frame(mesh_object, binding, runtime=None, scene=None):
+    actual_scene = scene or scene_for_id(mesh_object)
+    param = fiber_surface_param(binding)
+    depsgraph = _runtime_depsgraph(actual_scene, runtime)
+    valid = mesh_object is not None and param is not None and depsgraph is not None
+    return None if not valid else frame_from_parent_param(mesh_object, param, depsgraph, cache=_runtime_cache(runtime))
+
+
+def surface_binding_topology(mesh_object, runtime=None, scene=None):
+    actual_scene = scene or scene_for_id(mesh_object)
+    depsgraph = _runtime_depsgraph(actual_scene, runtime)
+    surface = None if mesh_object is None or depsgraph is None else build_mesh_surface_data(mesh_object, depsgraph, _runtime_cache(runtime))
+    return "" if surface is None else triangulated_topology_signature(len(surface["verts_world"]), surface["triangles"])
+
+
+def triangulated_topology_signature(vertex_count, triangles):
+    payload = {"vertex_count": int(vertex_count), "triangles": [list(map(int, tri)) for tri in triangles]}
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def capture_attachment_from_world(root, scene, parent_id, world_point, runtime=None):
-    return _capture_raw(_parent_mesh(root, scene, parent_id), world_point, scene, runtime)
+    return capture_surface_param(_parent_mesh(root, scene, parent_id), world_point, runtime, scene)
 
 
 def _mesh_vertex_world(parent_obj, vertex_index):
@@ -65,12 +96,7 @@ def capture_attachment_from_proxy_vertex(root, scene, parent_id, vertex_index, s
 
 
 def _resolved_frame(root, scene, parent_id, raw, runtime):
-    parent_obj = _parent_mesh(root, scene, parent_id)
-    param = fiber_surface_param(raw)
-    depsgraph = _runtime_depsgraph(scene, runtime)
-    cache = _runtime_cache(runtime)
-    ok = parent_obj is not None and param is not None and depsgraph is not None
-    return None if not ok else frame_from_parent_param(parent_obj, param, depsgraph, cache=cache)
+    return resolve_surface_frame(_parent_mesh(root, scene, parent_id), raw, runtime, scene)
 
 
 def resolve_attachment_world(root, scene, parent_id, raw, runtime=None):

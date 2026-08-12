@@ -1,5 +1,9 @@
 from ..queries.root import root_for_context
 from .results import failure, success
+try:
+    from ...core.vcp.surface_target import effective_tissue_target
+except ImportError:
+    from core.vcp.surface_target import effective_tissue_target
 
 
 def delete_vcp_in_tree(context, node_type, node_id):
@@ -57,7 +61,14 @@ def _delete_target(root, scene, kind, entity_id):
         return _delete_soft_tissue(root, scene, entity_id)
     if kind == "FIBER_SURFACE":
         return _delete_fiber_surface(root, scene, entity_id)
-    return _delete_reconcile()(root, scene, {_delete_key(kind, entity_id)})
+    deleted = _delete_reconcile()(root, scene, {_delete_key(kind, entity_id)}, explicit=True)
+    _clear_active_entity(root.af_vcp_system, kind, entity_id)
+    return deleted
+
+
+def _clear_active_entity(vcp, kind, entity_id):
+    if str(vcp.active_vcp_type) == kind and str(vcp.active_vcp_id) == entity_id:
+        vcp.active_vcp_type, vcp.active_vcp_id = "NONE", ""
 
 
 def _consumer_error(root, kind, entity_id):
@@ -68,7 +79,19 @@ def _consumer_error(root, kind, entity_id):
     if kind == "FIBER_SURFACE":
         users = _surface_consumers(root, entity_id)
         return "Fiber Surface is used by: " + ", ".join(users) if users else ""
+    if kind == "MUSCLE":
+        users = target_tissue_consumers(root, kind, entity_id)
+        return "Muscle is targeted by: " + ", ".join(users) if users else ""
     return ""
+
+
+def target_tissue_consumers(root, kind, entity_id):
+    out = []
+    for tissue in getattr(root.af_vcp_system, "soft_tissues", ()):
+        target = effective_tissue_target(tissue)
+        if target.kind.value == str(kind) and target.entity_id == str(entity_id):
+            out.append(str(tissue.id))
+    return out
 
 
 def _surface_consumers(root, surface_id):

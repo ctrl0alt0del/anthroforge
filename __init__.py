@@ -63,12 +63,15 @@ from .operators.muscle_tools import (
 from .operators.blob_tools import AF_OT_SelectBlobControl
 from .operators.soft_tissue import (
     AF_OT_AddSoftTissueVCP,
+    AF_OT_AssignSoftTissueTarget,
     AF_OT_ApplySoftTissuePreset,
+    AF_OT_ClearSoftTissueTarget,
     AF_OT_DuplicateSoftTissueSnapshot,
     AF_OT_ConvertBlobToSoftTissue,
     AF_OT_RebindSoftTissue,
     AF_OT_RecomputeSoftTissue,
     AF_OT_SelectSoftTissueBase,
+    AF_OT_SelectSoftTissueTarget,
 )
 from .operators.import_package import AF_OT_ImportPackage, AF_OT_ImportSCPDiff, AF_OT_ImportVCP
 from .operators.proxy_view import AF_OT_ExitProxyView, AF_OT_SwitchToProxyView
@@ -267,10 +270,13 @@ classes = (
     AF_OT_SelectFiberSurfaceSources,
     AF_OT_AddBlobVCP,
     AF_OT_AddSoftTissueVCP,
+    AF_OT_AssignSoftTissueTarget,
     AF_OT_ApplySoftTissuePreset,
+    AF_OT_ClearSoftTissueTarget,
     AF_OT_RecomputeSoftTissue,
     AF_OT_RebindSoftTissue,
     AF_OT_SelectSoftTissueBase,
+    AF_OT_SelectSoftTissueTarget,
     AF_OT_DuplicateSoftTissueSnapshot,
     AF_OT_ConvertBlobToSoftTissue,
     AF_OT_ToggleVCPCollapse,

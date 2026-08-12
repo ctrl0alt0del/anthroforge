@@ -44,9 +44,18 @@ def resolve_muscle_surface(root, muscle_id, surface_role, scene=None):
 
 def find_inflation_ctrl(vis_col, root_name, muscle_id, index=None):
     indexed = _indexed(index, "inflation", str(muscle_id or ""))
-    if indexed is not None:
+    if _live_object(indexed):
         return indexed
     return _find_inflation_ctrl_in_collection(vis_col, root_name, muscle_id) or _find_inflation_ctrl_global(root_name, muscle_id)
+
+
+def _live_object(obj):
+    if obj is None:
+        return False
+    try:
+        return bpy.data.objects.get(obj.name) == obj
+    except ReferenceError:
+        return False
 
 
 def _find_inflation_ctrl_in_collection(vis_col, root_name, muscle_id):

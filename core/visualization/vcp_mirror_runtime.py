@@ -3,6 +3,7 @@ import bpy
 from ..scp_runtime.runtime_state import mirror_effective_axis, mirror_source_id, mirror_status
 from ..utils import get_af_root, scene_for_id
 from ..vcp.fiber_modes import fiber_parent_ids
+from ..vcp.surface_target import SurfaceTargetKind, effective_tissue_target
 from .mirror_objects import create_mirror_from_source, ensure_obj_type, remove_obj, copy_data
 from .muscle_sync_helpers import resolve_muscle_surface
 from .mirror_rules import mirror_world_matrix
@@ -143,12 +144,34 @@ def _rule_for_blob(blob, muscles_by_id, fibers_by_id, scp_by_id):
     return None
 
 
-def _rule_for_soft_tissue(tissue, fibers_by_id, scp_by_id):
-    host_rule = _rule_for_scp(_as_id(getattr(tissue, "host_scp_id", "")), scp_by_id)
-    if host_rule is not None:
-        return host_rule
+def _rule_for_soft_tissue(tissue, muscles_by_id, fibers_by_id, scp_by_id):
+    target = effective_tissue_target(tissue)
+    if target.kind == SurfaceTargetKind.SCP:
+        return _rule_for_scp(target.entity_id, scp_by_id)
+    if target.kind == SurfaceTargetKind.MUSCLE:
+        muscle = muscles_by_id.get(target.entity_id)
+        return None if muscle is None else _rule_for_muscle(muscle, fibers_by_id, scp_by_id)
     for fiber in _soft_source_fibers(tissue, fibers_by_id):
         rule = _rule_for_fiber(fiber, fibers_by_id, scp_by_id)
+        if rule is not None:
+            return rule
+    return None
+
+
+def surface_target_mirror_rule(root, target):
+    scps, muscles, fibers = _scp_map(root), _muscle_map(root), _fiber_map(root)
+    if target.kind == SurfaceTargetKind.SCP:
+        return _rule_for_scp(target.entity_id, scps)
+    if target.kind == SurfaceTargetKind.MUSCLE:
+        muscle = muscles.get(target.entity_id)
+        return None if muscle is None else _rule_for_muscle(muscle, fibers, scps)
+    return None
+
+
+def tissue_source_mirror_rule(root, tissue):
+    fibers, scps = _fiber_map(root), _scp_map(root)
+    for fiber in _soft_source_fibers(tissue, fibers):
+        rule = _rule_for_fiber(fiber, fibers, scps)
         if rule is not None:
             return rule
     return None
@@ -423,19 +446,19 @@ def _sync_blob_mirrors(root, vis_col, blobs_by_id, muscles_by_id, fibers_by_id, 
         remove_obj(obj)
 
 
-def _sync_soft_tissue_mirrors(root, vis_col, tissues, fibers, scps, target_ids=None):
+def _sync_soft_tissue_mirrors(root, vis_col, tissues, muscles, fibers, scps, target_ids=None):
     targets = None if target_ids is None else {_as_id(value) for value in set(target_ids)}
     desired = set()
     for tissue_id, tissue in tissues.items():
         if targets is None or tissue_id in targets:
-            _sync_one_soft_mirror(root, vis_col, tissue_id, tissue, fibers, scps, desired)
+            _sync_one_soft_mirror(root, vis_col, tissue_id, tissue, muscles, fibers, scps, desired)
     _remove_stale_soft_mirrors(root, vis_col, desired, targets)
 
 
-def _sync_one_soft_mirror(root, vis_col, tissue_id, tissue, fibers, scps, desired):
+def _sync_one_soft_mirror(root, vis_col, tissue_id, tissue, muscles, fibers, scps, desired):
     source = _find_source_soft_obj(vis_col, root.name, tissue_id)
     mirror = _find_mirror_soft_obj(vis_col, root.name, tissue_id)
-    rule = _rule_for_soft_tissue(tissue, fibers, scps)
+    rule = _rule_for_soft_tissue(tissue, muscles, fibers, scps)
     if rule is None or source is None:
         if mirror is not None:
             remove_obj(mirror)
@@ -488,4 +511,4 @@ def _sync_all_mirror_types(root, scene, targets):
     _sync_fiber_mirrors(root, vis_col, fibers_by_id, scp_by_id, target_fiber_ids=targets[0])
     _sync_muscle_mirrors(root, vis_col, muscles_by_id, fibers_by_id, scp_by_id, target_muscle_ids=targets[1])
     _sync_blob_mirrors(root, vis_col, blobs_by_id, muscles_by_id, fibers_by_id, scp_by_id, target_blob_ids=targets[2])
-    _sync_soft_tissue_mirrors(root, vis_col, tissues_by_id, fibers_by_id, scp_by_id, targets[3])
+    _sync_soft_tissue_mirrors(root, vis_col, tissues_by_id, muscles_by_id, fibers_by_id, scp_by_id, targets[3])

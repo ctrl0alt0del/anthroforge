@@ -117,14 +117,21 @@ def _mirrored_side_muscle_setup():
     root_obj = root()
     source = scp_with_object(root_obj, "MirrorSrc", empty_object("MirrorSrc"), with_geometry=False)
     source.mirror_enabled = True
-    o1 = scp_with_object(root_obj, "O1", mesh_object("O1", (1.0, 0.0, 0.0)))
-    i1 = scp_with_object(root_obj, "I1", mesh_object("I1", (3.0, 0.0, 0.0)))
-    o2 = scp_with_object(root_obj, "O2", mesh_object("O2", (1.0, 1.0, 0.0)))
-    i2 = scp_with_object(root_obj, "I2", mesh_object("I2", (3.0, 1.0, 0.0)))
-    for scp in (o1, i1, o2, i2):
-        set_parent_relation(scp.transform_object_ref, scp, source.transform_object_ref)
+    parent, ids = source.transform_object_ref, []
+    for name, loc in (("O1", (1.0, 0.0, 0.0)), ("I1", (3.0, 0.0, 0.0)),
+                      ("O2", (1.0, 1.0, 0.0)), ("I2", (3.0, 1.0, 0.0))):
+        child = scp_with_object(root_obj, name, mesh_object(name, loc))
+        ids.append(child.id)
+    children = [_scp_by_id(root_obj, item_id) for item_id in ids]
+    for child in children:
+        set_parent_relation(child.transform_object_ref, child, parent)
+    o1, i1, o2, i2 = children
     _add_fiber(o1, i1), _add_fiber(o2, i2)
     return root_obj, find_flagged("af_fiber_proxy", root_obj.af_vcp_system.fibers[0].id, "af_fiber_id"), find_flagged("af_fiber_proxy", root_obj.af_vcp_system.fibers[1].id, "af_fiber_id")
+
+
+def _scp_by_id(root_obj, item_id):
+    return next(item for item in root_obj.af_scp_system.scps if item.id == item_id)
 
 
 def _restored_ctrl_state(root_obj, muscle):

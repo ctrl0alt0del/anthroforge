@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from ..deps.dirty_hints import empty_dirty_hints
 from ..id_utils import next_prefixed_id
 from ..vcp.prop_update_guard import suppress_vcp_prop_updates
+from ..vcp.attachment_backend import attachment_runtime, surface_binding_topology
+from ..vcp.surface_binding_codec import remap_binding_target
 from ..visualization.delete_reconcile import cleanup_scp_dependents
 from ..visualization.sync_runner import schedule_sync_from_dirty_hints
 from .model import ImportResult
@@ -220,21 +222,46 @@ def _stage_tissue_base(state, source_id):
 
 
 def _create_one_soft_tissue(state, snap):
+    values = _soft_tissue_import_values(state, snap)
+    error = _soft_tissue_import_missing(*values)
+    if error:
+        return _warn_skip(state, "soft tissue", snap.source_id, error)
+    dst = _new_vcp_item(state.root.af_vcp_system.soft_tissues, "TISSUE")
+    state.soft_tissues[str(snap.source_id or "")] = str(dst.id or "")
+    _populate_soft_tissue(dst, snap, values)
+    base = values[4]
+    if base is not None:
+        _keep_base(state, base, dst)
+
+
+def _soft_tissue_import_values(state, snap):
     missing = _incompatible_scps(state, {snap.host_scp_id}) if snap.host_scp_id else set()
+    target_type, target_id = _mapped_soft_target(state, snap)
     source_type = str(getattr(snap, "base_source_type", "OBJECT") or "OBJECT")
     base = _stage_tissue_base(state, snap.source_id) if source_type == "OBJECT" else None
     source_id = _mapped_soft_source(state, source_type, getattr(snap, "base_source_id", ""))
-    if missing or (source_type == "OBJECT" and base is None) or (source_type != "OBJECT" and not source_id):
-        return _warn_skip(state, "soft tissue", snap.source_id, missing or {"base source"})
-    dst = _new_vcp_item(state.root.af_vcp_system.soft_tissues, "TISSUE")
-    state.soft_tissues[str(snap.source_id or "")] = str(dst.id or "")
+    return missing, target_type, target_id, source_type, base, source_id
+
+
+def _soft_tissue_import_missing(missing, target_type, target_id, source_type, base, source_id):
+    if missing:
+        return missing
+    if target_type != "NONE" and not target_id:
+        return {"attachment target"}
+    invalid_source = (source_type == "OBJECT" and base is None) or (source_type != "OBJECT" and not source_id)
+    return {"base source"} if invalid_source else set()
+
+
+def _populate_soft_tissue(dst, snap, values):
+    _missing, target_type, target_id, source_type, base, source_id = values
     dst.name = str(snap.name or dst.id)
     apply_scalar_dict(dst, snap.props)
     dst.base_source_type, dst.base_source_id = source_type, source_id
     dst.host_scp_id, dst.base_object_ref = str(snap.host_scp_id or ""), base
+    dst.attachment_target_type, dst.attachment_target_id = target_type, target_id
+    dst.attachment_target_surface = str(getattr(snap, "attachment_target_surface", "AUTO"))
     _copy_soft_attachments(dst, snap)
-    if base is not None:
-        _keep_base(state, base, dst)
+    _remap_soft_payloads(dst, snap, target_type, target_id)
 
 
 def _mapped_soft_source(state, source_type, source_id):
@@ -243,6 +270,35 @@ def _mapped_soft_source(state, source_type, source_id):
     if source_type == "FIBER_SURFACE":
         return state.fiber_surfaces.get(str(source_id or ""), "")
     return ""
+
+
+def _mapped_soft_target(state, snap):
+    kind = str(getattr(snap, "attachment_target_type", "NONE") or "NONE")
+    source_id = str(getattr(snap, "attachment_target_id", "") or "")
+    if kind == "SCP":
+        valid = source_id in state.compatible_scps and _stored_target_topology_matches(state, snap, source_id)
+        return kind, source_id if valid else ""
+    if kind == "MUSCLE":
+        return kind, state.muscles.get(source_id, "")
+    return "NONE", ""
+
+
+def _stored_target_topology_matches(state, snap, target_id):
+    expected = str(dict(snap.props or {}).get("attachment_topology_signature", "") or "")
+    scp = _scp_map(state.root).get(str(target_id))
+    obj = None if scp is None else getattr(scp, "geometry_object_ref", None)
+    current = surface_binding_topology(obj, attachment_runtime(state.scene), state.scene)
+    return bool(current and (not expected or current == expected))
+
+
+def _remap_soft_payloads(dst, snap, target_type, target_id):
+    source_id = str(getattr(snap, "attachment_target_id", "") or "")
+    if target_type == "NONE" or not source_id or not target_id:
+        return
+    dst.control_bindings_json = remap_binding_target(dst.control_bindings_json, target_type, source_id, target_id)
+    dst.base_bindings_json = remap_binding_target(dst.base_bindings_json, target_type, source_id, target_id)
+    for row in dst.attachments:
+        row.bindings_json = remap_binding_target(row.bindings_json, target_type, source_id, target_id)
 
 
 def _copy_soft_attachments(dst, snap):

@@ -128,11 +128,11 @@ def ensure_inflation_ctrl(
     create_inflation_ctrl_fn,
     nearest_on_mesh_surface_fn,
 ):
+    _ensure_initial_ctrl_world(muscle, base_points)
+    target = _snap_ctrl_to_surface(muscle, base_obj, nearest_on_mesh_surface_fn)
     ctrl = find_inflation_ctrl_fn(vis_col, root.name, muscle.id)
     if ctrl is None:
         ctrl = create_inflation_ctrl_fn(vis_col, root, muscle.id)
-    _ensure_initial_ctrl_world(muscle, base_points)
-    target = _snap_ctrl_to_surface(muscle, base_obj, nearest_on_mesh_surface_fn)
     ctrl.location = target
     mark_inflation_ctrl_location(ctrl)
     ctrl.show_in_front = True

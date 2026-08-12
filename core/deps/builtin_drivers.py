@@ -258,9 +258,14 @@ class SoftTissueSyncDriver(DependencyDriver):
         ids = set(impacted.get("SOFT_TISSUE", set()) or set())
         payload = _meta_payload(dict(gate_meta or {}))
         recapture = _payload_id_set(payload, "soft_tissue_recapture_ids")
+        base = _payload_id_set(payload, "soft_tissue_base_recapture_ids")
+        regions = _payload_id_set(payload, "soft_tissue_region_recapture_ids")
         force = bool(payload.get("soft_tissue_force"))
         targets = None if is_full else ids
-        register_soft_tissue_sync().sync_root_to_scene(root, scene, targets, recapture, force or is_full)
+        scopes = {value: "ALL" for value in recapture}
+        scopes.update({value: "BASE" for value in base - recapture})
+        scopes.update({value: "REGIONS" for value in regions - recapture - base})
+        register_soft_tissue_sync().sync_root_to_scene(root, scene, targets, scopes, force or _load_event(gate_meta))
 
 
 class VCPMirrorSyncDriver(DependencyDriver):
