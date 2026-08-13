@@ -82,6 +82,52 @@ and a transitive filib licensing/build review. A disabled pure-data conservative
 covers adversarial sweeps, but costs about 543 ms by itself at 512 nodes, so it is a qualification
 oracle rather than a production backend.
 
+### Skeleton benchmark and V2 decisions - 2026-08-13
+
+The second mandatory benchmark is
+`E:\development\WIP_models\skeleton_comb_base.blend`, SHA-256
+`8C1920F019CBBFD226569D9D8A1BA885F1737D4ABBC3032F83246217D7B1A7B6`. It contains two authored
+open Fibers from the scapula (`SCP_4`) through one rib touch (`SCP_2`) to the ilium (`SCP_12`).
+Both use 64 nodes, 12 interactive / 180 final iterations, a `0.002` collision radius, and one
+authored mid-touch. The file remained byte-identical throughout the read-only audit.
+
+A Fiber-handle feedback loop was reproduced in this file. One physical handle move could schedule
+49 refinements in about eight seconds because the consumed transform was never recorded; repeated
+attachment recapture then produced slightly different serialized barycentric values. Saving appeared
+to fix the loop only because save removes dynamic handles. The runtime now marks a successfully
+enqueued transform as consumed. Programmatic handle placement also writes and marks the intended
+world matrix atomically, avoiding a stale pre-depsgraph matrix that previously caused one false
+creation-time supersede.
+
+The visible obstacle intersections are a release correctness blocker, not primarily a planner-search
+or performance problem. Both planners find ROADMAP detours, but exact-count resampling and pin
+restoration introduce about `0.085` residual before smoothing. More importantly, the mid-touch owner
+zone expands through every contiguous colliding rib node: nodes 3-41 for `FIBER_1` and 7-46 for
+`FIBER_2`. Current owner-aware validation consequently reports zero penetration while unfiltered
+validation measures `0.932539` and `0.465556` on fresh outputs, with four actual rib ray crossings
+per Fiber. Both final V1 solves also consume all 180 iterations and remain nonconverged.
+
+Therefore owner permission must be bounded by an authored local contact neighbourhood, not inferred
+from an arbitrarily long already-colliding run. Planner-to-exact-count handoff must preserve a safe
+corridor or reject/replan, and a final conservative validator must ignore the solver's legal-contact
+mask outside that bounded neighbourhood. These changes belong in the V2 collision integration and
+must pass in shadow mode before any native speedup is accepted. Accelerating the current filter would
+only produce an unsafe answer faster.
+
+The numerical unit contract for new AnthroForge work is SI: one Blender world unit is one metre and
+the default `collision_radius=0.002` means two millimetres. Core calculations remain in world space;
+the UI uses Blender length units. Existing files retain their coordinates and stored radii without
+automatic reinterpretation or scaling. A legacy project requires one explicit anatomical-scale
+calibration before physical tolerances can be claimed; changing `scale_length` alone is not a
+geometry migration.
+
+The approved native target is Windows x64, Blender 5.0 / CPython 3.11 (`cp311-win_amd64`). End users
+will receive a packaged `.pyd` and need no compiler or separate C++ executable. Local development
+builds require a CPython-compatible MSVC toolchain and Windows SDK. This workstation already has
+Visual Studio 2019 Build Tools (MSVC 19.29), CMake, Ninja, and Windows SDK 10.0.19041; they are not on
+the ordinary shell `PATH` but are available through `vcvars64.bat`. Blender provides Python 3.11.13.
+CI-built release binaries remain the reproducible distribution path.
+
 ### Baseline audit evidence (pre-implementation)
 
 The detailed findings below preserve the measured baseline and the reasoning that drove the staged
@@ -1402,8 +1448,20 @@ The supplied `.blend` resolves the need for an average-complexity workload and c
 - acceptable quality/error thresholds for interactive preview versus explicit final bake;
 - the units/scale tolerance for point and penetration equivalence.
 
-The P0/P1 order above is backed by microbenchmarks and the supplied real file. The owner-zone,
-explicit-empty, cache-lifecycle, publication, runtime-routing, and banded-core fixes are now covered
-by focused regression tests. Stage 3 still needs pure-data ownership and microbatched acceptance /
-final validation, while collision still needs a fast production conservative backend. Those are the
-two structural items that block V2 rollout and the final responsiveness targets.
+The P0/P1 order above is backed by microbenchmarks and both supplied real files. The endless handle
+feedback loop is fixed: one physical move now produces one refinement, and programmatic off-origin
+handle creation produces none. SCP identity writes no longer create four nested full update tails;
+the skeleton SCP_2 sync changed from roughly 1.03 seconds / ten solves to about 240 ms / two solves.
+
+The skeleton intersections were proved to be a correctness defect, not a planner-search failure.
+The persisted FIBER_1/FIBER_2 curves cross the ribs four times and have strict residuals 0.93714 and
+0.46427. Their old touch-owner zones covered 39-40 nodes; zones are now pin-local, and fresh unsafe
+results report residuals about 0.1269 and are rejected instead of committed. The existing last-good
+curve remains visible as STALE and cannot feed downstream generation.
+
+A native Windows conservative CCD batch now exists behind an opt-in development flag. On the skull
+fixture its sorted native broad phase plus pair kernel takes about 7 ms at 64 nodes, 13-17 ms at 256,
+and 20-24 ms at 512, versus roughly 78-88 / 278-317 / 540-546 ms in the earlier valid-path Python
+reference run. It requires no user-installed runtime executable. V2 remains rollout-gated:
+stored intersecting inputs need explicit depenetration/replanning, the global step still repeatedly
+changes its fidelity target, and convergence does not yet include objective stationarity.

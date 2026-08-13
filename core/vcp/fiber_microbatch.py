@@ -89,6 +89,8 @@ def _push_point(session, index):
 
 def _advance_edges(session, deadline):
     work, solver = session.iteration_work, session.solver
+    work.zones = work.zones or solver._owner_zone_limits(
+        work.candidate, session.oracle, session.level.colliders, work.local)
     pairs = solver._segment_pairs(len(work.candidate), work.cyclic)
     while work.cursor < len(pairs) and _within_deadline(work.cursor, deadline):
         _push_edge(session, pairs[work.cursor])
@@ -100,11 +102,8 @@ def _push_edge(session, pair):
     first, second = pair
     cols = solver._pair_colliders(work.candidate, first, second, session.oracle,
                                   level.colliders, work.local, work.zones)
-    if not solver._pair_needs_segment_penalty(
-            work.candidate, first, second, session.oracle, cols, work.local):
-        return
-    pen = solver._segment_penalty(work.candidate, work.pins, session.oracle,
-                                  cols, first, second, work.local)
+    pen = solver._owner_pair_penalty(work.candidate, work.pins, session.oracle,
+                                     cols, first, second, work.local, work.zones)
     work.max_pen = max(work.max_pen, float(pen))
 
 
@@ -121,19 +120,25 @@ def _advance_rollback(session, deadline):
 
 def _advance_contact_stage(session):
     work, solver = session.iteration_work, session.solver
-    total = _stage_size(session)
-    if work.cursor < total:
+    if work.cursor < _stage_size(session):
         return
+    stage = _next_contact_stage(solver, work)
+    if stage is None:
+        _finish_contacts(session)
+        return
+    _set_contact_stage(work, stage)
+    if stage == "DONE":
+        _finish_contacts(session)
+
+
+def _set_contact_stage(work, stage):
+    work.stage, work.cursor, work.zones = stage, 0, None
+
+
+def _next_contact_stage(solver, work):
     if work.stage == "POINTS":
-        work.stage = "EDGES" if work.local["segment_collisions"] else _after_edges(solver, work)
-    elif work.stage == "EDGES":
-        work.stage = _after_edges(solver, work)
-    else:
-        _finish_contacts(session)
-        return
-    work.cursor, work.zones = 0, None
-    if work.stage == "DONE":
-        _finish_contacts(session)
+        return "EDGES" if work.local["segment_collisions"] else _after_edges(solver, work)
+    return _after_edges(solver, work) if work.stage == "EDGES" else None
 
 
 def _stage_size(session):

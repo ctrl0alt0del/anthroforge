@@ -10,7 +10,7 @@ from .fiber_microbatch import (
     iteration_result, start_iteration,
 )
 from .fiber_modes import is_loop_fiber
-from .fiber_planner import DIRECT, LOCAL_FALLBACK
+from .fiber_planner import DIRECT, LOCAL_FALLBACK, ROADMAP
 from .fiber_planner_progressive import begin_progressive_plan, advance_progressive_plan
 from .fiber_validation import (
     advance_validation, begin_final_validation, begin_post_validation,
@@ -72,6 +72,7 @@ class FiberSolveSession:
     guides: list = field(default_factory=list)
     params: dict = field(default_factory=dict)
     preview: list = field(default_factory=list)
+    preview_validated: bool = False
     mode: str = LOCAL_FALLBACK
     planner_ms: float = 0.0
     planned_ids: tuple = ()
@@ -234,13 +235,30 @@ def _finish_direct(session):
 
 
 def _init_open_levels(session):
-    session.counts, session.iterations = session.solver._level_schedule(
-        session.params["node_count"], len(session.anchors), session.params["iterations"])
     session.route_seed = _route_seed(session)
+    minimum = session.solver._route_level_minimum(
+        session.params["node_count"], session.anchors, session.route_seed)
+    session.counts, session.iterations = session.solver._level_schedule(
+        session.params["node_count"], minimum, session.params["iterations"])
+    _install_route_preview(session)
     session.phase = FiberPhase.LEVEL_SETUP.value
 
 
+def _install_route_preview(session):
+    count = int(session.params["node_count"])
+    _nodes, _pinned, targets = session.solver._build_level_nodes(
+        session.fiber, session.anchors, session.guides, count, session.route_seed)
+    candidate = session.solver._validated_route_seed(
+        session.route_seed, count, session.oracle,
+        dict(session.params, pin_owners=session.solver._pin_owners(session.anchors, targets)), targets)
+    session.preview = _copy_points(candidate) if candidate else []
+    session.preview_validated = bool(candidate)
+    session.generation += int(session.preview_validated)
+
+
 def _route_seed(session):
+    if session.mode == ROADMAP or len(tuple(session.preview or ())) > len(session.anchors):
+        return _copy_points(session.preview)
     if not session.guides:
         return _copy_points(session.preview)
     return [session.anchors[0].point.copy(), *_copy_points(session.guides),
@@ -249,8 +267,9 @@ def _route_seed(session):
 
 def _start_open_level(session):
     count = session.counts[session.level_index]
+    seed = session.route_seed if session.seed is None else session.seed
     nodes, pinned, targets = session.solver._build_level_nodes(
-        session.fiber, session.anchors, session.guides, count, session.seed,
+        session.fiber, session.anchors, session.guides, count, seed,
         session.params.get("_cache_signature"))
     params = session.solver._level_params(session.params, session.iterations[session.level_index])
     params["surface_route_seed"] = bool(session.guides)

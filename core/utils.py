@@ -3,6 +3,8 @@ from sys import getsizeof
 
 import bpy
 
+from .units import declare_si_unit_contract
+
 _SCENE_CACHE = {}
 _BOUNDED_SCENE_CACHE = {}
 _GEOMETRY_GENERATIONS = {}
@@ -230,6 +232,7 @@ def create_af_root(scene):
     scene.collection.objects.link(root)
     root.empty_display_type, root.empty_display_size = "PLAIN_AXES", 0.5
     root["anthroforge_root"] = True
+    declare_si_unit_contract(root)
     root.af_scp_system, root.af_vcp_system, root.af_shortcut_system
     return scene_cache_set(scene, "af_root", root)
 

@@ -20,6 +20,7 @@ def _args():
     parser.add_argument("--clearance", type=float, default=0.002)
     parser.add_argument("--motion", type=float, default=0.002)
     parser.add_argument("--repeat", type=int, default=2)
+    parser.add_argument("--backend", choices=("reference", "native"), default="reference")
     return parser.parse_args(sys.argv[sys.argv.index("--") + 1:])
 
 
@@ -135,13 +136,20 @@ def _owner_filter(owners, zones):
     return allowed
 
 
-def _run_once(points, vertices, triangles, owners, zones, clearance, motion):
+def _backend(name):
+    if name == "native":
+        from anthroforge.core.vcp.fiber_ccd_native import mesh_collision_free_step_native
+        return mesh_collision_free_step_native
     from anthroforge.core.vcp.fiber_ccd_reference import mesh_collision_free_step_reference
+    return mesh_collision_free_step_reference
+
+
+def _run_once(points, vertices, triangles, owners, zones, clearance, motion, backend):
     edges = np.column_stack((np.arange(len(points) - 1), np.arange(1, len(points))))
     end = _candidate_motion(points, motion)
     pair_filter = _owner_filter(owners, zones)
     started = time.perf_counter()
-    result = mesh_collision_free_step_reference(points, end, edges, vertices, triangles, clearance, pair_filter)
+    result = _backend(backend)(points, end, edges, vertices, triangles, clearance, pair_filter)
     elapsed = (time.perf_counter() - started) * 1000.0
     payload = dict(result.__dict__); payload["wall_ms"] = elapsed
     return payload
@@ -158,7 +166,7 @@ def _benchmark(args):
     for count in (int(value) for value in args.nodes.split(",")):
         points = _resample(source, count)
         zones = _owner_zones(points, root, scene, fiber, depsgraph, args.clearance)
-        rows[str(count)] = [_run_once(points, vertices, triangles, owners, zones, args.clearance, args.motion)
+        rows[str(count)] = [_run_once(points, vertices, triangles, owners, zones, args.clearance, args.motion, args.backend)
                             for _index in range(max(1, args.repeat))]
     return _report(args, original_hash, rows, vertices, triangles, fiber)
 
@@ -169,7 +177,7 @@ def _report(args, original_hash, rows, vertices, triangles, fiber):
             "clearance": args.clearance, "motion": args.motion, "vertices": len(vertices),
             "triangles": len(triangles), "runs": rows, "blender": bpy.app.version_string,
             "python": platform.python_version(), "platform": platform.platform(),
-            "filter": "solver-derived local owner-contact zones"}
+            "filter": "solver-derived local owner-contact zones", "backend": args.backend}
 
 
 def main():

@@ -164,7 +164,7 @@ def _try_seed_fallback_steps(session):
 
 def _seed_candidate(session):
     level, solver = session.level, session.solver
-    candidate = solver._resample_polyline(session.route_seed, len(level.nodes))
+    candidate = solver._preserve_polyline(session.route_seed, len(level.nodes))
     solver._restore_pins(candidate, level.targets)
     return candidate
 
@@ -276,13 +276,21 @@ def _uncached_edge_residual(solver, nodes, oracle, colliders, params, zones, cyc
 def _pair_blocked_steps(solver, nodes, first, second, oracle, colliders, params, zones):
     cols = solver._pair_colliders(
         nodes, first, second, oracle, colliders, params, zones)
-    if solver._no_real_colliders(oracle, cols):
-        return False
-    if solver._cached_segment_ray(nodes[first], nodes[second], oracle, cols, params):
+    for collider in cols:
+        segment = solver._owner_trimmed_pair(
+            nodes, first, second, oracle, collider, params, zones)
+        if segment is not None and (yield from _trimmed_pair_blocked_steps(
+                solver, segment, oracle, collider, params)):
+            return True
+    return False
+
+
+def _trimmed_pair_blocked_steps(solver, segment, oracle, collider, params):
+    start, end = segment[:2]
+    if solver._cached_segment_ray(start, end, oracle, (collider,), params):
         return True
     for value in solver._segment_samples():
-        point = nodes[first].lerp(nodes[second], value)
-        if (yield from _penetration_steps(point, oracle, cols)) > 0.0:
+        if (yield from _penetration_steps(start.lerp(end, value), oracle, (collider,))) > 0.0:
             return True
     return False
 
@@ -290,16 +298,28 @@ def _pair_blocked_steps(solver, nodes, first, second, oracle, colliders, params,
 def _pair_penetration_steps(solver, nodes, first, second, oracle, colliders, params, zones):
     cols = solver._pair_colliders(
         nodes, first, second, oracle, colliders, params, zones)
-    if solver._no_real_colliders(oracle, cols):
+    maximum = 0.0
+    for collider in cols:
+        segment = solver._owner_trimmed_pair(
+            nodes, first, second, oracle, collider, params, zones)
+        value = yield from _trimmed_pair_penetration_steps(
+            solver, segment, oracle, collider, params)
+        maximum = max(maximum, value)
+    return maximum
+
+
+def _trimmed_pair_penetration_steps(solver, segment, oracle, collider, params):
+    if segment is None:
         return 0.0
-    samples = solver._segment_samples_for_cached(
-        nodes[first], nodes[second], oracle, cols, params)
-    maximum = yield from _sample_max_steps(
-        nodes[first], nodes[second], samples, oracle, cols)
+    start, end = segment[:2]
+    samples = solver._segment_samples_for_cached(start, end, oracle, (collider,), params)
+    maximum = yield from _sample_max_steps(start, end, samples, oracle, (collider,))
+    blocked = solver._cached_segment_ray(start, end, oracle, (collider,), params)
+    maximum = max(maximum, float(params.get("eps_pen", 1.0e-5))) if blocked else maximum
     if not solver._uses_v2(params):
         return maximum
     return (yield from _v2_pair_penetration(
-        solver, nodes[first], nodes[second], oracle, cols, params, maximum))
+        solver, start, end, oracle, (collider,), params, maximum, blocked))
 
 
 def _sample_max_steps(start, end, samples, oracle, colliders):
@@ -311,10 +331,9 @@ def _sample_max_steps(start, end, samples, oracle, colliders):
     return maximum
 
 
-def _v2_pair_penetration(solver, start, end, oracle, colliders, params, sample_pen):
+def _v2_pair_penetration(solver, start, end, oracle, colliders, params, sample_pen, blocked=False):
     first = yield from _penetration_steps(start, oracle, colliders)
     second = yield from _penetration_steps(end, oracle, colliders)
-    blocked = solver._cached_segment_ray(start, end, oracle, colliders, params)
     return 0.0 if max(first, second) <= 0.0 and not blocked else sample_pen
 
 
@@ -369,40 +388,6 @@ def _owner_zones_steps(solver, nodes, oracle, colliders, params):
 
 
 def _compute_zones_steps(solver, nodes, oracle, colliders, owners):
-    zones = {}
-    by_sid = {str(collider["sid"]): collider for collider in tuple(colliders or ())}
-    for index, owner in owners:
-        if owner and owner in by_sid:
-            zone = yield from _pin_zone_steps(
-                nodes, oracle, by_sid[owner], int(index))
-            zones.setdefault(owner, []).append(zone)
-    return {sid: tuple(values) for sid, values in zones.items()}
-
-
-def _pin_zone_steps(nodes, oracle, collider, index):
-    pin = max(0, min(len(nodes) - 1, int(index)))
-    left = yield from _zone_left_steps(nodes, oracle, collider, pin)
-    right = yield from _zone_right_steps(nodes, oracle, collider, pin)
-    return left, right
-
-
-def _zone_left_steps(nodes, oracle, collider, pin):
-    index = int(pin)
-    while index > 0:
-        penetration = yield from _penetration_steps(
-            nodes[index - 1], oracle, (collider,))
-        if penetration <= 0.0:
-            break
-        index -= 1
-    return index
-
-
-def _zone_right_steps(nodes, oracle, collider, pin):
-    index = int(pin)
-    while index + 1 < len(nodes):
-        penetration = yield from _penetration_steps(
-            nodes[index + 1], oracle, (collider,))
-        if penetration <= 0.0:
-            break
-        index += 1
-    return index
+    if False:
+        yield None
+    return solver._compute_owner_zone_limits(nodes, oracle, colliders, owners)

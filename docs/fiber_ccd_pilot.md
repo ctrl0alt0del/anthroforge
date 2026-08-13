@@ -1,6 +1,25 @@
 # Fiber CCD development pilot
 
-Status: development reference only, disabled by default, not a V2 rollout gate.
+Status: native Windows development backend implemented, disabled by default, not yet a V2 rollout gate.
+
+## Native backend result
+
+The approved AnthroForge backend now ships as a 124,416-byte `af_fiber_ccd.dll` plus source and a
+reproducible MSVC build script. It uses one native call for sorted swept-AABB candidate generation
+and one native call for the conservative pair batch. Blender loads it through `ctypes`; there is no
+installer, service, executable, SciPy, or IPC dependency. This machine already had the required
+Visual Studio 2019 C++ build tools, so no toolchain installation was necessary.
+
+It remains explicitly gated by `ANTHROFORGE_FIBER_NATIVE_CCD=1`. The opt-in V2 line search tests pass,
+but default behavior is unchanged while invalid-start recovery and the local/global V2 fixed-point
+contract are unfinished.
+
+On the same read-only skull benchmark, the original Python reference measured about 78-88 ms at 64,
+278-317 ms at 256, and about 540-546 ms at 512 in the earlier valid-path run. The native
+batch measured 6.6-7.2 ms at 64, 12.9-16.5 ms at 256, and 19.7-23.6 ms at 512. Corrected owner
+semantics now classify this stored path as `INVALID_START`; that is truthful and prevents the result
+from being misrepresented as CCD-safe, but it also means this fixture cannot qualify safe movement
+until it is explicitly depenetrated or replanned.
 
 ## Decision
 

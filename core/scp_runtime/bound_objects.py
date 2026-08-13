@@ -2,8 +2,9 @@ import bpy
 
 from ..id_utils import next_prefixed_id
 from ..utils import scene_for_id
-from .common import as_id, invalidate_scp_object_maps, set_prop_raw
+from .common import as_id, invalidate_scp_object_maps, invalidate_scp_prop_map, set_prop_raw
 from .object_colors import apply_object_color, ensure_scp_color
+from .prop_update_guard import suppress_scp_prop_updates
 
 
 def _entry_obj(entry):
@@ -25,7 +26,11 @@ def _identity_obj(scp):
 def _sync_identity(scp):
     obj = _identity_obj(scp)
     name = "" if obj is None else str(obj.name)
-    set_prop_raw(scp, "name", name or as_id(getattr(scp, "id", "")))
+    target = name or as_id(getattr(scp, "id", ""))
+    if str(getattr(scp, "name", "")) == target:
+        return
+    with suppress_scp_prop_updates():
+        set_prop_raw(scp, "name", target)
 
 
 def find_bound_entry_by_id(scp, bound_id):
@@ -188,7 +193,9 @@ def _sync_color(root, scp):
 
 
 def _invalidate_object_index(root):
-    invalidate_scp_object_maps(scene_for_id(root), root.name)
+    scene = scene_for_id(root)
+    invalidate_scp_object_maps(scene, root.name)
+    invalidate_scp_prop_map(root)
 
 
 def sync_scp_roles(root, scp, invalidate=True):

@@ -6,6 +6,7 @@ import bpy
 
 from ..shortcuts.owner_backsolve import owner_backsolve_enabled
 from ..shortcuts.path_codec import make_bound_entity_id, make_shortcut_path, parse_shortcut_path
+from ..units import unit_contract_payload
 from ..utils import get_af_root
 from .model import (
     BlobSnapshot,
@@ -156,6 +157,7 @@ def root_snapshot(root):
     vcp = root.af_vcp_system
     return PackageSnapshot(
         root_name=str(root.name or "AF_ROOT"),
+        unit_contract=unit_contract_payload(root),
         draft_skin_settings=scalar_dict(root.af_draft_skin_settings),
         topology_settings=scalar_dict(root.af_topology_settings),
         scps=[_scp_snapshot(scp) for scp in root.af_scp_system.scps],

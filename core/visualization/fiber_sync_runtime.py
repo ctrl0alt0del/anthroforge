@@ -20,14 +20,20 @@ def _iter_endpoints(fiber):
     )
 
 
+def _place_handle_world(handle, point):
+    matrix = handle.matrix_world.copy()
+    matrix.translation = point
+    handle.matrix_world = matrix
+    mark_applied_matrix(handle)
+
+
 def _sync_endpoint_handle(sync, vis_col, root, scene, runtime_registry, fiber, endpoint, parent_id, raw, window_manager=None):
     h = sync._find_endpoint_handle(vis_col, root.name, fiber.id, endpoint)
     if h is None:
         h = sync._create_endpoint_handle(vis_col, root, fiber.id, endpoint)
     w = sync._endpoint_world(root, scene, runtime_registry, parent_id, raw)
     if w is not None:
-        h.location = w
-        mark_applied_matrix(h)
+        _place_handle_world(h, w)
         sync._set_helper_screen_size(h, px=14.0, window_manager=window_manager)
 
 
@@ -37,8 +43,7 @@ def _sync_touch_handle(sync, vis_col, root, scene, runtime_registry, fiber, inde
         h = sync._create_touch_handle(vis_col, root, fiber.id, index)
     w = sync._endpoint_world(root, scene, runtime_registry, touch.parent_id, touch.attach_param)
     if w is not None:
-        h.location = w
-        mark_applied_matrix(h)
+        _place_handle_world(h, w)
         sync._set_helper_screen_size(h, px=12.0, window_manager=window_manager)
 
 
@@ -48,8 +53,7 @@ def _sync_loop_anchor_handle(sync, vis_col, root, scene, runtime_registry, fiber
         h = sync._create_loop_anchor_handle(vis_col, root, fiber.id, index)
     w = sync._endpoint_world(root, scene, runtime_registry, anchor.parent_id, anchor.attach_param)
     if w is not None:
-        h.location = w
-        mark_applied_matrix(h)
+        _place_handle_world(h, w)
         sync._set_helper_screen_size(h, px=13.0, window_manager=window_manager)
 
 
@@ -157,14 +161,21 @@ def _sync_commit_allowed(fiber, points):
         return False
     if not all(all(_finite(value) for value in point) for point in points):
         return False
-    if _effective_solver_version(fiber) < 2:
+    if _effective_solver_version(fiber) >= 2:
+        return float(fiber_eps_pen(fiber)) < 1.0e-5 and not fiber_not_converged(fiber)
+    if not _requires_collision_truth(fiber):
         return True
-    return float(fiber_eps_pen(fiber)) < 1.0e-5 and not fiber_not_converged(fiber)
+    return float(fiber_eps_pen(fiber)) < 1.0e-5
 
 
 def _finite(value):
     from math import isfinite
     return isfinite(float(value))
+
+
+def _requires_collision_truth(fiber):
+    return bool(getattr(fiber, "use_segment_collisions", False) or
+                len(tuple(getattr(fiber, "mid_touches", ()) or ())))
 
 
 def _effective_solver_version(fiber):
@@ -472,6 +483,7 @@ def _merge_changed_fibers(sync, root, vis_col, changed, obj):
     payload = dict(classified["payload"])
     payload["binding"] = classified.get("binding")
     if enqueue_control_intent(root, classified["control_type"], payload):
+        mark_applied_matrix(obj)
         changed |= set(classified["dirty_hints"].get("FIBER", set()) or set())
 
 

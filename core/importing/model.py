@@ -189,6 +189,7 @@ class ShortcutSnapshot:
 class PackageSnapshot:
     root_name: str
     schema_version: int = PACKAGE_SCHEMA_VERSION
+    unit_contract: dict | None = None
     scps: list[ScpSnapshot] = field(default_factory=list)
     fibers: list[FiberSnapshot] = field(default_factory=list)
     fiber_surfaces: list[FiberSurfaceSnapshot] = field(default_factory=list)

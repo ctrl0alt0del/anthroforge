@@ -143,6 +143,13 @@ def _handle_count(fiber_id):
     return sum(bool(obj.get("af_fiber_id") == fiber_id and (obj.get("af_fiber_endpoint_handle") or obj.get("af_fiber_touch_handle"))) for obj in bpy.context.scene.objects)
 
 
+def _remove_fiber_handles(fiber_id):
+    handles = [obj for obj in bpy.context.scene.objects if obj.get("af_fiber_id") == fiber_id
+               and (obj.get("af_fiber_endpoint_handle") or obj.get("af_fiber_touch_handle"))]
+    for obj in handles:
+        bpy.data.objects.remove(obj, do_unlink=True)
+
+
 def _touch_handle(fiber_id, index=0):
     return next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_touch_handle") and obj.get("af_fiber_id") == fiber_id and int(obj.get("af_fiber_touch_index", -1)) == index)
 
@@ -278,9 +285,9 @@ class _WideBandPushOracle:
 
 def _owner_zone_hit(point, sid):
     if sid == "START":
-        return point.x < 0.25
+        return point.x < 0.005
     if sid == "END":
-        return point.x > 1.75
+        return point.x > 1.995
     return sid == "BLOCK" and abs(point.x - 1.0) < 0.2 and point.z < 0.25
 
 
@@ -446,6 +453,14 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         count = sum(bool(obj.get("af_fiber_endpoint_handle") and obj.get("af_fiber_id") == fiber.id) for obj in bpy.context.scene.objects)
         self.assertEqual((fiber.a_parent_id, fiber.b_parent_id, proxy is not None), (origin.id, insert.id, True))
         self.assertEqual((bpy.context.active_object, count), (proxy, 2))
+
+    def test_reselecting_fiber_recreates_removed_control_handles(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        _remove_fiber_handles(fiber.id)
+        root_obj.af_vcp_system.active_vcp_type, root_obj.af_vcp_system.active_vcp_id = "FIBER", fiber.id
+        sync_from_dirty_hints(root_obj, bpy.context.scene, dirty_hints_for("FIBER", {fiber.id}),
+                              event_type="SELECTION")
+        self.assertEqual(_handle_count(fiber.id), 2)
 
     def test_add_fiber_operator_creates_proxy_and_endpoint_handles(self):
         root_obj, fiber, origin, insert = _fiber_setup()
@@ -851,24 +866,24 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertGreater(min(nodes[2].z, nodes[3].z), 0.5)
         self.assertTrue(solver._segments_clear(nodes, oracle, oracle._colliders, params, skip_ends=True))
 
-    def test_owner_zones_expand_only_through_contiguous_pin_contact(self):
+    def test_owner_zones_are_bounded_to_authored_pins(self):
         solver, oracle = FiberSolver(), _LocalizedPinOracle()
         nodes = [Vector((float(index), 0.0, 0.0)) for index in range(10)]
         colliders = ({"sid": "A"}, {"sid": "B"})
         params = {"pin_owners": {0: "A", 5: "B"}}
         zones = solver._owner_zone_limits(nodes, oracle, colliders, params)
-        self.assertEqual(zones, {"A": ((0, 2),), "B": ((4, 6),)})
+        self.assertEqual(zones, {"A": ((0, 0),), "B": ((5, 5),)})
         self.assertTrue(solver._node_collider_allowed(colliders[0], 8, zones))
 
-    def test_accepted_state_invalidates_owner_zone_cache(self):
+    def test_accepted_state_keeps_authored_owner_zones_stable(self):
         solver, oracle = FiberSolver(), _LocalizedPinOracle()
         nodes = [Vector((float(index), 0.0, 0.0)) for index in range(10)]
         colliders, params = ({"sid": "A"}, {"sid": "B"}), {"margin": 0.0, "pin_owners": {0: "A", 5: "B"}}
-        self.assertEqual(solver._owner_zone_limits(nodes, oracle, colliders, params)["A"], ((0, 2),))
+        self.assertEqual(solver._owner_zone_limits(nodes, oracle, colliders, params)["A"], ((0, 0),))
         nodes[2].x = 4.0
         with patch.object(solver, "_active_colliders", return_value=colliders), patch.object(solver, "_refresh_safe_snapshot", return_value=None):
             solver._post_iteration_state(nodes, oracle, params, None)
-        self.assertEqual(solver._owner_zone_limits(nodes, oracle, colliders, params)["A"], ((0, 1),))
+        self.assertEqual(solver._owner_zone_limits(nodes, oracle, colliders, params)["A"], ((0, 0),))
 
     def test_segment_blocked_early_out_uses_ray_hit_without_pushout(self):
         blocked = FiberSolver()._segment_blocked(Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.0)), _RayHitOnlyOracle(), ({"sid": "A"},))
@@ -945,17 +960,18 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertGreater(pen, 0.0)
         self.assertGreater(oracle.pushes, 0)
 
-    def test_recompute_fiber_preserves_mid_touch_anchor(self):
+    def test_recompute_fiber_rejects_unsafe_mid_touch_result(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
         blocker, blocker_obj = _cube_scp(root_obj, "TouchBlocker", (1.0, 0.0, 0.0), 0.8)
         target_local = Vector((0.0, 0.0, 0.4))
+        before = _fiber_points_world(fiber)
         touch = fiber.mid_touches.add()
         touch.parent_id = blocker.id
         touch.attach_param = capture_world_attachment(root_obj, blocker.id, blocker_obj.matrix_world @ target_local)
         _recompute_and_drain()
-        target_world = blocker_obj.matrix_world @ target_local
-        points = [Vector(value) for value in _fiber_points_world(fiber)]
-        self.assertLess(min((point - target_world).length for point in points), 1.0e-6)
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        self.assertEqual(_fiber_points_world(fiber), before)
+        self.assertEqual(proxy.get("af_fiber_output_state"), "STALE")
 
     def test_move_fiber_touch_point_reorders_handles_in_viewport(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()

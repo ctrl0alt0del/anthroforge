@@ -136,7 +136,8 @@ def _initial_proxy(job, show_preview):
     root, scene, fiber = _resolved_job_data(job)
     proxy = _find_proxy(scene, root.name, fiber.id)
     if show_preview or proxy is None:
-        proxy = register_fiber_sync().apply_points(root, scene, fiber, job.session.preview, bake=False, commit=False)
+        proxy = register_fiber_sync().apply_points(
+            root, scene, fiber, job.session.preview, bake=False, commit=False)
     job.proxy_name = "" if proxy is None else proxy.name
     return proxy
 
@@ -240,21 +241,33 @@ def _finish_job(job, result=None):
 def _commit_allowed(job, result):
     if not (_valid_job(job) and result.done and not result.invalid_reason):
         return False
-    if _pending_version(_owned_job_data(job)[2]) == 2 and not result.converged:
+    fiber = _owned_job_data(job)[2]
+    if _pending_version(fiber) == 2 and not result.converged:
         return False
     expected = int(job.session.params.get("node_count", 0))
     finite = all(all(isfinite(float(value)) for value in point) for point in result.points)
-    valid = len(result.points) == expected and finite and _safe_residual(job, result)
+    valid = len(result.points) == expected and finite and _result_safe(fiber, result)
     return bool(valid and _surface_route_clear(job, result))
 
 
-def _safe_residual(job, result):
+def _result_safe(fiber, result):
+    if int(getattr(fiber, "solver_version", 1) or 1) >= 2:
+        return bool(result.converged and float(result.max_pen) < 1.0e-5)
+    if not _requires_collision_truth(fiber):
+        return True
     return float(result.max_pen) < 1.0e-5
+
+
+def _requires_collision_truth(fiber):
+    return bool(getattr(fiber, "use_segment_collisions", False) or
+                len(tuple(getattr(fiber, "mid_touches", ()) or ())))
 
 
 def _surface_route_clear(job, result):
     fiber = _owned_job_data(job)[2]
-    if fiber is None or not fiber.use_surface_routing or len(fiber.mid_touches):
+    if fiber is None or not fiber.use_surface_routing:
+        return True
+    if len(fiber.mid_touches):
         return True
     owner = str(fiber.a_parent_id or "")
     if not owner or owner != str(fiber.b_parent_id or ""):
@@ -262,8 +275,14 @@ def _surface_route_clear(job, result):
     collider = job.session.oracle.collider_by_id(owner)
     if collider is None:
         return True
-    return all(job.session.oracle.push_out_point(point, (collider,))[1] < 1.0e-5
-               for point in result.points[1:-1])
+    return _owner_surface_curve_clear(job, result.points, collider)
+
+
+def _owner_surface_curve_clear(job, points, collider):
+    if any(job.session.oracle.push_out_point(p, (collider,))[1] >= 1.0e-5 for p in points[1:-1]):
+        return False
+    hits = job.session.oracle.segment_hit_samples
+    return not any(hits(a, b, (collider,)) for a, b in zip(points[:-1], points[1:]))
 
 
 def _finish_pending_version(job, committed):
