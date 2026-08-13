@@ -14,6 +14,7 @@ from ..scp_runtime.marking import normalize_active_index
 from ..scp_runtime.tree import sanitize_parent_links
 from ..vcp.fiber_modes import fiber_parent_ids
 from ..vcp.prop_update_guard import suppress_vcp_prop_updates
+from .fiber_cache_lifecycle import invalidate_fiber_caches
 
 
 def _owner_key(obj):
@@ -151,19 +152,25 @@ def _reconcile_scp_dependents(root):
 def cleanup_scp_dependents(root):
     changed = _reconcile_scp_dependents(root)
     normalize_active_index(root)
+    invalidate_fiber_caches(root=root)
     return changed
 
 
 def reconcile_deleted_entities(root, scene, removed_keys, explicit=False):
-    _ = scene, explicit
+    _ = explicit
     with suppress_vcp_prop_updates(), suppress_scp_prop_updates():
-        muscle_ids = _removed_ids(removed_keys, "MUSCLE")
-        changed = _remove_muscles(root, muscle_ids)
-        changed = _remove_blobs(root, _removed_ids(removed_keys, "BLOB")) or changed
-        changed = _remove_fibers(root, _removed_ids(removed_keys, "FIBER")) or changed
-        if _removed_ids(removed_keys, "SCP"):
-            changed = _reconcile_scp_objects(root) or changed
-        return _reconcile_scp_dependents(root) or changed
+        changed = _reconcile_removed(root, removed_keys)
+    invalidate_fiber_caches(scene=scene, root=root)
+    return changed
+
+
+def _reconcile_removed(root, removed_keys):
+    changed = _remove_muscles(root, _removed_ids(removed_keys, "MUSCLE"))
+    changed = _remove_blobs(root, _removed_ids(removed_keys, "BLOB")) or changed
+    changed = _remove_fibers(root, _removed_ids(removed_keys, "FIBER")) or changed
+    if _removed_ids(removed_keys, "SCP"):
+        changed = _reconcile_scp_objects(root) or changed
+    return _reconcile_scp_dependents(root) or changed
 
 
 def _reconcile_scp_objects(root):

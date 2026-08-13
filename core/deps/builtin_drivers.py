@@ -78,6 +78,15 @@ def _load_event(meta):
     return str(dict(meta or {}).get("event_type", "") or "").upper() == "LOAD"
 
 
+def _fiber_update_event(meta):
+    return str(dict(meta or {}).get("event_type", "") or "").upper() == "FIBER_UPDATE"
+
+
+def _fiber_quality(meta, bake=False):
+    value = str(dict(meta or {}).get("quality", "") or "").upper()
+    return "FINAL" if bake or value in {"BAKE", "FINAL"} else "INTERACTIVE"
+
+
 def _sync_scp_scene(root, scene, ids, is_full, meta):
     parent_ids = _scp_parent_ids(meta) or (_all_scp_parent_ids(root) if is_full else set())
     target_ids = _scp_target_ids(meta, ids)
@@ -172,15 +181,31 @@ class FiberSyncDriver(DependencyDriver):
         return ("FIBER",)
 
     def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
-        if _selection_event(gate_meta) or _load_event(gate_meta):
+        ids = set(impacted.get("FIBER", set()) or set())
+        if _selection_event(gate_meta):
+            register_fiber_sync().refresh_selection(root=root, scene=scene, fiber_ids=ids)
+            return
+        if _load_event(gate_meta):
             register_fiber_sync().refresh_selection(root=root, scene=scene)
             return
-        ids = set(impacted.get("FIBER", set()) or set())
+        if _fiber_update_event(gate_meta):
+            _request_fiber_refinements(root, scene, ids, _fiber_quality(gate_meta, bake))
+            return
         solved = _solved_fiber_ids(gate_meta)
         ids -= solved
         if solved:
             register_fiber_sync().refresh_selection(root=root, scene=scene)
         _sync_unsolved_fibers(root, scene, is_full, ids, solved, bake)
+
+
+def _request_fiber_refinements(root, scene, ids, quality):
+    from ..visualization.fiber_refinement import request_fiber_refinement
+    fibers = getattr(root.af_vcp_system, "fibers", ())
+    by_id = {str(fiber.id): fiber for fiber in fibers}
+    for fiber_id in sorted(set(ids or ())):
+        fiber = by_id.get(str(fiber_id))
+        if fiber is not None:
+            request_fiber_refinement(root, scene, fiber, show_preview=True, quality=quality)
 
 
 def _sync_unsolved_fibers(root, scene, is_full, ids, solved, bake):
@@ -208,7 +233,8 @@ class MuscleSyncDriver(DependencyDriver):
         return ("MUSCLE",)
 
     def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
-        _ = gate_meta
+        if _selection_event(gate_meta) or _fiber_update_event(gate_meta):
+            return
         ids = set(impacted.get("MUSCLE", set()) or set())
         if is_full:
             register_muscle_sync().sync_root_to_scene(root=root, scene=scene)
@@ -223,7 +249,8 @@ class FiberSurfaceSyncDriver(DependencyDriver):
         return ("FIBER_SURFACE",)
 
     def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
-        _ = bake, gate_meta
+        if _selection_event(gate_meta) or _fiber_update_event(gate_meta):
+            return
         ids = set(impacted.get("FIBER_SURFACE", set()) or set())
         targets = None if is_full else ids
         if is_full or ids:
@@ -237,7 +264,8 @@ class BlobSyncDriver(DependencyDriver):
         return ("BLOB",)
 
     def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
-        _ = gate_meta
+        if _selection_event(gate_meta):
+            return
         ids = set(impacted.get("BLOB", set()) or set())
         if is_full:
             register_blob_sync().sync_root_to_scene(root=root, scene=scene)
@@ -252,7 +280,8 @@ class SoftTissueSyncDriver(DependencyDriver):
         return ("SOFT_TISSUE",)
 
     def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
-        _ = bake
+        if _selection_event(gate_meta) or _fiber_update_event(gate_meta):
+            return
         if not len(root.af_vcp_system.soft_tissues):
             return
         ids = set(impacted.get("SOFT_TISSUE", set()) or set())
@@ -294,7 +323,8 @@ class VCPMirrorSyncDriver(DependencyDriver):
 
     def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
         _ = bake
-        _ = gate_meta
+        if _selection_event(gate_meta) or _fiber_update_event(gate_meta):
+            return
         fiber_ids, muscle_ids, blob_ids, tissue_ids = self._impacted_ids(impacted)
         if is_full:
             sync_vcp_mirrors(root=root, scene=scene)

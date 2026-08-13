@@ -1,4 +1,5 @@
 import json
+
 from mathutils import Vector
 
 from ..vcp.runtime_state import muscle_inflation_ctrl_world, set_muscle_inflation_ctrl_world
@@ -24,22 +25,8 @@ def collect_fiber_points(root, scene, fiber_props):
 
 
 def _fiber_points(scene, root, fsync, vis_col, fiber):
-    cached = cached_fiber_points(scene, root.name, fiber.id)
-    if cached is not None:
-        return cached
-    fobj = fsync._find_fiber_proxy(vis_col, root.name, fiber.id)
-    return None if fobj is None else _json_fiber_points(fobj)
-
-
-def _json_fiber_points(fobj):
-    raw = fobj.get("af_fiber_points_world", "")
-    if not raw:
-        return None
-    try:
-        arr = json.loads(raw)
-        return [Vector((float(v[0]), float(v[1]), float(v[2]))) for v in arr]
-    except Exception:
-        return None
+    _ = fsync, vis_col
+    return cached_fiber_points(scene, root.name, fiber.id)
 
 
 def collect_muscle_rows(root, scene, muscle, fiber_props):

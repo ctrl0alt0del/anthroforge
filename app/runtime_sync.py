@@ -5,7 +5,9 @@ def _ready(ctx):
 def emit_sync(sync_fn, ctx, request):
     if not _ready(ctx):
         return
-    sync_fn(root=ctx.root, scene=ctx.scene, dirty_hints=request.dirty_hints, bake=request.bake, source=request.source, event_type=request.event_type, payload=request.payload)
+    sync_fn(root=ctx.root, scene=ctx.scene, dirty_hints=request.dirty_hints, bake=request.bake,
+            source=request.source, event_type=request.event_type, payload=request.payload,
+            full=request.full, dirty_aspects=request.dirty_aspects, quality=request.quality)
 
 
 def queue_runtime(ctx, request):
@@ -17,4 +19,6 @@ def queue_runtime(ctx, request):
 def run_runtime_now(ctx, request, runner):
     if not _ready(ctx):
         return
-    runner(root=ctx.root, scene=ctx.scene, dirty_hints=request.dirty_hints, bake=request.bake, gate_meta=request.gate_meta())
+    runner(root=ctx.root, scene=ctx.scene, dirty_hints=request.dirty_hints, bake=request.bake,
+           gate_meta=request.gate_meta(), full=request.full, dirty_aspects=request.dirty_aspects,
+           quality=request.quality)

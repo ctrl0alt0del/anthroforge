@@ -1,12 +1,16 @@
+from collections import deque
 from dataclasses import dataclass
+from math import isfinite
 from time import monotonic
 
 import bpy
 from bpy.app.handlers import persistent
 
 from ..deps.dirty_hints import dirty_hints_for
+from ..deps.runtime_trace import activate_request_telemetry, restore_request_telemetry, telemetry_cache_snapshot
 from ..vcp.fiber_collision import _collider_stamp
-from ..vcp.fiber_progressive import begin_fiber_solve
+from ..vcp.fiber_engine import FiberTermination
+from ..vcp.fiber_progressive import begin_fiber_solve, publish_fiber_cache
 from ..vcp.runtime_state import (
     fiber_recompute_status,
     set_fiber_active_colliders,
@@ -21,13 +25,14 @@ from ..vcp.runtime_state import (
     set_fiber_route_mode,
 )
 from .fiber_sync import register_fiber_sync
+from .fiber_sync_helpers import mark_fiber_output_current, mark_fiber_output_stale, persisted_fiber_points
 
 
 _SLICE_MS = 12.0
 _TIMER_INTERVAL = 0.01
 _DRAW_INTERVAL = 0.05
 _JOBS = {}
-_QUEUE = []
+_QUEUE = deque()
 _TIMER_ARMED = False
 _PAUSED = []
 
@@ -45,6 +50,9 @@ class FiberRefinementJob:
     key: tuple
     scene_name: str
     root_name: str
+    scene_uid: int
+    root_uid: int
+    fiber_uid: int
     fiber_id: str
     signature: tuple
     geometry_signature: tuple
@@ -52,30 +60,38 @@ class FiberRefinementJob:
     proxy_name: str = ""
     last_apply: float = 0.0
     last_generation: int = -1
+    token: int = 0
+    previous_status: str = "UNKNOWN"
+    output_committed: bool = False
+    previous_points: tuple = ()
+    retain_preview: bool = False
 
 
-def request_fiber_refinement(root, scene, fiber, show_preview=False):
+def request_fiber_refinement(root, scene, fiber, show_preview=False, quality="FINAL"):
     if root is None or scene is None or fiber is None:
         return RefinementRequest(False, "Fiber refinement context is unavailable.")
     key = _job_key(scene, root, fiber.id)
-    _drop_job(key, mark_unknown=False)
-    session = begin_fiber_solve(register_fiber_sync()._solver, root, fiber, scene, _depsgraph(scene))
+    session = begin_fiber_solve(
+        register_fiber_sync()._solver, root, fiber, scene, _depsgraph(scene), quality)
     if session.invalid_reason:
+        _abort_request(key, root, scene, fiber)
         return RefinementRequest(False, session.invalid_reason)
+    _supersede_job(key)
     job = _new_job(key, scene, root, fiber, session)
+    mark_fiber_output_stale(scene, root.name, fiber.id)
     proxy = _initial_proxy(job, show_preview)
     return _start_or_finish(job, proxy)
 
 
 def cancel_fiber_refinement(scene, fiber_id, mark_unknown=True):
-    keys = [key for key in tuple(_JOBS) if key[0] == _scene_name(scene) and key[2] == str(fiber_id)]
+    keys = [key for key in tuple(_JOBS) if key[0] == _id_uid(scene) and key[2] == str(fiber_id)]
     for key in keys:
-        _drop_job(key, mark_unknown=mark_unknown)
+        _terminate_key(key, FiberTermination.CANCELLED, mark_unknown)
     return bool(keys)
 
 
 def fiber_refinement_state(scene, fiber_id):
-    key = next((key for key in _JOBS if key[0] == _scene_name(scene) and key[2] == str(fiber_id)), None)
+    key = next((key for key in _JOBS if key[0] == _id_uid(scene) and key[2] == str(fiber_id)), None)
     if key is not None:
         return "REFINING"
     fiber = _fiber_for_scene(scene, fiber_id)
@@ -85,7 +101,7 @@ def fiber_refinement_state(scene, fiber_id):
 def shutdown_fiber_refinements(mark_unknown=False):
     global _TIMER_ARMED
     for key in tuple(_JOBS):
-        _drop_job(key, mark_unknown=mark_unknown)
+        _terminate_key(key, FiberTermination.CANCELLED, mark_unknown)
     _QUEUE.clear()
     _drop_timer()
     _TIMER_ARMED = False
@@ -103,8 +119,15 @@ def drain_fiber_refinements(max_slices=100000):
 
 
 def _new_job(key, scene, root, fiber, session):
-    job = FiberRefinementJob(key, scene.name, root.name, fiber.id, _fiber_signature(fiber),
-                             _geometry_signature(session), session)
+    token = _next_token(fiber)
+    previous = _displayed_points(scene, root.name, fiber.id)
+    job = FiberRefinementJob(key, scene.name, root.name, _id_uid(scene), _id_uid(root),
+                             _id_pointer(fiber), fiber.id, _fiber_signature(fiber),
+                             _geometry_signature(session), session, token=token,
+                             previous_status=fiber_recompute_status(fiber),
+                             previous_points=previous,
+                             retain_preview=bool(previous and fiber.use_surface_routing))
+    _claim_pending_version(fiber, token)
     job.last_apply, job.last_generation = monotonic(), session.generation
     return job
 
@@ -113,7 +136,7 @@ def _initial_proxy(job, show_preview):
     root, scene, fiber = _resolved_job_data(job)
     proxy = _find_proxy(scene, root.name, fiber.id)
     if show_preview or proxy is None:
-        proxy = register_fiber_sync().apply_points(root, scene, fiber, job.session.preview, bake=False)
+        proxy = register_fiber_sync().apply_points(root, scene, fiber, job.session.preview, bake=False, commit=False)
     job.proxy_name = "" if proxy is None else proxy.name
     return proxy
 
@@ -144,7 +167,7 @@ def _flush_one():
     if not _QUEUE:
         _TIMER_ARMED = False
         return None
-    key = _QUEUE.pop(0)
+    key = _QUEUE.popleft()
     job = _JOBS.get(key)
     if job is not None:
         _advance_job(job)
@@ -155,9 +178,18 @@ def _flush_one():
 
 
 def _advance_job(job):
-    if not _valid_job(job):
-        _drop_job(job.key, mark_unknown=True)
+    reason = _invalid_job_reason(job)
+    if reason:
+        _terminate_job(job, reason, mark_unknown=True, stale=True)
         return
+    previous = activate_request_telemetry(job.session.telemetry)
+    try:
+        _advance_active_job(job)
+    finally:
+        restore_request_telemetry(previous)
+
+
+def _advance_active_job(job):
     result = job.session.step(_SLICE_MS)
     _apply_progress(job, result)
     if result.done:
@@ -165,21 +197,156 @@ def _advance_job(job):
 
 
 def _apply_progress(job, result):
+    if not _valid_job(job):
+        return
     now = monotonic()
     changed_level = job.last_generation != job.session.generation
     if not (result.done or changed_level or now - job.last_apply >= _DRAW_INTERVAL):
         return
     root, scene, fiber = _resolved_job_data(job)
-    proxy = register_fiber_sync().apply_points(root, scene, fiber, result.points, bake=result.done)
+    commit = bool(result.done and _commit_allowed(job, result))
+    if _retain_safe_preview(job, commit, now):
+        return
+    proxy = register_fiber_sync().apply_points(root, scene, fiber, result.points,
+                                               bake=result.done, commit=commit)
+    job.output_committed = bool(result.done and commit and proxy is not None)
     job.proxy_name = "" if proxy is None else proxy.name
     job.last_apply, job.last_generation = now, job.session.generation
 
 
+def _retain_safe_preview(job, commit, now):
+    if not job.retain_preview or commit:
+        return False
+    job.last_apply, job.last_generation = now, job.session.generation
+    return True
+
+
 def _finish_job(job, result=None):
+    reason = _invalid_job_reason(job)
+    if reason:
+        _terminate_job(job, reason, mark_unknown=True, stale=True)
+        return
     result = result or job.session.result()
-    _store_result(job.session.fiber, result)
-    _drop_job(job.key, mark_unknown=False)
-    _sync_final(job)
+    _store_result(_owned_job_data(job)[2], result)
+    committed = bool(job.output_committed and _commit_allowed(job, result))
+    _restore_previous_output(job, stale=True) if not committed else None
+    _finish_pending_version(job, committed)
+    publish_fiber_cache(job.session, result) if committed else None
+    telemetry_cache_snapshot(getattr(job.session, "telemetry", None))
+    _detach_job(job)
+    _sync_final(job) if committed else None
+
+
+def _commit_allowed(job, result):
+    if not (_valid_job(job) and result.done and not result.invalid_reason):
+        return False
+    if _pending_version(_owned_job_data(job)[2]) == 2 and not result.converged:
+        return False
+    expected = int(job.session.params.get("node_count", 0))
+    finite = all(all(isfinite(float(value)) for value in point) for point in result.points)
+    valid = len(result.points) == expected and finite and _safe_residual(job, result)
+    return bool(valid and _surface_route_clear(job, result))
+
+
+def _safe_residual(job, result):
+    return float(result.max_pen) < 1.0e-5
+
+
+def _surface_route_clear(job, result):
+    fiber = _owned_job_data(job)[2]
+    if fiber is None or not fiber.use_surface_routing or len(fiber.mid_touches):
+        return True
+    owner = str(fiber.a_parent_id or "")
+    if not owner or owner != str(fiber.b_parent_id or ""):
+        return True
+    collider = job.session.oracle.collider_by_id(owner)
+    if collider is None:
+        return True
+    return all(job.session.oracle.push_out_point(point, (collider,))[1] < 1.0e-5
+               for point in result.points[1:-1])
+
+
+def _finish_pending_version(job, committed):
+    fiber = _owned_job_data(job)[2]
+    if fiber is None or not _job_owns_pending(job, fiber):
+        return
+    if committed:
+        _set_solver_version(fiber, 2)
+    _clear_pending_version(fiber)
+
+
+def _restore_previous_output(job, stale=False):
+    root, scene, fiber = _owned_job_data(job)
+    if root is None or fiber is None:
+        return
+    fallback = job.previous_points if job.retain_preview and _pending_version(fiber) != 2 else ()
+    _restore_fiber_output(root, scene, fiber, stale=stale, fallback=fallback)
+
+
+def _restore_fiber_output(root, scene, fiber, stale=False, fallback=()):
+    points = list(fallback or ()) or _rollback_points(scene, root.name, fiber)
+    if not points:
+        return None
+    proxy = register_fiber_sync().apply_points(root, scene, fiber, points, commit=False)
+    if stale:
+        mark_fiber_output_stale(scene, root.name, fiber.id)
+    else:
+        mark_fiber_output_current(proxy, increment=False)
+    return proxy
+
+
+def _rollback_points(scene, root_name, fiber):
+    raw = str(getattr(fiber, "legacy_points_json", "") or "") if _pending_version(fiber) == 2 else ""
+    if raw:
+        return _json_points(raw)
+    return persisted_fiber_points(scene, root_name, fiber.id)
+
+
+def _json_points(raw):
+    import json
+    from mathutils import Vector
+    try:
+        return [Vector(tuple(float(value) for value in row[:3])) for row in json.loads(raw)]
+    except Exception:
+        return None
+
+
+def _set_solver_version(fiber, version):
+    from ..vcp.prop_update_guard import suppress_vcp_prop_updates
+    with suppress_vcp_prop_updates():
+        fiber.solver_version = int(version)
+
+
+def _pending_version(fiber):
+    try:
+        return int(fiber.get("af_pending_solver_version", 0) or 0)
+    except Exception:
+        return 0
+
+
+def _clear_pending_version(fiber):
+    for key in ("af_pending_solver_version", "af_pending_solver_token"):
+        try:
+            del fiber[key]
+        except Exception:
+            pass
+
+
+def _claim_pending_version(fiber, token):
+    if _pending_version(fiber) == 2:
+        fiber["af_pending_solver_token"] = int(token)
+
+
+def _job_owns_pending(job, fiber):
+    if _pending_version(fiber) != 2:
+        return False
+    return int(fiber.get("af_pending_solver_token", 0) or 0) == job.token
+
+
+def _next_token(fiber):
+    token = int(fiber.get("af_fiber_request_token", 0)) + 1
+    fiber["af_fiber_request_token"] = token
+    return token
 
 
 def _store_result(fiber, result):
@@ -196,7 +363,7 @@ def _store_result(fiber, result):
 
 
 def _sync_final(job):
-    root, scene, fiber = _resolved_job_data(job)
+    root, scene, fiber = _owned_job_data(job)
     if root is None or scene is None or fiber is None:
         return
     payload = {"solved_fiber_ids": [fiber.id]}
@@ -204,40 +371,121 @@ def _sync_final(job):
                   source="fiber_refinement", event_type="FIBER_SOLVE_READY", payload=payload)
 
 
-def _drop_job(key, mark_unknown=False):
-    job = _JOBS.pop(key, None)
-    while key in _QUEUE:
-        _QUEUE.remove(key)
-    if job is not None and mark_unknown:
-        fiber = _resolved_job_data(job)[2]
-        None if fiber is None else set_fiber_recompute_status(fiber, "UNKNOWN")
+def _abort_request(key, root, scene, fiber):
+    job = _JOBS.get(key)
+    if job is not None:
+        _terminate_job(job, FiberTermination.CANCELLED, mark_unknown=True, stale=True)
+        return
+    _restore_fiber_output(root, scene, fiber, stale=True)
+    _clear_pending_version(fiber)
+
+
+def _supersede_job(key):
+    job = _JOBS.get(key)
+    if job is None:
+        return None
+    _mark_terminated(job, FiberTermination.SUPERSEDED)
+    _detach_job(job)
+    return job
+
+
+def _terminate_key(key, reason, mark_unknown):
+    job = _JOBS.get(key)
+    if job is not None:
+        _terminate_job(job, reason, mark_unknown)
+
+
+def _terminate_job(job, reason, mark_unknown, stale=False):
+    if _JOBS.get(job.key) is not job:
+        _mark_terminated(job, reason)
+        return
+    fiber = _owned_job_data(job)[2]
+    _restore_previous_output(job, stale=stale)
+    if fiber is not None and _job_owns_pending(job, fiber):
+        _clear_pending_version(fiber)
+    _restore_job_status(job, fiber, mark_unknown)
+    _mark_terminated(job, reason)
+    _detach_job(job)
+
+
+def _restore_job_status(job, fiber, mark_unknown):
+    if fiber is None:
+        return
+    status = "UNKNOWN" if mark_unknown else job.previous_status
+    set_fiber_recompute_status(fiber, status)
+
+
+def _mark_terminated(job, reason):
+    job.session.termination_reason = FiberTermination(reason).value
+    job.session.converged = False
+    job.session.done = True
+
+
+def _detach_job(job):
+    if _JOBS.get(job.key) is not job:
+        return
+    _JOBS.pop(job.key, None)
+    while job.key in _QUEUE:
+        _QUEUE.remove(job.key)
 
 
 def _valid_job(job):
-    root, scene, fiber = _resolved_job_data(job)
+    return _invalid_job_reason(job) is None
+
+
+def _invalid_job_reason(job):
+    root, scene, fiber = _owned_job_data(job)
     if root is None or scene is None or fiber is None:
-        return False
+        return FiberTermination.CANCELLED
+    if int(fiber.get("af_fiber_request_token", 0)) != job.token:
+        return FiberTermination.SUPERSEDED
     if _fiber_signature(fiber) != job.signature:
-        return False
-    return _current_geometry_signature(job.session) == job.geometry_signature
+        return FiberTermination.CANCELLED
+    if _current_geometry_signature(job.session) != job.geometry_signature:
+        return FiberTermination.CANCELLED
+    return None
 
 
 def _resolved_job_data(job):
-    scene = bpy.data.scenes.get(job.scene_name)
-    root = None if scene is None else scene.objects.get(job.root_name)
-    fibers = () if root is None else root.af_vcp_system.fibers
+    scene = _by_uid(bpy.data.scenes, job.scene_uid)
+    root = None if scene is None else _by_uid(scene.objects, job.root_uid)
+    vcp = None if root is None else getattr(root, "af_vcp_system", None)
+    fibers = () if vcp is None else vcp.fibers
     fiber = next((item for item in fibers if item.id == job.fiber_id), None)
     return root, scene, fiber
+
+
+def _owned_job_data(job):
+    root, scene, fiber = _resolved_job_data(job)
+    if fiber is not None and _id_pointer(fiber) != job.fiber_uid:
+        fiber = None
+    return root, scene, fiber
+
+
+def _by_uid(values, uid):
+    return next((item for item in values if _id_uid(item) == int(uid)), None)
 
 
 def _fiber_signature(fiber):
     fields = ("a_parent_id", "a_attach_param", "b_parent_id", "b_attach_param", "node_count",
               "iterations_bake", "use_surface_routing", "use_segment_collisions",
-              "bend_stiffness", "stretch_stiffness", "topology_mode")
-    values = tuple(getattr(fiber, name, None) for name in fields)
+              "bend_stiffness", "stretch_stiffness", "topology_mode", "solver_version",
+              "collision_radius", "symmetry_mode", "symmetry_axis", "use_warm_start",
+              "preview_planner_route")
+    values = tuple(_signature_value(getattr(fiber, name, None)) for name in fields)
+    values += (tuple(float(value) for value in fiber.symmetry_origin),)
     touches = tuple((item.parent_id, item.attach_param, float(item.normal_offset)) for item in fiber.mid_touches)
     anchors = tuple((item.parent_id, item.attach_param) for item in fiber.loop_anchors)
     return values, touches, anchors
+
+
+def _signature_value(value):
+    if isinstance(value, (str, int, float, bool, type(None))):
+        return value
+    try:
+        return tuple(value)
+    except TypeError:
+        return repr(value)
 
 
 def _geometry_signature(session):
@@ -256,8 +504,8 @@ def _current_geometry_signature(session):
 @persistent
 def _on_depsgraph_update(scene, depsgraph):
     for job in tuple(_JOBS.values()):
-        if job.scene_name == _scene_name(scene) and _job_geometry_updated(job, depsgraph):
-            _drop_job(job.key, mark_unknown=True)
+        if job.scene_uid == _id_uid(scene) and _job_geometry_updated(job, depsgraph):
+            _terminate_job(job, FiberTermination.CANCELLED, mark_unknown=True, stale=True)
 
 
 def _job_geometry_updated(job, depsgraph):
@@ -281,6 +529,10 @@ def _id_pointer(value):
         return 0
 
 
+def _id_uid(value):
+    return int(getattr(value, "session_uid", 0) or _id_pointer(value))
+
+
 def _mark_refining(fiber):
     set_fiber_not_converged(fiber, False)
     set_fiber_recompute_status(fiber, "REFINING")
@@ -292,7 +544,7 @@ def _mark_refining(fiber):
 
 
 def _job_key(scene, root, fiber_id):
-    return _scene_name(scene), str(root.name), str(fiber_id)
+    return _id_uid(scene), _id_uid(root), str(fiber_id)
 
 
 def _scene_name(scene):
@@ -312,6 +564,14 @@ def _find_proxy(scene, root_name, fiber_id):
         return None
     return next((obj for obj in scene.objects if obj.get("af_fiber_proxy") and
                  obj.get("af_root_name") == root_name and obj.get("af_fiber_id") == fiber_id), None)
+
+
+def _displayed_points(scene, root_name, fiber_id):
+    obj = _find_proxy(scene, root_name, fiber_id)
+    splines = () if obj is None else tuple(getattr(obj.data, "splines", ()))
+    if not splines:
+        return ()
+    return tuple(obj.matrix_world @ point.co.xyz for point in splines[0].points)
 
 
 def _depsgraph(scene):
@@ -338,14 +598,13 @@ def _drop_timer():
 @persistent
 def _on_history_pre(_dummy):
     global _PAUSED
-    _PAUSED = [(job.scene_name, job.root_name, job.fiber_id) for job in _JOBS.values()]
+    _PAUSED = []
     shutdown_fiber_refinements(mark_unknown=False)
 
 
 @persistent
 def _on_history_post(_dummy):
-    if _PAUSED and not bpy.app.timers.is_registered(_resume_paused):
-        bpy.app.timers.register(_resume_paused, first_interval=0.0)
+    return None
 
 
 def _resume_paused():

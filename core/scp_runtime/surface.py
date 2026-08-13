@@ -1,10 +1,12 @@
 from heapq import heappop, heappush
+from array import array
+import hashlib
 
 from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
 from ..perf_trace import perf_count, perf_time, perf_timer
-from ..utils import depsgraph_for_scene, scene_cache_get, scene_cache_set, scene_for_id
+from ..utils import depsgraph_for_scene, geometry_generation, scene_cache_get, scene_cache_set, scene_for_id
 from .common import _EPS, matrix_flat16
 
 _AXIS_VECTORS = {
@@ -15,6 +17,8 @@ _AXIS_VECTORS = {
     "POS_Z": Vector((0.0, 0.0, 1.0)),
     "NEG_Z": Vector((0.0, 0.0, -1.0)),
 }
+_FINGERPRINT_FULL_LIMIT = 256
+_FINGERPRINT_SAMPLE_COUNT = 32
 
 
 def _normalized(vector, fallback):
@@ -83,7 +87,17 @@ def _curve_modifier(parent_obj):
 
 
 def _cache_key(mesh_obj):
-    return None if mesh_obj is None else int(mesh_obj.as_pointer())
+    if mesh_obj is None:
+        return None
+    data = getattr(mesh_obj, "data", None)
+    return _runtime_id(mesh_obj), _runtime_id(data)
+
+
+def _runtime_id(value):
+    if value is None:
+        return 0
+    uid = int(getattr(value, "session_uid", 0) or 0)
+    return uid or int(value.as_pointer())
 
 
 def _typed_cache_key(kind, mesh_obj):
@@ -92,7 +106,7 @@ def _typed_cache_key(kind, mesh_obj):
 
 
 def _surface_entry_key(mesh_obj, kind="full"):
-    return None if mesh_obj is None else f"surface:{kind}:{_cache_key(mesh_obj)}"
+    return None if mesh_obj is None else f"surface:{kind}:{int(mesh_obj.as_pointer())}"
 
 
 def _data_id(data):
@@ -106,9 +120,51 @@ def _mesh_counts(data):
     return (0, 0) if data is None else (len(data.vertices), len(data.polygons))
 
 
-def _surface_stamp(obj_eval):
+def _fingerprint_indices(count):
+    if count <= _FINGERPRINT_FULL_LIMIT:
+        return range(count)
+    last = count - 1
+    return tuple((index * last) // (_FINGERPRINT_SAMPLE_COUNT - 1)
+                 for index in range(_FINGERPRINT_SAMPLE_COUNT))
+
+
+def _coordinate_fingerprint(data, full=False):
+    vertices = getattr(data, "vertices", ())
+    try:
+        if full:
+            return _full_coordinate_fingerprint(vertices)
+        indices = _fingerprint_indices(len(vertices))
+        return tuple(_vertex_coordinate(vertices[index]) for index in indices)
+    except Exception:
+        return ()
+
+
+def _full_coordinate_fingerprint(vertices):
+    values = array("f", [0.0]) * (len(vertices) * 3)
+    vertices.foreach_get("co", values)
+    return hashlib.blake2b(values.tobytes(), digest_size=16).digest()
+
+
+def _vertex_coordinate(vertex):
+    co = vertex.co
+    return float(co.x), float(co.y), float(co.z)
+
+
+def _pending_geometry_ids(depsgraph):
+    return {getattr(update, "id", None) for update in tuple(getattr(depsgraph, "updates", ()) or ())
+            if getattr(update, "is_updated_geometry", False) or getattr(update, "is_updated_transform", False)}
+
+
+def _surface_stamp(mesh_obj, obj_eval, depsgraph):
     data = getattr(obj_eval, "data", None)
-    return (_data_id(data), _mesh_counts(data), tuple(matrix_flat16(obj_eval.matrix_world)))
+    source = getattr(mesh_obj, "data", None)
+    generations = geometry_generation(mesh_obj), geometry_generation(source)
+    identities = _runtime_id(mesh_obj), _runtime_id(source)
+    pending = _pending_geometry_ids(depsgraph)
+    coordinates = _coordinate_fingerprint(source, mesh_obj in pending or source in pending)
+    coordinates = coordinates, _coordinate_fingerprint(data, obj_eval in pending or data in pending)
+    return (identities, _data_id(data), _mesh_counts(data),
+            tuple(matrix_flat16(obj_eval.matrix_world)), generations, coordinates)
 
 
 def _remember_payload(cache, key, stamp, name, payload):
@@ -127,7 +183,7 @@ def _cached_surface(mesh_obj, depsgraph, kind="full"):
     if scene is None or mesh_obj is None or depsgraph is None:
         return None, None, None
     obj_eval = mesh_obj.evaluated_get(depsgraph)
-    return scene, _surface_stamp(obj_eval), scene_cache_get(scene, _surface_entry_key(mesh_obj, kind))
+    return scene, _surface_stamp(mesh_obj, obj_eval, depsgraph), scene_cache_get(scene, _surface_entry_key(mesh_obj, kind))
 
 
 def _store_payload(scene, mesh_obj, stamp, kind, name, payload):

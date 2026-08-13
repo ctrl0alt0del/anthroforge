@@ -1,10 +1,23 @@
 from dataclasses import dataclass, field
 from time import perf_counter
 
+from ..deps.runtime_trace import current_request_telemetry, telemetry_count, telemetry_slice, telemetry_timing
 from .fiber_collision import CollisionOracle
+from .fiber_engine import FiberPhase, FiberTermination
 from .fiber_loop import loop_pin_targets
+from .fiber_microbatch import (
+    advance_contacts, advance_global, advance_line_search, clear_iteration,
+    iteration_result, start_iteration,
+)
 from .fiber_modes import is_loop_fiber
-from .fiber_planner import DIRECT, LOCAL_FALLBACK, plan_route
+from .fiber_planner import DIRECT, LOCAL_FALLBACK
+from .fiber_planner_progressive import begin_progressive_plan, advance_progressive_plan
+from .fiber_validation import (
+    advance_validation, begin_final_validation, begin_post_validation,
+)
+
+
+_SLICE_HEADROOM_MS = 3.0
 
 
 @dataclass
@@ -13,6 +26,7 @@ class FiberSolveResult:
     done: bool = False
     converged: bool = False
     stalled: bool = False
+    blocked: bool = False
     invalid_reason: str = ""
     mode: str = LOCAL_FALLBACK
     planner_ms: float = 0.0
@@ -20,6 +34,8 @@ class FiberSolveResult:
     active_count: int = 0
     max_disp: float = 0.0
     max_pen: float = 0.0
+    termination_reason: str = ""
+    telemetry: object = None
 
 
 @dataclass
@@ -38,6 +54,7 @@ class FiberLevelState:
     last_residual: object = None
     converged: bool = False
     stalled: bool = False
+    blocked: bool = False
     max_disp: float = 0.0
     max_pen: float = 0.0
 
@@ -49,6 +66,7 @@ class FiberSolveSession:
     fiber: object
     scene: object
     depsgraph: object
+    quality: str = "FINAL"
     oracle: object = None
     anchors: list = field(default_factory=list)
     guides: list = field(default_factory=list)
@@ -71,14 +89,24 @@ class FiberSolveSession:
     refine_ms: float = 0.0
     active_count: int = 0
     generation: int = 0
+    phase: str = FiberPhase.CAPTURE.value
+    termination_reason: str = ""
+    planner_work: object = None
+    iteration_work: object = None
+    validation_work: object = None
 
     def step(self, time_budget_ms=12.0):
         if self.done:
             return self.result()
-        started = perf_counter()
-        deadline = started + max(0.0, float(time_budget_ms)) / 1000.0
+        started, planner_before = perf_counter(), _planner_elapsed(self)
+        budget = max(0.0, float(time_budget_ms) - _SLICE_HEADROOM_MS)
+        deadline = started + budget / 1000.0
         _step_until_deadline(self, deadline)
-        self.refine_ms += (perf_counter() - started) * 1000.0
+        elapsed = (perf_counter() - started) * 1000.0
+        planner_delta = max(0.0, _planner_elapsed(self) - planner_before)
+        self.refine_ms += max(0.0, elapsed - planner_delta)
+        telemetry_slice(elapsed, self.phase, self.telemetry)
+        telemetry_timing(f"progressive.{self.phase}", elapsed, self.telemetry)
         return self.result()
 
     def result(self):
@@ -86,27 +114,36 @@ class FiberSolveSession:
         points = self.preview if level is None else level.nodes
         disp = 0.0 if level is None else level.max_disp
         pen = 0.0 if level is None else level.max_pen
-        return FiberSolveResult(_copy_points(points), self.done, self.converged, self.stalled,
-                                self.invalid_reason, self.mode, self.planner_ms,
-                                self.refine_ms, self.active_count, disp, pen)
+        blocked = False if level is None else level.blocked
+        reason = self.termination_reason or _termination_reason(self)
+        return FiberSolveResult(
+            points=_copy_points(points), done=self.done, converged=self.converged,
+            stalled=self.stalled, blocked=blocked, invalid_reason=self.invalid_reason,
+            mode=self.mode, planner_ms=self.planner_ms, refine_ms=self.refine_ms,
+            active_count=self.active_count, max_disp=disp, max_pen=pen,
+            termination_reason=reason)
 
 
-def begin_fiber_solve(solver, root, fiber, scene, depsgraph):
-    session = FiberSolveSession(solver, root, fiber, scene, depsgraph)
+def begin_fiber_solve(solver, root, fiber, scene, depsgraph, quality="FINAL"):
+    telemetry_count("fiber_solves")
+    session = FiberSolveSession(solver, root, fiber, scene, depsgraph, _quality(quality))
+    session.telemetry = current_request_telemetry()
     session.loop = is_loop_fiber(fiber)
-    return _init_loop(session) if session.loop else _init_open(session)
+    session = _init_loop(session) if session.loop else _init_open(session)
+    if not session.done:
+        _init_colliders(session)
+    return session
 
 
 def _init_open(session):
     _init_common(session, session.solver._open_anchors)
     if session.done:
         return session
+    if _invalid_configuration(session):
+        return session
     session.params = session.solver._with_endpoint_owners(session.params, session.anchors)
-    session.guides = session.solver._planner_guides(session.fiber, session.oracle, session.anchors)
-    _plan_open(session)
-    if _can_finish_direct(session):
-        return _finish_direct(session)
-    _init_open_levels(session)
+    session.preview = [anchor.point.copy() for anchor in session.anchors]
+    session.phase = FiberPhase.COLLIDERS.value
     return session
 
 
@@ -114,34 +151,67 @@ def _init_loop(session):
     _init_common(session, session.solver._loop_anchors)
     if session.done:
         return session
-    route, mode, planner_ms, planned = session.solver._loop_seed_route(session.oracle, session.anchors, True)
-    session.preview, session.mode = _copy_points(route), mode
-    session.planner_ms, session.planned_ids = planner_ms, planned
-    _init_loop_level(session)
+    if _invalid_configuration(session):
+        return session
+    session.preview = [anchor.point.copy() for anchor in session.anchors]
+    session.phase = FiberPhase.COLLIDERS.value
     return session
 
 
+def _invalid_configuration(session):
+    issue = session.solver._configuration_issue(session.anchors, session.params)
+    if issue:
+        _finish_invalid(session, issue)
+    return bool(issue)
+
+
 def _init_common(session, anchor_fn):
+    session.phase = FiberPhase.CAPTURE.value
     _runtime, anchors, issue = anchor_fn(session.root, session.scene, session.depsgraph, session.fiber)
     if issue:
         _finish_invalid(session, issue)
         return
     session.anchors = anchors
-    session.params = session.solver._runtime_params(session.fiber, True)
+    session.params = session.solver._runtime_params(session.fiber, _is_final(session))
+
+
+def _init_colliders(session):
     session.oracle = CollisionOracle(session.root, session.scene, session.depsgraph,
                                      session.params["margin"], session.solver.surface_offset)
+    session.solver._attach_cache_signature(
+        session.root, session.scene, session.fiber, session.anchors, session.params,
+        session.oracle, session.quality, session.loop)
+    session.phase = FiberPhase.PLAN.value
 
 
-def _plan_open(session):
-    started = perf_counter()
-    result = plan_route(session.oracle, session.anchors, allow_dense=True)
-    session.planner_ms = (perf_counter() - started) * 1000.0
+def _init_open_planner(session):
+    session.guides = session.solver._planner_guides(
+        session.fiber, session.oracle, session.anchors)
+    session.planner_work = begin_progressive_plan(
+        session.oracle, session.anchors, allow_dense=_is_final(session))
+
+
+def _finish_open_plan(session, result):
     session.preview = _copy_points(result.points)
     session.mode, session.planned_ids = result.mode, result.active_ids
+    if _can_finish_direct(session):
+        _finish_direct(session)
+        return
+    _init_open_levels(session)
+
+
+def _plan_loop(session):
+    route, mode, planner_ms, planned = session.solver._loop_seed_route(
+        session.oracle, session.anchors, _is_final(session))
+    session.preview, session.mode = _copy_points(route), mode
+    session.planner_ms, session.planned_ids = planner_ms, planned
+    _init_loop_level(session)
 
 
 def _can_finish_direct(session):
-    ready = session.mode == DIRECT and not session.guides and len(session.preview) >= 2
+    if session.solver._uses_v2(session.params):
+        return False
+    ready = session.mode == DIRECT and not session.guides and len(session.anchors) == 2
     return bool(ready and _authored_segments_clear(session))
 
 
@@ -164,39 +234,67 @@ def _finish_direct(session):
 
 
 def _init_open_levels(session):
-    anchor_count = len(session.guides) + 2
-    session.counts = session.solver._level_counts(session.params["node_count"], anchor_count)
-    session.iterations = session.solver._split_iterations(session.params["iterations"], len(session.counts))
-    session.route_seed = _copy_points(session.preview)
-    _start_open_level(session)
+    session.counts, session.iterations = session.solver._level_schedule(
+        session.params["node_count"], len(session.anchors), session.params["iterations"])
+    session.route_seed = _route_seed(session)
+    session.phase = FiberPhase.LEVEL_SETUP.value
+
+
+def _route_seed(session):
+    if not session.guides:
+        return _copy_points(session.preview)
+    return [session.anchors[0].point.copy(), *_copy_points(session.guides),
+            session.anchors[-1].point.copy()]
 
 
 def _start_open_level(session):
     count = session.counts[session.level_index]
     nodes, pinned, targets = session.solver._build_level_nodes(
-        session.fiber, session.anchors, session.guides, count, session.seed)
+        session.fiber, session.anchors, session.guides, count, session.seed,
+        session.params.get("_cache_signature"))
     params = session.solver._level_params(session.params, session.iterations[session.level_index])
+    params["surface_route_seed"] = bool(session.guides)
+    params["pin_owners"] = session.solver._pin_owners(session.anchors, targets)
     session.level = _new_level(session, nodes, pinned, targets, params)
     session.generation += 1
+    session.phase = FiberPhase.LOCAL_STEP.value
 
 
 def _init_loop_level(session):
     sig = session.solver._loop_cache_signature(session.anchors, session.params)
     cached = session.solver._cached_loop_result(session.fiber, sig, session.params["node_count"])
-    if cached is not None:
-        session.level = _new_level(session, cached, set(), {}, session.params)
-        _finish_session(session, True, False)
+    if cached is not None and _finish_cached_loop(session, cached):
         return
-    _start_loop_level(session)
+    session.phase = FiberPhase.LEVEL_SETUP.value
+
+
+def _finish_cached_loop(session, cached):
+    route = session.preview or [anchor.point.copy() for anchor in session.anchors]
+    targets = loop_pin_targets(route, [anchor.point.copy() for anchor in session.anchors], len(cached[0]))
+    params = dict(session.params, pin_owners=session.solver._pin_owners(session.anchors, targets))
+    points, converged, disp, pen, active = session.solver._validated_loop_cache(
+        cached, targets, session.oracle, params)
+    if not converged:
+        session.solver._discard_loop_exact(session.fiber)
+        return False
+    session.level = _new_level(session, points, set(targets), targets, params, cyclic=True)
+    session.level.max_disp, session.level.max_pen = disp, pen
+    session.active_count = max(session.active_count, active)
+    _finish_session(session, converged, False)
+    return True
 
 
 def _start_loop_level(session):
     route = session.preview or [anchor.point.copy() for anchor in session.anchors]
-    nodes = session.solver._loop_nodes(session.fiber, route, session.params["node_count"])
+    signature = session.params.get("_cache_signature")
+    nodes = session.solver._loop_nodes(
+        session.fiber, route, session.params["node_count"], signature)
     targets = loop_pin_targets(route, [anchor.point.copy() for anchor in session.anchors], len(nodes))
     session.solver._restore_pins(nodes, targets)
-    session.level = _new_level(session, nodes, set(targets), targets, session.params, cyclic=True)
+    params = dict(session.params, pin_owners=session.solver._pin_owners(session.anchors, targets))
+    session.level = _new_level(session, nodes, set(targets), targets, params, cyclic=True)
     session.generation += 1
+    session.phase = FiberPhase.LOCAL_STEP.value
 
 
 def _new_level(session, nodes, pinned, targets, params, cyclic=False):
@@ -211,28 +309,69 @@ def _new_level(session, nodes, pinned, targets, params, cyclic=False):
 def _step_until_deadline(session, deadline):
     ran = False
     while not session.done and (not ran or perf_counter() < deadline):
-        _step_loop(session) if session.loop else _step_open(session)
+        _advance_session(session, deadline)
         ran = True
 
 
-def _step_open(session):
-    level, local = session.level, session.solver._collision_context_params(session.level.params)
-    level.colliders = session.solver._active_colliders(session.oracle, level.nodes, level.params["margin"])
-    next_guards = {}
-    disp, pen, alpha = session.solver._open_step(
-        level.nodes, level.prev_nodes, level.pinned, level.targets, session.oracle,
-        level.colliders, local, level.iteration, level.guards, next_guards)
-    _after_step(session, local, next_guards, disp, pen, alpha, False)
+def _advance_session(session, deadline):
+    phase = session.phase
+    if phase == FiberPhase.COLLIDERS.value:
+        _init_colliders(session)
+    elif phase == FiberPhase.PLAN.value:
+        _advance_plan(session, deadline)
+    elif phase == FiberPhase.LEVEL_SETUP.value:
+        _setup_level(session)
+    elif phase == FiberPhase.LOCAL_STEP.value:
+        start_iteration(session)
+    else:
+        _advance_iteration_phase(session, deadline)
 
 
-def _step_loop(session):
-    level, local = session.level, session.solver._collision_context_params(session.level.params)
-    level.colliders = session.solver._active_colliders(session.oracle, level.nodes, level.params["margin"])
-    next_guards = {}
-    disp, pen, alpha = session.solver._cyclic_step(
-        level.nodes, level.prev_nodes, level.pinned, level.targets, session.oracle,
-        level.colliders, local, level.iteration, level.guards, next_guards)
-    _after_step(session, local, next_guards, disp, pen, alpha, True)
+def _advance_iteration_phase(session, deadline):
+    phase = session.phase
+    if phase == FiberPhase.GLOBAL_STEP.value:
+        advance_global(session)
+    elif phase == FiberPhase.CONTACTS.value:
+        advance_contacts(session, deadline)
+    elif phase == FiberPhase.LINE_SEARCH.value:
+        advance_line_search(session)
+    elif phase == FiberPhase.ACCEPT.value:
+        _advance_accept(session, deadline)
+    elif phase == FiberPhase.FINAL_VALIDATE.value:
+        _advance_final_validation(session, deadline)
+
+
+def _advance_plan(session, deadline):
+    if session.loop:
+        _plan_loop(session)
+        return
+    if session.planner_work is None:
+        _init_open_planner(session)
+    if not advance_progressive_plan(session.planner_work, deadline):
+        return
+    session.planner_ms = session.planner_work.elapsed_ms
+    _finish_open_plan(session, session.planner_work.result)
+
+
+def _setup_level(session):
+    _start_loop_level(session) if session.loop else _start_open_level(session)
+
+
+def _advance_accept(session, deadline):
+    if session.validation_work is None:
+        payload = iteration_result(session)
+        clear_iteration(session)
+        session.validation_work = begin_post_validation(session, payload)
+    if not advance_validation(session.validation_work, deadline):
+        return
+    payload, session.validation_work = session.validation_work.result, None
+    _finish_accepted_step(session, payload)
+
+
+def _finish_accepted_step(session, payload):
+    _local, _guards, disp, pen, alpha = payload
+    _record_step(session.level, disp, pen)
+    _check_level_done(session, alpha)
 
 
 def _after_step(session, local, next_guards, disp, pen, alpha, cyclic):
@@ -259,38 +398,64 @@ def _check_level_done(session, alpha):
     level, solver = session.level, session.solver
     index = max(0, level.iteration - 1)
     level.converged = solver._iteration_converged(index, level.max_disp, level.max_pen, level.params)
-    level.converged = level.converged or solver._blocked_clear(alpha, level.max_pen, level.params)
+    level.blocked = solver._blocked_clear(alpha, level.max_pen, level.params)
     level.stalled = level.iteration >= level.params["min_iters"] and level.stall_count >= 12
-    if level.converged or level.stalled or level.iteration >= level.params["iterations"]:
-        _complete_level(session)
+    if level.converged or level.stalled or level.blocked or level.iteration >= level.params["iterations"]:
+        session.phase = FiberPhase.FINAL_VALIDATE.value
+    else:
+        session.phase = FiberPhase.LOCAL_STEP.value
 
 
 def _complete_level(session):
+    session.phase = FiberPhase.FINAL_VALIDATE.value
     if session.loop:
         _complete_loop(session)
         return
     _complete_open(session)
 
 
+def _advance_final_validation(session, deadline):
+    if session.validation_work is None:
+        session.validation_work = begin_final_validation(session)
+    if not advance_validation(session.validation_work, deadline):
+        return
+    session.validation_work = None
+    _finish_validated_level(session)
+
+
+def _finish_validated_level(session):
+    if session.loop or session.level_index + 1 >= len(session.counts):
+        _finish_session(session, session.level.converged, session.level.stalled)
+        return
+    session.seed = _copy_points(session.level.nodes)
+    session.level_index += 1
+    session.phase = FiberPhase.LEVEL_SETUP.value
+
+
 def _complete_open(session):
     level = session.level
-    session.solver._finish_open_iterations(
+    level.converged, level.max_disp, level.max_pen = session.solver._finish_open_iterations(
         level.nodes, level.safe, level.first_safe, session.oracle, level.colliders,
         level.params, level.converged, level.max_disp, level.max_pen)
-    session.solver._restore_seed_if_needed(level.nodes, session.route_seed, session.oracle, level.params)
+    level.converged, level.max_disp, level.max_pen = session.solver._restore_and_validate_open(
+        level.nodes, session.route_seed, session.oracle, level.params, level.targets,
+        level.converged, level.max_disp, level.max_pen)
     if session.level_index + 1 >= len(session.counts):
         _finish_session(session, level.converged, level.stalled)
         return
     session.seed, session.level_index = _copy_points(level.nodes), session.level_index + 1
-    _start_open_level(session)
+    session.phase = FiberPhase.LEVEL_SETUP.value
 
 
 def _complete_loop(session):
     level = session.level
     if not level.converged:
-        session.solver._restore_unconverged(
+        level.converged, level.max_disp, level.max_pen = session.solver._restore_unconverged(
             level.nodes, level.safe, level.first_safe, session.oracle, level.colliders,
             level.params, level.max_disp, level.max_pen, cyclic=True)
+    else:
+        level.converged, level.max_disp, level.max_pen = session.solver._finish_cyclic_state(
+            level.nodes, session.oracle, level.params, True, level.max_disp)
     _finish_session(session, level.converged, level.stalled)
 
 
@@ -300,21 +465,62 @@ def _finish_session(session, converged, stalled):
     session.solver._store_status(session.fiber, session.converged, level.max_disp, level.max_pen)
     session.solver._store_metrics(session.fiber, session.mode, session.planner_ms,
                                   session.refine_ms, max(session.active_count, len(session.planned_ids)))
-    session.solver._cache[session.fiber.id] = _copy_points(level.nodes)
-    _store_loop_signature(session)
     session.generation += 1
+    session.phase = FiberPhase.DONE.value
+    session.termination_reason = _termination_reason(session)
     return session
 
 
-def _store_loop_signature(session):
+def publish_fiber_cache(session, result=None):
+    result = result or session.result()
+    if not (session.done and result.converged):
+        return
+    signature = session.params.get("_cache_signature")
+    session.solver._store_warm_cache(session.fiber, result.points, signature)
     if session.loop:
-        session.solver._store_loop_cache_signature(session.fiber, session.anchors, session.params)
+        diagnostics = result.converged, result.max_disp, result.max_pen, result.active_count
+        session.solver._store_loop_exact_result(
+            session.fiber, signature, result.points, diagnostics)
 
 
 def _finish_invalid(session, issue):
     session.invalid_reason, session.done = str(issue or "Invalid attachment."), True
     session.solver._mark_invalid(session.fiber, session.invalid_reason)
+    session.phase = FiberPhase.DONE.value
+    session.termination_reason = _invalid_termination(issue)
+
+
+def _termination_reason(session):
+    if session.invalid_reason:
+        return _invalid_termination(session.invalid_reason)
+    if session.converged:
+        return FiberTermination.CONVERGED.value
+    if session.level is not None and session.level.blocked:
+        return FiberTermination.BLOCKED.value
+    if session.stalled:
+        return FiberTermination.STALLED.value
+    return FiberTermination.BUDGET_EXHAUSTED.value if session.done else ""
+
+
+def _invalid_termination(issue):
+    text = str(issue or "").lower()
+    if "anchor" in text or "node" in text or "configuration" in text:
+        return FiberTermination.INVALID_CONFIGURATION.value
+    return FiberTermination.INVALID_ATTACHMENT.value
 
 
 def _copy_points(points):
     return [point.copy() for point in tuple(points or ())]
+
+
+def _quality(value):
+    return "FINAL" if str(value or "").upper() in {"BAKE", "FINAL"} else "INTERACTIVE"
+
+
+def _is_final(session):
+    return str(session.quality).upper() == "FINAL"
+
+
+def _planner_elapsed(session):
+    work = getattr(session, "planner_work", None)
+    return 0.0 if work is None else float(work.elapsed_ms)

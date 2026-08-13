@@ -7,6 +7,7 @@ from ..app.use_cases.fiber_tools import (
     move_fiber_touch_point,
     recompute_fiber,
     remove_fiber_touch_point,
+    restore_legacy_fiber,
 )
 from ..app.queries.root import root_for_context
 
@@ -167,6 +168,17 @@ class AF_OT_RecomputeFiber(bpy.types.Operator):
 
     def execute(self, context):
         return _finish(self, recompute_fiber(context, self.fiber_id))
+
+
+class AF_OT_RestoreLegacyFiber(bpy.types.Operator):
+    bl_idname = "af.restore_legacy_fiber"
+    bl_label = "Restore Legacy Shape"
+    bl_options = {"REGISTER", "UNDO"}
+
+    fiber_id: bpy.props.StringProperty(default="")
+
+    def execute(self, context):
+        return _finish(self, restore_legacy_fiber(context, self.fiber_id))
 
 
 class AF_OT_AddFiberTouchPoint(bpy.types.Operator):

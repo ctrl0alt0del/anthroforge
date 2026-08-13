@@ -26,7 +26,9 @@ from .rna import scalar_dict
 
 _FULL_OBJECT_RE = re.compile(r"^bpy\.data\.objects\[(['\"])(.+?)\1\](.+)$")
 _SCP_SKIP = {"id", "name", "parent_id", "bound_objects", "transform_object_ref", "geometry_object_ref"}
-_FIBER_SKIP = {"id", "name", "a_parent_id", "b_parent_id", "mid_touches", "loop_anchors", "muscle_id", "not_converged", "last_recompute_ms", "last_recompute_status", "last_eps_disp", "last_eps_pen"}
+_FIBER_SKIP = {"id", "name", "a_parent_id", "b_parent_id", "mid_touches", "loop_anchors", "muscle_id",
+               "not_converged", "last_recompute_ms", "last_recompute_status", "last_eps_disp", "last_eps_pen",
+               "legacy_points_json", "legacy_diagnostics_json", "legacy_status", "legacy_eps_disp", "legacy_eps_pen"}
 _MUSCLE_SKIP = {"id", "name", "fiber_refs", "fiber_surface_id"}
 _FIBER_SURFACE_SKIP = {"id", "name", "fiber_refs", "active_fiber_ref_index"}
 _BLOB_SKIP = {"id", "name", "attach_target_type", "attach_target_id", "attach_target_object_name", "last_solve_converged", "last_solve_max_disp", "last_solve_iterations"}

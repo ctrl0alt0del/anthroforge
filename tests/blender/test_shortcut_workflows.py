@@ -200,7 +200,8 @@ class ShortcutWorkflowTests(BlenderTestCase):
         self.assertTrue(capture_attachment_from_link(owner, owner.transform_object_ref, owner.geometry_object_ref, parent.transform_object_ref, None))
         before = _parent_local_face_center(parent, owner)
         mod, key = _geometry_nodes_setup(owner.transform_object_ref)
-        add_shortcut(root_obj, "Offset", "SCP", owner.id, f'bpy.data.objects["{owner.transform_object_ref.name}"].modifiers["{mod.name}"]["{key}"]').proxy_float = 2.0
+        shortcut = add_shortcut(root_obj, "Offset", "SCP", owner.id, f'bpy.data.objects["{owner.transform_object_ref.name}"].modifiers["{mod.name}"]["{key}"]')
+        shortcut.owner_backsolve, shortcut.proxy_float = True, 2.0
         bpy.context.view_layer.update()
         self.assertEqual((_parent_local_face_center(parent, owner), tuple(round(float(v), 4) for v in owner.transform_object_ref.location)), (before, (2.0, 1.0, 0.0)))
         bpy.context.view_layer.update()

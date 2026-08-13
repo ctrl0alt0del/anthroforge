@@ -52,6 +52,7 @@ from .operators.add_blob_vcp import AF_OT_AddBlobVCP
 from .operators.fiber_tools import (
     AF_OT_ClearFiberWarmStart,
     AF_OT_RecomputeFiber,
+    AF_OT_RestoreLegacyFiber,
     AF_OT_AddFiberTouchPoint,
     AF_OT_RemoveFiberTouchPoint,
     AF_OT_MoveFiberTouchPoint,
@@ -172,6 +173,10 @@ from .core.visualization.fiber_refinement import (
     register_fiber_refinement_runtime,
     unregister_fiber_refinement_runtime,
 )
+from .core.visualization.fiber_cache_lifecycle import (
+    register_fiber_cache_lifecycle,
+    unregister_fiber_cache_lifecycle,
+)
 from .core.visualization.muscle_sync import register_muscle_sync, unregister_muscle_sync
 from .core.visualization.blob_sync import register_blob_sync, unregister_blob_sync
 from .core.visualization.soft_tissue_sync import register_soft_tissue_sync, unregister_soft_tissue_sync
@@ -238,6 +243,7 @@ classes = (
 
     AF_OT_ClearFiberWarmStart,
     AF_OT_RecomputeFiber,
+    AF_OT_RestoreLegacyFiber,
     AF_OT_AddFiberTouchPoint,
     AF_OT_RemoveFiberTouchPoint,
     AF_OT_MoveFiberTouchPoint,
@@ -372,6 +378,7 @@ def _ensure_scene_props():
 def _register_runtime_hooks():
     register_sync()
     register_fiber_sync()
+    register_fiber_cache_lifecycle()
     register_fiber_surface_sync()
     register_fiber_refinement_runtime()
     register_muscle_sync()
@@ -386,6 +393,7 @@ def _register_runtime_hooks():
 def _unregister_runtime_hooks():
     _shutdown_background_jobs()
     _clear_transient_sessions()
+    unregister_fiber_cache_lifecycle()
     unregister_fiber_refinement_runtime()
     unregister_proxy_session_runtime()
     unregister_delete_reconcile()

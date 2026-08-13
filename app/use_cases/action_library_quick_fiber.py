@@ -4,7 +4,7 @@ import bpy
 
 from ..queries.root import root_for_context
 from ..queries.scp import scp_label
-from .fiber_create import _activate, _new_fiber
+from .fiber_create import _activate, _invalidate_fiber_runtime, _new_fiber
 from .results import failure, success
 
 try:
@@ -64,7 +64,8 @@ def commit_quick_fiber(context, points):
     if root is None or len(values) < 2:
         return failure("Quick Fiber requires an origin and insertion.")
     fiber = _create_fiber(root, values)
-    request = request_fiber_refinement(root, context.scene, fiber, show_preview=True)
+    request = request_fiber_refinement(
+        root, context.scene, fiber, show_preview=True, quality="INTERACTIVE")
     if not request.ok or request.proxy is None:
         _rollback_fiber(root, context.scene, fiber.id)
         return failure(request.error or "Quick Fiber could not create its preview route.")
@@ -89,6 +90,7 @@ def _rollback_fiber(root, scene, fiber_id):
     index = next((i for i, item in enumerate(fibers) if item.id == fiber_id), -1)
     if index >= 0:
         fibers.remove(index)
+    _invalidate_fiber_runtime(root, fiber_id)
 
 
 def _fiber_object(obj, root_name, fiber_id):

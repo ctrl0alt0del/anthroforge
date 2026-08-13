@@ -19,7 +19,18 @@ def resample_closed(points, count):
         return []
     if total <= 1.0e-9:
         return [pts[0].copy() for _ in range(count)]
-    return [_closed_point(pts, spans, total * i / float(count)) for i in range(count)]
+    return _closed_samples(pts, spans, total, count)
+
+
+def _closed_samples(points, spans, total, count):
+    out, segment = [], 0
+    for index in range(count):
+        target = total * index / float(count)
+        while segment + 2 < len(spans) and spans[segment + 1] < target:
+            segment += 1
+        out.append(_segment_point(points[segment], points[segment + 1],
+                                  spans[segment], spans[segment + 1], target))
+    return out
 
 
 def _closed_point(points, spans, target):

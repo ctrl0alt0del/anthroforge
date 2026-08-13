@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from ..deps.dirty_hints import empty_dirty_hints
+from ..deps.dirty_hints import DirtyHints, empty_dirty_hints
 from ..id_utils import next_prefixed_id
 from ..scp_proxy.signature import mesh_topology_signature
 from ..scp_runtime.bound_objects import find_bound_entry_by_object, sync_all_scp_roles
@@ -572,7 +572,7 @@ def _result(state):
 
 
 def _dirty_for_diff(state):
-    dirty = empty_dirty_hints()
+    dirty = DirtyHints(full=False)
     dirty["SCP"] = {sid for sid in state.imported_scps if sid}
     dirty["FIBER"] = set(state.fibers.values())
     dirty["FIBER_SURFACE"] = set(state.fiber_surfaces.values())

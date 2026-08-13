@@ -76,6 +76,19 @@ def _matching_target():
     return root_obj, left, right
 
 
+def _scp_diff_target(parent_id):
+    root_obj = root()
+    root_obj.af_draft_skin_settings.collagen_depth_percent = 0.25
+    parent = scp_with_object(root_obj, "ParentTarget", mesh_object("ParentTarget"))
+    return root_obj, parent
+
+
+def _vcp_target():
+    root_obj, left, right = _matching_target()
+    root_obj.af_draft_skin_settings.collagen_depth_percent = 0.35
+    return root_obj, left, right, fiber(root_obj, left.id, right.id)
+
+
 def _source_snapshot():
     root_obj = root()
     root_obj.af_draft_skin_settings.collagen_depth_percent = 1.25
@@ -144,10 +157,14 @@ class ImportPackageE2ETests(BlenderTestCase):
         path, (parent_id, child_id) = _source_scp_diff_file()
         self.addCleanup(lambda: os.remove(path) if os.path.exists(path) else None)
         reset_scene()
-        root_obj = root()
-        root_obj.af_draft_skin_settings.collagen_depth_percent = 0.25
-        parent = scp_with_object(root_obj, "ParentTarget", mesh_object("ParentTarget"))
+        root_obj, parent = _scp_diff_target(parent_id)
         self.assertEqual(parent.id, parent_id)
+        self._assert_scp_diff_import(root_obj, path, parent_id, child_id)
+        result = import_scp_diff_from_blend(path, bpy.context)
+        self.assertEqual((result.scp_count, result.fiber_count, result.shortcut_count), (0, 0, 0))
+        self.assertAlmostEqual(root_obj.af_draft_skin_settings.collagen_depth_percent, 0.25)
+
+    def _assert_scp_diff_import(self, root_obj, path, parent_id, child_id):
         with patch("anthroforge.core.importing.merge.schedule_sync_from_dirty_hints") as schedule:
             result = import_scp_diff_from_blend(path, bpy.context)
         child = next(scp for scp in root_obj.af_scp_system.scps if scp.id == child_id)
@@ -157,17 +174,17 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertEqual((root_obj.af_vcp_system.fibers[-1].a_parent_id, root_obj.af_vcp_system.fibers[-1].b_parent_id), (parent_id, child_id))
         self.assertEqual((shortcut.owner_id, child_id in shortcut.data_path), (child_id, True))
         self.assertIn(child_id, schedule.call_args.kwargs["dirty_hints"]["SCP"])
-        result = import_scp_diff_from_blend(path, bpy.context)
-        self.assertEqual((result.scp_count, result.fiber_count, result.shortcut_count), (0, 0, 0))
-        self.assertAlmostEqual(root_obj.af_draft_skin_settings.collagen_depth_percent, 0.25)
+        self.assertFalse(schedule.call_args.kwargs["dirty_hints"].full)
 
     def test_import_vcp_uses_matching_target_scp_ids_and_topology(self):
         path, source_ids = _source_vcp_file()
         self.addCleanup(lambda: os.remove(path) if os.path.exists(path) else None)
         reset_scene()
-        root_obj, left, right = _matching_target()
-        root_obj.af_draft_skin_settings.collagen_depth_percent = 0.35
-        existing = fiber(root_obj, left.id, right.id)
+        root_obj, left, right, existing = _vcp_target()
+        self._assert_vcp_import(root_obj, left, right, existing, path, source_ids)
+        self.assertAlmostEqual(root_obj.af_draft_skin_settings.collagen_depth_percent, 0.35)
+
+    def _assert_vcp_import(self, root_obj, left, right, existing, path, source_ids):
         with patch("anthroforge.core.importing.service.append_stage_root", side_effect=AssertionError("append")), patch(
             "anthroforge.core.importing.vcp.schedule_sync_from_dirty_hints"
         ) as schedule:
@@ -182,7 +199,7 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertEqual(root_obj.af_vcp_system.blobs[-1].attach_target_id, imported_muscle.id)
         self.assertEqual(schedule.call_count, 1)
         self.assertIn(imported_fiber.id, schedule.call_args.kwargs["dirty_hints"]["FIBER"])
-        self.assertAlmostEqual(root_obj.af_draft_skin_settings.collagen_depth_percent, 0.35)
+        self.assertFalse(schedule.call_args.kwargs["dirty_hints"].full)
 
     def test_import_vcp_skips_mismatched_scp_topology(self):
         path, _source_ids = _source_vcp_file()

@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from ..deps.dirty_hints import empty_dirty_hints
+from ..deps.dirty_hints import DirtyHints
 from ..id_utils import next_prefixed_id
 from ..vcp.prop_update_guard import suppress_vcp_prop_updates
 from ..vcp.attachment_backend import attachment_runtime, surface_binding_topology
@@ -330,7 +330,7 @@ def _result(state):
 
 
 def _dirty_for_imported(state):
-    dirty = empty_dirty_hints()
+    dirty = DirtyHints(full=False)
     dirty["FIBER"] = set(state.fibers.values())
     dirty["FIBER_SURFACE"] = set(state.fiber_surfaces.values())
     dirty["MUSCLE"] = set(state.muscles.values())

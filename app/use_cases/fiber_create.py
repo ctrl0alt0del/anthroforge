@@ -44,7 +44,7 @@ def create_fiber_from_proxy_vertices(context):
     if error:
         return failure(error)
     resolved, error = _resolved_proxy_inputs(root, context.scene, picks)
-    return _create_fiber(context, root, resolved, error)
+    return _create_fiber(context, root, resolved, error, surface=True)
 
 
 def create_loop_fiber_from_selected_vertices(context):
@@ -78,15 +78,37 @@ def create_symmetric_loop_fiber_from_selected_vertices(context):
     return success(f"Added {fiber.id}", value=fiber)
 
 
-def _create_fiber(context, root, resolved, error_message):
+def _create_fiber(context, root, resolved, error_message, surface=False):
     if resolved is None:
         return failure(error_message or "Could not resolve fiber endpoints.")
     with suppress_vcp_prop_updates():
         fiber = _new_fiber(root, *resolved)
+        fiber.use_surface_routing = bool(surface)
     _activate(root.af_vcp_system, "FIBER", fiber.id)
-    _sync_entity(root, context.scene, "FIBER", {fiber.id})
+    _sync_created_fiber(root, context.scene, fiber, surface)
     _finalize_selection(context, root, fiber)
     return success(f"Added {fiber.id}", value=fiber)
+
+
+def _sync_created_fiber(root, scene, fiber, surface):
+    if not surface:
+        _sync_entity(root, scene, "FIBER", {fiber.id})
+        return
+    with suppress_vcp_prop_updates():
+        fiber.preview_planner_route = True
+    try:
+        _sync_entity(root, scene, "FIBER", {fiber.id})
+    finally:
+        with suppress_vcp_prop_updates():
+            fiber.preview_planner_route = False
+    _mark_transient_preview(scene, root.name, fiber.id)
+    _request_refinement()(root, scene, fiber, show_preview=False, quality="INTERACTIVE")
+
+
+def _mark_transient_preview(scene, root_name, fiber_id):
+    proxy = _find_proxy(scene, root_name, fiber_id)
+    if proxy is not None:
+        proxy["af_fiber_output_state"] = "STALE"
 
 
 def _resolved_inputs(context, root):
@@ -316,6 +338,7 @@ def _new_fiber(root, origin_id, insert_id, origin_raw, insert_raw, touch_specs=(
     _apply_touch_specs(fiber, touch_specs)
     _apply_values(fiber, _fiber_defaults())
     reset_fiber_runtime(fiber)
+    _invalidate_fiber_runtime(root, fiber.id)
     return fiber
 
 
@@ -357,7 +380,7 @@ def _append_loop_anchor(fiber, parent_id, attach_param):
 
 
 def _fiber_defaults():
-    return {
+    values = {
         "use_warm_start": True,
         "use_surface_routing": False,
         "use_segment_collisions": False,
@@ -369,6 +392,14 @@ def _fiber_defaults():
         "bend_stiffness": 0.02,
         "thickness": 0.01,
     }
+    values["solver_version"] = 2 if _v2_rollout_enabled() else 1
+    return values
+
+
+def _v2_rollout_enabled():
+    import os
+    value = str(os.environ.get("AF_FIBER_V2_ROLLOUT", "0") or "0").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 def _apply_values(item, values):
@@ -380,6 +411,14 @@ def _activate(vcp, kind, entity_id):
     vcp.active_vcp_type, vcp.active_vcp_id = str(kind or ""), str(entity_id or "")
 
 
+def _invalidate_fiber_runtime(root, fiber_id):
+    try:
+        from ...core.visualization.fiber_cache_lifecycle import invalidate_fiber_caches
+    except ImportError:
+        from core.visualization.fiber_cache_lifecycle import invalidate_fiber_caches
+    invalidate_fiber_caches(root=root, fiber_ids={fiber_id})
+
+
 def _finalize_selection(context, root, fiber):
     if getattr(context, "mode", "") == "EDIT_MESH" and _active_proxy(context):
         return
@@ -387,6 +426,7 @@ def _finalize_selection(context, root, fiber):
     proxy = _find_proxy(context.scene, root.name, fiber.id)
     _select_if_found(context, proxy)
     _sync_selection(context.scene, proxy)
+    _fiber_sync().refresh_selection(root=root, scene=context.scene, fiber_ids={fiber.id}, sync_handles=True)
 
 
 def _exit_edit_mode(context):
@@ -570,3 +610,11 @@ def _notify_selection_changed():
     except ImportError:
         from core.visualization.control_runtime import notify_selection_changed
     return notify_selection_changed
+
+
+def _request_refinement():
+    try:
+        from ...core.visualization.fiber_refinement import request_fiber_refinement
+    except ImportError:
+        from core.visualization.fiber_refinement import request_fiber_refinement
+    return request_fiber_refinement

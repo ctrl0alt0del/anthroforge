@@ -2,6 +2,7 @@ from mathutils import Matrix, Vector
 
 from ..utils import depsgraph_for_scene, scene_for_id, update_scene_view_layer
 from ..shortcuts.owner_backsolve import apply_owner_backsolve
+from ..shortcuts.session_state import suppress_next_depsgraph_ids
 from .attachment_session import follow_rotation_enabled, tangent_strategy
 from .common import as_bool, as_id, as_vec3, find_geometry_mesh_scp_obj, find_transform_scp_obj, indexed_geometry_mesh_scp_obj
 from .common import indexed_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix, scp_object_maps
@@ -545,7 +546,10 @@ def _refresh_child_chain(scene, active_parent_ids, sid, kids, pending, depsgraph
 
 def _apply_shortcut_backsolve(root, scene, sid, backsolve):
     owner_id = as_id(dict(backsolve or {}).get("owner_id"))
-    return bool(owner_id and owner_id == sid and apply_owner_backsolve(root, scene, backsolve))
+    moved = bool(owner_id and owner_id == sid and apply_owner_backsolve(root, scene, backsolve))
+    if moved:
+        suppress_next_depsgraph_ids({sid})
+    return moved
 
 
 def _needs_child_refresh(kids, pending, sid):

@@ -23,8 +23,8 @@ def _trace_line(text):
     trace_line(text)
 
 
-def _normalize_dirty_hints(entity_sets, dirty_hints):
-    return normalize_dirty_hints(entity_sets, dirty_hints)
+def _normalize_dirty_hints(entity_sets, dirty_hints, full=None):
+    return normalize_dirty_hints(entity_sets, dirty_hints, full)
 
 
 def _compute_scc_index(adjacency):
@@ -60,8 +60,8 @@ def _run_sync_drivers(root, scene, is_full, impacted, bake, gate_meta, profile=N
     run_sync_drivers(root, scene, is_full, impacted, bake, gate_meta, profile)
 
 
-def _build_runtime_context(root, scene, dirty_hints, gate_meta=None):
-    build = build_runtime_context(root, scene, dirty_hints, gate_meta)
+def _build_runtime_context(root, scene, dirty_hints, gate_meta=None, full=None):
+    build = build_runtime_context(root, scene, dirty_hints, gate_meta, full)
     return build.graph, build.entity_sets, build.adjacency, build.scc_idx, build.scc_sizes, build.dirty, build.is_full
 
 
@@ -69,14 +69,25 @@ def _compute_impacted_sets(graph, dirty, gate_meta=None):
     return compute_impacted_sets(graph, dirty, gate_meta)
 
 
-def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=None):
+def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=None, full=None,
+                           dirty_aspects=None, quality=""):
+    gate_meta = _request_meta(gate_meta, full, dirty_aspects, quality, bake)
     trace = trace_session(root=root, scene=scene)
-    build, build_ms = timed_call(build_runtime_context, root, scene, dirty_hints, gate_meta)
+    build, build_ms = timed_call(build_runtime_context, root, scene, dirty_hints, gate_meta, full)
     impacted, impact_ms = timed_call(compute_impacted_sets, build.graph, build.dirty, gate_meta)
     c_impacts, c_ms = timed_call(apply_constraint_drivers, root, scene, build, bake, gate_meta, trace.profile)
-    _, expand_ms = timed_call(expand_constraint_impacts, build.graph, impacted, c_impacts)
+    _, expand_ms = timed_call(expand_constraint_impacts, build.graph, impacted, c_impacts, gate_meta)
     _, sync_ms = timed_call(run_sync_drivers, root, scene, build.is_full, impacted, bake, gate_meta, trace.profile)
     emit_trace_report(trace, gate_meta, build, impacted, c_impacts, build_ms, impact_ms, c_ms, expand_ms, sync_ms)
+
+
+def _request_meta(gate_meta, full, dirty_aspects, quality, bake):
+    meta = dict(gate_meta or {})
+    meta["full"] = bool(meta.get("full", False) if full is None else full)
+    meta["dirty_aspects"] = dict(dirty_aspects or meta.get("dirty_aspects", {}) or {})
+    mode = str(quality or meta.get("quality", "") or "").upper()
+    meta["quality"] = "FINAL" if bake or mode in {"BAKE", "FINAL"} else "INTERACTIVE"
+    return meta
 
 
 register_builtin_dependency_drivers()

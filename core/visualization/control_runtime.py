@@ -9,11 +9,14 @@ from ..deps.controls import classify_control_object, is_control_object
 from ..deps.control_lifecycle import should_remove_control_object_on_load, should_remove_control_object_on_save
 from ..deps.dirty_hints import dirty_hints_for, empty_dirty_hints
 from ..scp_runtime.common import is_bound_scp_obj
+from ..scp_runtime.prop_update_guard import suppress_scp_prop_updates
 from ..scp_runtime.runtime_state import reset_scp_runtime_state
 from ..shortcuts.owner_backsolve import retrofit_owner_backsolve_defaults
+from ..shortcuts.session_state import reset_shortcut_runtime_state
 from ..selection_order import update_selection_order
 from ..utils import depsgraph_for_scene, get_af_root, view_layer_for_scene
 from ..vcp.runtime_state import reset_vcp_runtime_state
+from ..vcp.prop_update_guard import suppress_vcp_prop_updates
 
 
 ENTITY_TYPES = ("SCP", "FIBER", "FIBER_SURFACE", "MUSCLE", "BLOB", "SOFT_TISSUE")
@@ -242,6 +245,7 @@ def _consume_history_suspend():
 def _on_history_pre(_dummy):
     global _HISTORY_SUSPENDED
     _HISTORY_SUSPENDED = True
+    reset_shortcut_runtime_state()
     None if _CONTROL_RUNTIME is None else _CONTROL_RUNTIME.reset()
 
 
@@ -252,6 +256,7 @@ def _on_save_pre(_dummy):
 
 @persistent
 def _on_load_post(_dummy):
+    reset_shortcut_runtime_state()
     _remove_transient_controls(should_remove_control_object_on_load)
     if _CONTROL_RUNTIME is not None:
         _CONTROL_RUNTIME.reset()
@@ -289,7 +294,8 @@ def _hydrate_runtime_state(root, scene):
     reset_scp_runtime_state(root)
     reset_vcp_runtime_state(root)
     _prime_evaluated_depsgraph(scene)
-    sync_scene(root=root, scene=scene, dirty_hints=empty_dirty_hints(), source="load", event_type="LOAD")
+    with suppress_scp_prop_updates(), suppress_vcp_prop_updates():
+        sync_scene(root=root, scene=scene, dirty_hints=empty_dirty_hints(), source="load", event_type="LOAD")
 
 
 def _ensure_runtime_handlers():

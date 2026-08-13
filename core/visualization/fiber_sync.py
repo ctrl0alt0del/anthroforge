@@ -15,6 +15,7 @@ from .fiber_sync_helpers import (
     set_fiber_color,
     create_fiber_proxy,
     update_curve_points,
+    update_curve_style,
     get_scp_proxy,
     endpoint_world,
     nearest_param,
@@ -28,6 +29,7 @@ from .fiber_sync_runtime import (
     sync_root_to_scene as _sync_root_to_scene_runtime,
     on_depsgraph_update as _on_depsgraph_update_runtime,
     apply_fiber_points as _apply_fiber_points_runtime,
+    refresh_display as _refresh_display_runtime,
 )
 
 DEFAULT_FIBER_COLOR = (0.85, 0.55, 0.20, 1.0)
@@ -88,8 +90,11 @@ class FiberSceneSync:
     def _create_fiber_proxy(self, vis_col, root, fiber_id):
         return create_fiber_proxy(vis_col, root, fiber_id, DEFAULT_FIBER_COLOR)
 
-    def _update_curve_points(self, obj, points, thickness, bake=False, cyclic=False):
-        update_curve_points(obj, points, thickness, bake=bake, cyclic=cyclic)
+    def _update_curve_points(self, obj, points, thickness, bake=False, cyclic=False, commit=True):
+        update_curve_points(obj, points, thickness, bake=bake, cyclic=cyclic, commit=commit)
+
+    def _update_curve_style(self, obj, thickness):
+        return update_curve_style(obj, thickness)
 
     def _clear_curve_points(self, obj):
         clear_curve_points(obj)
@@ -124,16 +129,20 @@ class FiberSceneSync:
     def _apply_selection_highlight(self, root, scene):
         return _apply_selection_highlight_runtime(self, root, scene)
 
-    def refresh_selection(self, root=None, scene=None, window_manager=None):
-        return _refresh_selection_runtime(self, root=root, scene=scene, window_manager=window_manager)
+    def refresh_selection(self, root=None, scene=None, window_manager=None, fiber_ids=None, sync_handles=False):
+        return _refresh_selection_runtime(self, root=root, scene=scene, window_manager=window_manager,
+                                          fiber_ids=fiber_ids, sync_handles=sync_handles)
+
+    def refresh_display(self, root=None, scene=None, target_fiber_ids=None):
+        return _refresh_display_runtime(self, root=root, scene=scene, target_fiber_ids=target_fiber_ids)
 
     def sync_root_to_scene(self, root=None, scene=None, bake=False, target_fiber_ids=None, window_manager=None):
         return _sync_root_to_scene_runtime(
             self, root=root, scene=scene, bake=bake, target_fiber_ids=target_fiber_ids, window_manager=window_manager
         )
 
-    def apply_points(self, root, scene, fiber, points, bake=False):
-        return _apply_fiber_points_runtime(self, root, scene, fiber, points, bake=bake)
+    def apply_points(self, root, scene, fiber, points, bake=False, commit=True):
+        return _apply_fiber_points_runtime(self, root, scene, fiber, points, bake=bake, commit=commit)
 
     def on_depsgraph_update(self, scene, depsgraph):
         return _on_depsgraph_update_runtime(self, scene, depsgraph)

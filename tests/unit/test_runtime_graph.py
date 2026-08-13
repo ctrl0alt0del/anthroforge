@@ -3,6 +3,7 @@ import importlib.util
 import sys
 import types
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 TEST_ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +33,13 @@ def _load_module(name):
 _load_module("types")
 adapters = _load_module("adapters")
 runtime_graph = _load_module("runtime_graph")
+runtime_impact = _load_module("runtime_impact")
+
+
+def _impact_sets(graph, dirty, meta):
+    with patch.object(runtime_impact, "get_registered_entity_types",
+                      return_value=("FIBER", "MUSCLE")):
+        return runtime_impact.compute_impacted_sets(graph, dirty, meta)
 
 
 def fiber(fid, a_id, b_id, touch_ids=(), topology="OPEN", loop_ids=()):
@@ -46,6 +54,36 @@ def muscle(mid, fiber_ids):
 
 
 class RuntimeGraphTests(unittest.TestCase):
+    def test_selection_impacts_only_selected_entities(self):
+        graph = runtime_graph.RuntimeGraph()
+        graph.add_entity_edge(("FIBER", "F1"), ("MUSCLE", "M1"))
+        dirty = {"FIBER": {"F1"}, "MUSCLE": set()}
+        impacted = _impact_sets(graph, dirty, {"event_type": "SELECTION"})
+        self.assertEqual((impacted["FIBER"], impacted["MUSCLE"]), ({"F1"}, set()))
+
+    def test_fiber_update_aspect_does_not_dirty_downstream(self):
+        graph = runtime_graph.RuntimeGraph()
+        graph.add_entity_edge(("FIBER", "F1"), ("MUSCLE", "M1"))
+        dirty = {"FIBER": {"F1"}, "MUSCLE": set()}
+        meta = {"event_type": "FIBER_UPDATE", "dirty_aspects": {"FIBER": {"SOLVER"}}}
+        impacted = _impact_sets(graph, dirty, meta)
+        self.assertEqual((impacted["FIBER"], impacted["MUSCLE"]), ({"F1"}, set()))
+
+    def test_solve_ready_propagates_fiber_downstream(self):
+        graph = runtime_graph.RuntimeGraph()
+        graph.add_entity_edge(("FIBER", "F1"), ("MUSCLE", "M1"))
+        dirty = {"FIBER": {"F1"}, "MUSCLE": set()}
+        impacted = _impact_sets(graph, dirty, {"event_type": "FIBER_SOLVE_READY"})
+        self.assertEqual((impacted["FIBER"], impacted["MUSCLE"]), ({"F1"}, {"M1"}))
+
+    def test_local_fiber_constraint_impact_stays_local(self):
+        graph = runtime_graph.RuntimeGraph()
+        graph.add_entity_edge(("FIBER", "F1"), ("MUSCLE", "M1"))
+        impacted = {"FIBER": {"F1"}, "MUSCLE": set()}
+        meta = {"event_type": "FIBER_UPDATE", "dirty_aspects": {"FIBER": {"ATTACHMENT"}}}
+        out = runtime_impact.expand_constraint_impacts(graph, impacted, {"FIBER": {"F1"}}, meta)
+        self.assertEqual((out["FIBER"], out["MUSCLE"]), ({"F1"}, set()))
+
     def test_runtime_graph_connects_scp_vcp_chain(self):
         scps = [SimpleNamespace(id="S1", parent_id=""), SimpleNamespace(id="S2", parent_id="S1")]
         tissue = SimpleNamespace(id="T1", host_scp_id="S2")

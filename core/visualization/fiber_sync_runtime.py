@@ -5,8 +5,11 @@ from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..deps.conflict_resolver import resolve_conflict
 from ..scp_runtime.common import is_runtime_applied_matrix, mark_applied_matrix
 from ..vcp.fiber_modes import is_loop_fiber, is_open_fiber
+from ..vcp.prop_update_guard import suppress_vcp_prop_updates
+from ..vcp.runtime_state import fiber_eps_pen, fiber_invalid_reason, fiber_not_converged
 from ..utils import depsgraph_for_scene, get_af_root, scene_for_id
 from .control_runtime import active_entity_id
+from .fiber_sync_helpers import mark_fiber_output_stale, show_curve_preview
 from .vcp_object_index import build_vcp_object_index
 
 
@@ -109,10 +112,10 @@ def _sync_loop_handles(sync, root, scene, vis_col, runtime_registry, fiber, live
         _sync_loop_anchor_handle(sync, vis_col, root, scene, runtime_registry, fiber, i, anchor, window_manager)
 
 
-def apply_selection_highlight(sync, root, scene):
+def apply_selection_highlight(sync, root, scene, objects=None):
     active_id = root.af_vcp_system.active_vcp_id
     active_type = root.af_vcp_system.active_vcp_type
-    for obj in scene.objects:
+    for obj in scene.objects if objects is None else objects:
         if not obj.get("af_fiber_proxy"):
             continue
         if obj.get("af_root_name") != root.name:
@@ -139,17 +142,51 @@ def _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake):
     obj = sync._find_fiber_proxy(vis_col, root.name, fiber.id)
     if obj is None:
         obj = sync._create_fiber_proxy(vis_col, root, fiber.id)
-    if bake:
-        sync._set_fiber_prefer_bake(fiber, True)
-    use_bake = bool(bake or sync._fiber_prefer_bake(fiber))
+    if sync._fiber_prefer_bake(fiber):
+        sync._set_fiber_prefer_bake(fiber, False)
+    use_bake = bool(bake)
     points = sync._solver.solve_points(root=root, fiber_prop=fiber, scene=scene, depsgraph=depsgraph, bake=use_bake)
-    if len(points) >= 2:
+    if _sync_commit_allowed(fiber, points):
         sync._update_curve_points(obj, points, fiber.thickness, bake=use_bake, cyclic=sync._fiber_cyclic(fiber))
         return
-    sync._clear_curve_points(obj)
+    _retain_or_clear_failed(sync, root, scene, fiber, obj, points)
 
 
-def apply_fiber_points(sync, root, scene, fiber, points, bake=False):
+def _sync_commit_allowed(fiber, points):
+    if fiber_invalid_reason(fiber) or len(points) != int(fiber.node_count):
+        return False
+    if not all(all(_finite(value) for value in point) for point in points):
+        return False
+    if _effective_solver_version(fiber) < 2:
+        return True
+    return float(fiber_eps_pen(fiber)) < 1.0e-5 and not fiber_not_converged(fiber)
+
+
+def _finite(value):
+    from math import isfinite
+    return isfinite(float(value))
+
+
+def _effective_solver_version(fiber):
+    try:
+        pending = int(fiber.get("af_pending_solver_version", 0) or 0)
+    except Exception:
+        pending = 0
+    return max(int(getattr(fiber, "solver_version", 1) or 1), pending)
+
+
+def _retain_or_clear_failed(sync, root, scene, fiber, obj, points):
+    preview = len(points) >= 2 and bool(getattr(fiber, "preview_planner_route", False))
+    if preview:
+        show_curve_preview(obj, points, fiber.thickness, cyclic=sync._fiber_cyclic(fiber))
+        mark_fiber_output_stale(scene, root.name, fiber.id)
+    elif obj.get("af_fiber_points_world"):
+        mark_fiber_output_stale(scene, root.name, fiber.id)
+    else:
+        sync._clear_curve_points(obj)
+
+
+def apply_fiber_points(sync, root, scene, fiber, points, bake=False, commit=True):
     vis_col = sync._get_vis_collection(scene)
     if vis_col is None or fiber is None or len(tuple(points or ())) < 2:
         return None
@@ -157,7 +194,8 @@ def apply_fiber_points(sync, root, scene, fiber, points, bake=False):
     try:
         obj = sync._find_fiber_proxy(vis_col, root.name, fiber.id)
         obj = obj or sync._create_fiber_proxy(vis_col, root, fiber.id)
-        sync._update_curve_points(obj, points, fiber.thickness, bake=bake, cyclic=sync._fiber_cyclic(fiber))
+        sync._update_curve_points(obj, points, fiber.thickness, bake=bake,
+                                  cyclic=sync._fiber_cyclic(fiber), commit=commit)
         return obj
     finally:
         sync._object_index = None
@@ -185,13 +223,31 @@ def sync_root_to_scene(sync, root=None, scene=None, bake=False, target_fiber_ids
     _run_scene_sync(sync, *state, bake, target_fiber_ids, window_manager)
 
 
-def refresh_selection(sync, root=None, scene=None, window_manager=None):
+def refresh_selection(sync, root=None, scene=None, window_manager=None, fiber_ids=None, sync_handles=False):
     if sync._syncing:
         return
-    state = _scene_sync_state(root, scene)
-    if state is None:
+    scene = scene or scene_for_id(root)
+    root = root or get_af_root(scene)
+    if root is None or scene is None:
         return
-    _run_selection_refresh(sync, state[0], state[1], window_manager)
+    _run_selection_refresh(sync, root, scene, window_manager, fiber_ids, sync_handles)
+
+
+def refresh_display(sync, root=None, scene=None, target_fiber_ids=None):
+    scene = scene or scene_for_id(root)
+    root = root or get_af_root(scene)
+    if sync._syncing or root is None or scene is None:
+        return
+    vis_col = sync._get_vis_collection(scene)
+    index = build_vcp_object_index(vis_col, root.name)
+    for fiber in _fibers_to_sync(root, target_fiber_ids):
+        _refresh_fiber_style(sync, index, fiber)
+
+
+def _refresh_fiber_style(sync, index, fiber):
+    for obj in (index["fiber"].get(fiber.id), index["fiber_mirror"].get(fiber.id)):
+        if obj is not None:
+            sync._update_curve_style(obj, fiber.thickness)
 
 
 def _scene_sync_state(root, scene):
@@ -213,16 +269,25 @@ def _run_scene_sync(sync, root, scene, depsgraph, bake, target_fiber_ids, window
         sync._syncing = False
 
 
-def _run_selection_refresh(sync, root, scene, window_manager=None):
+def _run_selection_refresh(sync, root, scene, window_manager=None, fiber_ids=None, sync_handles=False):
     sync._syncing = True
     try:
         vis_col = sync._get_vis_collection(scene)
         sync._object_index = build_vcp_object_index(vis_col, root.name)
-        sync._sync_handles(root, scene, vis_col, {}, window_manager=window_manager)
-        sync._apply_selection_highlight(root, scene)
+        if sync_handles:
+            sync._sync_handles(root, scene, vis_col, {}, window_manager=window_manager)
+        objects = _selection_objects(sync._object_index, fiber_ids)
+        apply_selection_highlight(sync, root, scene, objects)
     finally:
         sync._object_index = None
         sync._syncing = False
+
+
+def _selection_objects(index, fiber_ids):
+    if fiber_ids is None:
+        return None
+    ids = set(fiber_ids or ())
+    return [obj for key in ("fiber", "fiber_mirror") for fid, obj in index[key].items() if fid in ids]
 
 
 def _sync_target_fibers(sync, vis_col, root, scene, depsgraph, bake, target_fiber_ids):
@@ -254,7 +319,8 @@ def _apply_attach_update(sync, fiber, changed_ids, setter, current, resolved):
     if current == resolved:
         return False
     sync.clear_solver_cache(fiber.id)
-    setter(resolved)
+    with suppress_vcp_prop_updates():
+        setter(resolved)
     sync._set_fiber_prefer_bake(fiber, False)
     changed_ids.add(fiber.id)
     return True
@@ -410,6 +476,8 @@ def _merge_changed_fibers(sync, root, vis_col, changed, obj):
 
 
 def _enqueue_fiber_runtime(root, scene, changed_fiber_ids):
-    from .sync_runner import sync_from_dirty_hints
+    from .sync_runner import schedule_sync_from_dirty_hints
 
-    sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("FIBER", changed_fiber_ids), source="depsgraph", event_type="TRANSFORM")
+    aspects = {"FIBER": {"ATTACHMENT"}}
+    schedule_sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("FIBER", changed_fiber_ids),
+                                   source="depsgraph", event_type="FIBER_UPDATE", dirty_aspects=aspects, quality="INTERACTIVE")

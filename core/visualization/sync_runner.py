@@ -14,12 +14,13 @@ except ImportError:
     from app.runtime_requests import runtime_request
     from app.runtime_sync import queue_runtime, run_runtime_now
 from ..deps import run_dependency_runtime
-from ..deps.runtime_trace import trace_enabled, trace_line
+from ..deps.runtime_trace import begin_request_telemetry, finish_request_telemetry, trace_enabled, trace_line
 from ..perf_trace import perf_count
 
 
 _RUNNING = False
 _PENDING = []
+_TAIL_PENDING = []
 _TIMER_ARMED = False
 _TIMER_DUE_AT = 0.0
 _ID_PAYLOAD_KEYS = ("scp_recapture_ids", "scp_apply_parent_ids", "scp_apply_target_ids",
@@ -28,10 +29,13 @@ _ID_PAYLOAD_KEYS = ("scp_recapture_ids", "scp_apply_parent_ids", "scp_apply_targ
 _FALSE_VALUES = {"0", "false", "no", "off"}
 _DEFER_ENV = "AF_DEPS_DEFER"
 _DEFER_MS_ENV = "AF_DEPS_DEFER_MS"
+_FIBER_DEFER_MS_ENV = "AF_FIBER_DEFER_MS"
 _DEFER_MAX_MS_ENV = "AF_DEPS_DEFER_MAX_MS"
 _DEFAULT_DEFER_MS = 75.0
+_DEFAULT_FIBER_DEFER_MS = 125.0
 _DEFAULT_MAX_MS = 0.0
 _RETRY_SECONDS = 0.01
+_MAX_TAIL_PASSES = 4
 
 
 @dataclass
@@ -49,12 +53,50 @@ def _run_request(ctx, request):
         return False
     _RUNNING = True
     try:
+        _run_request_chain(ctx, request)
+    finally:
+        _finish_request(ctx)
+    return True
+
+
+def _trace_request(ctx, request, queue_ms, elapsed):
+    if not trace_enabled(root=ctx.root, scene=ctx.scene):
+        return
+    trace_line(f"request source={request.source} event={request.event_type} quality={request.quality} "
+               f"full={request.full} aspects={request.dirty_aspects} queue={queue_ms:.2f}ms run={elapsed:.2f}ms")
+
+
+def _request_seen(request):
+    return float(getattr(request, "queued_at", 0.0) or _now())
+
+
+def _run_request_chain(ctx, request):
+    _run_one_request(ctx, request)
+    for _index in range(_MAX_TAIL_PASSES):
+        item = _pop_tail()
+        if item is None:
+            return
+        _run_one_request(item[0], item[1])
+
+
+def _run_one_request(ctx, request):
+    queue_ms = 1000.0 * max(0.0, _now() - _request_seen(request))
+    started = time.perf_counter()
+    record = begin_request_telemetry(request, queue_ms, ctx.root, ctx.scene)
+    try:
         run_runtime_now(ctx, request, run_dependency_runtime)
     finally:
-        _reapply_scp_isolation(ctx.scene)
-        _rehide_proxy_session(ctx.root, ctx.scene)
-        _RUNNING = False
-    return True
+        elapsed = 1000.0 * max(0.0, time.perf_counter() - started)
+        finish_request_telemetry(record, elapsed)
+        _trace_request(ctx, request, queue_ms, elapsed)
+
+
+def _finish_request(ctx):
+    global _RUNNING
+    _reapply_scp_isolation(ctx.scene)
+    _rehide_proxy_session(ctx.root, ctx.scene)
+    _RUNNING = False
+    _defer_tail_remainder()
 
 
 def _reapply_scp_isolation(scene):
@@ -119,7 +161,9 @@ def _env_seconds(name, default_ms):
         return max(0.0, float(default_ms)) / 1000.0
 
 
-def _defer_seconds():
+def _defer_seconds(request=None):
+    if request is not None and str(request.event_type) == "FIBER_UPDATE":
+        return _env_seconds(_FIBER_DEFER_MS_ENV, _DEFAULT_FIBER_DEFER_MS)
     return _env_seconds(_DEFER_MS_ENV, _DEFAULT_DEFER_MS)
 
 
@@ -134,6 +178,8 @@ def _deferable(request):
     event = str(request.event_type)
     if event == "SCP_UPDATE":
         return source == "depsgraph"
+    if event == "FIBER_UPDATE":
+        return source in {"depsgraph", "property"}
     return event == "SOFT_TISSUE_UPDATE" and source in {"depsgraph", "property"}
 
 
@@ -158,7 +204,7 @@ def _enqueue_deferred(ctx, item):
 
 def _queue_item(ctx, request):
     started = _now()
-    due_at = started + (_defer_seconds() if _deferable(request) else 0.0)
+    due_at = started + (_defer_seconds(request) if _deferable(request) else 0.0)
     return QueuedRuntime(_obj_name(ctx.scene), _obj_name(ctx.root), request, started, due_at)
 
 
@@ -191,7 +237,22 @@ def _merge_due_at(old, new):
 def _merge_request(old, new):
     dirty = _merge_dirty(old.dirty_hints, new.dirty_hints)
     payload = _merge_payload(old.payload, new.payload)
-    return runtime_request(dirty, old.bake or new.bake, new.source, new.event_type, payload)
+    aspects = _merge_aspects(old.dirty_aspects, new.dirty_aspects)
+    queued = min(float(old.queued_at), float(new.queued_at))
+    return runtime_request(dirty, old.bake or new.bake, new.source, new.event_type, payload,
+                           old.full or new.full, aspects, _merged_quality(old, new), queued)
+
+
+def _merge_aspects(old, new):
+    out = {str(key): set(values or ()) for key, values in dict(old or {}).items()}
+    for key, values in dict(new or {}).items():
+        out.setdefault(str(key), set()).update(set(values or ()))
+    return out
+
+
+def _merged_quality(old, new):
+    values = {str(old.quality).upper(), str(new.quality).upper()}
+    return "FINAL" if values & {"BAKE", "FINAL"} else "INTERACTIVE"
 
 
 def _merge_dirty(old, new):
@@ -307,26 +368,72 @@ def _context(root=None, scene=None):
     return addon_context(root=root, scene=scene, scheduler=_scheduler)
 
 
-def _request(dirty_hints=None, bake=False, source="manual", event_type="UPDATE", payload=None):
-    return runtime_request(dirty_hints=dirty_hints, bake=bake, source=source, event_type=event_type, payload=payload)
+def _request(dirty_hints=None, bake=False, source="manual", event_type="UPDATE", payload=None,
+             full=None, dirty_aspects=None, quality=""):
+    return runtime_request(dirty_hints, bake, source, event_type, payload, full, dirty_aspects, quality)
+
+
+def _runtime_key(ctx, request):
+    return (_owner_key(ctx.scene), _owner_key(ctx.root), str(request.source), str(request.event_type))
+
+
+def _owner_key(owner):
+    value = getattr(owner, "session_uid", 0)
+    if value:
+        return int(value)
+    try:
+        return int(owner.as_pointer())
+    except Exception:
+        return id(owner)
+
+
+def _enqueue_tail(ctx, request):
+    key = _runtime_key(ctx, request)
+    for index, item in enumerate(_TAIL_PENDING):
+        if _runtime_key(item[0], item[1]) == key:
+            _TAIL_PENDING[index] = (ctx, _merge_request(item[1], request))
+            return
+    _TAIL_PENDING.append((ctx, request))
+
+
+def _pop_tail():
+    return None if not _TAIL_PENDING else _TAIL_PENDING.pop(0)
+
+
+def _defer_tail_remainder():
+    if not _TAIL_PENDING:
+        return
+    items, _TAIL_PENDING[:] = tuple(_TAIL_PENDING), []
+    for ctx, request in items:
+        _enqueue_item(ctx, request)
+    _arm_next_timer()
 
 
 def sync_from_dirty_hints(
-    root=None, scene=None, dirty_hints=None, bake=False, source="manual", event_type="UPDATE", payload=None
+    root=None, scene=None, dirty_hints=None, bake=False, source="manual", event_type="UPDATE", payload=None,
+    full=None, dirty_aspects=None, quality=""
 ):
-    _run_request(_context(root=root, scene=scene), _request(dirty_hints, bake, source, event_type, payload))
+    ctx = _context(root=root, scene=scene)
+    request = _request(dirty_hints, bake, source, event_type, payload, full, dirty_aspects, quality)
+    if _RUNNING:
+        _enqueue_tail(ctx, request)
+        return False
+    return _run_request(ctx, request)
 
 
 def schedule_sync_from_dirty_hints(
-    root=None, scene=None, dirty_hints=None, bake=False, source="manual", event_type="UPDATE", payload=None
+    root=None, scene=None, dirty_hints=None, bake=False, source="manual", event_type="UPDATE", payload=None,
+    full=None, dirty_aspects=None, quality=""
 ):
     # Defer depsgraph-driven runtime work until Blender finishes the current evaluation pass.
-    queue_runtime(_context(root=root, scene=scene), _request(dirty_hints, bake, source, event_type, payload))
+    request = _request(dirty_hints, bake, source, event_type, payload, full, dirty_aspects, quality)
+    queue_runtime(_context(root=root, scene=scene), request)
 
 
 def clear_pending_runtime(keep_timer=True):
     global _RUNNING, _TIMER_ARMED, _TIMER_DUE_AT
     _PENDING.clear()
+    _TAIL_PENDING.clear()
     _RUNNING = False
     if not keep_timer:
         _drop_timer()

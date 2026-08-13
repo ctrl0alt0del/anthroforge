@@ -43,7 +43,7 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
 
     def _draw_solver(self, layout, fiber):
         solver_box = layout.box()
-        solver_box.label(text="Solver")
+        solver_box.label(text=f"Solver V{int(fiber.solver_version)}")
         solver_box.prop(fiber, "use_warm_start")
         solver_box.prop(fiber, "use_surface_routing")
         solver_box.prop(fiber, "use_segment_collisions")
@@ -54,7 +54,16 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         solver_box.prop(fiber, "node_count")
         solver_box.prop(fiber, "iterations_interactive")
         solver_box.prop(fiber, "iterations_bake")
-        solver_box.prop(fiber, "bend_stiffness")
+        solver_box.prop(fiber, "collision_radius")
+        self._draw_weights(solver_box, fiber)
+
+    def _draw_weights(self, layout, fiber):
+        if int(fiber.solver_version) >= 2:
+            layout.prop(fiber, "stretch_stiffness", text="Length Weight")
+            layout.prop(fiber, "bend_stiffness", text="Curvature Weight")
+            return
+        layout.prop(fiber, "stretch_stiffness")
+        layout.prop(fiber, "bend_stiffness")
 
     def _draw_touch_points(self, layout, root, fiber):
         touch_box = layout.box()
@@ -127,6 +136,9 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         display_box.prop(fiber, "thickness")
         op = layout.operator("af.recompute_fiber", icon="FILE_REFRESH")
         op.fiber_id = fiber.id
+        if fiber.legacy_points_json:
+            restore = layout.operator("af.restore_legacy_fiber", icon="LOOP_BACK")
+            restore.fiber_id = fiber.id
 
     def _draw_header(self, layout, fiber):
         suffix = "Loop" if is_loop_fiber(fiber) else "Open"

@@ -1,15 +1,34 @@
 import bpy
 
 from ..app.runtime_api import schedule_context, sync_context
-from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
+from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.vcp.prop_update_guard import suppress_vcp_prop_updates, vcp_prop_updates_suppressed
 from ..core.vcp.soft_tissue_model import construction_mode_for_domain
 
 
-def _sync_vcp_scene(_self, context):
+def _sync_vcp_scene(self, context):
     if vcp_prop_updates_suppressed():
         return
-    sync_context(context, dirty_hints=empty_dirty_hints())
+    owner = _nested_fiber_owner(self)
+    if owner is not None:
+        _queue_fiber_update(owner, context, "RELATIONSHIP")
+
+
+def _nested_fiber_owner(item):
+    root, pointer = getattr(item, "id_data", None), _prop_pointer(item)
+    fibers = getattr(getattr(root, "af_vcp_system", None), "fibers", ())
+    for fiber in fibers:
+        children = tuple(fiber.mid_touches) + tuple(fiber.loop_anchors)
+        if any(_prop_pointer(child) == pointer for child in children):
+            return fiber
+    return None
+
+
+def _prop_pointer(item):
+    try:
+        return int(item.as_pointer())
+    except Exception:
+        return id(item)
 
 
 def _on_muscle_prop_update(self, context):
@@ -117,9 +136,38 @@ def _mark_soft_tissue_dirty(tissue):
 
 
 def _on_fiber_prop_update(self, context):
+    _queue_fiber_update(self, context, "SOLVER")
+
+
+def _on_fiber_topology_update(self, context):
+    _queue_fiber_update(self, context, "RELATIONSHIP")
+
+
+def _on_fiber_attachment_update(self, context):
+    _queue_fiber_update(self, context, "ATTACHMENT")
+
+
+def _queue_fiber_update(self, context, aspect):
+    fiber_id = str(getattr(self, "id", "") or "")
+    if vcp_prop_updates_suppressed() or not fiber_id:
+        return
+    aspects = {"FIBER": {str(aspect)}}
+    schedule_context(context, dirty_hints=dirty_hints_for("FIBER", {fiber_id}),
+                     event_type="FIBER_UPDATE", dirty_aspects=aspects)
+
+
+def _on_fiber_display_update(self, context):
     if vcp_prop_updates_suppressed():
         return
-    sync_context(context, dirty_hints=dirty_hints_for("FIBER", {self.id}))
+    root = getattr(self, "id_data", None)
+    scene = None if context is None else getattr(context, "scene", None)
+    if root is not None and scene is not None:
+        _fiber_scene_sync().refresh_display(root, scene, {self.id})
+
+
+def _fiber_scene_sync():
+    from ..core.visualization.fiber_sync import register_fiber_sync
+    return register_fiber_sync()
 
 
 class AF_MuscleFiberRef_Property(bpy.types.PropertyGroup):
@@ -247,56 +295,64 @@ class AF_FiberLoopAnchor_Property(bpy.types.PropertyGroup):
 
 class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
-    name: bpy.props.StringProperty(name="Name", default="", update=_on_fiber_prop_update)
+    name: bpy.props.StringProperty(name="Name", default="")
 
     topology_mode: bpy.props.EnumProperty(
         name="Topology",
         items=(("OPEN", "Open", ""), ("LOOP", "Loop", "")),
         default="OPEN",
-        update=_on_fiber_prop_update,
+        update=_on_fiber_topology_update,
     )
     symmetry_mode: bpy.props.EnumProperty(
         name="Symmetry",
         items=(("NONE", "None", ""), ("MIRROR_SEAM_LOOP", "Mirror Seam Loop", "")),
         default="NONE",
-        update=_on_fiber_prop_update,
+        update=_on_fiber_topology_update,
     )
     symmetry_axis: bpy.props.EnumProperty(
         name="Symmetry Axis",
         items=(("X", "X", ""), ("Y", "Y", ""), ("Z", "Z", "")),
         default="X",
-        update=_on_fiber_prop_update,
+        update=_on_fiber_topology_update,
     )
     symmetry_origin: bpy.props.FloatVectorProperty(
         name="Symmetry Origin",
         size=3,
         subtype="TRANSLATION",
         default=(0.0, 0.0, 0.0),
-        update=_on_fiber_prop_update,
+        update=_on_fiber_topology_update,
     )
-    a_parent_id: bpy.props.StringProperty(name="Origin SCP ID", update=_on_fiber_prop_update)
-    a_attach_param: bpy.props.StringProperty(name="Origin Attach Param JSON", update=_on_fiber_prop_update)
-    b_parent_id: bpy.props.StringProperty(name="Insertion SCP ID", update=_on_fiber_prop_update)
-    b_attach_param: bpy.props.StringProperty(name="Insertion Attach Param JSON", update=_on_fiber_prop_update)
+    a_parent_id: bpy.props.StringProperty(name="Origin SCP ID", update=_on_fiber_topology_update)
+    a_attach_param: bpy.props.StringProperty(name="Origin Attach Param JSON", update=_on_fiber_attachment_update)
+    b_parent_id: bpy.props.StringProperty(name="Insertion SCP ID", update=_on_fiber_topology_update)
+    b_attach_param: bpy.props.StringProperty(name="Insertion Attach Param JSON", update=_on_fiber_attachment_update)
 
     mid_touches: bpy.props.CollectionProperty(type=AF_FiberTouchPoint_Property)
     loop_anchors: bpy.props.CollectionProperty(type=AF_FiberLoopAnchor_Property)
 
-    muscle_id: bpy.props.StringProperty(name="Muscle ID", default="", update=_on_fiber_prop_update)
+    muscle_id: bpy.props.StringProperty(name="Muscle ID", default="")
 
+    solver_version: bpy.props.IntProperty(name="Solver Version", default=1, min=1, max=2, update=_on_fiber_prop_update)
+    collision_radius: bpy.props.FloatProperty(name="Collision Radius", subtype="DISTANCE", default=0.002,
+                                              min=0.0, update=_on_fiber_prop_update)
     use_warm_start: bpy.props.BoolProperty(name="Use Warm Start", default=True, update=_on_fiber_prop_update)
     use_surface_routing: bpy.props.BoolProperty(name="Use Surface Routing", default=False, update=_on_fiber_prop_update)
     use_segment_collisions: bpy.props.BoolProperty(name="Segment Collisions", default=False, update=_on_fiber_prop_update)
     preview_planner_route: bpy.props.BoolProperty(name="Preview Planner Route", default=False, update=_on_fiber_prop_update)
     node_count: bpy.props.IntProperty(name="Node Count", default=64, min=8, max=512, update=_on_fiber_prop_update)
     iterations_interactive: bpy.props.IntProperty(name="Iterations (Interactive)", default=12, min=1, max=200, update=_on_fiber_prop_update)
-    iterations_bake: bpy.props.IntProperty(name="Iterations (Bake)", default=120, min=1, max=1000, update=_on_fiber_prop_update)
+    iterations_bake: bpy.props.IntProperty(name="Iterations (Bake)", default=120, min=1, max=1000)
 
     bend_stiffness: bpy.props.FloatProperty(name="Bend Stiffness", default=0.15, min=0.0, max=1.0, update=_on_fiber_prop_update)
 
     stretch_stiffness: bpy.props.FloatProperty(name="Shorten Strength", default=0.9, min=0.0, max=1.0, update=_on_fiber_prop_update)
 
-    thickness: bpy.props.FloatProperty(name="Thickness", default=0.01, min=0.0, update=_on_fiber_prop_update)
+    thickness: bpy.props.FloatProperty(name="Thickness", default=0.01, min=0.0, update=_on_fiber_display_update)
+    legacy_points_json: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    legacy_diagnostics_json: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    legacy_status: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    legacy_eps_disp: bpy.props.FloatProperty(default=0.0, options={"HIDDEN"})
+    legacy_eps_pen: bpy.props.FloatProperty(default=0.0, options={"HIDDEN"})
 
 
 class AF_BlobVCP_Property(bpy.types.PropertyGroup):

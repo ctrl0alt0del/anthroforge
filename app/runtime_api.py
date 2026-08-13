@@ -4,21 +4,24 @@ from .runtime_requests import runtime_request
 from .runtime_sync import emit_sync
 
 
-def sync_context(context=None, dirty_hints=None, bake=False, source="manual", event_type="UPDATE", payload=None):
+def sync_context(context=None, dirty_hints=None, bake=False, source="manual", event_type="UPDATE", payload=None,
+                 full=None, dirty_aspects=None, quality=""):
     ctx = context_from_blender(context)
-    req = runtime_request(dirty_hints=dirty_hints, bake=bake, source=source, event_type=event_type, payload=payload)
+    req = runtime_request(dirty_hints, bake, source, event_type, payload, full, dirty_aspects, quality)
     emit_sync(_sync_fn(), ctx, req)
 
 
-def sync_scene(root=None, scene=None, dirty_hints=None, bake=False, source="manual", event_type="UPDATE", payload=None):
+def sync_scene(root=None, scene=None, dirty_hints=None, bake=False, source="manual", event_type="UPDATE", payload=None,
+               full=None, dirty_aspects=None, quality=""):
     ctx = addon_context(root=root, scene=scene)
-    req = runtime_request(dirty_hints=dirty_hints, bake=bake, source=source, event_type=event_type, payload=payload)
+    req = runtime_request(dirty_hints, bake, source, event_type, payload, full, dirty_aspects, quality)
     emit_sync(_sync_fn(), ctx, req)
 
 
-def schedule_context(context=None, dirty_hints=None, source="property", event_type="UPDATE", payload=None):
+def schedule_context(context=None, dirty_hints=None, source="property", event_type="UPDATE", payload=None,
+                     full=None, dirty_aspects=None, quality=""):
     ctx = context_from_blender(context)
-    req = runtime_request(dirty_hints=dirty_hints, source=source, event_type=event_type, payload=payload)
+    req = runtime_request(dirty_hints, False, source, event_type, payload, full, dirty_aspects, quality)
     emit_sync(_schedule_fn(), ctx, req)
 
 

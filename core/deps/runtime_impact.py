@@ -13,7 +13,25 @@ def _non_source_ids(gate_meta):
 
 def source_start_nodes(starts, gate_meta):
     blocked = _non_source_ids(gate_meta)
-    return {node for node in set(starts or set()) if str(node[1]) not in blocked.get(str(node[0]), set())}
+    return {node for node in set(starts or set()) if _source_allowed(node, blocked, gate_meta)}
+
+
+def _source_allowed(node, blocked, gate_meta):
+    if str(node[1]) in blocked.get(str(node[0]), set()):
+        return False
+    return not (_fiber_update_is_local(node, gate_meta) or _selection_is_local(node, gate_meta))
+
+
+def _fiber_update_is_local(node, gate_meta):
+    meta = dict(gate_meta or {})
+    aspects = set(dict(meta.get("dirty_aspects", {}) or {}).get("FIBER", ()) or ())
+    event = str(meta.get("event_type", "") or "").upper()
+    return str(node[0]) == "FIBER" and event == "FIBER_UPDATE" and bool(aspects)
+
+
+def _selection_is_local(node, gate_meta):
+    event = str(dict(gate_meta or {}).get("event_type", "") or "").upper()
+    return event == "SELECTION"
 
 
 def impact_sets(impacted):
@@ -37,8 +55,8 @@ def compute_impacted_sets(graph, dirty, gate_meta=None):
     return impact_sets(impacted | starts)
 
 
-def expand_constraint_impacts(graph, impacted_sets, constraint_impacts):
-    starts = dirty_start_nodes(constraint_impacts)
+def expand_constraint_impacts(graph, impacted_sets, constraint_impacts, gate_meta=None):
+    starts = source_start_nodes(dirty_start_nodes(constraint_impacts), gate_meta)
     if not starts:
         return impacted_sets
     merge_impacts(impacted_sets, impact_sets(graph.downstream_entities(starts) | starts))

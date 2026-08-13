@@ -16,6 +16,7 @@ from .fiber_tools import (
     move_fiber_touch_point,
     recompute_fiber,
     remove_fiber_touch_point,
+    restore_legacy_fiber,
 )
 from .muscle_create import create_muscle_vcp
 from .muscle_tools import flip_muscle_normals, select_muscle_inflation_ctrl
@@ -42,6 +43,7 @@ __all__ = [
     "recompute_fiber",
     "reparent_scp",
     "remove_fiber_touch_point",
+    "restore_legacy_fiber",
     "run_create_root",
     "select_blob_control",
     "select_muscle_inflation_ctrl",

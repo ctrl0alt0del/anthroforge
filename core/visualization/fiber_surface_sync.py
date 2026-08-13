@@ -38,8 +38,10 @@ class FiberSurfaceSceneSync:
             result = evaluate_surface_record(root, scene, surface)
             proxy = _ensure_proxy(collection, root, surface, index)
             update_mesh(proxy, result.vertices, result.faces)
+            _mark_surface_current(proxy)
             _finish_surface(surface, started, "CLEAN")
         except Exception as exc:
+            _mark_surface_stale(index, surface)
             _finish_surface(surface, started, "ERROR", str(exc))
 
 
@@ -61,6 +63,18 @@ def find_fiber_surface_proxy(scene, root_name, surface_id):
     return next((obj for obj in scene.objects if obj.get("af_fiber_surface_proxy")
                  and obj.get("af_root_name") == root_name
                  and obj.get("af_fiber_surface_id") == surface_id), None)
+
+
+def _mark_surface_current(proxy):
+    proxy["af_fiber_surface_output_state"] = "CURRENT"
+    key = "af_fiber_surface_output_generation"
+    proxy[key] = int(proxy.get(key, 0)) + 1
+
+
+def _mark_surface_stale(index, surface):
+    proxy = dict(index.get("fiber_surface", {})).get(str(surface.id))
+    if proxy is not None:
+        proxy["af_fiber_surface_output_state"] = "STALE"
 
 
 def _source_fibers(root, surface):

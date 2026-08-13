@@ -6,11 +6,13 @@ try:
     from ...core.id_utils import next_prefixed_id
     from ...core.visualization.mirror_rules import effective_rule_for_fiber
     from ...core.vcp.runtime_state import reset_muscle_runtime
+    from ...core.vcp.prop_update_guard import suppress_vcp_prop_updates
 except ImportError:
     from core.vcp.fiber_modes import is_loop_fiber
     from core.id_utils import next_prefixed_id
     from core.visualization.mirror_rules import effective_rule_for_fiber
     from core.vcp.runtime_state import reset_muscle_runtime
+    from core.vcp.prop_update_guard import suppress_vcp_prop_updates
 
 
 def create_muscle_vcp(context, name="", closed_v=False, use_mirrored_rows=False):
@@ -124,12 +126,13 @@ def _mixed_topology(fibers):
 
 
 def _new_muscle(vcp, name, closed_v, use_mirrored_rows):
-    muscle = vcp.muscles.add()
-    muscle.id = next_prefixed_id(vcp.muscles, "MUSCLE")
-    muscle.name = str(name or "").strip() or muscle.id
-    muscle.closed_v = bool(closed_v)
-    muscle.use_mirrored_rows = bool(use_mirrored_rows)
-    _apply_values(muscle, _muscle_defaults())
+    with suppress_vcp_prop_updates():
+        muscle = vcp.muscles.add()
+        muscle.id = next_prefixed_id(vcp.muscles, "MUSCLE")
+        muscle.name = str(name or "").strip() or muscle.id
+        muscle.closed_v = bool(closed_v)
+        muscle.use_mirrored_rows = bool(use_mirrored_rows)
+        _apply_values(muscle, _muscle_defaults())
     reset_muscle_runtime(muscle)
     return muscle
 
