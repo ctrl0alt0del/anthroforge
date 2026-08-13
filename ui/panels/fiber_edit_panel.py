@@ -110,18 +110,25 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         if self._draw_invalid_status(status_box, fiber):
             return
         status = fiber_recompute_status(fiber)
-        if status == "REFINING":
-            status_box.label(text="Status: Refining", icon="TIME")
-            return
-        if status == "CONVERGED":
-            status_box.label(text="Status: Converged", icon="CHECKMARK")
-            return
-        if status == "NOT_CONVERGED":
-            status_box.label(text="Status: Not Converged", icon="ERROR")
-            status_box.label(text=f"Residual disp: {fiber_eps_disp(fiber):.6f}")
-            status_box.label(text=f"Residual pen: {fiber_eps_pen(fiber):.6f}")
+        if self._draw_known_status(status_box, fiber, status):
             return
         status_box.label(text="Status: Unknown", icon="QUESTION")
+
+    def _draw_known_status(self, box, fiber, status):
+        labels = {"REFINING": ("Refining", "TIME"), "CONVERGED": ("Converged", "CHECKMARK"),
+                  "PLANNER_PREVIEW": ("Planner Preview", "HIDE_OFF"),
+                  "NO_FEASIBLE_PATH": ("No Feasible Planner Path", "ERROR"),
+                  "NOT_CONVERGED": ("Not Converged", "ERROR")}
+        if status not in labels:
+            return False
+        text, icon = labels[status]
+        box.label(text=f"Status: {text}", icon=icon)
+        self._draw_residuals(box, fiber) if status == "NOT_CONVERGED" else None
+        return True
+
+    def _draw_residuals(self, box, fiber):
+        box.label(text=f"Residual disp: {fiber_eps_disp(fiber):.6f}")
+        box.label(text=f"Residual pen: {fiber_eps_pen(fiber):.6f}")
 
     def _draw_status_metrics(self, status_box, fiber):
         status_box.label(text=f"Recompute: {fiber_recompute_ms(fiber):.2f} ms")

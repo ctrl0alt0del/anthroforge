@@ -146,6 +146,8 @@ def _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake):
     obj = sync._find_fiber_proxy(vis_col, root.name, fiber.id)
     if obj is None:
         obj = sync._create_fiber_proxy(vis_col, root, fiber.id)
+    if not bool(getattr(fiber, "preview_planner_route", False)):
+        obj.pop("af_fiber_display_mode", None)
     if sync._fiber_prefer_bake(fiber):
         sync._set_fiber_prefer_bake(fiber, False)
     use_bake = bool(bake)

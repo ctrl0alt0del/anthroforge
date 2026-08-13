@@ -707,7 +707,12 @@ class FiberSolver:
             return None, LOCAL_FALLBACK, 0.0, ()
         t0 = perf_counter()
         result = plan_route(oracle, anchors, allow_dense=bool(bake))
+        self._set_planned_colliders(oracle, result.active_ids)
         return result.points, result.mode, (perf_counter() - t0) * 1000.0, result.active_ids
+
+    def _set_planned_colliders(self, oracle, collider_ids):
+        if hasattr(oracle, "require_colliders"):
+            oracle.require_colliders(collider_ids)
 
     def _interactive_collision_plan(self, fiber_prop):
         return bool(getattr(fiber_prop, "use_segment_collisions", False))
@@ -1524,7 +1529,8 @@ class FiberSolver:
         _ = margin
         if not hasattr(oracle, "active_colliders_for_polyline"):
             return ()
-        return oracle.active_colliders_for_polyline(nodes, padding=max(0.05, oracle.clearance * 2.0, oracle.margin * 4.0))
+        pad = oracle.active_padding() if hasattr(oracle, "active_padding") else max(0.05, oracle.clearance * 2.0, oracle.margin * 4.0)
+        return oracle.active_colliders_for_polyline(nodes, padding=pad)
 
     def _apply_length_shortening(self, nodes, pinned, strength):
         n = len(nodes)

@@ -39,6 +39,7 @@ class CollisionOracle:
         self._segment_hit_cache = OrderedDict()
         self._push_cache = OrderedDict()
         self._active_cache = OrderedDict()
+        self._required_ids = ()
 
     def colliders(self):
         if self._colliders is None:
@@ -57,6 +58,13 @@ class CollisionOracle:
     def active_colliders_for_polyline(self, points, padding=0.0):
         return self._active_cached(points, padding)
 
+    def active_padding(self):
+        return max(0.05, self.clearance * 2.0, self.margin * 4.0)
+
+    def require_colliders(self, collider_ids):
+        values = (*self._required_ids, *tuple(collider_ids or ()))
+        self._required_ids = tuple(dict.fromkeys(str(value) for value in values if value))
+
     def _active_cached(self, points, padding):
         points = tuple(points or ())
         if not points:
@@ -64,7 +72,15 @@ class CollisionOracle:
         bounds = _line_bounds(points, self.margin + padding)
         key = _round_bounds(bounds)
         factory = lambda: _active_for_bounds(self.scene, self.colliders(), bounds)
-        return _cache_result(self._active_cache, key, factory, _ACTIVE_LOCAL_CACHE_LIMIT)
+        active = _cache_result(self._active_cache, key, factory, _ACTIVE_LOCAL_CACHE_LIMIT)
+        return self._with_required(active)
+
+    def _with_required(self, active):
+        if not self._required_ids:
+            return active
+        lookup = _build_collider_lookup(self.colliders())
+        required = tuple(lookup[sid] for sid in self._required_ids if sid in lookup)
+        return _merge_collider_sets(active, required)
 
     def segment_visible(self, a, b, owners=(), colliders=None):
         cols = _provided_or_active(colliders, lambda: self.active_colliders_for_segment(a, b, owners=owners))
@@ -192,6 +208,12 @@ def _build_collider_lookup(colliders):
     for collider in tuple(colliders or ()):
         lookup.setdefault(str(collider["sid"]), collider)
     return lookup
+
+
+def _merge_collider_sets(first, second):
+    values = (*tuple(first or ()), *tuple(second or ()))
+    lookup = {str(collider["sid"]): collider for collider in values}
+    return tuple(lookup[sid] for sid in sorted(lookup))
 
 
 def _matrix_orientation(matrix):

@@ -195,10 +195,25 @@ def _init_open_planner(session):
 def _finish_open_plan(session, result):
     session.preview = _copy_points(result.points)
     session.mode, session.planned_ids = result.mode, result.active_ids
+    session.solver._set_planned_colliders(session.oracle, result.active_ids)
+    if session.solver._preview_planner_route(session.fiber):
+        _finish_planner_preview(session)
+        return
     if _can_finish_direct(session):
         _finish_direct(session)
         return
     _init_open_levels(session)
+
+
+def _finish_planner_preview(session):
+    valid = session.mode != LOCAL_FALLBACK
+    session.done, session.converged = True, valid
+    session.preview_validated = valid
+    session.active_count = len(session.planned_ids)
+    session.generation += 1
+    session.phase = FiberPhase.DONE.value
+    reason = FiberTermination.PLANNER_PREVIEW if valid else FiberTermination.NO_FEASIBLE_PATH
+    session.termination_reason = reason.value
 
 
 def _plan_loop(session):

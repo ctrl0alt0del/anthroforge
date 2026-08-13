@@ -45,12 +45,63 @@ def _segments(anchors):
 
 
 def _plan_segment(oracle, segment, allow_dense=True):
-    active = oracle.active_colliders_for_segment(segment.start.point, segment.end.point, padding=_corridor_pad(oracle))
-    blockers = tuple(active or ())
-    if oracle.segment_visible(segment.start.point, segment.end.point, _owners(segment), blockers):
-        return PlannerResult(_segment_points(segment), DIRECT, _active_ids(blockers))
-    sparse = _roadmap_result(oracle, segment, blockers, False)
-    return sparse or _dense_or_fallback(oracle, segment, blockers, allow_dense)
+    active = _initial_colliders(oracle, segment)
+    while True:
+        result = _plan_segment_active(oracle, segment, active, allow_dense)
+        expanded = _route_colliders(oracle, result.points, active)
+        merged = _merge_colliders(active, expanded)
+        if len(merged) == len(active):
+            return result
+        if _route_visible(oracle, result.points, _owners(segment), merged):
+            return _result_with_active(result, merged)
+        active = merged
+
+
+def _plan_segment_active(oracle, segment, active, allow_dense):
+    if oracle.segment_visible(segment.start.point, segment.end.point, _owners(segment), active):
+        return PlannerResult(_segment_points(segment), DIRECT, _active_ids(active))
+    sparse = _roadmap_result(oracle, segment, active, False)
+    return sparse or _dense_or_fallback(oracle, segment, active, allow_dense)
+
+
+def _initial_colliders(oracle, segment):
+    active = oracle.active_colliders_for_segment(
+        segment.start.point, segment.end.point, padding=_corridor_pad(oracle))
+    return tuple(active or ())
+
+
+def _route_colliders(oracle, points, fallback):
+    if not hasattr(oracle, "active_colliders_for_polyline"):
+        return fallback
+    return oracle.active_colliders_for_polyline(points, padding=_corridor_pad(oracle))
+
+
+def _merge_colliders(first, second):
+    out, seen = [], set()
+    for collider in (*tuple(first or ()), *tuple(second or ())):
+        key = _collider_key(collider)
+        if key not in seen:
+            seen.add(key)
+            out.append(collider)
+    return tuple(out)
+
+
+def _collider_key(collider):
+    sid = collider.get("sid", "") if hasattr(collider, "get") else ""
+    return ("sid", str(sid)) if sid else ("id", id(collider))
+
+
+def _route_visible(oracle, points, owners, colliders):
+    for index in range(len(points) - 1):
+        edge_owners = _edge_owners(points, index, index + 1, owners)
+        if not oracle.segment_visible(points[index], points[index + 1], edge_owners, colliders):
+            return False
+    return True
+
+
+def _result_with_active(result, active):
+    return PlannerResult([point.copy() for point in result.points],
+                         result.mode, _active_ids(active))
 
 
 def _dense_or_fallback(oracle, segment, active, allow_dense):
@@ -60,7 +111,9 @@ def _dense_or_fallback(oracle, segment, active, allow_dense):
 
 
 def _corridor_pad(oracle):
-    return max(0.05, float(oracle.clearance), float(oracle.margin) * 4.0)
+    if hasattr(oracle, "active_padding"):
+        return float(oracle.active_padding())
+    return max(0.05, float(oracle.clearance) * 2.0, float(oracle.margin) * 4.0)
 
 
 def _owners(segment):

@@ -435,6 +435,29 @@ class _ExternalBlockerPlannerOracle:
         return [Vector((0.5, 1.0, 0.0))]
 
 
+class _DetourBlockerPlannerOracle:
+    margin, clearance = 0.0, 0.01
+
+    def active_colliders_for_segment(self, *_args, **_kwargs):
+        return ({"sid": "A"},)
+
+    def active_colliders_for_polyline(self, points, padding=0.0):
+        _ = padding
+        ids = ("A", "B") if max(point.y for point in points) > 0.5 else ("A",)
+        return tuple({"sid": sid} for sid in ids)
+
+    def segment_visible(self, a, b, owners=(), colliders=None):
+        _ = owners
+        ids = {collider["sid"] for collider in tuple(colliders or ())}
+        return not (("A" in ids and max(a.y, b.y) < 0.5) or
+                    ("B" in ids and max(a.y, b.y) < 1.5))
+
+    def shell_nodes(self, collider, dense=False):
+        _ = dense
+        height = 1.0 if collider["sid"] == "A" else 2.0
+        return [Vector((1.0, height, 0.0))]
+
+
 def _path_len(points):
     return sum((points[i + 1] - points[i]).length for i in range(len(points) - 1))
 
@@ -660,6 +683,22 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertLess((points[0] - a_world).length, 1.0e-6)
         self.assertLess((points[-1] - b_world).length, 1.0e-6)
         self.assertTrue(any(abs(p.y) > 1.0e-4 or abs(p.z) > 1.0e-4 for p in points[1:-1]))
+
+    def test_progressive_planner_preview_remains_after_drain(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        _cube_scp(root_obj, "Blocker", (1.0, 0.0, 0.0), 0.8)
+        persisted = _fiber_points_world(fiber)
+        with suppress_vcp_prop_updates():
+            fiber.preview_planner_route = True
+        request = fiber_refinement.request_fiber_refinement(
+            root_obj, bpy.context.scene, fiber, True, "INTERACTIVE")
+        self.assertTrue(request.ok and drain_fiber_refinements())
+        shown = _shown_fiber_world_vectors(fiber)
+        self.assertEqual(fiber_recompute_status(fiber), "PLANNER_PREVIEW")
+        self.assertLess(len(shown), fiber.node_count)
+        self.assertEqual(_fiber_points_world(fiber), persisted)
+        self.assertEqual(request.job.session.preview, shown)
+        self.assertEqual(_shown_fiber_world_vectors(fiber), shown)
 
     def test_segment_collision_toggle_catches_thin_blocker_in_interactive_mode(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
@@ -935,6 +974,15 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         result = fiber_planner._plan_segment(oracle, fiber_planner.PlannerSegment(start, end), False)
         self.assertEqual((result.mode, len(result.points), result.active_ids), (fiber_planner.ROADMAP, 3, ("B",)))
         self.assertGreater(oracle.shell_calls, 0)
+
+    def test_planner_replans_for_blocker_discovered_on_detour(self):
+        oracle = _DetourBlockerPlannerOracle()
+        anchors = (fiber_planner.PlannerAnchor(Vector((0.0, 0.0, 0.0))),
+                   fiber_planner.PlannerAnchor(Vector((2.0, 0.0, 0.0))))
+        result = fiber_planner.plan_route(oracle, anchors, allow_dense=False)
+        self.assertEqual((result.mode, result.active_ids),
+                         (fiber_planner.ROADMAP, ("A", "B")))
+        self.assertGreater(max(point.y for point in result.points), 1.5)
 
     def test_planner_relax_shortens_visible_zigzag_seed(self):
         route = [Vector((0.0, 0.0, 0.0)), Vector((0.5, 1.0, 0.0)), Vector((1.0, 0.0, 0.0))]

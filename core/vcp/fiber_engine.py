@@ -20,6 +20,7 @@ class FiberPhase(str, Enum):
 
 class FiberTermination(str, Enum):
     CONVERGED = "CONVERGED"
+    PLANNER_PREVIEW = "PLANNER_PREVIEW"
     BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
     STALLED = "STALLED"
     BLOCKED = "BLOCKED"

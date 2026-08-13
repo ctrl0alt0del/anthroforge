@@ -7,8 +7,9 @@ from .fiber_collision import _segment_clear
 from .fiber_planner import (
     DIRECT, ROADMAP, PlannerResult, RoadmapNode, _a_star, _active_ids,
     _corridor_pad, _dedupe_nodes, _fallback_result, _limit_roadmap_nodes,
-    _merge_active_ids, _merge_mode, _merge_paths, _owners, _segment_points,
-    _segments, _shortcut_path,
+    _initial_colliders, _merge_active_ids, _merge_colliders, _merge_mode,
+    _merge_paths, _owners, _result_with_active, _route_colliders,
+    _segment_points, _segments, _shortcut_path,
 )
 
 
@@ -56,9 +57,35 @@ def _plan_steps(oracle, anchors, allow_dense):
 
 
 def _segment_steps(oracle, segment, allow_dense):
-    active = oracle.active_colliders_for_segment(
-        segment.start.point, segment.end.point, padding=_corridor_pad(oracle))
-    blockers = tuple(active or ())
+    active = _initial_colliders(oracle, segment)
+    while True:
+        result = yield from _segment_active_steps(oracle, segment, active, allow_dense)
+        expanded = _route_colliders(oracle, result.points, active)
+        merged = _merge_colliders(active, expanded)
+        if len(merged) == len(active):
+            return result
+        if (yield from _route_visible_steps(oracle, segment, result.points, merged)):
+            return _result_with_active(result, merged)
+        active = merged
+        yield None
+
+
+def _route_visible_steps(oracle, segment, points, colliders):
+    for index in range(len(points) - 1):
+        owners = _route_edge_owners(segment, points, index)
+        if not (yield from _visible_steps(
+                oracle, points[index], points[index + 1], owners, colliders)):
+            return False
+    return True
+
+
+def _route_edge_owners(segment, points, index):
+    first = segment.start.owner_id if index == 0 else ""
+    last = segment.end.owner_id if index + 1 == len(points) - 1 else ""
+    return first, last
+
+
+def _segment_active_steps(oracle, segment, blockers, allow_dense):
     visible = yield from _visible_steps(
         oracle, segment.start.point, segment.end.point, _owners(segment), blockers)
     if visible:

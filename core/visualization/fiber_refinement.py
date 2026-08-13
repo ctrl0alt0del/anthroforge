@@ -121,12 +121,14 @@ def drain_fiber_refinements(max_slices=100000):
 def _new_job(key, scene, root, fiber, session):
     token = _next_token(fiber)
     previous = _displayed_points(scene, root.name, fiber.id)
+    retain = bool(previous and fiber.use_surface_routing and
+                  not _planner_preview_visible(scene, root.name, fiber.id))
     job = FiberRefinementJob(key, scene.name, root.name, _id_uid(scene), _id_uid(root),
                              _id_pointer(fiber), fiber.id, _fiber_signature(fiber),
                              _geometry_signature(session), session, token=token,
                              previous_status=fiber_recompute_status(fiber),
                              previous_points=previous,
-                             retain_preview=bool(previous and fiber.use_surface_routing))
+                             retain_preview=retain)
     _claim_pending_version(fiber, token)
     job.last_apply, job.last_generation = monotonic(), session.generation
     return job
@@ -205,12 +207,30 @@ def _apply_progress(job, result):
     if not (result.done or changed_level or now - job.last_apply >= _DRAW_INTERVAL):
         return
     root, scene, fiber = _resolved_job_data(job)
+    if _planner_preview_result(result):
+        _apply_planner_preview(job, result, root, scene, fiber, now)
+        return
+    _apply_refined_geometry(job, result, root, scene, fiber, now)
+
+
+def _apply_refined_geometry(job, result, root, scene, fiber, now):
     commit = bool(result.done and _commit_allowed(job, result))
     if _retain_safe_preview(job, commit, now):
         return
     proxy = register_fiber_sync().apply_points(root, scene, fiber, result.points,
                                                bake=result.done, commit=commit)
+    None if proxy is None else proxy.pop("af_fiber_display_mode", None)
     job.output_committed = bool(result.done and commit and proxy is not None)
+    job.proxy_name = "" if proxy is None else proxy.name
+    job.last_apply, job.last_generation = now, job.session.generation
+
+
+def _apply_planner_preview(job, result, root, scene, fiber, now):
+    proxy = register_fiber_sync().apply_points(
+        root, scene, fiber, result.points, bake=False, commit=False)
+    if proxy is not None:
+        proxy["af_fiber_display_mode"] = "PLANNER_PREVIEW"
+        proxy["af_fiber_output_state"] = "STALE"
     job.proxy_name = "" if proxy is None else proxy.name
     job.last_apply, job.last_generation = now, job.session.generation
 
@@ -229,6 +249,13 @@ def _finish_job(job, result=None):
         return
     result = result or job.session.result()
     _store_result(_owned_job_data(job)[2], result)
+    if _planner_preview_result(result):
+        _finish_planner_preview_job(job)
+        return
+    _finish_refined_job(job, result)
+
+
+def _finish_refined_job(job, result):
     committed = bool(job.output_committed and _commit_allowed(job, result))
     _restore_previous_output(job, stale=True) if not committed else None
     _finish_pending_version(job, committed)
@@ -236,6 +263,18 @@ def _finish_job(job, result=None):
     telemetry_cache_snapshot(getattr(job.session, "telemetry", None))
     _detach_job(job)
     _sync_final(job) if committed else None
+
+
+def _finish_planner_preview_job(job):
+    _finish_pending_version(job, False)
+    telemetry_cache_snapshot(getattr(job.session, "telemetry", None))
+    _detach_job(job)
+
+
+def _planner_preview_result(result):
+    reasons = (FiberTermination.PLANNER_PREVIEW.value,
+               FiberTermination.NO_FEASIBLE_PATH.value)
+    return str(getattr(result, "termination_reason", "")) in reasons
 
 
 def _commit_allowed(job, result):
@@ -307,6 +346,8 @@ def _restore_fiber_output(root, scene, fiber, stale=False, fallback=()):
     if not points:
         return None
     proxy = register_fiber_sync().apply_points(root, scene, fiber, points, commit=False)
+    if proxy is not None:
+        proxy.pop("af_fiber_display_mode", None)
     if stale:
         mark_fiber_output_stale(scene, root.name, fiber.id)
     else:
@@ -370,7 +411,7 @@ def _next_token(fiber):
 
 def _store_result(fiber, result):
     set_fiber_not_converged(fiber, not result.converged)
-    set_fiber_recompute_status(fiber, "CONVERGED" if result.converged else "NOT_CONVERGED")
+    set_fiber_recompute_status(fiber, _result_status(result))
     set_fiber_recompute_ms(fiber, result.planner_ms + result.refine_ms)
     set_fiber_eps_disp(fiber, result.max_disp)
     set_fiber_eps_pen(fiber, result.max_pen)
@@ -379,6 +420,14 @@ def _store_result(fiber, result):
     set_fiber_refine_ms(fiber, result.refine_ms)
     set_fiber_active_colliders(fiber, result.active_count)
     set_fiber_invalid_reason(fiber, result.invalid_reason)
+
+
+def _result_status(result):
+    reason = str(getattr(result, "termination_reason", ""))
+    if reason in (FiberTermination.PLANNER_PREVIEW.value,
+                  FiberTermination.NO_FEASIBLE_PATH.value):
+        return reason
+    return "CONVERGED" if result.converged else "NOT_CONVERGED"
 
 
 def _sync_final(job):
@@ -583,6 +632,11 @@ def _find_proxy(scene, root_name, fiber_id):
         return None
     return next((obj for obj in scene.objects if obj.get("af_fiber_proxy") and
                  obj.get("af_root_name") == root_name and obj.get("af_fiber_id") == fiber_id), None)
+
+
+def _planner_preview_visible(scene, root_name, fiber_id):
+    proxy = _find_proxy(scene, root_name, fiber_id)
+    return proxy is not None and proxy.get("af_fiber_display_mode") == "PLANNER_PREVIEW"
 
 
 def _displayed_points(scene, root_name, fiber_id):
