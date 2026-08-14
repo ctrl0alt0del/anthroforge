@@ -19,9 +19,11 @@ from _helpers import BlenderTestCase, capture_mesh_attachment, capture_world_att
 from anthroforge.app.use_cases.fiber_tools import recompute_fiber as recompute_fiber_action
 from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param, encode_fiber_surface_param, encode_fiber_vertex_index, parse_fiber_attach_param
 from anthroforge.core.deps.dirty_hints import dirty_hints_for
+from anthroforge.core.deps import builtin_drivers
 from anthroforge.core.scp_runtime.surface import _surface_route_graph, surface_shortest_param_path
 from anthroforge.core.vcp import fiber_collision
 from anthroforge.core.vcp import fiber_planner
+from anthroforge.core.vcp.attachment_backend import capture_attachment_from_object_ray
 from anthroforge.core.vcp.fiber_collision import CollisionOracle, _active_for_bounds, _mesh_shell_nodes
 from anthroforge.core.vcp.fiber_solver import FiberSolver
 from anthroforge.core.vcp.runtime_state import (
@@ -39,6 +41,7 @@ from anthroforge.core.vcp.runtime_state import (
 )
 from anthroforge.core.vcp.prop_update_guard import suppress_vcp_prop_updates
 from anthroforge.core.visualization import fiber_sync_runtime as fiber_runtime
+from anthroforge.core.visualization import fiber_view_capture
 from anthroforge.core.visualization import fiber_sync_helpers
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
 from anthroforge.core.visualization.fiber_sync_helpers import cached_fiber_points, endpoint_world, mark_endpoint_handle, mark_touch_handle, touch_world
@@ -170,6 +173,15 @@ def _loop_mesh_object(name, location=(0.0, 0.0, 0.0)):
     bpy.context.scene.collection.objects.link(obj)
     obj.location = location
     return obj
+
+
+def _set_stacked_surface(obj, reverse_front=False):
+    verts = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (0, 1, 1)]
+    front = (3, 5, 4) if reverse_front else (3, 4, 5)
+    obj.data.clear_geometry()
+    obj.data.from_pydata(verts, [], [(0, 1, 2), front])
+    obj.data.update()
+    bpy.context.view_layer.update()
 
 
 def _symmetric_loop_mesh_object(name):
@@ -700,6 +712,32 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(request.job.session.preview, shown)
         self.assertEqual(_shown_fiber_world_vectors(fiber), shown)
 
+    def test_failed_planner_preview_keeps_last_curve(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        before = _shown_fiber_world_vectors(fiber)
+        with suppress_vcp_prop_updates():
+            fiber.preview_planner_route = True
+        request = fiber_refinement.request_fiber_refinement(
+            root_obj, bpy.context.scene, fiber, False, "INTERACTIVE")
+        request.job.session.preview = [Vector((0, 0, 0)), Vector((2, 0, 0))]
+        request.job.session.done = True
+        request.job.session.termination_reason = "NO_FEASIBLE_PATH"
+        fiber_refinement._apply_progress(request.job, request.job.session.result())
+        self.assertEqual(_shown_fiber_world_vectors(fiber), before)
+
+    def test_sync_failed_planner_preview_keeps_last_curve(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        sync = register_fiber_sync()
+        kept = [Vector((0, 0, 0)), Vector((1, 0, 0.5)), Vector((2, 0, 0))]
+        sync.apply_points(root_obj, bpy.context.scene, fiber, kept, commit=True)
+        before = _shown_fiber_world_vectors(fiber)
+        fiber.preview_planner_route = True
+        fallback = [Vector((0, 0, 0)), Vector((2, 0, 0))]
+        with patch.object(sync._solver, "solve_points", return_value=fallback), \
+             patch.object(fiber_runtime, "fiber_route_mode", return_value="LOCAL_FALLBACK"):
+            sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene)
+        self.assertEqual(_shown_fiber_world_vectors(fiber), before)
+
     def test_segment_collision_toggle_catches_thin_blocker_in_interactive_mode(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
         fiber.node_count, fiber.iterations_interactive = 8, 20
@@ -1108,7 +1146,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         _sync_active_fiber(root_obj, fiber)
         sync = register_fiber_sync()
         handle = mark_endpoint_handle(empty_object("Endpoint"), root_obj, fiber.id, "A")
-        with patch.object(fiber_runtime, "resolve_conflict", return_value="ENDPOINT_RAW"):
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY), patch.object(fiber_runtime, "resolve_conflict", return_value="ENDPOINT_RAW"):
             fiber_runtime.apply_fiber_control_update(sync, root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
         self.assertEqual(fiber.a_attach_param, "ENDPOINT_RAW")
 
@@ -1119,7 +1157,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         _sync_active_fiber(root_obj, fiber)
         sync = register_fiber_sync()
         handle = mark_touch_handle(empty_object("Touch"), root_obj, fiber.id, 0)
-        with patch.object(fiber_runtime, "resolve_conflict", return_value="TOUCH_RAW"):
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY), patch.object(fiber_runtime, "resolve_conflict", return_value="TOUCH_RAW"):
             fiber_runtime.apply_fiber_control_update(sync, root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
         self.assertEqual(fiber.mid_touches[0].attach_param, "TOUCH_RAW")
 
@@ -1142,12 +1180,77 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         handle = mark_touch_handle(empty_object("TouchMove"), root_obj, fiber.id, 0)
         handle.location = origin.geometry_object_ref.matrix_world @ origin.geometry_object_ref.data.vertices[2].co
         sync = register_fiber_sync()
-        with patch.object(fiber_runtime, "resolve_conflict", side_effect=lambda **kwargs: kwargs["incoming"]):
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY), patch.object(fiber_runtime, "resolve_conflict", side_effect=lambda **kwargs: kwargs["incoming"]):
             fiber_runtime.apply_fiber_control_update(sync, root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
         target = origin.geometry_object_ref.matrix_world @ origin.geometry_object_ref.data.vertices[2].co
         actual = endpoint_world(root_obj, bpy.context.scene, {}, fiber.mid_touches[0].parent_id, fiber.mid_touches[0].attach_param)
         self.assertEqual(parse_fiber_attach_param(fiber.mid_touches[0].attach_param)[0], "surface_param_v2")
         self.assertLess((actual - target).length, 1.0e-6)
+
+    def test_fiber_update_projects_endpoint_handle_to_surface(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        handle = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_endpoint_handle") and obj.get("af_fiber_endpoint") == "A")
+        select_only(handle)
+        handle.location += Vector((0.2, 0.2, 0.75))
+        sync = register_fiber_sync()
+        fiber_runtime.apply_fiber_control_update(sync, root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        with patch.object(builtin_drivers, "_request_fiber_refinements"):
+            builtin_drivers.FiberSyncDriver().sync(root_obj, bpy.context.scene, False, {"FIBER": {fiber.id}}, False, {"event_type": "FIBER_UPDATE"})
+        target = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
+        self.assertLess((handle.location - target).length, 1.0e-6)
+
+    def test_fiber_update_projects_touch_handle_to_surface(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        _append_touch(root_obj, fiber, "Touch", (1.0, 1.0, 0.0))
+        _sync_active_fiber(root_obj, fiber)
+        handle = _touch_handle(fiber.id)
+        select_only(handle)
+        handle.location += Vector((0.2, 0.2, 0.75))
+        fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        with patch.object(builtin_drivers, "_request_fiber_refinements"):
+            builtin_drivers.FiberSyncDriver().sync(root_obj, bpy.context.scene, False, {"FIBER": {fiber.id}}, False, {"event_type": "FIBER_UPDATE"})
+        touch = fiber.mid_touches[0]
+        target = endpoint_world(root_obj, bpy.context.scene, {}, touch.parent_id, touch.attach_param)
+        self.assertAlmostEqual(target.z, 0.0, places=6)
+        self.assertLess((handle.location - target).length, 1.0e-6)
+
+    def test_endpoint_capture_uses_first_camera_facing_surface(self):
+        root_obj, fiber, origin, _insert = _fiber_setup()
+        _set_stacked_surface(origin.geometry_object_ref)
+        fiber.a_attach_param = capture_mesh_attachment(root_obj, origin, 0)
+        _sync_active_fiber(root_obj, fiber)
+        handle = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_endpoint_handle") and obj.get("af_fiber_endpoint") == "A")
+        handle.location = Vector((0.2, 0.2, 0.1))
+        ray = (Vector((0.2, 0.2, 2.0)), Vector((0.0, 0.0, -1.0)))
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=ray):
+            fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        actual = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
+        self.assertAlmostEqual(actual.z, 1.0, places=6)
+
+    def test_camera_capture_rejects_a_back_facing_first_hit(self):
+        _root_obj, _fiber, origin, _insert = _fiber_setup()
+        _set_stacked_surface(origin.geometry_object_ref, reverse_front=True)
+        ray = (Vector((0.2, 0.2, 2.0)), Vector((0.0, 0.0, -1.0)))
+        raw = capture_attachment_from_object_ray(origin.geometry_object_ref, *ray)
+        self.assertIsNone(raw)
+
+    def test_view_ray_uses_active_viewport_through_control(self):
+        region, rv3d = SimpleNamespace(type="WINDOW"), SimpleNamespace(view_location=Vector())
+        context = SimpleNamespace(area=SimpleNamespace(type="VIEW_3D"), region=region,
+                                  space_data=SimpleNamespace(region_3d=rv3d))
+        with patch.object(fiber_view_capture.view3d_utils, "location_3d_to_region_2d", return_value=Vector((4, 5))), patch.object(
+                fiber_view_capture.view3d_utils, "region_2d_to_origin_3d", return_value=Vector((0, 0, 3))), patch.object(
+                fiber_view_capture.view3d_utils, "region_2d_to_vector_3d", return_value=Vector((0, 0, -2))):
+            ray = fiber_view_capture.view_ray_for_world_point(Vector((0, 0, 1)), context)
+        self.assertEqual((tuple(ray[0]), tuple(ray[1])), ((0.0, 0.0, 3.0), (0.0, 0.0, -1.0)))
+
+    def test_view_capture_does_not_nearest_fallback_behind_camera(self):
+        region, rv3d = SimpleNamespace(type="WINDOW"), SimpleNamespace(view_location=Vector())
+        context = SimpleNamespace(area=SimpleNamespace(type="VIEW_3D"), region=region,
+                                  space_data=SimpleNamespace(region_3d=rv3d))
+        with patch.object(fiber_view_capture.view3d_utils, "location_3d_to_region_2d", return_value=None):
+            ray = fiber_view_capture.view_ray_for_world_point(Vector((0, 0, 1)), context)
+        self.assertIsNone(ray)
 
     def test_recompute_fiber_rejects_legacy_attach_payloads(self):
         for raw in (encode_fiber_shape_param(0.25), encode_fiber_mesh_anchor(Vector((0.0, 0.0, 0.0))), encode_fiber_vertex_index(0, "sig")):
@@ -1230,7 +1333,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         handle.location = loop.geometry_object_ref.matrix_world @ loop.geometry_object_ref.data.vertices[2].co
         sync = register_fiber_sync()
         sync._solver._cache[fiber.id] = [Vector((9.0, 9.0, 9.0))]
-        with patch.object(fiber_runtime, "resolve_conflict", side_effect=lambda **kwargs: kwargs["incoming"]):
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY), patch.object(fiber_runtime, "resolve_conflict", side_effect=lambda **kwargs: kwargs["incoming"]):
             fiber_runtime.apply_fiber_control_update(sync, root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
         target = loop.geometry_object_ref.matrix_world @ loop.geometry_object_ref.data.vertices[2].co
         anchor = fiber.loop_anchors[0]

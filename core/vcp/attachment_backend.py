@@ -4,7 +4,7 @@ import json
 from ..attachment_codec import encode_fiber_surface_param, fiber_surface_param, is_fiber_legacy_attach
 from ..scp_proxy.signature import mesh_topology_signature, open_evaluated_mesh
 from ..scp_runtime.common import as_id, find_geometry_mesh_scp_obj
-from ..scp_runtime.surface import build_mesh_surface_data, frame_from_parent_param, nearest_parent_param_from_world
+from ..scp_runtime.surface import build_mesh_surface_data, frame_from_parent_param, nearest_parent_param_from_ray, nearest_parent_param_from_world
 from ..utils import depsgraph_for_scene, scene_for_id
 
 
@@ -32,6 +32,12 @@ def _capture_param(parent_obj, world_point, scene, runtime):
     return None if depsgraph is None else nearest_parent_param_from_world(parent_obj, world_point, depsgraph, cache=cache)
 
 
+def _capture_ray_param(parent_obj, ray_origin, ray_direction, scene, runtime):
+    depsgraph = _runtime_depsgraph(scene, runtime)
+    cache = _runtime_cache(runtime)
+    return None if depsgraph is None else nearest_parent_param_from_ray(parent_obj, ray_origin, ray_direction, depsgraph, cache=cache)
+
+
 def _capture_raw(parent_obj, world_point, scene, runtime):
     param = None if parent_obj is None else _capture_param(parent_obj, world_point, scene, runtime)
     return None if param is None else encode_fiber_surface_param(param)
@@ -42,6 +48,14 @@ def capture_surface_param(mesh_object, world_point, runtime=None, scene=None):
         return None
     actual_scene = scene or scene_for_id(mesh_object)
     return _capture_raw(mesh_object, world_point, actual_scene, runtime)
+
+
+def capture_surface_param_from_ray(mesh_object, ray_origin, ray_direction, runtime=None, scene=None):
+    if mesh_object is None:
+        return None
+    actual_scene = scene or scene_for_id(mesh_object)
+    param = _capture_ray_param(mesh_object, ray_origin, ray_direction, actual_scene, runtime)
+    return None if param is None else encode_fiber_surface_param(param)
 
 
 def resolve_surface_frame(mesh_object, binding, runtime=None, scene=None):
@@ -130,3 +144,7 @@ def capture_attachment_from_object(parent_obj, world_point, runtime=None):
     if parent_obj is None:
         return None
     return _capture_raw(parent_obj, world_point, scene_for_id(parent_obj), runtime)
+
+
+def capture_attachment_from_object_ray(parent_obj, ray_origin, ray_direction, runtime=None):
+    return capture_surface_param_from_ray(parent_obj, ray_origin, ray_direction, runtime)

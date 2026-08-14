@@ -298,8 +298,18 @@ def _surface_payload_data(obj_eval, mesh_eval, verts_local, verts_world, triangl
     return {
         "bvh_local": bvh_local, "bvh_world": bvh_world, "face_centers": _face_centers(obj_eval, mesh_eval),
         "triangles": triangles, "verts_world": verts_world, "bounds_world": _world_bounds(verts_world),
+        "vertex_normals_world": _surface_vertex_normals(verts_world, triangles),
         "route_graph": _surface_route_graph(verts_world, triangles),
     }
+
+
+def _surface_vertex_normals(verts, triangles):
+    normals = [Vector() for _point in verts]
+    for tri in triangles:
+        normal = (verts[tri[1]] - verts[tri[0]]).cross(verts[tri[2]] - verts[tri[0]])
+        for index in tri:
+            normals[index] += normal
+    return tuple(_normalized(normal, (0.0, 0.0, 1.0)) for normal in normals)
 
 
 def _surface_route_graph(verts_world, triangles):
@@ -359,6 +369,41 @@ def surface_shortest_param_path(surface, start_param, end_param):
     points, start, end, extra = setup
     path = _route_path(surface["route_graph"], points, start, end, extra)
     return None if path is None else [points[i].copy() for i in path]
+
+
+def surface_shortest_param_samples(surface, start_param, end_param):
+    setup = _param_route_setup(surface, start_param, end_param)
+    if setup is None:
+        return None
+    points, start, end, extra = setup
+    path = _route_path(surface["route_graph"], points, start, end, extra)
+    params = (start_param, end_param)
+    return None if path is None else [_route_sample(surface, points, node, (start, end), params) for node in path]
+
+
+def _route_sample(surface, points, node, ends, params):
+    normals = _surface_normals(surface)
+    if node < len(normals):
+        return points[node].copy(), normals[node].copy()
+    param = params[0] if node == ends[0] else params[1]
+    return points[node].copy(), _param_normal(normals, param)
+
+
+def _surface_normals(surface):
+    normals = tuple(surface.get("vertex_normals_world", ()))
+    verts = tuple(surface.get("verts_world", ()))
+    if len(normals) != len(verts):
+        normals = _surface_vertex_normals(verts, tuple(surface.get("triangles", ())))
+        surface["vertex_normals_world"] = normals
+    return normals
+
+
+def _param_normal(normals, param):
+    tri = tuple(dict(param or {}).get("tri_vidx", (-1, -1, -1)))
+    weights = tuple(dict(param or {}).get("tri_weights", (1.0, 0.0, 0.0)))
+    values = [normals[int(index)] * float(weight) for index, weight in zip(tri, weights)
+              if 0 <= int(index) < len(normals)]
+    return _normalized(sum(values, Vector()), (0.0, 0.0, 1.0))
 
 
 def _param_route_setup(surface, start_param, end_param):
@@ -544,6 +589,22 @@ def nearest_parent_param_from_world(parent_obj, target_world, depsgraph, cache=N
     surface = build_mesh_surface_data(parent_obj, depsgraph, cache=cache)
     hit = _nearest_triangle_hit(surface, target_world)
     return None if hit is None else _param_from_hit(hit)
+
+
+def nearest_parent_param_from_ray(parent_obj, ray_origin, ray_direction, depsgraph, cache=None):
+    surface = build_mesh_surface_data(parent_obj, depsgraph, cache=cache)
+    hit = _front_facing_ray_hit(surface, ray_origin, ray_direction)
+    return None if hit is None else _param_from_hit(hit)
+
+
+def _front_facing_ray_hit(surface, ray_origin, ray_direction):
+    direction = ray_direction.normalized()
+    if not surface or direction.length_squared <= _EPS:
+        return None
+    hit = surface["bvh_world"].ray_cast(ray_origin, direction)
+    if not hit or hit[0] is None or hit[1] is None:
+        return None
+    return _hit_from_bvh(surface, hit) if hit[1].dot(direction) < -_EPS else None
 
 
 def closest_child_face_center_to_parent(child_obj, parent_obj, depsgraph, cache=None):

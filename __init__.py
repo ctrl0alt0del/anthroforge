@@ -377,7 +377,7 @@ def _ensure_scene_props():
 
 def _register_runtime_hooks():
     register_sync()
-    register_fiber_sync()
+    register_fiber_sync(context_provider=lambda: bpy.context)
     register_fiber_cache_lifecycle()
     register_fiber_surface_sync()
     register_fiber_refinement_runtime()

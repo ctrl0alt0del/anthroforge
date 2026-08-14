@@ -6,7 +6,7 @@ from ..deps.conflict_resolver import resolve_conflict
 from ..scp_runtime.common import is_runtime_applied_matrix, mark_applied_matrix
 from ..vcp.fiber_modes import is_loop_fiber, is_open_fiber
 from ..vcp.prop_update_guard import suppress_vcp_prop_updates
-from ..vcp.runtime_state import fiber_eps_pen, fiber_invalid_reason, fiber_not_converged
+from ..vcp.runtime_state import fiber_eps_pen, fiber_invalid_reason, fiber_not_converged, fiber_route_mode
 from ..utils import depsgraph_for_scene, get_af_root, scene_for_id
 from .control_runtime import active_entity_id
 from .fiber_sync_helpers import mark_fiber_output_stale, show_curve_preview
@@ -161,6 +161,8 @@ def _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake):
 def _sync_commit_allowed(fiber, points):
     if fiber_invalid_reason(fiber) or len(points) != int(fiber.node_count):
         return False
+    if _failed_planner_preview(fiber):
+        return False
     if not all(all(_finite(value) for value in point) for point in points):
         return False
     if _effective_solver_version(fiber) >= 2:
@@ -168,6 +170,11 @@ def _sync_commit_allowed(fiber, points):
     if not _requires_collision_truth(fiber):
         return True
     return float(fiber_eps_pen(fiber)) < 1.0e-5
+
+
+def _failed_planner_preview(fiber):
+    return bool(getattr(fiber, "preview_planner_route", False) and
+                fiber_route_mode(fiber) == "LOCAL_FALLBACK")
 
 
 def _finite(value):
@@ -189,7 +196,8 @@ def _effective_solver_version(fiber):
 
 
 def _retain_or_clear_failed(sync, root, scene, fiber, obj, points):
-    preview = len(points) >= 2 and bool(getattr(fiber, "preview_planner_route", False))
+    preview = (len(points) >= 2 and bool(getattr(fiber, "preview_planner_route", False))
+               and fiber_route_mode(fiber) != "LOCAL_FALLBACK")
     if preview:
         show_curve_preview(obj, points, fiber.thickness, cyclic=sync._fiber_cyclic(fiber))
         mark_fiber_output_stale(scene, root.name, fiber.id)

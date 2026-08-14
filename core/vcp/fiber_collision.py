@@ -6,7 +6,9 @@ from mathutils import Vector
 from ..deps.runtime_trace import telemetry_collision_query
 from ..perf_trace import perf_count, perf_time, perf_timer
 from ..scp_runtime.common import iter_geometry_mesh_scp_objects
-from ..scp_runtime.surface import build_mesh_surface_bounds, build_mesh_surface_data, surface_shortest_param_path, surface_shortest_vertex_path
+from ..scp_runtime.surface import (build_mesh_surface_bounds, build_mesh_surface_data,
+                                   surface_shortest_param_path, surface_shortest_param_samples,
+                                   surface_shortest_vertex_path)
 from ..utils import bounded_scene_cache_adopt, bounded_scene_cache_get, bounded_scene_cache_set
 
 
@@ -27,6 +29,11 @@ _SCENE_CACHE_ENTRY_LIMIT = 128
 _ACTIVE_CACHE_BYTE_LIMIT = 8 * 1024 * 1024
 _GEOMETRY_CACHE_BYTE_LIMIT = 256 * 1024 * 1024
 _COLLIDER_GENERATIONS = {}
+_RAY_COUNT_LIMIT = 256
+_RAY_DIRECTIONS = tuple(Vector(v) for v in (
+    (0.9273095, 0.3440318, 0.1474422), (-0.2429726, 0.8965780, 0.3702867),
+    (0.1793772, -0.3225071, 0.9294154)))
+_SURFACE_OFFSET_FACTORS = (1.0, 2.0, 2.5, 3.0, 3.5, 4.0)
 
 
 class CollisionOracle:
@@ -113,6 +120,36 @@ class CollisionOracle:
         surface = None if collider is None else _collider_surface(collider)
         return None if surface is None else surface_shortest_param_path(surface, start_param, end_param)
 
+    def surface_local_path(self, owner_id, start_param, end_param):
+        routes = self.surface_local_paths(owner_id, start_param, end_param)
+        return None if not routes else routes[0]
+
+    def surface_local_paths(self, owner_id, start_param, end_param):
+        collider = self.collider_by_id(owner_id)
+        surface = None if collider is None else _collider_surface(collider)
+        samples = None if surface is None else surface_shortest_param_samples(surface, start_param, end_param)
+        return () if not samples else tuple(_offset_surface_samples(self, collider, samples, factor)
+                                            for factor in _SURFACE_OFFSET_FACTORS)
+
+    def surface_route_shortcut(self, points, owner_id, colliders=None):
+        owner = self.collider_by_id(owner_id)
+        if owner is None:
+            return [Vector(point) for point in tuple(points or ())]
+        active = _provided_or_active(colliders, lambda: self.active_colliders_for_polyline(points))
+        return _surface_shortcut(self, owner, points, _merge_collider_sets(active, (owner,)))
+
+    def surface_route_relax(self, points, owner_id, colliders=None):
+        owner = self.collider_by_id(owner_id)
+        if owner is None:
+            return [Vector(point) for point in tuple(points or ())]
+        active = _provided_or_active(colliders, lambda: self.active_colliders_for_polyline(points))
+        return _relax_surface_route(self, owner, points, _merge_collider_sets(active, (owner,)))
+
+    def surface_route_visible(self, points, owner_id, colliders=None):
+        owner = self.collider_by_id(owner_id)
+        active = _provided_or_active(colliders, lambda: self.active_colliders_for_polyline(points))
+        return bool(owner and _surface_polyline_clear(self, owner, points, _merge_collider_sets(active, (owner,))))
+
 
 def _build_colliders(root, scene, depsgraph):
     start = perf_timer()
@@ -173,6 +210,123 @@ def _materialize_collider(collider):
     return surface
 
 
+def _offset_surface_route(oracle, collider, route):
+    return [_offset_surface_point(oracle, collider, point) for point in tuple(route or ())]
+
+
+def _offset_surface_samples(oracle, collider, samples, factor):
+    distance = max(float(oracle.margin), float(oracle.clearance), 1.0e-6) * float(factor)
+    return [_choose_exterior_offset(collider, Vector(point), Vector(normal), distance)
+            for point, normal in tuple(samples or ())]
+
+
+def _offset_surface_point(oracle, collider, point):
+    hit = _query_nearest(_collider_bvh(collider), point)
+    return Vector(point) if not hit or hit[0] is None else _offset_surface_hit(oracle, collider, hit)
+
+
+def _offset_surface_hit(oracle, collider, hit):
+    co, normal, _index, _distance = hit
+    offset = max(float(oracle.margin), float(oracle.clearance), 1.0e-6)
+    direction = _world_normal(collider, normal)
+    return _choose_exterior_offset(collider, Vector(co), direction, offset)
+
+
+def _choose_exterior_offset(collider, point, normal, offset):
+    first, second = point + normal * offset, point - normal * offset
+    return first if _sample_distance(collider, first) >= _sample_distance(collider, second) else second
+
+
+def _surface_polyline_clear(oracle, owner, points, colliders):
+    route = tuple(points or ())
+    for index in range(len(route) - 1):
+        owners = _surface_edge_owners(owner["sid"], index, len(route))
+        if not _surface_edge_clear(oracle, owner, route[index], route[index + 1], owners, colliders):
+            return False
+    return True
+
+
+def _surface_shortcut(oracle, owner, points, colliders):
+    route = tuple(points or ())
+    if owner is None or len(route) < 3:
+        return [point.copy() for point in route]
+    out, index = [route[0].copy()], 0
+    while index < len(route) - 1:
+        index = _surface_shortcut_index(oracle, owner, route, colliders, index)
+        out.append(route[index].copy())
+    return out
+
+
+def _surface_shortcut_index(oracle, owner, route, colliders, index):
+    for candidate in range(len(route) - 1, index, -1):
+        owners = _surface_edge_owners(owner["sid"], index, len(route), candidate)
+        if _surface_edge_clear(oracle, owner, route[index], route[candidate], owners, colliders):
+            return candidate
+    return index + 1
+
+
+def _relax_surface_route(oracle, owner, points, colliders, iterations=2):
+    out = [Vector(point) for point in tuple(points or ())]
+    for _iteration in range(iterations):
+        for index in range(1, len(out) - 1):
+            out[index] = _relaxed_surface_point(oracle, owner, out, colliders, index)
+    return out
+
+
+def _relaxed_surface_point(oracle, owner, points, colliders, index):
+    target = (points[index - 1] + points[index + 1]) * 0.5
+    for alpha in (0.5, 0.25, 0.125, 0.0625):
+        candidate = points[index].lerp(target, alpha)
+        if _relaxed_surface_edges_clear(oracle, owner, points, colliders, index, candidate):
+            return candidate
+    return points[index].copy()
+
+
+def _relaxed_surface_edges_clear(oracle, owner, points, colliders, index, candidate):
+    left = (owner["sid"] if index == 1 else "", "")
+    right = ("", owner["sid"] if index + 2 == len(points) else "")
+    return (_surface_edge_clear(oracle, owner, points[index - 1], candidate, left, colliders) and
+            _surface_edge_clear(oracle, owner, candidate, points[index + 1], right, colliders))
+
+
+def _surface_edge_owners(owner_id, index, count, end_index=None):
+    end = index + 1 if end_index is None else end_index
+    return (owner_id if index == 0 else "", owner_id if end + 1 == count else "")
+
+
+def _surface_edge_clear(oracle, owner, start, end, owners, colliders):
+    for collider in tuple(colliders or ()):
+        check = _surface_owner_clear if _same_collider(collider, owner) else _segment_clear
+        if not check(oracle, collider, start, end, owners):
+            return False
+    return True
+
+
+def _same_collider(first, second):
+    first_id, second_id = str(first.get("sid", "") or ""), str(second.get("sid", "") or "")
+    return first is second or bool(first_id and first_id == second_id)
+
+
+def _surface_owner_clear(oracle, collider, start, end, owners):
+    if not _aabb_overlap(*_line_bounds((start, end), oracle.margin), collider["mn"], collider["mx"], 0.0):
+        return True
+    first, last = _trimmed_segment(oracle, collider, start, end, owners)
+    return first is None or (not _segment_ray_hit(collider, first, last) and
+                             _surface_segment_clear(oracle, collider, first, last))
+
+
+def _surface_segment_clear(oracle, collider, start, end):
+    tolerance = max(1.0e-7, float(oracle.margin) * 1.0e-5)
+    return all(_sample_distance(collider, start.lerp(end, step / 8.0)) + tolerance >= oracle.margin
+               for step in range(1, 8))
+
+
+def _unsigned_segment_clear(oracle, collider, start, end):
+    tolerance = max(1.0e-7, float(oracle.margin) * 1.0e-5)
+    return all(_bvh_unsigned_distance(collider, start.lerp(end, step / 8.0)) + tolerance >= oracle.margin
+               for step in range(1, 8))
+
+
 def _adopt_evaluated_cache(scene, obj, kind, payload):
     key = _evaluated_cache_key(obj, kind)
     if scene is None or key is None or payload is None:
@@ -196,7 +350,7 @@ def _evaluated_payload_bytes(payload):
     tris = len(tuple(payload.get("triangles", ()) or ()))
     centers = len(tuple(payload.get("face_centers", ()) or ()))
     edges = sum(len(tuple(v or ())) for v in dict(payload.get("route_graph", {})).values())
-    return 1024 + 128 * verts + 384 * tris + 96 * centers + 48 * edges
+    return 1024 + 160 * verts + 384 * tris + 96 * centers + 48 * edges
 
 
 def _collider_by_id(colliders, owner_id):
@@ -561,18 +715,37 @@ def _signed_hit(collider, point, hit):
 
 
 def _ray_sign(collider, point):
+    votes = tuple(_ray_parity(collider, point, direction) for direction in _RAY_DIRECTIONS)
+    valid = tuple(value for value in votes if value is not None)
+    if not valid or sum(valid) * 2 == len(valid):
+        return None
+    return -1.0 if sum(valid) * 2 > len(valid) else 1.0
+
+
+def _ray_parity(collider, point, direction):
     bvh = _collider_bvh(collider)
     if bvh is None:
-        return 1.0
-    limit = (collider["mx"] - collider["mn"]).length + 1.0
-    pos = _ray_hit(bvh, point, Vector((1.0, 0.0, 0.0)), limit)
-    neg = _ray_hit(bvh, point, Vector((-1.0, 0.0, 0.0)), limit)
-    return -1.0 if pos and neg else (1.0 if (not pos and not neg) else None)
+        return False
+    origin, remaining = Vector(point), _ray_limit(collider, point)
+    epsilon, crossings = _ray_epsilon(collider), 0
+    for _index in range(_RAY_COUNT_LIMIT):
+        hit = _query_ray(bvh, origin, direction, remaining)
+        if not hit or hit[0] is None:
+            return bool(crossings % 2)
+        step = (Vector(hit[0]) - origin).length + epsilon
+        origin, remaining = origin + direction * step, remaining - step
+        crossings += 1
+    return None
 
 
-def _ray_hit(bvh, origin, direction, distance):
-    hit = _query_ray(bvh, origin, direction, distance)
-    return bool(hit and hit[0] is not None)
+def _ray_limit(collider, point):
+    diagonal = (collider["mx"] - collider["mn"]).length
+    center = (collider["mx"] + collider["mn"]) * 0.5
+    return diagonal + (Vector(point) - center).length + 1.0
+
+
+def _ray_epsilon(collider):
+    return max(1.0e-7, (collider["mx"] - collider["mn"]).length * 1.0e-8)
 
 
 def _query_ray(bvh, origin, direction, distance):

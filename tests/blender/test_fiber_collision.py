@@ -40,12 +40,35 @@ def _scene_oracle(root_obj, margin=0.05):
     return CollisionOracle(root_obj, bpy.context.scene, depsgraph, margin, 0.002)
 
 
+def _disconnected_cube_oracle():
+    root_obj = root()
+    bpy.ops.mesh.primitive_cube_add(size=2.0, location=(-2.0, 0.0, 0.0))
+    left = bpy.context.active_object
+    bpy.ops.mesh.primitive_cube_add(size=2.0, location=(2.0, 0.0, 0.0))
+    right = bpy.context.active_object
+    left.select_set(True)
+    bpy.context.view_layer.objects.active = right
+    bpy.ops.object.join()
+    scp = scp_with_object(root_obj, "DisconnectedOwner", right)
+    oracle = _scene_oracle(root_obj)
+    return oracle, oracle.collider_by_id(scp.id), scp
+
+
 def _assert_vector(test, actual, expected):
     for value, target in zip(actual, expected):
         test.assertAlmostEqual(value, target, places=5)
 
 
 class FiberCollisionTests(BlenderTestCase):
+    def test_disconnected_closed_components_classify_gap_as_outside(self):
+        oracle, collider, scp = _disconnected_cube_oracle()
+        gap = Vector((0.0, 0.0, 0.0))
+        inside = Vector((2.0, 0.0, 0.0))
+        endpoint = Vector((1.0, 0.0, 0.0))
+        self.assertGreater(_bvh_signed_distance(collider, gap), 0.0)
+        self.assertLess(_bvh_signed_distance(collider, inside), 0.0)
+        self.assertTrue(oracle.segment_visible(endpoint, gap, (scp.id, ""), (collider,)))
+
     def test_explicit_empty_collider_cache_is_stable(self):
         oracle = CollisionOracle(root(), bpy.context.scene, None)
         oracle._colliders = []

@@ -458,10 +458,13 @@ class RuntimeContractTests(BlenderTestCase):
         root_obj = root()
         item = fiber(root_obj, "A", "B")
         driver = builtin_drivers.FiberSyncDriver()
-        with patch.object(builtin_drivers, "_request_fiber_refinements") as request:
+        sync = SimpleNamespace(refresh_selection=Mock())
+        with patch.object(builtin_drivers, "register_fiber_sync", return_value=sync), patch.object(builtin_drivers, "_request_fiber_refinements") as request:
             driver.sync(root_obj, bpy.context.scene, False, {"FIBER": {item.id}}, False,
                         gate_meta={"event_type": "FIBER_UPDATE", "quality": "INTERACTIVE"})
         request.assert_called_once_with(root_obj, bpy.context.scene, {item.id}, "INTERACTIVE")
+        sync.refresh_selection.assert_called_once_with(root=root_obj, scene=bpy.context.scene,
+                                                       fiber_ids={item.id}, sync_handles=True)
 
     def test_fiber_update_refinement_requests_immediate_preview(self):
         root_obj = root()

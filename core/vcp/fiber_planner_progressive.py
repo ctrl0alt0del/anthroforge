@@ -8,7 +8,7 @@ from .fiber_planner import (
     DIRECT, ROADMAP, PlannerResult, RoadmapNode, _a_star, _active_ids,
     _corridor_pad, _dedupe_nodes, _fallback_result, _limit_roadmap_nodes,
     _initial_colliders, _merge_active_ids, _merge_colliders, _merge_mode,
-    _merge_paths, _owners, _result_with_active, _route_colliders,
+    _merge_paths, _owners, _result_with_active, _route_colliders, _surface_result,
     _segment_points, _segments, _shortcut_path,
 )
 
@@ -21,8 +21,8 @@ class ProgressivePlanner:
     elapsed_ms: float = 0.0
 
 
-def begin_progressive_plan(oracle, anchors, allow_dense=True):
-    iterator = _plan_steps(oracle, tuple(anchors or ()), bool(allow_dense))
+def begin_progressive_plan(oracle, anchors, allow_dense=True, allow_surface=True):
+    iterator = _plan_steps(oracle, tuple(anchors or ()), bool(allow_dense), bool(allow_surface))
     return ProgressivePlanner(iterator)
 
 
@@ -47,24 +47,24 @@ def _advance_once(planner):
         planner.result, planner.done = stop.value, True
 
 
-def _plan_steps(oracle, anchors, allow_dense):
+def _plan_steps(oracle, anchors, allow_dense, allow_surface):
     results = []
     for segment in _segments(anchors):
-        result = yield from _segment_steps(oracle, segment, allow_dense)
+        result = yield from _segment_steps(oracle, segment, allow_dense, allow_surface)
         results.append(result)
     return PlannerResult(_merge_paths(results), _merge_mode(results),
                          _merge_active_ids(results))
 
 
-def _segment_steps(oracle, segment, allow_dense):
+def _segment_steps(oracle, segment, allow_dense, allow_surface):
     active = _initial_colliders(oracle, segment)
     while True:
-        result = yield from _segment_active_steps(oracle, segment, active, allow_dense)
+        result = yield from _segment_active_steps(oracle, segment, active, allow_dense, allow_surface)
         expanded = _route_colliders(oracle, result.points, active)
         merged = _merge_colliders(active, expanded)
         if len(merged) == len(active):
             return result
-        if (yield from _route_visible_steps(oracle, segment, result.points, merged)):
+        if (yield from _result_visible_steps(oracle, segment, result, merged)):
             return _result_with_active(result, merged)
         active = merged
         yield None
@@ -79,17 +79,29 @@ def _route_visible_steps(oracle, segment, points, colliders):
     return True
 
 
+def _result_visible_steps(oracle, segment, result, colliders):
+    if result.surface_owner and hasattr(oracle, "surface_route_visible"):
+        visible = oracle.surface_route_visible(result.points, result.surface_owner, colliders)
+        yield None
+        return visible
+    return (yield from _route_visible_steps(oracle, segment, result.points, colliders))
+
+
 def _route_edge_owners(segment, points, index):
     first = segment.start.owner_id if index == 0 else ""
     last = segment.end.owner_id if index + 1 == len(points) - 1 else ""
     return first, last
 
 
-def _segment_active_steps(oracle, segment, blockers, allow_dense):
+def _segment_active_steps(oracle, segment, blockers, allow_dense, allow_surface):
     visible = yield from _visible_steps(
         oracle, segment.start.point, segment.end.point, _owners(segment), blockers)
     if visible:
         return PlannerResult(_segment_points(segment), DIRECT, _active_ids(blockers))
+    surface = _surface_result(oracle, segment, blockers) if allow_surface else None
+    yield None
+    if surface is not None:
+        return surface
     result = yield from _roadmap_steps(oracle, segment, blockers, False)
     return result or (yield from _dense_steps(oracle, segment, blockers, allow_dense))
 

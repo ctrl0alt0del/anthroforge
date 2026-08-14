@@ -21,7 +21,7 @@ from .fiber_sync_helpers import (
     nearest_param,
     world_units_per_pixel,
 )
-from ..vcp.attachment_backend import capture_attachment_from_object
+from ..vcp.attachment_backend import capture_attachment_from_object, capture_attachment_from_object_ray
 from .fiber_sync_runtime import (
     sync_handles as _sync_handles_runtime,
     apply_selection_highlight as _apply_selection_highlight_runtime,
@@ -31,17 +31,19 @@ from .fiber_sync_runtime import (
     apply_fiber_points as _apply_fiber_points_runtime,
     refresh_display as _refresh_display_runtime,
 )
+from . import fiber_view_capture
 
 DEFAULT_FIBER_COLOR = (0.85, 0.55, 0.20, 1.0)
 SELECTED_FIBER_COLOR = (1.0, 0.0, 0.0, 1.0)
 
 
 class FiberSceneSync:
-    def __init__(self, collection_name="AF_VCP_VIS"):
+    def __init__(self, collection_name="AF_VCP_VIS", context_provider=None):
         self.collection_name = collection_name
         self._solver = FiberSolver(surface_offset=0.002)
         self._syncing = False
         self._object_index = None
+        self._context_provider = context_provider
         self.default_fiber_color = DEFAULT_FIBER_COLOR
         self.selected_fiber_color = SELECTED_FIBER_COLOR
 
@@ -112,7 +114,11 @@ class FiberSceneSync:
         return nearest_param(parent_scp, parent_proxy, moved_world)
 
     def _capture_attachment_from_world(self, parent_proxy, moved_world, runtime=None):
-        return capture_attachment_from_object(parent_proxy, moved_world, runtime)
+        context = None if self._context_provider is None else self._context_provider()
+        ray = fiber_view_capture.view_ray_for_world_point(moved_world, context)
+        if ray is fiber_view_capture.NO_VIEW_RAY:
+            return capture_attachment_from_object(parent_proxy, moved_world, runtime)
+        return None if ray is None else capture_attachment_from_object_ray(parent_proxy, *ray, runtime=runtime)
 
     def _world_units_per_pixel(self, world_loc, window_manager=None):
         return world_units_per_pixel(world_loc, window_manager)
@@ -150,10 +156,12 @@ class FiberSceneSync:
 _FIBER_SYNC = None
 
 
-def register_fiber_sync():
+def register_fiber_sync(context_provider=None):
     global _FIBER_SYNC
     if _FIBER_SYNC is None:
-        _FIBER_SYNC = FiberSceneSync()
+        _FIBER_SYNC = FiberSceneSync(context_provider=context_provider)
+    elif context_provider is not None:
+        _FIBER_SYNC._context_provider = context_provider
     h = _FIBER_SYNC.on_depsgraph_update
     if h not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(h)

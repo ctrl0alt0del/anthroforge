@@ -189,13 +189,18 @@ class FiberSyncDriver(DependencyDriver):
             register_fiber_sync().refresh_selection(root=root, scene=scene, sync_handles=True)
             return
         if _fiber_update_event(gate_meta):
-            _request_fiber_refinements(root, scene, ids, _fiber_quality(gate_meta, bake))
+            _sync_fiber_update(root, scene, ids, _fiber_quality(gate_meta, bake))
             return
         solved = _solved_fiber_ids(gate_meta)
         ids -= solved
         if solved:
             register_fiber_sync().refresh_selection(root=root, scene=scene)
         _sync_unsolved_fibers(root, scene, is_full, ids, solved, bake)
+
+
+def _sync_fiber_update(root, scene, ids, quality):
+    register_fiber_sync().refresh_selection(root=root, scene=scene, fiber_ids=ids, sync_handles=True)
+    _request_fiber_refinements(root, scene, ids, quality)
 
 
 def _request_fiber_refinements(root, scene, ids, quality):

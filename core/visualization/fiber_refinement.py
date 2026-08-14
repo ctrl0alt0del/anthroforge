@@ -208,7 +208,7 @@ def _apply_progress(job, result):
         return
     root, scene, fiber = _resolved_job_data(job)
     if _planner_preview_result(result):
-        _apply_planner_preview(job, result, root, scene, fiber, now)
+        _apply_planner_result(job, result, root, scene, fiber, now)
         return
     _apply_refined_geometry(job, result, root, scene, fiber, now)
 
@@ -231,6 +231,19 @@ def _apply_planner_preview(job, result, root, scene, fiber, now):
     if proxy is not None:
         proxy["af_fiber_display_mode"] = "PLANNER_PREVIEW"
         proxy["af_fiber_output_state"] = "STALE"
+    job.proxy_name = "" if proxy is None else proxy.name
+    job.last_apply, job.last_generation = now, job.session.generation
+
+
+def _apply_planner_result(job, result, root, scene, fiber, now):
+    if str(result.termination_reason) == FiberTermination.PLANNER_PREVIEW.value:
+        _apply_planner_preview(job, result, root, scene, fiber, now)
+        return
+    restored = _restore_fiber_output(
+        root, scene, fiber, stale=True, fallback=job.previous_points)
+    proxy = restored or _find_proxy(scene, root.name, fiber.id)
+    if restored is None and proxy is not None:
+        register_fiber_sync()._clear_curve_points(proxy)
     job.proxy_name = "" if proxy is None else proxy.name
     job.last_apply, job.last_generation = now, job.session.generation
 
