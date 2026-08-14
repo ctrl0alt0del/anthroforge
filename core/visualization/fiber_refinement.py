@@ -270,12 +270,38 @@ def _finish_job(job, result=None):
 
 def _finish_refined_job(job, result):
     committed = bool(job.output_committed and _commit_allowed(job, result))
-    _restore_previous_output(job, stale=True) if not committed else None
+    kept = bool(not committed and _keep_failed_preview(job, result))
+    _restore_previous_output(job, stale=True) if not committed and not kept else None
     _finish_pending_version(job, committed)
     publish_fiber_cache(job.session, result) if committed else None
     telemetry_cache_snapshot(getattr(job.session, "telemetry", None))
     _detach_job(job)
     _sync_final(job) if committed else None
+
+
+def _keep_failed_preview(job, result):
+    root, scene, fiber = _owned_job_data(job)
+    points = _failed_preview_points(job, result, fiber)
+    if root is None or scene is None or fiber is None or not points:
+        return False
+    proxy = register_fiber_sync().apply_points(root, scene, fiber, points, commit=False)
+    if proxy is None:
+        return False
+    proxy["af_fiber_display_mode"] = "FAILED_PREVIEW"
+    mark_fiber_output_stale(scene, root.name, fiber.id)
+    job.proxy_name = proxy.name
+    return True
+
+
+def _failed_preview_points(job, result, fiber):
+    if fiber is None or str(getattr(job.session, "quality", "FINAL")) != "INTERACTIVE":
+        return ()
+    if _pending_version(fiber) == 2 or getattr(result, "invalid_reason", ""):
+        return ()
+    points = tuple(getattr(result, "points", ()) or ())
+    expected = int(getattr(job.session, "params", {}).get("node_count", 0))
+    finite = all(all(isfinite(float(value)) for value in point) for point in points)
+    return points if len(points) == expected and finite else ()
 
 
 def _finish_planner_preview_job(job):
