@@ -133,10 +133,16 @@ class MuscleSceneSync:
 
     def _collect_points_with_fallback(self, root, scene, muscle, ordered_fibers):
         ordered_points = collect_muscle_rows(root, scene, muscle, ordered_fibers)
-        if ordered_points:
+        if ordered_points or self._runtime_request_active():
             return ordered_points
-        # Route fallback updates through dependency runtime so downstream impacts
-        # stay centralized in one scheduler.
+        self._request_fiber_fallback(root, scene, ordered_fibers)
+        return collect_muscle_rows(root, scene, muscle, ordered_fibers)
+
+    def _runtime_request_active(self):
+        from .sync_runner import runtime_request_active
+        return runtime_request_active()
+
+    def _request_fiber_fallback(self, root, scene, ordered_fibers):
         from .sync_runner import sync_from_dirty_hints
         sync_from_dirty_hints(
             root=root,
@@ -144,7 +150,6 @@ class MuscleSceneSync:
             dirty_hints=dirty_hints_for("FIBER", {f.id for f in ordered_fibers}),
             bake=False,
         )
-        return collect_muscle_rows(root, scene, muscle, ordered_fibers)
 
     def _build_surface(self, points, closed_v, closed_u):
         try:

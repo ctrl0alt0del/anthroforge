@@ -38,6 +38,10 @@ _RETRY_SECONDS = 0.01
 _MAX_TAIL_PASSES = 4
 
 
+def runtime_request_active():
+    return bool(_RUNNING)
+
+
 @dataclass
 class QueuedRuntime:
     scene_name: str = ""
