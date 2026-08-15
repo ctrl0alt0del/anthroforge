@@ -31,6 +31,34 @@ from .structural import (
     structural_cache_stats,
     structural_energy,
 )
+from .collision import (
+    EDGE_BATCH,
+    PAIR_BATCH,
+    V2_COLLISION_VERSION,
+    V2BackendStatus,
+    V2CollisionReason,
+    V2OwnerContact,
+    V2SafeStep,
+    V2SegmentBatch,
+    V2StaticClearance,
+    V2TriangleSnapshot,
+    build_triangle_snapshot,
+    collision_backend_status,
+    collision_free_step,
+    point_triangle_distances,
+    segment_triangle_distances,
+    validate_static_clearance,
+    validate_segment_clearance_batch,
+)
+from .planner import (
+    V2_PLANNER_41_VERSION,
+    V2_PLANNER_VERSION,
+    V2PlannerDiagnostics,
+    V2PlannerMode,
+    V2PlannerResult,
+    plan_reference,
+    plan_reference_v41,
+)
 
 __all__ = (
     "V2_CONTRACT_VERSION", "V2_ENGINE_VERSION", "V2Anchor",
@@ -43,4 +71,14 @@ __all__ = (
     "V2_STRUCTURAL_VERSION", "V2StructuralEnergy", "V2StructuralResult",
     "clear_structural_cache", "solve_structural", "structural_cache_stats",
     "structural_energy",
+    "EDGE_BATCH", "PAIR_BATCH", "V2_COLLISION_VERSION",
+    "V2BackendStatus", "V2CollisionReason", "V2OwnerContact",
+    "V2SafeStep", "V2StaticClearance", "V2TriangleSnapshot",
+    "V2SegmentBatch",
+    "build_triangle_snapshot", "collision_backend_status",
+    "collision_free_step", "point_triangle_distances",
+    "segment_triangle_distances", "validate_static_clearance",
+    "validate_segment_clearance_batch",
+    "V2_PLANNER_VERSION", "V2_PLANNER_41_VERSION", "V2PlannerDiagnostics",
+    "V2PlannerMode", "V2PlannerResult", "plan_reference", "plan_reference_v41",
 )

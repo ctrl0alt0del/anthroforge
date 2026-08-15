@@ -1,0 +1,953 @@
+"""Deterministic, Blender-independent route planning for Fiber Solver V2."""
+
+from dataclasses import dataclass, replace
+from enum import Enum
+from heapq import heappop, heappush
+from math import ceil
+from time import perf_counter
+
+import numpy as np
+
+from .collision import (V2OwnerContact, build_triangle_snapshot,
+                        collision_backend_status, validate_segment_clearance_batch,
+                        validate_static_clearance)
+from .contracts import V2Request, V2Termination, V2Topology
+
+
+V2_PLANNER_VERSION = "fiber-v2-planner-1"
+V2_PLANNER_41_VERSION = "fiber-v2-planner-1.1"
+_SPARSE_LIMIT = 96
+_DENSE_LIMIT = 240
+_SPARSE_NEIGHBORS = 24
+_DENSE_NEIGHBORS = 48
+_SURFACE_FACTORS = (1.25, 1.75, 2.5, 4.0, 8.0)
+
+
+class V2PlannerMode(str, Enum):
+    DIRECT = "DIRECT"
+    SURFACE = "SURFACE"
+    ROADMAP = "ROADMAP"
+
+
+@dataclass(frozen=True)
+class V2PlannerDiagnostics:
+    candidate_nodes: int = 0
+    tested_edges: int = 0
+    rejected_edges: int = 0
+    corridor_points: int = 0
+    candidate_pairs: int = 0
+    tested_pairs: int = 0
+    planner_ms: float = 0.0
+    handoff_ms: float = 0.0
+    graph_searches: int = 0
+    edge_batches: int = 0
+    frontier_edges: int = 0
+    graph_metric_builds: int = 0
+    graph_expansions: int = 0
+
+
+@dataclass(frozen=True)
+class V2PlannerResult:
+    termination: V2Termination
+    mode: V2PlannerMode
+    reference: tuple = ()
+    corridor: tuple = ()
+    pin_indices: tuple = ()
+    contacts: tuple = ()
+    collider_ids: tuple = ()
+    diagnostics: V2PlannerDiagnostics = V2PlannerDiagnostics()
+    message: str = ""
+
+    @property
+    def succeeded(self):
+        return self.termination is V2Termination.CONVERGED
+
+
+@dataclass
+class _PlannerState:
+    request: object
+    snapshot: object
+    edge_cache: dict
+    membership_cache: dict
+    tested_edges: int = 0
+    rejected_edges: int = 0
+    candidate_nodes: int = 0
+    candidate_pairs: int = 0
+    tested_pairs: int = 0
+    graph_searches: int = 0
+    edge_batches: int = 0
+    frontier_edges: int = 0
+    graph_metric_builds: int = 0
+    graph_expansions: int = 0
+
+
+@dataclass(frozen=True)
+class _SegmentRoute:
+    points: tuple
+    mode: V2PlannerMode
+
+
+def plan_reference(request, snapshot=None):
+    """Return a deterministic exact-count planner reference for one V2 request."""
+    return _plan_reference(request, snapshot, _plan_segments)
+
+
+def plan_reference_v41(request, snapshot=None):
+    """Return a Package 4.1 batched-lazy exact-count planner reference."""
+    return _plan_reference(request, snapshot, _plan_segments_v41)
+
+
+def _plan_reference(request, snapshot, segment_planner):
+    started = perf_counter(); issue = _configuration_issue(request)
+    if issue:
+        return _failed(V2Termination.INVALID_CONFIGURATION, issue, started)
+    snapshot = snapshot or build_triangle_snapshot(request.colliders)
+    if not collision_backend_status().available:
+        return _failed(V2Termination.BACKEND_UNAVAILABLE, "native collision backend unavailable", started)
+    state = _PlannerState(request, snapshot, {}, {})
+    routes = segment_planner(state)
+    return _finish_plan(state, routes, started)
+
+
+def _configuration_issue(request):
+    if not isinstance(request, V2Request):
+        return "planner requires a V2Request"
+    minimum = 3 if request.settings.topology is V2Topology.CYCLIC else 2
+    if len(request.anchors) < minimum:
+        return "topology has too few authored anchors"
+    if request.settings.node_count < len(request.anchors):
+        return "authored anchors cannot fit requested node count"
+    return ""
+
+
+def _failed(reason, message, started, diagnostics=None):
+    elapsed = 1000.0 * (perf_counter() - started)
+    diag = diagnostics or V2PlannerDiagnostics(planner_ms=elapsed)
+    return V2PlannerResult(reason, V2PlannerMode.DIRECT, diagnostics=diag, message=message)
+
+
+def _plan_segments(state):
+    return _plan_segments_with(state, _plan_pair)
+
+
+def _plan_segments_v41(state):
+    return _plan_segments_with(state, _plan_pair_v41)
+
+
+def _plan_segments_with(state, pair_planner):
+    anchors = tuple(state.request.anchors); cyclic = _cyclic(state.request)
+    count = len(anchors) if cyclic else len(anchors) - 1
+    routes = []
+    for index in range(count):
+        route = pair_planner(state, anchors[index], anchors[(index + 1) % len(anchors)])
+        if route is None:
+            return None
+        routes.append(route)
+    return tuple(routes)
+
+
+def _plan_pair(state, start, end):
+    if _edge_clear(state, start.point, end.point, start.owner_id, end.owner_id):
+        return _SegmentRoute((start.point, end.point), V2PlannerMode.DIRECT)
+    surface = _surface_route(state, start, end)
+    if surface is not None:
+        return _SegmentRoute(surface, V2PlannerMode.SURFACE)
+    route = _roadmap_route(state, start, end)
+    return None if route is None else _SegmentRoute(route, V2PlannerMode.ROADMAP)
+
+
+def _plan_pair_v41(state, start, end):
+    if _edge_clear(state, start.point, end.point, start.owner_id, end.owner_id):
+        return _SegmentRoute((start.point, end.point), V2PlannerMode.DIRECT)
+    surface = _surface_route(state, start, end)
+    if surface is not None:
+        return _SegmentRoute(surface, V2PlannerMode.SURFACE)
+    route = _roadmap_route_v41(state, start, end)
+    return None if route is None else _SegmentRoute(route, V2PlannerMode.ROADMAP)
+
+
+def _surface_route(state, start, end):
+    owner = str(start.owner_id or "")
+    if not owner or owner != str(end.owner_id or ""):
+        return None
+    candidates = [_surface_on_collider(state, item, start, end)
+                  for item in state.request.colliders if item.owner_id == owner]
+    routes = [route for route in candidates if route is not None]
+    return min(routes, key=_route_length) if routes else None
+
+
+def _surface_on_collider(state, collider, start, end):
+    points = np.asarray(collider.vertices, dtype=np.float64)
+    faces = np.asarray(collider.triangles, dtype=np.int64)
+    if not len(points) or not len(faces):
+        return None
+    first, last = _nearest_indices(points, start.point, end.point)
+    normals = _vertex_normals(points, faces)
+    local = _local_surface_bridge(state, start, end, normals[first], normals[last])
+    if local is not None:
+        return local
+    indices = _mesh_path(points, faces, first, last)
+    if not indices:
+        return None
+    return _best_offset_route(state, points, faces, indices, start, end)
+
+
+def _local_surface_bridge(state, start, end, first_normal, last_normal):
+    for factor in _SURFACE_FACTORS:
+        for sign in (1.0, -1.0):
+            route = _bridge_points(state, start.point, end.point, first_normal,
+                                   last_normal, factor * sign)
+            if _route_clear(state, route, start.owner_id, end.owner_id):
+                return _shortcut_route(state, route, start.owner_id, end.owner_id)
+    return None
+
+
+def _bridge_points(state, start, end, first_normal, last_normal, factor):
+    first, last = np.asarray(start), np.asarray(end)
+    distance = float(np.linalg.norm(last - first)); radius = _radius(state)
+    count = min(16, max(2, int(ceil(distance / max(4.0 * radius, 1.0e-6)))))
+    rows = [first]
+    for index in range(count + 1):
+        value = index / count; normal = _unit_lerp(first_normal, last_normal, value)
+        rows.append(_lerp(first, last, value) + normal * radius * factor)
+    rows.append(last)
+    return _dedupe(rows)
+
+
+def _unit_lerp(first, second, factor):
+    value = _lerp(first, second, factor)
+    return value / max(float(np.linalg.norm(value)), 1.0e-12)
+
+
+def _nearest_indices(points, start, end):
+    first = int(np.argmin(np.sum((points - np.asarray(start)) ** 2, axis=1)))
+    last = int(np.argmin(np.sum((points - np.asarray(end)) ** 2, axis=1)))
+    return first, last
+
+
+def _mesh_path(points, faces, start, goal):
+    graph = _mesh_graph(points, faces); heap = [(0.0, start)]
+    distance, came, seen = {start: 0.0}, {}, set()
+    while heap:
+        _score, node = heappop(heap)
+        if node == goal:
+            return _reconstruct(came, goal)
+        if node in seen:
+            continue
+        seen.add(node)
+        _expand_mesh_node(points, graph, node, goal, distance, came, heap)
+    return ()
+
+
+def _mesh_graph(points, faces):
+    graph = [set() for _point in points]
+    for a, b, c in faces:
+        graph[a].update((int(b), int(c)))
+        graph[b].update((int(a), int(c)))
+        graph[c].update((int(a), int(b)))
+    return tuple(tuple(sorted(row)) for row in graph)
+
+
+def _expand_mesh_node(points, graph, node, goal, distance, came, heap):
+    for nxt in graph[node]:
+        cost = distance[node] + float(np.linalg.norm(points[nxt] - points[node]))
+        if cost >= distance.get(nxt, float("inf")):
+            continue
+        distance[nxt], came[nxt] = cost, node
+        score = cost + float(np.linalg.norm(points[nxt] - points[goal]))
+        heappush(heap, (score, nxt))
+
+
+def _reconstruct(came, goal):
+    output, node = [goal], goal
+    while node in came:
+        node = came[node]; output.append(node)
+    return tuple(reversed(output))
+
+
+def _best_offset_route(state, points, faces, indices, start, end):
+    normals = _vertex_normals(points, faces)
+    rows = []
+    for factor in _SURFACE_FACTORS:
+        for sign in (1.0, -1.0):
+            route = _offset_surface_points(state, points, normals, indices, start, end, factor * sign)
+            if _route_clear(state, route, start.owner_id, end.owner_id):
+                rows.append(_shortcut_route(state, route, start.owner_id, end.owner_id))
+        if rows:
+            break
+    return min(rows, key=_route_length) if rows else None
+
+
+def _vertex_normals(points, faces):
+    normals = np.zeros_like(points)
+    triangles = points[faces]
+    face_normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
+    for column in range(3):
+        np.add.at(normals, faces[:, column], face_normals)
+    center = points.mean(axis=0); signs = np.sum(normals * (points - center), axis=1)
+    normals[signs < 0.0] *= -1.0
+    return _normalize_rows(normals, points - center)
+
+
+def _normalize_rows(values, fallback):
+    lengths = np.linalg.norm(values, axis=1)
+    fallback_lengths = np.linalg.norm(fallback, axis=1)
+    safe = np.where(lengths[:, None] > 1.0e-12, values,
+                    fallback / np.maximum(fallback_lengths[:, None], 1.0e-12))
+    return safe / np.maximum(np.linalg.norm(safe, axis=1)[:, None], 1.0e-12)
+
+
+def _offset_surface_points(state, points, normals, indices, start, end, factor):
+    radius = _radius(state); offset = radius * factor
+    surface = points[np.asarray(indices)] + normals[np.asarray(indices)] * offset
+    rows = [np.asarray(start.point), *surface, np.asarray(end.point)]
+    return _dedupe(rows)
+
+
+def _roadmap_route(state, start, end):
+    return _roadmap_route_with(state, start, end, _search_compatibility, _search_roadmap)
+
+
+def _roadmap_route_v41(state, start, end):
+    return _roadmap_route_with(state, start, end, _search_compatibility_v41, _search_roadmap_v41)
+
+
+def _roadmap_route_with(state, start, end, compatibility_search, roadmap_search):
+    compatible = _compatibility_candidates(state, start, end)
+    state.candidate_nodes = max(state.candidate_nodes, len(compatible))
+    route = compatibility_search(state, compatible, start.owner_id, end.owner_id)
+    if route is not None:
+        return _shortcut_route(state, route, start.owner_id, end.owner_id)
+    for dense in (False, True):
+        candidates = _roadmap_candidates(state, start, end, dense)
+        state.candidate_nodes = max(state.candidate_nodes, len(candidates))
+        route = roadmap_search(state, candidates, start.owner_id, end.owner_id, dense)
+        if route is not None:
+            return _shortcut_route(state, route, start.owner_id, end.owner_id)
+    return None
+
+
+def _search_compatibility(state, points, start_owner, end_owner):
+    if len(points) <= 48:
+        return _search_complete_roadmap(state, points, start_owner, end_owner)
+    return _search_roadmap(state, points, start_owner, end_owner, True)
+
+
+def _search_compatibility_v41(state, points, start_owner, end_owner):
+    values = np.asarray(points)
+    neighbors = _complete_neighbors(len(points)) if len(points) <= 48 else _neighbor_rows(values, True)
+    return _search_batched_lazy(state, points, values, neighbors, start_owner, end_owner)
+
+
+def _compatibility_candidates(state, start, end):
+    source, target = np.asarray(start.point), np.asarray(end.point)
+    active = _active_corridor_colliders(state, source, target)
+    colliders = tuple(item for item in active if _single_collider_blocks(state, item, start, end))
+    colliders = colliders or active
+    rows = [source, target]
+    for collider in colliders:
+        rows.extend(_compatibility_shell(state, collider))
+    return _sample_candidates(_dedupe(rows), _SPARSE_LIMIT)
+
+
+def _compatibility_shell(state, collider):
+    points = np.asarray(collider.vertices, dtype=np.float64)
+    if not len(points):
+        return ()
+    sampled = _sample_rows(points, min(32, len(points)))
+    margin = max(_radius(state) * 5.0, state.request.tolerances.numeric_floor)
+    return (*_radial_shell(sampled, margin * 4.0), *_bounds_shell(points, margin, False))
+
+
+def _active_corridor_colliders(state, start, end):
+    pad = max(0.05, _radius(state) * 4.0)
+    low, high = np.minimum(start, end) - pad, np.maximum(start, end) + pad
+    return tuple(item for item in state.request.colliders if _bounds_overlap(item, low, high))
+
+
+def _bounds_overlap(collider, low, high):
+    points = np.asarray(collider.vertices, dtype=np.float64)
+    if not len(points):
+        return False
+    item_low, item_high = points.min(axis=0), points.max(axis=0)
+    return bool(np.all(high >= item_low) and np.all(item_high >= low))
+
+
+def _single_collider_blocks(state, collider, start, end):
+    snapshot = build_triangle_snapshot((collider,))
+    points = np.asarray((start.point, end.point), dtype=np.float64)
+    contacts = _endpoint_contacts(points, start.owner_id, end.owner_id, _radius(state))
+    result = validate_static_clearance(points, snapshot, _radius(state), contacts,
+                                       slack=_slack(state))
+    return not result.valid
+
+
+def _sample_candidates(points, limit):
+    if len(points) <= limit:
+        return tuple(points)
+    return (points[0], points[1], *_sample_rows(np.asarray(points[2:]), limit - 2))
+
+
+def _sample_rows(points, count):
+    indices = np.linspace(0, len(points) - 1, count).round().astype(np.int64)
+    return tuple(points[index] for index in indices)
+
+
+def _radial_shell(points, pad):
+    center = np.asarray(points).mean(axis=0); rows = []
+    for point in points:
+        delta = point - center; length = max(float(np.linalg.norm(delta)), 1.0e-12)
+        rows.append(point + delta * (pad / length))
+    return tuple(rows)
+
+
+def _roadmap_candidates(state, start, end, dense):
+    source, target = np.asarray(start.point), np.asarray(end.point)
+    colliders = _corridor_colliders(state.request.colliders, source, target, dense)
+    groups = [_collider_shell(state, collider, source, target, dense)
+              for collider in colliders]
+    limit = _DENSE_LIMIT if dense else _SPARSE_LIMIT
+    return _grouped_candidates(groups, source, target, limit, dense)
+
+
+def _corridor_colliders(colliders, start, end, dense):
+    rows = sorted((( _collider_line_distance(item, start, end), item.collider_id, item)
+                   for item in colliders), key=lambda row: (row[0], row[1]))
+    length = float(np.linalg.norm(end - start)); threshold = max(0.05, length * 0.3)
+    nearby = [item for distance, _identifier, item in rows if distance <= threshold]
+    limit = 16 if dense else 8
+    return tuple((nearby or [row[2] for row in rows[:limit]])[:limit])
+
+
+def _collider_line_distance(collider, start, end):
+    points = np.asarray(collider.vertices, dtype=np.float64)
+    low, high = points.min(axis=0), points.max(axis=0)
+    factors = np.linspace(0.0, 1.0, 33)
+    samples = start + factors[:, None] * (end - start)
+    nearest = np.minimum(np.maximum(samples, low), high)
+    return float(np.min(np.linalg.norm(samples - nearest, axis=1)))
+
+
+def _grouped_candidates(groups, start, end, limit, dense):
+    if not groups:
+        return (start, end)
+    quota = max(1, (limit - 2) // len(groups)); selected, remainder = [], []
+    for group in groups:
+        rows = list(_dedupe(group))
+        chosen = tuple(rows[:quota]) if dense else _group_quota(rows, start, end, quota)
+        selected.extend(chosen)
+        remainder.extend(row for row in rows if not _contains_point(chosen, row))
+    output = list(_dedupe((start, end, *selected)))
+    if len(output) < limit:
+        output.extend(_ranked_points(remainder, start, end, limit - len(output)))
+    return tuple(_dedupe(output[:limit]))
+
+
+def _group_quota(rows, start, end, quota):
+    bounds = rows[:min(14, len(rows))]; mesh = rows[min(14, len(rows)):]
+    bound_count = min(len(bounds), max(1, quota // 4))
+    first = _ranked_points(bounds, start, end, bound_count)
+    second = _ranked_points(mesh, start, end, max(0, quota - len(first)))
+    return tuple((*first, *second))
+
+
+def _contains_point(points, target):
+    return any(np.linalg.norm(np.asarray(point) - target) <= 1.0e-10 for point in points)
+
+
+def _ranked_points(points, start, end, limit):
+    rows = _dedupe(points)
+    if not rows or limit <= 0:
+        return ()
+    values = np.asarray(rows); scores = _line_distance_rows(values, start, end)
+    order = np.argsort(scores, kind="stable")[:limit]
+    return tuple(rows[int(index)] for index in order)
+
+
+def _collider_shell(state, collider, start, end, dense):
+    points = np.asarray(collider.vertices, dtype=np.float64)
+    faces = np.asarray(collider.triangles, dtype=np.int64)
+    if not len(points) or not len(faces):
+        return ()
+    radius = _radius(state); scale = state.request.tolerances.length_scale
+    bounds = _bounds_shell(points, max(radius * 4.0, scale * 0.00025), dense)
+    mesh = _mesh_shell(points, faces, start, end, max(radius * 8.0, scale * 0.001), dense)
+    return (*bounds, *mesh)
+
+
+def _bounds_shell(points, pad, dense):
+    low, high = points.min(axis=0) - pad, points.max(axis=0) + pad
+    center = (low + high) * 0.5
+    corners = [np.asarray((x, y, z)) for x in (low[0], high[0])
+               for y in (low[1], high[1]) for z in (low[2], high[2])]
+    faces = [center + np.eye(3)[axis] * sign * (high[axis] - low[axis]) * 0.5
+             for axis in range(3) for sign in (-1.0, 1.0)]
+    return tuple(corners + faces + (_edge_shell(low, high) if dense else []))
+
+
+def _edge_shell(low, high):
+    center = (low + high) * 0.5; rows = []
+    for free in range(3):
+        fixed = [axis for axis in range(3) if axis != free]
+        for first in (low[fixed[0]], high[fixed[0]]):
+            for second in (low[fixed[1]], high[fixed[1]]):
+                point = center.copy(); point[fixed] = (first, second); rows.append(point)
+    return rows
+
+
+def _mesh_shell(points, faces, start, end, pad, dense):
+    triangles = points[faces]; centers = triangles.mean(axis=1)
+    normals = _face_normals(points, triangles)
+    distances = _line_distance_rows(centers, start, end)
+    limit = 48 if dense else 20
+    indices = np.argsort(distances, kind="stable")[:min(limit, len(faces))]
+    signs = (1.0, -1.0) if dense else (1.0,)
+    face_rows = tuple(centers[index] + sign * pad * normals[index]
+                      for index in indices for sign in signs)
+    return (*_vertex_shell(points, start, end, pad, dense), *face_rows)
+
+
+def _vertex_shell(points, start, end, pad, dense):
+    _ = start, end
+    limit = min(len(points), 96 if dense else 32); center = points.mean(axis=0)
+    indices = tuple(map(int, np.linspace(0, len(points) - 1, limit).round()))
+    rows = []
+    for index in indices:
+        direction = points[index] - center; length = float(np.linalg.norm(direction))
+        rows.append(points[index] + direction * (max(pad, 1.0e-6) / max(length, 1.0e-12)))
+    return tuple(rows)
+
+
+def _face_normals(points, triangles):
+    normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
+    center = points.mean(axis=0); signs = np.sum(normals * (triangles.mean(axis=1) - center), axis=1)
+    normals[signs < 0.0] *= -1.0
+    lengths = np.linalg.norm(normals, axis=1)
+    return normals / np.maximum(lengths[:, None], 1.0e-12)
+
+
+def _line_distance_rows(points, start, end):
+    delta = end - start; denom = float(np.dot(delta, delta))
+    if denom <= 1.0e-24:
+        return np.linalg.norm(points - start, axis=1)
+    factors = np.clip(((points - start) @ delta) / denom, 0.0, 1.0)
+    return np.linalg.norm(points - (start + factors[:, None] * delta), axis=1)
+
+
+def _search_roadmap(state, points, start_owner, end_owner, dense):
+    values = np.asarray(points); neighbors = _neighbor_rows(values, dense)
+    if len(points) <= 48:
+        return _eager_roadmap_path(state, points, values, neighbors, start_owner, end_owner)
+    invalid, validated = set(), set()
+    for _attempt in range(512 if dense else 256):
+        state.graph_searches += 1
+        path = _geometric_path(values, neighbors, invalid)
+        if path is None:
+            return None
+        edges = tuple(tuple(sorted(edge)) for edge in zip(path[:-1], path[1:]))
+        _validate_lazy_edges(state, values, edges, validated, invalid, start_owner, end_owner)
+        if all(edge in validated for edge in edges):
+            return tuple(points[index] for index in path)
+    return None
+
+
+def _search_complete_roadmap(state, points, start_owner, end_owner):
+    values = np.asarray(points); neighbors = _complete_neighbors(len(points))
+    invalid, validated = set(), set()
+    for _attempt in range(512):
+        state.graph_searches += 1
+        path = _geometric_path(values, neighbors, invalid)
+        if path is None:
+            return None
+        edges = tuple(tuple(sorted(edge)) for edge in zip(path[:-1], path[1:]))
+        _validate_lazy_edges(state, values, edges, validated, invalid, start_owner, end_owner)
+        if all(edge in validated for edge in edges):
+            return tuple(points[index] for index in path)
+    return None
+
+
+def _eager_roadmap_path(state, points, values, neighbors, start_owner, end_owner):
+    pairs = sorted({tuple(sorted((index, nxt))) for index, row in enumerate(neighbors)
+                    for nxt in row if index != nxt})
+    owners = tuple(_graph_owners(a, b, start_owner, end_owner) for a, b in pairs)
+    clear = _batch_edge_states(state, values, pairs, owners); graph = [[] for _point in points]
+    for (first, second), allowed in zip(pairs, clear):
+        if allowed:
+            graph[first].append(second); graph[second].append(first)
+    state.graph_searches += 1; path = _geometric_path(values, graph, set())
+    return None if path is None else tuple(points[index] for index in path)
+
+
+def _search_roadmap_v41(state, points, start_owner, end_owner, dense):
+    values = np.asarray(points); neighbors = _neighbor_rows(values, dense)
+    return _search_batched_lazy(state, points, values, neighbors, start_owner, end_owner)
+
+
+def _search_batched_lazy(state, points, values, neighbors, start_owner, end_owner):
+    invalid, validated = set(), set(); metric = _graph_metric(values)
+    state.graph_metric_builds += 1
+    for _attempt in range(512):
+        state.graph_searches += 1; path = _geometric_path_metric(metric, neighbors, invalid, state)
+        if path is None:
+            return None
+        edges = tuple(tuple(sorted(edge)) for edge in zip(path[:-1], path[1:]))
+        _validate_lazy_edges(state, values, edges, validated, invalid, start_owner, end_owner)
+        if all(edge in validated for edge in edges):
+            return tuple(points[index] for index in path)
+    return None
+
+
+def _complete_neighbors(count):
+    return tuple(tuple(other for other in range(count) if other != index)
+                 for index in range(count))
+
+
+def _validate_lazy_edges(state, points, edges, validated, invalid, start_owner, end_owner):
+    pending = tuple(edge for edge in edges if edge not in validated and edge not in invalid)
+    if not pending:
+        return
+    owners = tuple(_graph_owners(a, b, start_owner, end_owner) for a, b in pending)
+    clear = _batch_edge_states(state, points, pending, owners)
+    for edge, allowed in zip(pending, clear):
+        (validated if allowed else invalid).add(edge)
+
+
+def _geometric_path(points, neighbors, invalid):
+    heap, distance, came, seen = [(0.0, 0)], {0: 0.0}, {}, set()
+    while heap:
+        _score, node = heappop(heap)
+        if node == 1:
+            return _reconstruct(came, 1)
+        if node in seen:
+            continue
+        seen.add(node)
+        _expand_geometric(points, neighbors[node], node, invalid, distance, came, heap)
+    return None
+
+
+def _graph_metric(points):
+    delta = points[:, None, :] - points[None, :, :]
+    return np.linalg.norm(delta, axis=2)
+
+
+def _geometric_path_metric(metric, neighbors, invalid, state=None):
+    heap, distance, came, seen = [(0.0, 0)], {0: 0.0}, {}, set()
+    while heap:
+        _score, node = heappop(heap)
+        if node == 1:
+            return _reconstruct(came, 1)
+        if node not in seen:
+            if state is not None:
+                state.graph_expansions += 1
+            seen.add(node); _expand_metric(metric, neighbors[node], node, invalid, distance, came, heap)
+    return None
+
+
+def _expand_metric(metric, neighbors, node, invalid, distance, came, heap):
+    for nxt in neighbors:
+        if tuple(sorted((node, nxt))) in invalid:
+            continue
+        cost = distance[node] + float(metric[node, nxt])
+        if cost < distance.get(nxt, float("inf")):
+            distance[nxt], came[nxt] = cost, node
+            heappush(heap, (cost + float(metric[nxt, 1]), nxt))
+
+
+def _expand_geometric(points, neighbors, node, invalid, distance, came, heap):
+    for nxt in neighbors:
+        if tuple(sorted((node, nxt))) in invalid:
+            continue
+        cost = distance[node] + float(np.linalg.norm(points[nxt] - points[node]))
+        if cost >= distance.get(nxt, float("inf")):
+            continue
+        distance[nxt], came[nxt] = cost, node
+        heappush(heap, (cost + float(np.linalg.norm(points[nxt] - points[1])), nxt))
+
+
+def _neighbor_rows(points, dense):
+    count = len(points); limit = _DENSE_NEIGHBORS if dense else _SPARSE_NEIGHBORS
+    rows = []
+    for index in range(count):
+        distances = np.linalg.norm(points - points[index], axis=1)
+        order = [int(value) for value in np.argsort(distances, kind="stable") if value != index]
+        rows.append(tuple(dict.fromkeys((1, 0, *order[:min(limit, count - 1)]))))
+    return tuple(rows)
+
+
+def _graph_owners(first, second, start_owner, end_owner):
+    return (start_owner if first == 0 else end_owner if first == 1 else "",
+            start_owner if second == 0 else end_owner if second == 1 else "")
+
+
+def _shortcut_route(state, points, start_owner, end_owner):
+    route = tuple(np.asarray(point) for point in points)
+    output, index = [route[0]], 0
+    while index < len(route) - 1:
+        index = _furthest_clear(state, route, index, start_owner, end_owner)
+        output.append(route[index])
+    return tuple(output)
+
+
+def _furthest_clear(state, route, index, start_owner, end_owner):
+    candidates = tuple(range(index + 1, len(route)))
+    edges = tuple((index, candidate) for candidate in candidates)
+    owners = tuple((start_owner if index == 0 else "",
+                    end_owner if candidate == len(route) - 1 else "") for candidate in candidates)
+    clear = _batch_edge_states(state, np.asarray(route), edges, owners)
+    for candidate, allowed in reversed(tuple(zip(candidates, clear))):
+        if allowed:
+            return candidate
+    return index + 1
+
+
+def _route_clear(state, points, start_owner, end_owner):
+    edges = tuple((index, index + 1) for index in range(len(points) - 1))
+    owners = tuple((start_owner if index == 0 else "",
+                    end_owner if index + 2 == len(points) else "") for index in range(len(edges)))
+    return all(_batch_edge_states(state, np.asarray(points), edges, owners))
+
+
+def _batch_edge_states(state, points, edges, owners):
+    result = validate_segment_clearance_batch(points, edges, state.snapshot, _radius(state),
+                                              owners, _contact_span(_radius(state)),
+                                              _slack(state), containment_cache=state.membership_cache)
+    state.tested_edges += len(edges)
+    state.edge_batches += int(bool(len(edges)))
+    state.rejected_edges += sum(not value for value in result.clear)
+    state.candidate_pairs += result.candidate_pairs; state.tested_pairs += result.tested_pairs
+    _store_edge_states(state, points, edges, owners, result.clear)
+    return result.clear
+
+
+def _store_edge_states(state, points, edges, owners, values):
+    for (first, second), owner, value in zip(edges, owners, values):
+        key = _edge_key(points[first], points[second], owner[0], owner[1])
+        state.edge_cache[key] = bool(value)
+
+
+def _edge_clear(state, start, end, start_owner="", end_owner=""):
+    key = _edge_key(start, end, start_owner, end_owner)
+    if key in state.edge_cache:
+        return state.edge_cache[key]
+    points = np.asarray((start, end), dtype=np.float64)
+    contacts = _endpoint_contacts(points, start_owner, end_owner, _radius(state))
+    result = validate_static_clearance(points, state.snapshot, _radius(state), contacts,
+                                       slack=_slack(state))
+    state.tested_edges += 1; state.rejected_edges += int(not result.valid)
+    state.edge_cache[key] = bool(result.valid)
+    return bool(result.valid)
+
+
+def _edge_key(start, end, start_owner, end_owner):
+    first = tuple(np.round(np.asarray(start, dtype=np.float64), 12))
+    second = tuple(np.round(np.asarray(end, dtype=np.float64), 12))
+    return first, second, str(start_owner or ""), str(end_owner or "")
+
+
+def _endpoint_contacts(points, start_owner, end_owner, radius):
+    length = float(np.linalg.norm(points[1] - points[0])); span = _contact_span(radius)
+    rows = []
+    if start_owner:
+        rows.append(V2OwnerContact(start_owner, (0,), ((0, 0.0, min(1.0, span / max(length, 1e-12))),)))
+    if end_owner:
+        rows.append(V2OwnerContact(end_owner, (1,), ((0, max(0.0, 1.0 - span / max(length, 1e-12)), 1.0),)))
+    return tuple(rows)
+
+
+def _finish_plan(state, routes, started):
+    if routes is None:
+        return _failed_with_state(state, V2Termination.NO_FEASIBLE_PATH,
+                                  "no collision-free route joins all anchors", started)
+    handoff_started = perf_counter(); handoff = _exact_handoff(state, routes)
+    if handoff is None:
+        return _failed_with_state(state, V2Termination.NO_FEASIBLE_PATH,
+                                  "safe corridor cannot fit requested node count", started)
+    return _validated_result(state, routes, handoff, started, handoff_started)
+
+
+def _failed_with_state(state, reason, message, started):
+    diag = _diagnostics(state, (), started, 0.0, None)
+    return V2PlannerResult(reason, V2PlannerMode.DIRECT, diagnostics=diag, message=message)
+
+
+def _exact_handoff(state, routes):
+    cyclic = _cyclic(state.request); edge_budget = state.request.settings.node_count - int(not cyclic)
+    corridor_edges = sum(len(route.points) - 1 for route in routes)
+    if corridor_edges > edge_budget:
+        routes = _reduce_routes(state, routes, edge_budget)
+    if routes is None:
+        return None
+    allocations = _edge_allocations(routes, edge_budget)
+    return _subdivide_routes(routes, allocations, cyclic)
+
+
+def _reduce_routes(state, routes, edge_budget):
+    rows = list(routes)
+    while sum(len(row.points) - 1 for row in rows) > edge_budget:
+        candidate = _best_route_removal(state, rows)
+        if candidate is None:
+            return None
+        route, index = candidate; points = list(rows[route].points)
+        del points[index]; rows[route] = replace(rows[route], points=tuple(points))
+    return tuple(rows)
+
+
+def _best_route_removal(state, routes):
+    candidates = []
+    for route_index, route in enumerate(routes):
+        for index in range(1, len(route.points) - 1):
+            if _edge_clear(state, route.points[index - 1], route.points[index + 1]):
+                cost = _removal_cost(route.points, index)
+                candidates.append((cost, route_index, index))
+    return None if not candidates else min(candidates)[1:]
+
+
+def _removal_cost(points, index):
+    before = np.linalg.norm(np.asarray(points[index]) - points[index - 1])
+    before += np.linalg.norm(np.asarray(points[index + 1]) - points[index])
+    after = np.linalg.norm(np.asarray(points[index + 1]) - points[index - 1])
+    return float(before - after)
+
+
+def _edge_allocations(routes, edge_budget):
+    lengths = np.asarray([np.linalg.norm(np.asarray(b) - a) for route in routes
+                          for a, b in zip(route.points[:-1], route.points[1:])])
+    counts = np.ones(len(lengths), dtype=np.int64); remaining = edge_budget - len(counts)
+    if remaining <= 0:
+        return tuple(int(value) for value in counts)
+    weights = lengths / max(float(lengths.sum()), 1.0e-12); raw = weights * remaining
+    counts += np.floor(raw).astype(np.int64); left = remaining - int(np.floor(raw).sum())
+    order = np.argsort(-(raw - np.floor(raw)), kind="stable")
+    counts[order[:left]] += 1
+    return tuple(int(value) for value in counts)
+
+
+def _subdivide_routes(routes, allocations, cyclic):
+    points, pins, allocation_index, edge_index = [], [0], 0, 0
+    for route in routes:
+        for start, end in zip(route.points[:-1], route.points[1:]):
+            count = allocations[allocation_index]; allocation_index += 1
+            if not points:
+                points.append(tuple(start))
+            points.extend(tuple(_lerp(start, end, step / count)) for step in range(1, count + 1))
+            edge_index += count
+        pins.append(edge_index)
+    if cyclic:
+        points.pop(); pins.pop()
+    return tuple(points), tuple(pins)
+
+
+def _validated_result(state, routes, handoff, started, handoff_started):
+    reference, pins = handoff; contacts = _authored_contacts(state, reference, pins)
+    result = validate_static_clearance(reference, state.snapshot, _radius(state), contacts,
+                                       cyclic=_cyclic(state.request), slack=_slack(state))
+    if not result.valid:
+        return _failed_with_state(state, V2Termination.NO_FEASIBLE_PATH,
+                                  "exact-count handoff failed independent validation", started)
+    corridor = _merged_corridor(routes, _cyclic(state.request)); mode = _merged_mode(routes)
+    diag = _diagnostics(state, corridor, started, handoff_started, result)
+    ids = tuple(item.collider_id for item in state.request.colliders)
+    return V2PlannerResult(V2Termination.CONVERGED, mode, reference, corridor,
+                           pins, contacts, ids, diag)
+
+
+def _authored_contacts(state, points, pins):
+    rows = []
+    for anchor, index in zip(state.request.anchors, pins):
+        if anchor.owner_id:
+            rows.append(_anchor_contact(points, int(index), anchor.owner_id,
+                                        _contact_span(_radius(state)), _cyclic(state.request)))
+    return tuple(rows)
+
+
+def _anchor_contact(points, index, owner, span, cyclic):
+    node_indices = {index}; intervals = []
+    for direction in (-1, 1):
+        _walk_contact(points, index, direction, span, cyclic, node_indices, intervals)
+    return V2OwnerContact(owner, tuple(sorted(node_indices)), tuple(sorted(intervals)))
+
+
+def _walk_contact(points, index, direction, span, cyclic, nodes, intervals):
+    count, travelled, node = len(points), 0.0, index
+    for _step in range(count - 1):
+        nxt = node + direction
+        if not cyclic and not 0 <= nxt < count:
+            break
+        nxt %= count; edge = nxt if direction < 0 else node
+        length = float(np.linalg.norm(np.asarray(points[nxt]) - points[node]))
+        fraction = min(1.0, max(0.0, (span - travelled) / max(length, 1.0e-12)))
+        _append_contact_interval(intervals, edge, direction, fraction)
+        if travelled + length > span:
+            break
+        nodes.add(nxt); travelled += length; node = nxt
+
+
+def _append_contact_interval(intervals, edge, direction, fraction):
+    if fraction <= 0.0:
+        return
+    if direction < 0:
+        intervals.append((edge, 1.0 - fraction, 1.0))
+    else:
+        intervals.append((edge, 0.0, fraction))
+
+
+def _merged_corridor(routes, cyclic):
+    output = []
+    for index, route in enumerate(routes):
+        output.extend(route.points[1:] if index else route.points)
+    if cyclic and output and np.allclose(output[0], output[-1]):
+        output.pop()
+    return tuple(tuple(point) for point in output)
+
+
+def _merged_mode(routes):
+    modes = {route.mode for route in routes}
+    if V2PlannerMode.ROADMAP in modes:
+        return V2PlannerMode.ROADMAP
+    return V2PlannerMode.SURFACE if V2PlannerMode.SURFACE in modes else V2PlannerMode.DIRECT
+
+
+def _diagnostics(state, corridor, started, handoff_started, validation):
+    planner_ms = 1000.0 * ((handoff_started or perf_counter()) - started)
+    handoff_ms = 0.0 if not handoff_started else 1000.0 * (perf_counter() - handoff_started)
+    pairs = state.candidate_pairs + (0 if validation is None else validation.candidate_pairs)
+    tested = state.tested_pairs + (0 if validation is None else validation.tested_pairs)
+    return V2PlannerDiagnostics(state.candidate_nodes, state.tested_edges,
+                                state.rejected_edges, len(corridor), pairs, tested,
+                                planner_ms, handoff_ms, state.graph_searches,
+                                state.edge_batches, state.frontier_edges,
+                                state.graph_metric_builds, state.graph_expansions)
+
+
+def _route_length(points):
+    return sum(float(np.linalg.norm(np.asarray(b) - a)) for a, b in zip(points[:-1], points[1:]))
+
+
+def _dedupe(points, tolerance=1.0e-10):
+    output = []
+    for point in points:
+        value = np.asarray(point, dtype=np.float64)
+        if not output or np.linalg.norm(value - output[-1]) > tolerance:
+            output.append(value)
+    return tuple(output)
+
+
+def _lerp(start, end, factor):
+    first, second = np.asarray(start), np.asarray(end)
+    return first + float(factor) * (second - first)
+
+
+def _contact_span(radius):
+    return max(2.5 * float(radius), 1.0e-7)
+
+
+def _radius(state):
+    return float(state.request.collision_policy.collision_radius)
+
+
+def _slack(state):
+    return float(state.request.tolerances.clearance_slack)
+
+
+def _cyclic(request):
+    return request.settings.topology is V2Topology.CYCLIC

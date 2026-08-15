@@ -29,6 +29,7 @@ Thumbs.db
 # Compiled extensions (if ever added)
 *.so
 *.dll
+!native/fiber_ccd/af_fiber_ccd.dll
 *.dylib
 
 # Distribution artifacts

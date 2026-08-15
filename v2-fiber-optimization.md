@@ -44,6 +44,10 @@ World-transform equivalence.
 Thin, grazing, coplanar and degenerate tests.
 Missing/incompatible DLL returns BACKEND_UNAVAILABLE.
 No end user compiler is required.
+
+Status (2026-08-15): implemented and qualified in isolation. See
+`docs/fiber_v2_package3.md` for the test matrix, read-only production
+benchmarks, visual artifacts, and the remaining 512-node latency risk.
 Package 4 — V2 planner and exact-count handoff
 Standalone inputs: anchors, node count, collider snapshot and policy.
 Outputs:
@@ -60,6 +64,14 @@ unrelated colliders;
 unsafe resampling chords;
 complex touch ordering.
 Gate: every produced edge passes Package 3 validation.
+
+Status (2026-08-15): Package 4.1 caches the fixed roadmap metric and reduces
+Package 4 median wall time by 33.8% on the skeleton roadmap and 22.4% on skull
+FIBER_14 with bit-exact route/reference parity. It remains isolated and does not
+change V1 runtime behavior. The skeleton result is still 489 ms versus V1's 75 ms;
+strict collision processing is now the main cost. Package 5 therefore remains
+blocked on planner/collision latency and route-quality qualification. See
+`docs/fiber_v2_package4.md` and `docs/fiber_v2_package4_1.md`.
 Package 5 — Unaccelerated local/global solver
 Combine Packages 2–4 without Blender integration:
 project active contacts;

@@ -13,6 +13,7 @@ struct MeshSweep { double safe; int possible, valid, tested, intervals, reason; 
 struct Context { Vec a0, b0, a1, b1, t[3]; double clearance, speed, guard; };
 struct Search { std::vector<std::pair<double, double>> stack; double safe, minimum; int intervals; };
 struct Bounds { double lo[3], hi[3]; int index; };
+struct TriangleSnapshot { std::vector<Bounds> faces; };
 
 static Vec add(Vec a, Vec b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 static Vec sub(Vec a, Vec b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
@@ -133,6 +134,54 @@ static Context context(const double* start, const double* end, const double* tri
 
 AF_EXPORT int af_fiber_ccd_version() { return 1; }
 
+AF_EXPORT int af_fiber_ccd_capabilities() { return 7; }
+
+AF_EXPORT int af_segment_triangle_distances(const double* segments, const double* triangles,
+                                             int count, double* distances) {
+    if (!segments || !triangles || !distances || count < 0) return 1;
+    for (int i=0; i<count; ++i) {
+        Vec face[3]={load3(triangles+9*i),load3(triangles+9*i+3),load3(triangles+9*i+6)};
+        distances[i]=segment_triangle(load3(segments+6*i),load3(segments+6*i+3),face);
+    }
+    return 0;
+}
+
+static bool ray_hits_triangle(Vec point, Vec direction, const Vec* triangle) {
+    Vec edge0=sub(triangle[1],triangle[0]),edge1=sub(triangle[2],triangle[0]);
+    Vec crossed=cross(direction,edge1); double determinant=dot(edge0,crossed);
+    if (std::abs(determinant)<=eps()) return false;
+    Vec offset=sub(point,triangle[0]); double inverse=1.0/determinant;
+    double u=dot(offset,crossed)*inverse; if (u<-eps() || u>1.0+eps()) return false;
+    Vec side=cross(offset,edge0); double v=dot(direction,side)*inverse;
+    return v>=-eps() && u+v<=1.0+eps() && dot(edge1,side)*inverse>eps();
+}
+
+static bool point_inside_mesh(Vec point, const double* vertices, const int64_t* triangles, int count) {
+    Vec directions[3]={{1.0,0.3713906763541037,0.6941734212143177},
+                       {0.2191374213412347,1.0,0.5379137453123419},
+                       {0.6123419734213147,0.2931742134123471,1.0}};
+    int votes=0;
+    for (Vec direction: directions) {
+        int hits=0;
+        for (int f=0; f<count; ++f) {
+            Vec face[3]={load3(vertices+3*triangles[3*f]),load3(vertices+3*triangles[3*f+1]),load3(vertices+3*triangles[3*f+2])};
+            if (ray_hits_triangle(point,direction,face)) ++hits;
+        }
+        votes+=hits%2;
+    }
+    return votes>=2;
+}
+
+AF_EXPORT int af_points_inside_closed_mesh(const double* points, int point_count,
+                                            const double* vertices, const int64_t* triangles,
+                                            int triangle_count, int* inside) {
+    if (!points || !vertices || !triangles || !inside || point_count < 0 || triangle_count < 0) return 1;
+    for (int p=0; p<point_count; ++p) {
+        inside[p]=point_inside_mesh(load3(points+3*p),vertices,triangles,triangle_count) ? 1 : 0;
+    }
+    return 0;
+}
+
 AF_EXPORT int af_swept_segment_triangle(const double* start, const double* end,
                                          const double* triangle, double clearance,
                                          double tolerance, int budget, Sweep* output) {
@@ -159,6 +208,7 @@ static void scaled_end(const double* start, const double* end, double safe, doub
 static bool absorb_mesh(MeshSweep& mesh, const Sweep& pair) {
     ++mesh.tested; mesh.intervals+=pair.intervals;
     mesh.valid=mesh.valid && pair.valid; mesh.possible=mesh.possible || pair.possible;
+    if (pair.reason == 4) mesh.reason=4;
     mesh.safe*=pair.safe;
     return mesh.valid && mesh.safe > 0.0;
 }
@@ -173,7 +223,8 @@ AF_EXPORT int af_mesh_pair_safe_step(const double* starts, const double* ends,
         Sweep pair=sweep_pair(starts+6*i,scaled,triangles+9*i,clearance,tolerance,budget);
         if (!absorb_mesh(mesh,pair)) break;
     }
-    mesh.reason=!mesh.valid ? 2 : mesh.possible ? 3 : 0; *output=mesh; return 0;
+    mesh.reason=!mesh.valid ? 2 : mesh.reason == 4 ? 4 : mesh.possible ? 3 : 0;
+    *output=mesh; return 0;
 }
 
 static Bounds face_bounds(const double* vertices, const int64_t* triangle, int index) {
@@ -215,6 +266,26 @@ static int emit_candidates(const Bounds& moving, const std::vector<Bounds>& face
         if (!bounds_overlap(moving,face)) continue;
         if (output) output[2*count]=edge,output[2*count+1]=face.index; ++count;
     }
+    return count;
+}
+
+AF_EXPORT void* af_triangle_snapshot_create(const double* vertices, const int64_t* triangles,
+                                             int triangle_count) {
+    if (!vertices || !triangles || triangle_count < 0) return nullptr;
+    return new TriangleSnapshot{sorted_faces(vertices,triangles,triangle_count)};
+}
+
+AF_EXPORT void af_triangle_snapshot_destroy(void* handle) {
+    delete static_cast<TriangleSnapshot*>(handle);
+}
+
+AF_EXPORT int af_snapshot_candidate_pairs(void* handle, const double* start, const double* end,
+                                           const int64_t* edges, int edge_count, double padding,
+                                           int64_t* output) {
+    if (!handle || !start || !end || !edges || edge_count < 0 || padding < 0.0) return -1;
+    const auto& faces=static_cast<TriangleSnapshot*>(handle)->faces; int count=0;
+    for (int e=0; e<edge_count; ++e)
+        count=emit_candidates(moving_bounds(start,end,edges+2*e,padding),faces,e,output,count);
     return count;
 }
 
