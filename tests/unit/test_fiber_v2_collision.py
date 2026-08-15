@@ -10,8 +10,10 @@ import core.vcp.v2.collision as v2_collision
 from core.vcp.fiber_ccd_reference import segment_triangle_distance
 from core.vcp.v2 import (
     EDGE_BATCH, PAIR_BATCH, V2ColliderSnapshot, V2CollisionReason,
-    V2OwnerContact, build_triangle_snapshot, collision_backend_status,
+    V2OwnerContact, build_triangle_snapshot, cached_triangle_snapshot,
+    clear_triangle_snapshot_cache, collision_backend_status,
     collision_free_step, point_triangle_distances, segment_triangle_distances,
+    triangle_snapshot_cache_stats,
     validate_segment_clearance_batch, validate_static_clearance,
 )
 
@@ -43,7 +45,15 @@ class FiberV2CollisionTests(unittest.TestCase):
     def test_packaged_backend_is_available(self):
         status = collision_backend_status()
         self.assertTrue(status.available, status.message)
-        self.assertEqual(status.version, "af_fiber_ccd-1.7")
+        self.assertEqual(status.version, "af_fiber_ccd-1.31")
+
+    def test_persistent_snapshot_cache_reuses_generation(self):
+        clear_triangle_snapshot_cache(); colliders = (_plane(),)
+        first = cached_triangle_snapshot(colliders, ("scene", 1))
+        second = cached_triangle_snapshot(colliders, ("scene", 1))
+        third = cached_triangle_snapshot(colliders, ("scene", 2))
+        self.assertIs(first, second); self.assertIsNot(first, third)
+        self.assertEqual(triangle_snapshot_cache_stats(), {"entries": 2, "hits": 1, "misses": 2})
 
     def test_missing_and_incompatible_library_fail_closed(self):
         missing = collision_backend_status("Z:/missing/af_fiber_ccd.dll")

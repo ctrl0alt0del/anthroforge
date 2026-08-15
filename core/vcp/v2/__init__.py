@@ -43,21 +43,26 @@ from .collision import (
     V2StaticClearance,
     V2TriangleSnapshot,
     build_triangle_snapshot,
+    cached_triangle_snapshot,
+    clear_triangle_snapshot_cache,
     collision_backend_status,
     collision_free_step,
     point_triangle_distances,
     segment_triangle_distances,
     validate_static_clearance,
     validate_segment_clearance_batch,
+    triangle_snapshot_cache_stats,
 )
 from .planner import (
     V2_PLANNER_41_VERSION,
+    V2_PLANNER_42_VERSION,
     V2_PLANNER_VERSION,
     V2PlannerDiagnostics,
     V2PlannerMode,
     V2PlannerResult,
     plan_reference,
     plan_reference_v41,
+    plan_reference_v42,
 )
 
 __all__ = (
@@ -76,9 +81,12 @@ __all__ = (
     "V2SafeStep", "V2StaticClearance", "V2TriangleSnapshot",
     "V2SegmentBatch",
     "build_triangle_snapshot", "collision_backend_status",
+    "cached_triangle_snapshot", "clear_triangle_snapshot_cache",
     "collision_free_step", "point_triangle_distances",
     "segment_triangle_distances", "validate_static_clearance",
     "validate_segment_clearance_batch",
-    "V2_PLANNER_VERSION", "V2_PLANNER_41_VERSION", "V2PlannerDiagnostics",
-    "V2PlannerMode", "V2PlannerResult", "plan_reference", "plan_reference_v41",
+    "triangle_snapshot_cache_stats",
+    "V2_PLANNER_VERSION", "V2_PLANNER_41_VERSION", "V2_PLANNER_42_VERSION",
+    "V2PlannerDiagnostics", "V2PlannerMode", "V2PlannerResult",
+    "plan_reference", "plan_reference_v41", "plan_reference_v42",
 )

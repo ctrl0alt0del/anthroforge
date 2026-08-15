@@ -21,6 +21,9 @@ Thumbs.db
 # JetBrains
 .idea/
 
+# Ticket-isolated Git worktrees
+.worktrees/
+
 # OS junk
 *.log
 *.tmp
@@ -41,3 +44,5 @@ build/
 venv/
 .env/
 artifacts/
+.codex/
+AGENTS.md

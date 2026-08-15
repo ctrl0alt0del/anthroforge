@@ -16,6 +16,7 @@ from .contracts import V2Request, V2Termination, V2Topology
 
 V2_PLANNER_VERSION = "fiber-v2-planner-1"
 V2_PLANNER_41_VERSION = "fiber-v2-planner-1.1"
+V2_PLANNER_42_VERSION = "fiber-v2-planner-1.2"
 _SPARSE_LIMIT = 96
 _DENSE_LIMIT = 240
 _SPARSE_NEIGHBORS = 24
@@ -44,6 +45,8 @@ class V2PlannerDiagnostics:
     frontier_edges: int = 0
     graph_metric_builds: int = 0
     graph_expansions: int = 0
+    chain_groups: int = 0
+    shared_candidates: int = 0
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,8 @@ class _PlannerState:
     frontier_edges: int = 0
     graph_metric_builds: int = 0
     graph_expansions: int = 0
+    chain_groups: int = 0
+    shared_candidates: int = 0
 
 
 @dataclass(frozen=True)
@@ -95,6 +100,11 @@ def plan_reference(request, snapshot=None):
 def plan_reference_v41(request, snapshot=None):
     """Return a Package 4.1 batched-lazy exact-count planner reference."""
     return _plan_reference(request, snapshot, _plan_segments_v41)
+
+
+def plan_reference_v42(request, snapshot=None):
+    """Return a Package 4.2 shared-chain planner reference."""
+    return _plan_reference(request, snapshot, _plan_segments_v42)
 
 
 def _plan_reference(request, snapshot, segment_planner):
@@ -132,6 +142,183 @@ def _plan_segments(state):
 
 def _plan_segments_v41(state):
     return _plan_segments_with(state, _plan_pair_v41)
+
+
+def _plan_segments_v42(state):
+    if _cyclic(state.request):
+        return _plan_segments_v41(state)
+    output = []
+    for first, last, grouped in _ordered_anchor_groups(state.request.anchors):
+        routes = _plan_owner_chain(state, first, last) if grouped else _plan_group_pairs(state, first, last)
+        if routes is None:
+            return None
+        output.extend(routes)
+    return tuple(output)
+
+
+def _ordered_anchor_groups(anchors):
+    groups, first, count = [], 0, len(anchors)
+    while first < count - 1:
+        owner = str(anchors[first].owner_id or ""); last = first + 1
+        while owner and last < count and str(anchors[last].owner_id or "") == owner:
+            last += 1
+        grouped = last - first > 2; last = last - 1 if grouped else first + 1
+        groups.append((first, last, grouped)); first = last
+    return tuple(groups)
+
+
+def _plan_group_pairs(state, first, last):
+    anchors = state.request.anchors; output = []
+    for index in range(first, last):
+        route = _plan_pair_v41(state, anchors[index], anchors[index + 1])
+        if route is None:
+            return None
+        output.append(route)
+    return tuple(output)
+
+
+def _plan_owner_chain(state, first, last):
+    anchors = state.request.anchors[first:last + 1]
+    surface = _surface_owner_chain(state, anchors)
+    if surface is not None:
+        state.chain_groups += 1
+        return surface
+    shared = _shared_chain_candidates(state, anchors); state.chain_groups += 1
+    state.shared_candidates = max(state.shared_candidates, len(shared))
+    output = []
+    for start, end in zip(anchors[:-1], anchors[1:]):
+        route = _plan_chain_pair(state, start, end, shared)
+        if route is None:
+            return None
+        output.append(route)
+    return tuple(output)
+
+
+def _surface_owner_chain(state, anchors):
+    owner = str(anchors[0].owner_id or "")
+    colliders = (item for item in state.request.colliders if item.owner_id == owner)
+    routes = []
+    for collider in colliders:
+        routes.extend(_surface_chain_variants(state, collider, anchors))
+    return min(routes, key=_segments_length) if routes else None
+
+
+def _surface_chain_variants(state, collider, anchors):
+    points = np.asarray(collider.vertices, dtype=np.float64)
+    faces = np.asarray(collider.triangles, dtype=np.int64)
+    if not len(points) or not len(faces):
+        return ()
+    normals, graph, rows = _vertex_normals(points, faces), _mesh_graph(points, faces), []
+    for factor in _SURFACE_FACTORS:
+        rows.extend(_surface_factor_variants(state, points, normals, graph, anchors, factor))
+        if rows:
+            break
+    return tuple(rows)
+
+
+def _surface_factor_variants(state, points, normals, graph, anchors, factor):
+    routes = []
+    for sign in (1.0, -1.0):
+        distance = _radius(state) * factor * sign
+        offset = points + normals * distance
+        lifts = _surface_anchor_lifts(points, normals, anchors, distance)
+        result = _surface_chain_variant(state, offset, graph, anchors, lifts)
+        if result is not None:
+            routes.append(result)
+    return tuple(routes)
+
+
+def _surface_anchor_lifts(points, normals, anchors, distance):
+    rows = []
+    for anchor in anchors:
+        index = int(np.argmin(np.linalg.norm(points - anchor.point, axis=1)))
+        rows.append(np.asarray(anchor.point) + normals[index] * distance)
+    return tuple(rows)
+
+
+def _surface_chain_variant(state, points, graph, anchors, lifts):
+    output = []
+    for index, (start, end) in enumerate(zip(anchors[:-1], anchors[1:])):
+        route = _surface_graph_pair(state, points, graph, start, end, lifts[index:index + 2])
+        if route is None:
+            return None
+        output.append(_SegmentRoute(route, V2PlannerMode.SURFACE))
+    return tuple(output)
+
+
+def _surface_graph_pair(state, surface, graph, start, end, lifts):
+    points = np.vstack((start.point, end.point, *lifts, surface))
+    neighbors = _surface_pair_neighbors(points, graph)
+    state.candidate_nodes = max(state.candidate_nodes, len(points))
+    route = _search_batched_lazy(state, points, points, neighbors, start.owner_id, end.owner_id)
+    if route is None:
+        return None
+    return _shortcut_route(state, route, start.owner_id, end.owner_id)
+
+
+def _surface_pair_neighbors(points, graph):
+    rows = [set((2,)), set((3,)), set((0,)), set((1,)),
+            *(set(value + 4 for value in row) for row in graph)]
+    for endpoint in (0, 1):
+        lift = endpoint + 2
+        nearest = np.argsort(np.linalg.norm(points[4:] - points[lift], axis=1), kind="stable")[:12] + 4
+        for node in nearest:
+            rows[lift].add(int(node)); rows[int(node)].add(lift)
+    return tuple(tuple(sorted(row)) for row in rows)
+
+
+def _segments_length(routes):
+    return sum(_route_length(route.points) for route in routes)
+
+
+def _shared_chain_candidates(state, anchors):
+    rows = [np.asarray(anchor.point) for anchor in anchors]
+    for start, end in zip(anchors[:-1], anchors[1:]):
+        rows.extend(_compatibility_candidates(state, start, end))
+        rows.extend(_roadmap_candidates(state, start, end, True))
+    return _dedupe_global(rows)
+
+
+def _dedupe_global(points):
+    output, seen = [], set()
+    for point in points:
+        value = np.asarray(point, dtype=np.float64); key = tuple(np.round(value, 10))
+        if key not in seen:
+            seen.add(key); output.append(value)
+    return tuple(output)
+
+
+def _plan_chain_pair(state, start, end, shared):
+    if _edge_clear(state, start.point, end.point, start.owner_id, end.owner_id):
+        return _SegmentRoute((start.point, end.point), V2PlannerMode.DIRECT)
+    surface = _surface_route(state, start, end)
+    if surface is not None:
+        return _SegmentRoute(surface, V2PlannerMode.SURFACE)
+    points = _chain_pair_candidates(start, end, shared)
+    route = _search_chain_roadmap(state, points, start.owner_id, end.owner_id)
+    return None if route is None else _SegmentRoute(_shortcut_route(state, route, start.owner_id, end.owner_id), V2PlannerMode.ROADMAP)
+
+
+def _chain_pair_candidates(start, end, shared):
+    endpoints = (np.asarray(start.point), np.asarray(end.point)); rows = []
+    for point in shared:
+        if all(np.linalg.norm(point - endpoint) > 1.0e-10 for endpoint in endpoints):
+            rows.append(point)
+    return (*endpoints, *rows)
+
+
+def _search_chain_roadmap(state, points, start_owner, end_owner):
+    values = np.asarray(points); neighbors = _neighbor_rows_limit(values, 96)
+    return _search_batched_lazy(state, points, values, neighbors, start_owner, end_owner)
+
+
+def _neighbor_rows_limit(points, limit):
+    rows, count = [], len(points)
+    for index in range(count):
+        distances = np.linalg.norm(points - points[index], axis=1)
+        order = [int(value) for value in np.argsort(distances, kind="stable") if value != index]
+        rows.append(tuple(dict.fromkeys((1, 0, *order[:min(limit, count - 1)]))))
+    return tuple(rows)
 
 
 def _plan_segments_with(state, pair_planner):
@@ -916,7 +1103,8 @@ def _diagnostics(state, corridor, started, handoff_started, validation):
                                 state.rejected_edges, len(corridor), pairs, tested,
                                 planner_ms, handoff_ms, state.graph_searches,
                                 state.edge_batches, state.frontier_edges,
-                                state.graph_metric_builds, state.graph_expansions)
+                                state.graph_metric_builds, state.graph_expansions,
+                                state.chain_groups, state.shared_candidates)
 
 
 def _route_length(points):

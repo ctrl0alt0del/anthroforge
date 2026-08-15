@@ -151,4 +151,5 @@ def main():
     _build(record, output)
 
 
-main()
+if __name__ == "__main__":
+    main()

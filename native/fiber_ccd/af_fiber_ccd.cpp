@@ -13,7 +13,11 @@ struct MeshSweep { double safe; int possible, valid, tested, intervals, reason; 
 struct Context { Vec a0, b0, a1, b1, t[3]; double clearance, speed, guard; };
 struct Search { std::vector<std::pair<double, double>> stack; double safe, minimum; int intervals; };
 struct Bounds { double lo[3], hi[3]; int index; };
-struct TriangleSnapshot { std::vector<Bounds> faces; };
+struct BvhNode { Bounds bounds; int left, right, begin, end; };
+struct TriangleSnapshot {
+    std::vector<Vec> vertices; std::vector<int64_t> triangles;
+    std::vector<Bounds> faces; std::vector<BvhNode> nodes;
+};
 
 static Vec add(Vec a, Vec b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 static Vec sub(Vec a, Vec b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
@@ -134,7 +138,7 @@ static Context context(const double* start, const double* end, const double* tri
 
 AF_EXPORT int af_fiber_ccd_version() { return 1; }
 
-AF_EXPORT int af_fiber_ccd_capabilities() { return 7; }
+AF_EXPORT int af_fiber_ccd_capabilities() { return 31; }
 
 AF_EXPORT int af_segment_triangle_distances(const double* segments, const double* triangles,
                                              int count, double* distances) {
@@ -253,50 +257,136 @@ static bool bounds_overlap(const Bounds& moving, const Bounds& face) {
     return true;
 }
 
-static std::vector<Bounds> sorted_faces(const double* vertices, const int64_t* triangles, int count) {
-    std::vector<Bounds> faces; faces.reserve(count);
-    for (int i=0; i<count; ++i) faces.push_back(face_bounds(vertices,triangles+3*i,i));
-    std::sort(faces.begin(),faces.end(),[](const Bounds& a,const Bounds& b){return a.lo[0]<b.lo[0];});
-    return faces;
+static Bounds empty_bounds() {
+    Bounds value{};
+    for (int a=0; a<3; ++a) value.lo[a]=INFINITY,value.hi[a]=-INFINITY;
+    return value;
 }
 
-static int emit_candidates(const Bounds& moving, const std::vector<Bounds>& faces, int edge, int64_t* output, int count) {
-    for (const Bounds& face: faces) {
-        if (face.lo[0] > moving.hi[0]) break;
-        if (!bounds_overlap(moving,face)) continue;
-        if (output) output[2*count]=edge,output[2*count+1]=face.index; ++count;
-    }
+static Bounds merge_bounds(Bounds value, const Bounds& other) {
+    for (int a=0; a<3; ++a) value.lo[a]=std::min(value.lo[a],other.lo[a]),value.hi[a]=std::max(value.hi[a],other.hi[a]);
+    return value;
+}
+
+static int longest_axis(const Bounds& value) {
+    double x=value.hi[0]-value.lo[0],y=value.hi[1]-value.lo[1],z=value.hi[2]-value.lo[2];
+    return x>=y && x>=z ? 0 : y>=z ? 1 : 2;
+}
+
+static int build_bvh(TriangleSnapshot& snapshot, int begin, int end) {
+    Bounds bounds=empty_bounds(); for (int i=begin; i<end; ++i) bounds=merge_bounds(bounds,snapshot.faces[i]);
+    int node=int(snapshot.nodes.size()); snapshot.nodes.push_back({bounds,-1,-1,begin,end});
+    if (end-begin<=8) return node;
+    int axis=longest_axis(bounds),middle=(begin+end)/2;
+    std::stable_sort(snapshot.faces.begin()+begin,snapshot.faces.begin()+end,[axis](const Bounds& a,const Bounds& b){
+        double ca=a.lo[axis]+a.hi[axis],cb=b.lo[axis]+b.hi[axis]; return ca==cb ? a.index<b.index : ca<cb; });
+    snapshot.nodes[node].left=build_bvh(snapshot,begin,middle); snapshot.nodes[node].right=build_bvh(snapshot,middle,end);
+    return node;
+}
+
+static void collect_candidates(const TriangleSnapshot& snapshot, int node, const Bounds& moving, std::vector<int>& hits) {
+    const BvhNode& value=snapshot.nodes[node]; if (!bounds_overlap(moving,value.bounds)) return;
+    if (value.left>=0) { collect_candidates(snapshot,value.left,moving,hits); collect_candidates(snapshot,value.right,moving,hits); return; }
+    for (int i=value.begin; i<value.end; ++i) if (bounds_overlap(moving,snapshot.faces[i])) hits.push_back(snapshot.faces[i].index);
+}
+
+static int emit_candidates(const TriangleSnapshot& snapshot, const Bounds& moving, int edge, int64_t* output, int count) {
+    std::vector<int> hits; if (!snapshot.nodes.empty()) collect_candidates(snapshot,0,moving,hits);
+    std::sort(hits.begin(),hits.end());
+    for (int face: hits) { if (output) output[2*count]=edge,output[2*count+1]=face; ++count; }
     return count;
+}
+
+static TriangleSnapshot* create_snapshot(const double* vertices, const int64_t* triangles, int count) {
+    auto* snapshot=new TriangleSnapshot(); int maximum=-1;
+    snapshot->triangles.assign(triangles,triangles+3*count);
+    for (int i=0; i<3*count; ++i) maximum=std::max(maximum,int(triangles[i]));
+    snapshot->vertices.reserve(maximum+1); for (int i=0; i<=maximum; ++i) snapshot->vertices.push_back(load3(vertices+3*i));
+    snapshot->faces.reserve(count); for (int i=0; i<count; ++i) snapshot->faces.push_back(face_bounds(vertices,triangles+3*i,i));
+    if (count) build_bvh(*snapshot,0,count); return snapshot;
 }
 
 AF_EXPORT void* af_triangle_snapshot_create(const double* vertices, const int64_t* triangles,
                                              int triangle_count) {
     if (!vertices || !triangles || triangle_count < 0) return nullptr;
-    return new TriangleSnapshot{sorted_faces(vertices,triangles,triangle_count)};
+    return create_snapshot(vertices,triangles,triangle_count);
 }
 
 AF_EXPORT void af_triangle_snapshot_destroy(void* handle) {
     delete static_cast<TriangleSnapshot*>(handle);
 }
 
+static void snapshot_face(const TriangleSnapshot& snapshot, int index, Vec* face) {
+    for (int i=0; i<3; ++i) face[i]=snapshot.vertices[size_t(snapshot.triangles[size_t(3*index+i)])];
+}
+
+AF_EXPORT int af_snapshot_segment_triangle_distances(void* handle, const double* segments,
+                                                       const int64_t* faces, int count, double* distances) {
+    if (!handle || !segments || !faces || !distances || count < 0) return 1;
+    const auto& snapshot=*static_cast<TriangleSnapshot*>(handle);
+    for (int i=0; i<count; ++i) {
+        int face_index=int(faces[i]); if (face_index<0 || face_index*3+2>=int(snapshot.triangles.size())) return 1;
+        Vec face[3]; snapshot_face(snapshot,face_index,face);
+        distances[i]=segment_triangle(load3(segments+6*i),load3(segments+6*i+3),face);
+    }
+    return 0;
+}
+
+static bool ray_hits_bounds(Vec point, Vec direction, const Bounds& bounds) {
+    double low=0.0,high=INFINITY; const double* p=&point.x; const double* d=&direction.x;
+    for (int axis=0; axis<3; ++axis) {
+        double first=(bounds.lo[axis]-p[axis])/d[axis],last=(bounds.hi[axis]-p[axis])/d[axis];
+        if (first>last) std::swap(first,last); low=std::max(low,first); high=std::min(high,last);
+        if (high<low) return false;
+    }
+    return high>eps();
+}
+
+static int snapshot_ray_hits(const TriangleSnapshot& snapshot, Vec point, Vec direction, int first, int count) {
+    std::vector<int> stack{0}; int hits=0,limit=first+count;
+    while (!stack.empty()) {
+        int index=stack.back(); stack.pop_back(); const auto& node=snapshot.nodes[index];
+        if (!ray_hits_bounds(point,direction,node.bounds)) continue;
+        if (node.left>=0) { stack.push_back(node.left); stack.push_back(node.right); continue; }
+        for (int i=node.begin; i<node.end; ++i) if (snapshot.faces[i].index>=first && snapshot.faces[i].index<limit) {
+            Vec face[3]; snapshot_face(snapshot,snapshot.faces[i].index,face); hits+=ray_hits_triangle(point,direction,face); }
+    }
+    return hits;
+}
+
+static bool snapshot_inside(const TriangleSnapshot& snapshot, Vec point, int first, int count) {
+    Vec directions[3]={{1.0,0.3713906763541037,0.6941734212143177},
+                       {0.2191374213412347,1.0,0.5379137453123419},
+                       {0.6123419734213147,0.2931742134123471,1.0}};
+    int votes=0; for (Vec direction: directions) votes+=snapshot_ray_hits(snapshot,point,direction,first,count)%2;
+    return votes>=2;
+}
+
+AF_EXPORT int af_snapshot_points_inside_range(void* handle, const double* points, int point_count,
+                                                int face_start, int face_count, int* inside) {
+    if (!handle || !points || !inside || point_count<0 || face_start<0 || face_count<0) return 1;
+    const auto& snapshot=*static_cast<TriangleSnapshot*>(handle);
+    if (face_start+face_count>int(snapshot.triangles.size()/3)) return 1;
+    for (int i=0; i<point_count; ++i) inside[i]=snapshot_inside(snapshot,load3(points+3*i),face_start,face_count);
+    return 0;
+}
+
 AF_EXPORT int af_snapshot_candidate_pairs(void* handle, const double* start, const double* end,
                                            const int64_t* edges, int edge_count, double padding,
                                            int64_t* output) {
     if (!handle || !start || !end || !edges || edge_count < 0 || padding < 0.0) return -1;
-    const auto& faces=static_cast<TriangleSnapshot*>(handle)->faces; int count=0;
+    const auto& snapshot=*static_cast<TriangleSnapshot*>(handle); int count=0;
     for (int e=0; e<edge_count; ++e)
-        count=emit_candidates(moving_bounds(start,end,edges+2*e,padding),faces,e,output,count);
+        count=emit_candidates(snapshot,moving_bounds(start,end,edges+2*e,padding),e,output,count);
     return count;
 }
 
 AF_EXPORT int af_candidate_pairs(const double* start, const double* end, const int64_t* edges,
                                   int edge_count, const double* vertices, const int64_t* triangles,
                                   int triangle_count, double padding, int64_t* output) {
-    int count=0;
-    std::vector<Bounds> faces=sorted_faces(vertices,triangles,triangle_count);
-    for (int e=0; e<edge_count; ++e) {
-        Bounds moving=moving_bounds(start,end,edges+2*e,padding);
-        count=emit_candidates(moving,faces,e,output,count);
-    }
+    if (!vertices || !triangles || triangle_count < 0) return -1;
+    TriangleSnapshot* snapshot=create_snapshot(vertices,triangles,triangle_count); int count=0;
+    for (int e=0; e<edge_count; ++e) count=emit_candidates(*snapshot,moving_bounds(start,end,edges+2*e,padding),e,output,count);
+    delete snapshot;
     return count;
 }

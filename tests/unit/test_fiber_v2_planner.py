@@ -9,7 +9,7 @@ from core.vcp.v2 import (
     V2Anchor, V2AnchorRole, V2ColliderSnapshot, V2CollisionPolicy,
     V2PlannerMode, V2Quality, V2Request, V2ResolvedTolerances, V2Settings,
     V2Termination, V2Topology, build_triangle_snapshot, plan_reference,
-    plan_reference_v41, validate_static_clearance,
+    plan_reference_v41, plan_reference_v42, validate_static_clearance,
 )
 
 
@@ -155,6 +155,21 @@ class FiberV2PlannerTests(unittest.TestCase):
                                            0.05, first.contacts, slack=0.0005)
         self.assertEqual((first.reference, first.corridor), (second.reference, second.corridor))
         self.assertTrue(result.valid)
+
+    def test_v42_grouped_surface_chain_is_safe_and_deterministic(self):
+        collider = _sphere(); points = _angle_points((0.0, 0.12, 0.24, 0.36))
+        request = _request(_anchors(points, "SPHERE"), (collider,), 64, 0.02)
+        first, second = plan_reference_v42(request), plan_reference_v42(request)
+        checked = validate_static_clearance(first.reference, build_triangle_snapshot((collider,)),
+                                            0.02, first.contacts, slack=0.0002)
+        self.assertEqual((first.termination, first.reference), (V2Termination.CONVERGED, second.reference))
+        self.assertTrue(checked.valid); self.assertEqual(first.diagnostics.chain_groups, 1)
+
+    def test_v42_unrelated_obstacle_preserves_v41_result(self):
+        request = _request(_anchors(((-1, 0, 0), (1, 0, 0))), (_box(),), 24, 0.05)
+        old, new = plan_reference_v41(request), plan_reference_v42(request)
+        self.assertEqual((old.termination, old.mode, old.reference),
+                         (new.termination, new.mode, new.reference))
 
 
 if __name__ == "__main__":

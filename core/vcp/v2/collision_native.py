@@ -7,7 +7,7 @@ import numpy as np
 
 
 V2_NATIVE_ABI = 1
-V2_NATIVE_CAPABILITIES = 7
+V2_NATIVE_CAPABILITIES = 31
 
 
 class _NativeMeshSweep(Structure):
@@ -56,6 +56,12 @@ def _configure_snapshot_calls(library):
     library.af_snapshot_candidate_pairs.argtypes = [c_void_p, double, double, integer,
                                                      c_int, c_double, integer]
     library.af_snapshot_candidate_pairs.restype = c_int
+    library.af_snapshot_segment_triangle_distances.argtypes = [c_void_p, double, integer,
+                                                                c_int, double]
+    library.af_snapshot_segment_triangle_distances.restype = c_int
+    library.af_snapshot_points_inside_range.argtypes = [c_void_p, double, c_int, c_int,
+                                                         c_int, POINTER(c_int)]
+    library.af_snapshot_points_inside_range.restype = c_int
 
 
 def load_native(path=None):
@@ -137,12 +143,31 @@ def native_distances(segments, triangles, path=None):
     return output
 
 
+def native_snapshot_distances(snapshot, segments, faces):
+    output = np.empty(len(segments), dtype=np.float64)
+    code = snapshot.library.af_snapshot_segment_triangle_distances(
+        snapshot.handle, _double(segments), _integer(faces), len(segments), _double(output))
+    if code:
+        raise ValueError("invalid native snapshot-distance arguments")
+    return output
+
+
 def native_inside(points, vertices, triangles, path=None):
     output = np.empty(len(points), dtype=np.int32)
     args = (_double(points), len(points), _double(vertices), _integer(triangles),
             len(triangles), output.ctypes.data_as(POINTER(c_int)))
     if load_native(path).af_points_inside_closed_mesh(*args):
         raise ValueError("invalid native containment arguments")
+    return output.astype(bool)
+
+
+def native_snapshot_inside(snapshot, points, face_start, face_count):
+    output = np.empty(len(points), dtype=np.int32)
+    code = snapshot.library.af_snapshot_points_inside_range(
+        snapshot.handle, _double(points), len(points), int(face_start), int(face_count),
+        output.ctypes.data_as(POINTER(c_int)))
+    if code:
+        raise ValueError("invalid native snapshot-containment arguments")
     return output.astype(bool)
 
 

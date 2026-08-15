@@ -1,5 +1,6 @@
 """Standalone, fail-closed collision backend for Fiber Solver V2."""
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from enum import Enum
 
@@ -7,7 +8,7 @@ import numpy as np
 
 from .collision_native import (
     native_candidates, native_distances, native_inside, native_safe_step, native_snapshot,
-    native_status,
+    native_snapshot_distances, native_snapshot_inside, native_status,
 )
 from .contracts import V2ColliderSnapshot
 
@@ -94,6 +95,44 @@ class V2SegmentBatch:
     tested_pairs: int
     contained_endpoints: tuple = ()
     backend_version: str = ""
+
+
+class V2CollisionSnapshotCache:
+    def __init__(self, max_entries=8):
+        self.max_entries = max(1, int(max_entries)); self._rows = OrderedDict()
+        self.hits = 0; self.misses = 0
+
+    def get_or_build(self, colliders, generation):
+        key = tuple(generation or ())
+        if not key:
+            raise ValueError("persistent collision snapshots require a generation key")
+        if key in self._rows:
+            self.hits += 1; self._rows.move_to_end(key); return self._rows[key]
+        self.misses += 1; self._rows[key] = build_triangle_snapshot(colliders)
+        while len(self._rows) > self.max_entries:
+            self._rows.popitem(last=False)
+        return self._rows[key]
+
+    def clear(self):
+        self._rows.clear(); self.hits = 0; self.misses = 0
+
+    def stats(self):
+        return {"entries": len(self._rows), "hits": self.hits, "misses": self.misses}
+
+
+_SNAPSHOT_CACHE = V2CollisionSnapshotCache()
+
+
+def cached_triangle_snapshot(colliders, generation):
+    return _SNAPSHOT_CACHE.get_or_build(tuple(colliders or ()), generation)
+
+
+def clear_triangle_snapshot_cache():
+    _SNAPSHOT_CACHE.clear()
+
+
+def triangle_snapshot_cache_stats():
+    return _SNAPSHOT_CACHE.stats()
 
 
 def collision_backend_status(path=None):
@@ -214,8 +253,8 @@ def _segment_batch_owners(owners, count):
 
 def _segment_batch(points, edges, snapshot, owners, span, threshold, path, version, cache):
     pairs = _candidate_pairs(points, points, edges, snapshot, threshold, path)
-    segments, triangles, keys = _segment_batch_rows(points, edges, snapshot, owners, span, pairs)
-    distances = _batch_distances(segments, triangles, path)
+    segments, faces, keys = _segment_batch_rows(points, edges, snapshot, owners, span, pairs)
+    distances = _batch_face_distances(segments, faces, snapshot, path)
     clear = np.ones(len(edges), dtype=bool)
     for distance, edge in zip(distances, keys):
         clear[edge] &= distance >= threshold
@@ -248,26 +287,34 @@ def _plain_segment_rows(points, edges, snapshot, pairs):
         return _empty_segment_rows()
     edge_indices, face_indices = pairs[:, 0], pairs[:, 1]
     segments = points[edges[edge_indices]]
-    triangles = snapshot.vertices[snapshot.triangles[face_indices]]
-    return np.ascontiguousarray(segments), np.ascontiguousarray(triangles), edge_indices.copy()
+    return np.ascontiguousarray(segments), face_indices.copy(), edge_indices.copy()
 
 
 def _trimmed_segment_rows(points, edges, snapshot, owners, span, pairs):
-    segments, triangles, keys = [], [], []
+    segments, faces, keys = [], [], []
     for edge, face in pairs:
         owner = snapshot.face_owners[int(face)]
         for low, high in _batch_intervals(points[edges[edge]], owner, owners[int(edge)], span):
             segments.append(_subsegment(points[edges[edge]], low, high))
-            triangles.append(snapshot.vertices[snapshot.triangles[face]])
+            faces.append(int(face))
             keys.append(int(edge))
-    shapes = ((-1, 2, 3), (-1, 3, 3), (-1,))
-    return tuple(np.asarray(value, dtype=np.float64 if index < 2 else np.int64).reshape(shapes[index])
-                 for index, value in enumerate((segments, triangles, keys)))
+    return (np.asarray(segments, dtype=np.float64).reshape((-1, 2, 3)),
+            np.asarray(faces, dtype=np.int64), np.asarray(keys, dtype=np.int64))
 
 
 def _empty_segment_rows():
     return (np.empty((0, 2, 3), dtype=np.float64),
-            np.empty((0, 3, 3), dtype=np.float64), np.empty(0, dtype=np.int64))
+            np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64))
+
+
+def _batch_face_distances(segments, faces, snapshot, path):
+    if not len(segments):
+        return ()
+    lines = np.ascontiguousarray(segments, dtype=np.float64); indices = np.ascontiguousarray(faces)
+    if path is None and snapshot.native is not None:
+        return native_snapshot_distances(snapshot.native, lines, indices)
+    triangles = snapshot.vertices[snapshot.triangles[indices]]
+    return _batch_distances(lines, triangles, path)
 
 
 def _batch_intervals(edge, collider_owner, owners, span):
@@ -404,22 +451,29 @@ def _node_rows(points, snapshot, contacts, threshold, path):
     allowed = [(int(node), int(face)) for node, face in pairs
                if not _node_exempt(int(node), snapshot.face_owners[int(face)], contacts)]
     segments = [(points[node], points[node]) for node, _face in allowed]
-    faces = [snapshot.vertices[snapshot.triangles[face]] for _node, face in allowed]
-    distances, keys, candidates = _distance_rows(segments, faces, allowed, len(pairs), path)
+    faces = [face for _node, face in allowed]
+    distances, keys, candidates = _distance_face_rows(segments, faces, allowed, len(pairs), snapshot, path)
     contained = _contained_nodes(points, snapshot, contacts, path)
     return distances, keys, candidates, contained
 
 
 def _edge_rows(points, edges, snapshot, contacts, threshold, path):
-    pairs = _candidate_pairs(points, points, edges, snapshot, threshold, path)
-    segments, faces, keys = [], [], []
+    pairs = _candidate_pairs(points, points, edges, snapshot, threshold, path); segments, faces, keys = [], [], []
     for edge, face in pairs:
         owner = snapshot.face_owners[int(face)]
         for start, end in _tested_intervals(int(edge), owner, contacts):
             segments.append(_subsegment(points[edges[edge]], start, end))
-            faces.append(snapshot.vertices[snapshot.triangles[face]])
+            faces.append(int(face))
             keys.append((int(edge), int(face)))
-    return _distance_rows(segments, faces, keys, len(pairs), path)
+    return _distance_face_rows(segments, faces, keys, len(pairs), snapshot, path)
+
+
+def _distance_face_rows(segments, faces, keys, candidates, snapshot, path):
+    if not segments:
+        return (), (), int(candidates)
+    lines = np.ascontiguousarray(segments, dtype=np.float64)
+    distances = _batch_face_distances(lines, np.asarray(faces, dtype=np.int64), snapshot, path)
+    return tuple(float(value) for value in distances), tuple(keys), int(candidates)
 
 
 def _distance_rows(segments, triangles, keys, candidates, path):
@@ -455,8 +509,10 @@ def _inside_range(points, indices, snapshot, row, path):
     output = []
     for first in range(0, len(indices), PAIR_BATCH):
         batch = np.asarray(indices[first:first + PAIR_BATCH], dtype=np.int64)
-        inside = native_inside(np.ascontiguousarray(points[batch]), vertices,
-                               np.ascontiguousarray(triangles), path)
+        values = np.ascontiguousarray(points[batch])
+        inside = (native_snapshot_inside(snapshot.native, values, face_start, face_count)
+                  if path is None and snapshot.native is not None else
+                  native_inside(values, vertices, np.ascontiguousarray(triangles), path))
         output.extend(int(index) for index, value in zip(batch, inside) if value)
     return output
 

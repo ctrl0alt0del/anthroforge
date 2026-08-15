@@ -57,7 +57,8 @@ class FiberCacheLifecycleTests(unittest.TestCase):
     def test_invalidation_dispatches_every_cache_layer(self):
         scene, root = object(), object()
         targets = ("_cancel_refinements", "_clear_solver_cache", "clear_factor_cache",
-                   "clear_runtime_context_cache", "clear_scene_cache", "clear_geometry_generations")
+                   "clear_triangle_snapshot_cache", "clear_runtime_context_cache",
+                   "clear_scene_cache", "clear_geometry_generations")
         patches = [patch.object(lifecycle, name) for name in targets]
         mocks = [item.start() for item in patches]
         self.addCleanup(lambda: [item.stop() for item in patches])
