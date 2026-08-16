@@ -1,7 +1,7 @@
 """Standalone, fail-closed collision backend for Fiber Solver V2."""
 
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 import numpy as np
@@ -89,6 +89,17 @@ class V2SafeStep:
     backend_version: str = ""
 
 
+@dataclass(frozen=True)
+class V2CollisionWorkload:
+    candidate_pairs: int
+    edge_count: int
+    pair_density: float
+    sampled_pairs: int = 0
+    excluded_pairs: int = 0
+    exclusion_ratio: float = 0.0
+    certificate_eligible: bool = False
+
+
 @dataclass
 class V2SweepPairCache:
     key: tuple = ()
@@ -115,6 +126,38 @@ class V2SweepPairCache:
     def note(self, pair):
         if pair is not None:
             self.priority = tuple(int(value) for value in pair)
+
+
+@dataclass
+class V2DistanceCertificateCache:
+    bounds: dict = field(default_factory=dict)
+    hits: int = 0
+    refreshes: int = 0
+    excluded: int = 0
+
+    def classify(self, keys, starts, ends, faces, threshold, path=None):
+        motions = _row_motions(starts, ends)
+        known = np.asarray([self.bounds.get(key, -1.0) for key in keys])
+        safe = known - float(threshold) > motions
+        self.hits += int(np.count_nonzero(safe))
+        refresh = np.flatnonzero(~safe); self._refresh(refresh, keys, starts, faces, path)
+        refreshed = np.asarray([self.bounds[keys[int(index)]] for index in refresh])
+        safe[refresh] = refreshed - float(threshold) > motions[refresh]
+        self.excluded += int(np.count_nonzero(safe)); return np.flatnonzero(~safe)
+
+    def _refresh(self, indices, keys, starts, faces, path):
+        if not len(indices):
+            return
+        values = native_distances(starts[indices], faces[indices], path)
+        for index, distance in zip(indices, values):
+            self.bounds[keys[int(index)]] = float(distance)
+        self.refreshes += len(indices)
+
+    def advance(self, edges, source, target):
+        motion = np.linalg.norm(np.asarray(target) - source, axis=1)
+        for key, value in tuple(self.bounds.items()):
+            first, second = edges[int(key[0])]
+            self.bounds[key] = max(0.0, float(value) - max(motion[first], motion[second]))
 
 
 @dataclass(frozen=True)
@@ -352,7 +395,7 @@ def validate_static_clearance(points, snapshot, clearance, contacts=(), cyclic=F
 def collision_free_step(start, end, snapshot, clearance, contacts=(), cyclic=False,
                         slack=0.0, backend_path=None, time_tolerance=1.0e-5,
                         interval_budget=262143, pair_cache=None,
-                        assume_initial_valid=False, pair_envelope=None):
+                        assume_initial_valid=False, pair_envelope=None, distance_cache=None):
     status = collision_backend_status(backend_path)
     if not status.available:
         return _unavailable_sweep(status)
@@ -363,7 +406,36 @@ def collision_free_step(start, end, snapshot, clearance, contacts=(), cyclic=Fal
         return _invalid_start(initial, status.version)
     return _sweep(source, target, edges, snapshot, contacts, _threshold(clearance, slack),
                   time_tolerance, interval_budget, backend_path, status.version,
-                  pair_cache, pair_envelope)
+                  pair_cache, pair_envelope, distance_cache)
+
+
+def probe_collision_workload(start, end, snapshot, clearance, contacts=(), cyclic=False,
+                             slack=0.0, pair_cache=None, distance_cache=None,
+                             minimum_pairs=256, minimum_density=4.0, sample_limit=128):
+    source, target = _point_pair(start, end); edges = _chain_edges(len(source), cyclic)
+    threshold = _threshold(clearance, slack); envelope = (source, target)
+    pairs = _cached_candidate_pairs(envelope, edges, snapshot, threshold, None, pair_cache)
+    density = len(pairs) / max(1, len(edges)); eligible = _probe_eligible(len(pairs), density, minimum_pairs, minimum_density)
+    sampled, excluded = _probe_certificates(source, target, edges, snapshot, contacts,
+                                             pairs, threshold, sample_limit, distance_cache) if eligible else (0, 0)
+    ratio = excluded / sampled if sampled else 0.0
+    return V2CollisionWorkload(len(pairs), len(edges), density, sampled, excluded, ratio, eligible)
+
+
+def _probe_eligible(pairs, density, minimum, minimum_density):
+    return int(pairs) >= int(minimum) and float(density) >= float(minimum_density)
+
+
+def _probe_certificates(source, target, edges, snapshot, contacts, pairs, threshold, limit, cache):
+    if int(limit) <= 0:
+        return 0, 0
+    rows = _certificate_row_values(source, target, edges, snapshot, contacts, pairs, max(0, int(limit)))
+    starts, ends, faces, _keys, certificates = _certificate_arrays(rows)
+    if not len(starts):
+        return 0, 0
+    active = cache or V2DistanceCertificateCache(); keep = active.classify(
+        certificates, starts, ends, faces, threshold)
+    return len(starts), len(starts) - len(keep)
 
 
 def segment_triangle_distances(segments, triangles, backend_path=None):
@@ -720,10 +792,11 @@ def _static_result(nodes, edges, threshold, version):
 
 
 def _sweep(source, target, edges, snapshot, contacts, clearance, tolerance, budget, path, version,
-           pair_cache=None, pair_envelope=None):
+           pair_cache=None, pair_envelope=None, distance_cache=None):
     envelope = pair_envelope or (source, target)
     pairs = _cached_candidate_pairs(envelope, edges, snapshot, clearance, path, pair_cache)
-    starts, ends, faces, keys = _sweep_rows(source, target, edges, snapshot, contacts, pairs)
+    starts, ends, faces, keys = _certified_sweep_rows(
+        source, target, edges, snapshot, contacts, pairs, clearance, path, distance_cache)
     state = [1.0, False, True, 0, 0, "CLEAR"]
     for first in range(0, len(starts), PAIR_BATCH):
         limiting = _advance_sweep(state, starts[first:first + PAIR_BATCH], ends[first:first + PAIR_BATCH],
@@ -733,6 +806,42 @@ def _sweep(source, target, edges, snapshot, contacts, clearance, tolerance, budg
         if not state[2] or state[5] == "BUDGET_EXHAUSTED":
             break
     return _sweep_result(state, len(pairs), min(EDGE_BATCH, len(edges)), min(PAIR_BATCH, len(starts)), version)
+
+
+def _certified_sweep_rows(source, target, edges, snapshot, contacts, pairs, threshold, path, cache):
+    if cache is None:
+        return _sweep_rows(source, target, edges, snapshot, contacts, pairs)
+    rows = _certificate_row_values(source, target, edges, snapshot, contacts, pairs)
+    starts, ends, faces, keys, certificates = _certificate_arrays(rows)
+    keep = cache.classify(certificates, starts, ends, faces, threshold, path)
+    return starts[keep], ends[keep], faces[keep], tuple(keys[index] for index in keep)
+
+
+def _certificate_row_values(source, target, edges, snapshot, contacts, pairs, limit=None):
+    rows = []
+    for edge, face in pairs:
+        owner, nodes = snapshot.face_owners[int(face)], edges[int(edge)]
+        for low, high in _tested_intervals(int(edge), owner, contacts):
+            start = _subsegment(source[nodes], low, high); end = _subsegment(target[nodes], low, high)
+            rows.append((start, end, snapshot.vertices[snapshot.triangles[face]],
+                         (int(edge), int(face)), (int(edge), int(face), float(low), float(high))))
+            if limit is not None and len(rows) >= limit:
+                return rows
+    return rows
+
+
+def _certificate_arrays(rows):
+    starts = _row_array(rows, 0, (-1, 2, 3)); ends = _row_array(rows, 1, (-1, 2, 3))
+    faces = _row_array(rows, 2, (-1, 3, 3)); keys = tuple(row[3] for row in rows)
+    return starts, ends, faces, keys, tuple(row[4] for row in rows)
+
+
+def _row_array(rows, index, shape):
+    return np.ascontiguousarray([row[index] for row in rows], dtype=np.float64).reshape(shape)
+
+
+def _row_motions(starts, ends):
+    return np.max(np.linalg.norm(np.asarray(ends) - starts, axis=2), axis=1)
 
 
 def _cached_candidate_pairs(envelope, edges, snapshot, padding, path, cache):

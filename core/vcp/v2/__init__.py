@@ -39,6 +39,8 @@ from .collision import (
     V2_COLLISION_VERSION,
     V2BackendStatus,
     V2CollisionReason,
+    V2CollisionWorkload,
+    V2DistanceCertificateCache,
     V2OwnerContact,
     V2NativeCollisionWorld,
     V2SafeStep,
@@ -54,6 +56,7 @@ from .collision import (
     collision_backend_status,
     collision_free_step,
     point_triangle_distances,
+    probe_collision_workload,
     segment_triangle_distances,
     validate_static_clearance,
     validate_segment_clearance_batch,
@@ -81,6 +84,8 @@ from .solver import (
     solve_package5,
     solve_package51,
 )
+from .solver_p6 import V2_SOLVER_P6_VERSION, V2Package6Trace, solve_package6
+from .solver_p61 import V2_SOLVER_P61_VERSION, V2Package61Trace, solve_package61
 
 __all__ = (
     "V2_CONTRACT_VERSION", "V2_ENGINE_VERSION", "V2Anchor",
@@ -94,13 +99,13 @@ __all__ = (
     "clear_structural_cache", "solve_structural", "structural_cache_stats",
     "structural_energy", "structural_gradient", "structural_stationarity",
     "EDGE_BATCH", "PAIR_BATCH", "V2_COLLISION_VERSION",
-    "V2BackendStatus", "V2CollisionReason", "V2OwnerContact", "V2NativeCollisionWorld",
+    "V2BackendStatus", "V2CollisionReason", "V2CollisionWorkload", "V2DistanceCertificateCache", "V2OwnerContact", "V2NativeCollisionWorld",
     "V2SafeStep", "V2StaticClearance", "V2TriangleSnapshot",
     "V2SegmentBatch",
     "build_triangle_snapshot", "build_native_collision_world", "collision_backend_status",
     "cached_native_collision_world", "clear_native_collision_world_cache",
     "cached_triangle_snapshot", "clear_triangle_snapshot_cache",
-    "collision_free_step", "point_triangle_distances",
+    "collision_free_step", "point_triangle_distances", "probe_collision_workload",
     "segment_triangle_distances", "validate_static_clearance",
     "validate_segment_clearance_batch",
     "triangle_snapshot_cache_stats",
@@ -109,4 +114,6 @@ __all__ = (
     "plan_reference", "plan_reference_v41", "plan_reference_v42", "plan_reference_v43",
     "DEFAULT_CONTACT_WEIGHT", "V2_SOLVER_P5_VERSION", "V2_SOLVER_P51_VERSION",
     "V2Package5Result", "V2Package5Trace", "solve_package5", "solve_package51",
+    "V2_SOLVER_P6_VERSION", "V2Package6Trace", "solve_package6",
+    "V2_SOLVER_P61_VERSION", "V2Package61Trace", "solve_package61",
 )

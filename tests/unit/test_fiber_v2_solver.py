@@ -2,11 +2,14 @@ import ast
 from dataclasses import replace
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
-from core.vcp.v2 import (V2Termination, build_triangle_snapshot, solve_package5, solve_package51,
+from core.vcp.v2 import (V2Termination, build_triangle_snapshot, solve_package5, solve_package51, solve_package6,
+                         solve_package61,
                          solve_structural, validate_static_clearance)
+import core.vcp.v2.solver_p61 as p61
 from tests.unit.test_fiber_v2_planner import (_anchors, _box, _request, _sphere,
                                               _angle_points)
 
@@ -33,6 +36,42 @@ def _clearance(result, request):
 
 
 class FiberV2Package5Tests(unittest.TestCase):
+    def test_package61_light_workload_preserves_package51_fast_path(self):
+        request = _bent_request(); expected = solve_package51(request); result = solve_package61(request)
+        self.assertEqual(result.trace.selected_mode, "P51")
+        self.assertEqual(result.result.points, expected.result.points)
+        self.assertEqual(result.result.termination, expected.result.termination)
+
+    def test_package61_forced_dynamic_path_is_safe_and_deterministic(self):
+        request = _box_request()
+        with patch.object(p61, "MINIMUM_PAIRS", 0), patch.object(p61, "MINIMUM_DENSITY", 0.0), patch.object(p61, "MINIMUM_EXCLUSION", 0.0), patch.object(p61, "MINIMUM_COMPRESSION", 0.0):
+            first, second = solve_package61(request), solve_package61(request)
+        self.assertTrue(first.result.validated); self.assertTrue(_clearance(first, request).valid)
+        self.assertEqual(first.result.points, second.result.points)
+        self.assertTrue(first.trace.certificates_enabled); self.assertGreaterEqual(first.trace.dispatch_ms, 0.0)
+
+    def test_package61_rule_trace_is_auditable(self):
+        result = solve_package61(_box_request()); trace = result.trace
+        self.assertGreaterEqual(trace.dispatch_candidates, 0); self.assertGreaterEqual(trace.dispatch_density, 0.0)
+        self.assertGreaterEqual(trace.dispatch_exclusion_ratio, 0.0)
+        self.assertIn(trace.selected_mode, {"P51", "P61_CERTIFICATES", "P61_TRUST"})
+
+    def test_package6_is_deterministic_and_independently_safe(self):
+        request = _box_request(); first, second = solve_package6(request), solve_package6(request)
+        self.assertEqual(first.result.points, second.result.points)
+        self.assertTrue(first.result.validated); self.assertTrue(_clearance(first, request).valid)
+        self.assertEqual(first.trace.trust_radii, second.trace.trust_radii)
+
+    def test_package6_uses_one_ccd_path_per_trial(self):
+        result = solve_package6(_box_request())
+        self.assertEqual(result.trace.curved_waypoints, 0)
+        self.assertLessEqual(len(result.trace.ccd_fractions), result.trace.trials)
+
+    def test_package6_clear_fixed_point_is_not_trust_dependent(self):
+        request = _bent_request(); result = solve_package6(request); expected = solve_package5(request)
+        self.assertEqual(result.result.termination, V2Termination.CONVERGED)
+        np.testing.assert_allclose(result.result.points, expected.result.points, atol=2.0e-12)
+
     def test_package51_runs_only_final_static_validation(self):
         result = solve_package51(_sphere_request())
         self.assertTrue(result.result.validated); self.assertEqual(result.trace.static_validations, 1)

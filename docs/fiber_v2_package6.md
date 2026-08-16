@@ -5,6 +5,11 @@
 Package 6 is an isolated V2 experiment built on Package 5.1. It does not replace
 V1, alter saved Fibers, publish runtime output, or enable V2 by default.
 
+Implementation and qualification are complete. The experiment passed its dense
+CCD-filtering hypothesis but failed general latency and convergence gates; see
+[`fiber_v2_package6_results.md`](fiber_v2_package6_results.md). It remains
+isolated and is not a rollout candidate.
+
 Package 5.1 made collision processing faster, but it did not remove the dominant
 workload on `skeleton_comb_base.blend/FIBER_1`:
 

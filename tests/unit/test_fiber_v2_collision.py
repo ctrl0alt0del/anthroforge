@@ -10,10 +10,11 @@ import core.vcp.v2.collision as v2_collision
 from core.vcp.fiber_ccd_reference import segment_triangle_distance
 from core.vcp.v2 import (
     EDGE_BATCH, PAIR_BATCH, V2ColliderSnapshot, V2CollisionReason,
-    V2OwnerContact, build_triangle_snapshot, cached_triangle_snapshot,
+    V2DistanceCertificateCache, V2OwnerContact, build_triangle_snapshot, cached_triangle_snapshot,
     build_native_collision_world,
     clear_triangle_snapshot_cache, collision_backend_status,
     collision_free_step, point_triangle_distances, segment_triangle_distances,
+    probe_collision_workload,
     triangle_snapshot_cache_stats,
     validate_segment_clearance_batch, validate_static_clearance,
 )
@@ -43,6 +44,57 @@ def _dense_first_hit(start, end, triangle, clearance, samples=4001):
 
 
 class FiberV2CollisionTests(unittest.TestCase):
+    def test_package61_probe_skips_sampling_for_light_workload(self):
+        snapshot = build_triangle_snapshot((_plane(),)); start = ((-1, 0, 1), (1, 0, 1))
+        result = probe_collision_workload(start, start, snapshot, .01)
+        self.assertFalse(result.certificate_eligible); self.assertEqual(result.sampled_pairs, 0)
+
+    def test_package61_probe_samples_dense_excludable_workload(self):
+        colliders = tuple(_plane(collider_id=str(index)) for index in range(300))
+        snapshot = build_triangle_snapshot(colliders); start = ((1.8, 1.8, 0), (1.9, 1.8, 0))
+        result = probe_collision_workload(start, start, snapshot, .01)
+        self.assertTrue(result.certificate_eligible); self.assertEqual(result.sampled_pairs, 128)
+        self.assertEqual(result.excluded_pairs, 128); self.assertEqual(result.exclusion_ratio, 1.0)
+
+    def test_package61_dense_count_probe_does_not_sample(self):
+        colliders = tuple(_plane(collider_id=str(index)) for index in range(300))
+        snapshot = build_triangle_snapshot(colliders); start = ((1.8, 1.8, 0), (1.9, 1.8, 0))
+        result = probe_collision_workload(start, start, snapshot, .01, sample_limit=0)
+        self.assertTrue(result.certificate_eligible); self.assertEqual(result.sampled_pairs, 0)
+
+    def test_package6_distance_certificate_excludes_only_far_motion(self):
+        cache = V2DistanceCertificateCache(); face = np.asarray(((_plane().vertices),), dtype=float)
+        starts = np.asarray((((0, 0, 1), (1, 0, 1)), ((0, 0, .02), (1, 0, .02))))
+        ends = np.asarray((((0, 0, .99), (1, 0, .99)), ((0, 0, 0), (1, 0, 0))))
+        keep = cache.classify(((0, 0, 0., 1.), (1, 0, 0., 1.)), starts, ends,
+                              np.repeat(face, 2, axis=0), .01)
+        self.assertEqual(tuple(keep), (1,)); self.assertEqual(cache.excluded, 1)
+
+    def test_package6_certificate_advance_is_conservative(self):
+        cache = V2DistanceCertificateCache({(0, 0, 0., 1.): 1.0})
+        edges = np.asarray(((0, 1),)); source = np.asarray(((0, 0, 1), (1, 0, 1)), dtype=float)
+        target = source.copy(); target[:, 2] -= .25; cache.advance(edges, source, target)
+        self.assertAlmostEqual(cache.bounds[(0, 0, 0., 1.)], .75)
+
+    def test_package6_certified_crossing_matches_full_ccd(self):
+        snapshot = build_triangle_snapshot((_plane(),)); cache = V2DistanceCertificateCache()
+        start = np.asarray(((-1, 0, 1), (1, 0, 1))); end = start.copy(); end[:, 2] = -1
+        full = collision_free_step(start, end, snapshot, .01)
+        certified = collision_free_step(start, end, snapshot, .01, distance_cache=cache)
+        self.assertAlmostEqual(certified.safe_step, full.safe_step, places=12)
+        self.assertGreater(certified.tested_pairs, 0); self.assertGreater(cache.refreshes, 0)
+
+    def test_package6_random_certificates_match_full_ccd(self):
+        snapshot = build_triangle_snapshot((_plane(),)); random = np.random.default_rng(6006)
+        for _index in range(50):
+            start = random.uniform((-1, -1, .02), (1, 1, 1.5), size=(2, 3))
+            end = start + random.uniform((-.3, -.3, -1.0), (.3, .3, .3), size=(2, 3))
+            full = collision_free_step(start, end, snapshot, .01)
+            cached = collision_free_step(start, end, snapshot, .01,
+                                         distance_cache=V2DistanceCertificateCache())
+            self.assertEqual((cached.valid, cached.reason), (full.valid, full.reason))
+            self.assertAlmostEqual(cached.safe_step, full.safe_step, places=12)
+
     def test_package51_pair_cache_reuses_exact_set_and_prioritizes_limiter(self):
         cache = v2_collision.V2SweepPairCache(); pairs = np.asarray(((0, 1), (1, 2)))
         self.assertIs(cache.resolve(("a",), lambda: pairs), pairs)
