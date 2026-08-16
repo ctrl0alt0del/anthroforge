@@ -315,7 +315,12 @@ class V2Request:
         return payload
 
     def signature(self):
-        return stable_contract_signature(self.signature_payload())
+        cached = getattr(self, "_signature_cache", "")
+        if cached:
+            return cached
+        value = stable_contract_signature(self.signature_payload())
+        object.__setattr__(self, "_signature_cache", value)
+        return value
 
     @classmethod
     def from_payload(cls, value):

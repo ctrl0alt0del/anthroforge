@@ -581,6 +581,19 @@ def structural_energy(points, reference, settings=None):
     return V2StructuralEnergy(energy.fidelity, energy.length, energy.bend)
 
 
+def structural_stationarity(points, reference, pinned=(), settings=None):
+    gradient = structural_gradient(points, reference, pinned, settings)
+    return float(np.max(np.linalg.norm(gradient, axis=1))) if len(gradient) else 0.0
+
+
+def structural_gradient(points, reference, pinned=(), settings=None):
+    config = _v2_settings(settings)
+    values, target = _validated_pair(points, reference)
+    indices = _validated_pin_indices(pinned, len(values))
+    free = np.ones(len(values), dtype=bool); free[indices] = False
+    return _normal_gradient(values, target, _static_settings(config))[free]
+
+
 def _v2_settings(settings):
     if settings is None:
         return V2Settings()
@@ -605,4 +618,3 @@ def clear_structural_cache():
 
 def structural_cache_stats():
     return factor_cache_stats()
-

@@ -13,7 +13,8 @@ from time import perf_counter
 import bpy
 import numpy as np
 
-from anthroforge.core.vcp.v2 import build_triangle_snapshot, plan_reference, plan_reference_v41
+from anthroforge.core.vcp.v2 import (build_triangle_snapshot, plan_reference,
+                                     plan_reference_v41, plan_reference_v43)
 from anthroforge.core.vcp.v2 import collision as collision_module
 from anthroforge.core.vcp.v2 import collision_native as native_module
 from anthroforge.core.vcp.v2 import planner as planner_module
@@ -62,6 +63,8 @@ _PLANNER_PHASES = (
     ("_roadmap_candidates", "roadmap_candidates"),
     ("_search_roadmap", "roadmap_search"),
     ("_search_roadmap_v41", "roadmap_search_v41"),
+    ("_search_native_lazy", "native_lazy_search"),
+    ("_native_edge_states", "native_edge_validation"),
     ("_shortcut_route", "shortcut"),
     ("_exact_handoff", "exact_count_handoff"),
     ("_validated_result", "final_result_and_validation"),
@@ -84,7 +87,7 @@ def _arguments():
     parser.add_argument("--fiber-id", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--repeats", type=int, default=5)
-    parser.add_argument("--version", choices=("package4", "package41"), default="package4")
+    parser.add_argument("--version", choices=("package4", "package41", "package43"), default="package4")
     values = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     return parser.parse_args(values)
 
@@ -203,6 +206,8 @@ def _record(args):
 
 
 def _planner(version):
+    if version == "package43":
+        return plan_reference_v43
     return plan_reference_v41 if version == "package41" else plan_reference
 
 

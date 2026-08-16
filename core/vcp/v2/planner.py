@@ -9,14 +9,17 @@ from time import perf_counter
 import numpy as np
 
 from .collision import (V2OwnerContact, build_triangle_snapshot,
+                        cached_native_collision_world,
                         collision_backend_status, validate_segment_clearance_batch,
                         validate_static_clearance)
 from .contracts import V2Request, V2Termination, V2Topology
+from .collision_native import native_mesh_shortest_path
 
 
 V2_PLANNER_VERSION = "fiber-v2-planner-1"
 V2_PLANNER_41_VERSION = "fiber-v2-planner-1.1"
 V2_PLANNER_42_VERSION = "fiber-v2-planner-1.2"
+V2_PLANNER_43_VERSION = "fiber-v2-planner-1.3"
 _SPARSE_LIMIT = 96
 _DENSE_LIMIT = 240
 _SPARSE_NEIGHBORS = 24
@@ -47,6 +50,8 @@ class V2PlannerDiagnostics:
     graph_expansions: int = 0
     chain_groups: int = 0
     shared_candidates: int = 0
+    native_search_ms: float = 0.0
+    native_collision_ms: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -84,6 +89,10 @@ class _PlannerState:
     graph_expansions: int = 0
     chain_groups: int = 0
     shared_candidates: int = 0
+    native_world: object = None
+    native_search_ms: float = 0.0
+    native_collision_ms: float = 0.0
+    owner_contact_factor: float = 2.5
 
 
 @dataclass(frozen=True)
@@ -105,6 +114,40 @@ def plan_reference_v41(request, snapshot=None):
 def plan_reference_v42(request, snapshot=None):
     """Return a Package 4.2 shared-chain planner reference."""
     return _plan_reference(request, snapshot, _plan_segments_v42)
+
+
+def plan_reference_v43(request, snapshot=None, owner_contact_factor=2.5):
+    """Return a Package 4.3 fused-native exact-count planner reference."""
+    started = perf_counter(); issue = _configuration_issue(request)
+    if issue:
+        return _failed(V2Termination.INVALID_CONFIGURATION, issue, started)
+    if not collision_backend_status().available:
+        return _failed(V2Termination.BACKEND_UNAVAILABLE, "native collision backend unavailable", started)
+    state = _v43_state(request, snapshot, owner_contact_factor)
+    invalid = _invalid_anchor(state)
+    if invalid:
+        return _failed_with_state(state, V2Termination.INVALID_ATTACHMENT, invalid, started)
+    return _finish_plan(state, _plan_segments_v41(state), started)
+
+
+def _v43_state(request, snapshot, owner_contact_factor):
+    triangle = snapshot or build_triangle_snapshot(request.colliders)
+    world = cached_native_collision_world(request.colliders)
+    return _PlannerState(request, triangle, {}, {}, native_world=world,
+                         owner_contact_factor=float(owner_contact_factor))
+
+
+def _invalid_anchor(state):
+    points = np.asarray([anchor.point for anchor in state.request.anchors], dtype=np.float64)
+    edges = tuple((index, index) for index in range(len(points)))
+    owners = tuple((anchor.owner_id, anchor.owner_id) for anchor in state.request.anchors)
+    result = state.native_world.validate(points, edges, owners, _state_contact_span(state),
+                                         _radius(state) - _slack(state))
+    state.candidate_pairs += result.candidate_pairs; state.tested_pairs += result.tested_pairs
+    for index, clear in enumerate(result.clear):
+        if not clear:
+            return f"authored anchor {index} intersects collider {result.blockers[index] or 'unknown'}"
+    return ""
 
 
 def _plan_reference(request, snapshot, segment_planner):
@@ -373,10 +416,18 @@ def _surface_on_collider(state, collider, start, end):
     local = _local_surface_bridge(state, start, end, normals[first], normals[last])
     if local is not None:
         return local
-    indices = _mesh_path(points, faces, first, last)
+    indices = _surface_mesh_path(state, points, faces, first, last)
     if not indices:
         return None
     return _best_offset_route(state, points, faces, indices, start, end)
+
+
+def _surface_mesh_path(state, points, faces, start, goal):
+    if state.native_world is None:
+        return _mesh_path(points, faces, start, goal)
+    path, result = native_mesh_shortest_path(points, faces, start, goal)
+    state.native_search_ms += result.search_ms; state.graph_expansions += result.expansions
+    state.graph_searches += 1; return tuple(int(value) for value in path)
 
 
 def _local_surface_bridge(state, start, end, first_normal, last_normal):
@@ -561,12 +612,24 @@ def _bounds_overlap(collider, low, high):
 
 
 def _single_collider_blocks(state, collider, start, end):
+    if state.native_world is not None:
+        return _native_collider_blocks(state, collider, start, end)
     snapshot = build_triangle_snapshot((collider,))
     points = np.asarray((start.point, end.point), dtype=np.float64)
     contacts = _endpoint_contacts(points, start.owner_id, end.owner_id, _radius(state))
     result = validate_static_clearance(points, snapshot, _radius(state), contacts,
                                        slack=_slack(state))
     return not result.valid
+
+
+def _native_collider_blocks(state, collider, start, end):
+    index = state.native_world.collider_ids.index(collider.collider_id)
+    points = np.asarray((start.point, end.point), dtype=np.float64)
+    owners = ((start.owner_id, end.owner_id),)
+    result = state.native_world.validate_instance(index, points, ((0, 1),), owners,
+                                                  _state_contact_span(state),
+                                                  _radius(state) - _slack(state))
+    return not result.clear[0]
 
 
 def _sample_candidates(points, limit):
@@ -771,6 +834,8 @@ def _search_roadmap_v41(state, points, start_owner, end_owner, dense):
 
 
 def _search_batched_lazy(state, points, values, neighbors, start_owner, end_owner):
+    if state.native_world is not None:
+        return _search_native_lazy(state, points, values, neighbors, start_owner, end_owner)
     invalid, validated = set(), set(); metric = _graph_metric(values)
     state.graph_metric_builds += 1
     for _attempt in range(512):
@@ -782,6 +847,22 @@ def _search_batched_lazy(state, points, values, neighbors, start_owner, end_owne
         if all(edge in validated for edge in edges):
             return tuple(points[index] for index in path)
     return None
+
+
+def _search_native_lazy(state, points, values, neighbors, start_owner, end_owner):
+    path, result = state.native_world.lazy_path(values, neighbors, start_owner, end_owner,
+                                                _state_contact_span(state),
+                                                _radius(state) - _slack(state))
+    _absorb_native_search(state, result)
+    return None if result.status or not len(path) else tuple(points[int(index)] for index in path)
+
+
+def _absorb_native_search(state, result):
+    state.graph_metric_builds += 1; state.graph_searches += result.searches
+    state.graph_expansions += result.expansions; state.tested_edges += result.validated + result.rejected
+    state.rejected_edges += result.rejected; state.candidate_pairs += result.candidates
+    state.tested_pairs += result.tested; state.edge_batches += result.searches
+    state.native_search_ms += result.search_ms; state.native_collision_ms += result.collision_ms
 
 
 def _complete_neighbors(count):
@@ -895,11 +976,25 @@ def _route_clear(state, points, start_owner, end_owner):
 
 
 def _batch_edge_states(state, points, edges, owners):
+    if state.native_world is not None:
+        return _native_edge_states(state, points, edges, owners)
     result = validate_segment_clearance_batch(points, edges, state.snapshot, _radius(state),
-                                              owners, _contact_span(_radius(state)),
+                                              owners, _state_contact_span(state),
                                               _slack(state), containment_cache=state.membership_cache)
     state.tested_edges += len(edges)
     state.edge_batches += int(bool(len(edges)))
+    state.rejected_edges += sum(not value for value in result.clear)
+    state.candidate_pairs += result.candidate_pairs; state.tested_pairs += result.tested_pairs
+    _store_edge_states(state, points, edges, owners, result.clear)
+    return result.clear
+
+
+def _native_edge_states(state, points, edges, owners):
+    started = perf_counter()
+    result = state.native_world.validate(points, edges, owners, _state_contact_span(state),
+                                         _radius(state) - _slack(state))
+    state.native_collision_ms += 1000.0 * (perf_counter() - started)
+    state.tested_edges += len(edges); state.edge_batches += int(bool(len(edges)))
     state.rejected_edges += sum(not value for value in result.clear)
     state.candidate_pairs += result.candidate_pairs; state.tested_pairs += result.tested_pairs
     _store_edge_states(state, points, edges, owners, result.clear)
@@ -916,6 +1011,9 @@ def _edge_clear(state, start, end, start_owner="", end_owner=""):
     key = _edge_key(start, end, start_owner, end_owner)
     if key in state.edge_cache:
         return state.edge_cache[key]
+    if state.native_world is not None:
+        return _batch_edge_states(state, np.asarray((start, end)), ((0, 1),),
+                                  ((start_owner, end_owner),))[0]
     points = np.asarray((start, end), dtype=np.float64)
     contacts = _endpoint_contacts(points, start_owner, end_owner, _radius(state))
     result = validate_static_clearance(points, state.snapshot, _radius(state), contacts,
@@ -1043,7 +1141,7 @@ def _authored_contacts(state, points, pins):
     for anchor, index in zip(state.request.anchors, pins):
         if anchor.owner_id:
             rows.append(_anchor_contact(points, int(index), anchor.owner_id,
-                                        _contact_span(_radius(state)), _cyclic(state.request)))
+                                        _state_contact_span(state), _cyclic(state.request)))
     return tuple(rows)
 
 
@@ -1104,7 +1202,8 @@ def _diagnostics(state, corridor, started, handoff_started, validation):
                                 planner_ms, handoff_ms, state.graph_searches,
                                 state.edge_batches, state.frontier_edges,
                                 state.graph_metric_builds, state.graph_expansions,
-                                state.chain_groups, state.shared_candidates)
+                                state.chain_groups, state.shared_candidates,
+                                state.native_search_ms, state.native_collision_ms)
 
 
 def _route_length(points):
@@ -1127,6 +1226,10 @@ def _lerp(start, end, factor):
 
 def _contact_span(radius):
     return max(2.5 * float(radius), 1.0e-7)
+
+
+def _state_contact_span(state):
+    return max(state.owner_contact_factor * _radius(state), 1.0e-7)
 
 
 def _radius(state):

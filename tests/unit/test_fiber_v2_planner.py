@@ -10,6 +10,7 @@ from core.vcp.v2 import (
     V2PlannerMode, V2Quality, V2Request, V2ResolvedTolerances, V2Settings,
     V2Termination, V2Topology, build_triangle_snapshot, plan_reference,
     plan_reference_v41, plan_reference_v42, validate_static_clearance,
+    plan_reference_v43,
 )
 
 
@@ -170,6 +171,30 @@ class FiberV2PlannerTests(unittest.TestCase):
         old, new = plan_reference_v41(request), plan_reference_v42(request)
         self.assertEqual((old.termination, old.mode, old.reference),
                          (new.termination, new.mode, new.reference))
+
+    def test_v43_matches_v41_direct_roadmap_and_surface(self):
+        requests = (_request(_anchors(((0, 0, 0), (1, 0, 0))), count=17),
+                    _request(_anchors(((-1, 0, 0), (1, 0, 0))), (_box(),), 24, 0.05),
+                    _request(_anchors(_angle_points((0, .12, .24, .36)), "SPHERE"), (_sphere(),), 64, .02))
+        for request in requests:
+            old, new = plan_reference_v41(request), plan_reference_v43(request)
+            self.assertEqual((old.termination, old.mode, old.reference, old.pin_indices),
+                             (new.termination, new.mode, new.reference, new.pin_indices))
+
+    def test_v43_rejects_unrelated_hard_anchor_before_graph_search(self):
+        request = _request(_anchors(((0, 0, 0), (1, 0, 0)), "OWNER"), (_box(),), 16, 0.05)
+        result = plan_reference_v43(request)
+        self.assertEqual(result.termination, V2Termination.INVALID_ATTACHMENT)
+        self.assertEqual(result.diagnostics.graph_searches, 0)
+        self.assertIn("anchor 0", result.message)
+
+    def test_v43_native_search_is_deterministic_and_independently_safe(self):
+        collider = _box(); request = _request(_anchors(((-1, 0, 0), (1, 0, 0))), (collider,), 24, 0.05)
+        first, second = plan_reference_v43(request), plan_reference_v43(request)
+        checked = validate_static_clearance(first.reference, build_triangle_snapshot((collider,)),
+                                            0.05, first.contacts, slack=0.0005)
+        self.assertEqual((first.reference, first.corridor), (second.reference, second.corridor))
+        self.assertTrue(checked.valid); self.assertGreater(first.diagnostics.native_collision_ms, 0.0)
 
 
 if __name__ == "__main__":

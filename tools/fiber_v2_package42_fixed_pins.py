@@ -15,7 +15,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fiber_v2_package42_maxilla_benchmark as base
 
-from anthroforge.core.vcp.v2 import V2Anchor, V2OwnerContact, plan_reference_v41, plan_reference_v42
+from anthroforge.core.vcp.v2 import (V2Anchor, V2OwnerContact, plan_reference_v41,
+                                     plan_reference_v42, plan_reference_v43)
 from anthroforge.core.vcp.v2.collision import _node_rows
 
 
@@ -107,7 +108,8 @@ def _row(call, repeats, request, snapshot):
 
 def _planner_rows(request, snapshot, repeats):
     calls = (("package41", lambda: plan_reference_v41(request, snapshot)),
-             ("package42", lambda: plan_reference_v42(request, snapshot)))
+             ("package42", lambda: plan_reference_v42(request, snapshot)),
+             ("package43", lambda: plan_reference_v43(request, snapshot)))
     return {name: _row(call, repeats, request, snapshot) for name, call in calls}
 
 

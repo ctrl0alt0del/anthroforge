@@ -11,6 +11,7 @@ from core.vcp.fiber_ccd_reference import segment_triangle_distance
 from core.vcp.v2 import (
     EDGE_BATCH, PAIR_BATCH, V2ColliderSnapshot, V2CollisionReason,
     V2OwnerContact, build_triangle_snapshot, cached_triangle_snapshot,
+    build_native_collision_world,
     clear_triangle_snapshot_cache, collision_backend_status,
     collision_free_step, point_triangle_distances, segment_triangle_distances,
     triangle_snapshot_cache_stats,
@@ -45,7 +46,14 @@ class FiberV2CollisionTests(unittest.TestCase):
     def test_packaged_backend_is_available(self):
         status = collision_backend_status()
         self.assertTrue(status.available, status.message)
-        self.assertEqual(status.version, "af_fiber_ccd-1.31")
+        self.assertEqual(status.version, "af_fiber_ccd-1.511")
+
+    def test_package5_nearest_query_returns_surface_normal(self):
+        world = build_native_collision_world((_plane(),))
+        closest, normals, distances, blockers, contained = world.nearest(((0, 0, 1),))
+        np.testing.assert_allclose(closest, ((0, 0, 0),), atol=1.0e-12)
+        np.testing.assert_allclose(normals, ((0, 0, 1),), atol=1.0e-12)
+        self.assertEqual((distances[0], blockers[0], bool(contained[0])), (1.0, "C", False))
 
     def test_persistent_snapshot_cache_reuses_generation(self):
         clear_triangle_snapshot_cache(); colliders = (_plane(),)
@@ -98,6 +106,31 @@ class FiberV2CollisionTests(unittest.TestCase):
         expected = tuple(validate_static_clearance(points[list(edge)], snapshot, 0.2).valid
                          for edge in edges)
         self.assertEqual(batch.clear, expected)
+
+    def test_package43_fused_batch_matches_reference_validation(self):
+        points = np.asarray(((-2, 0, 0.1), (2, 0, 0.1), (-2, 0, 1), (2, 0, 1)))
+        edges = ((0, 1), (2, 3)); collider = _plane(); world = build_native_collision_world((collider,))
+        fused = world.validate(points, edges, (("", ""),) * 2, 0.5, 0.2)
+        reference = validate_segment_clearance_batch(points, edges, build_triangle_snapshot((collider,)), 0.2)
+        self.assertEqual(fused.clear, reference.clear)
+        self.assertEqual(fused.blockers, ("C", ""))
+
+    def test_package43_transform_refit_matches_clean_world(self):
+        collider = _plane(); moved = np.eye(4); moved[2, 3] = 1.0
+        points, edges = np.asarray(((-1, 0, 1), (1, 0, 1))), ((0, 1),)
+        refit = build_native_collision_world((collider,)); refit.update_transform(0, moved)
+        clean = build_native_collision_world((collider,), (moved,))
+        first = refit.validate(points, edges, (("", ""),), 0.1, 0.01)
+        second = clean.validate(points, edges, (("", ""),), 0.1, 0.01)
+        self.assertEqual((first.clear, first.blockers), (second.clear, second.blockers))
+
+    def test_package43_fused_containment_matches_reference(self):
+        vertices = ((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+        faces = ((0, 2, 1), (0, 1, 3), (0, 3, 2), (1, 2, 3))
+        collider = _collider(vertices, faces); points = np.asarray(((0.1, 0.1, 0.1), (2, 2, 2)))
+        fused = build_native_collision_world((collider,)).validate(points, ((0, 1),), (("", ""),), 0.1, 0.01)
+        reference = validate_segment_clearance_batch(points, ((0, 1),), build_triangle_snapshot((collider,)), 0.01)
+        self.assertEqual(fused.clear, reference.clear)
 
     def test_segment_batch_owner_trim_remains_local(self):
         points = np.asarray(((0, 0, 0), (0, 0, 1), (0, 0, 0)))

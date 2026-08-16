@@ -16,7 +16,7 @@ import fiber_v2_planner_benchmark as bench
 
 from anthroforge.core.vcp.v2 import (cached_triangle_snapshot, clear_triangle_snapshot_cache,
                                      plan_reference,
-                                     plan_reference_v41, plan_reference_v42,
+                                     plan_reference_v41, plan_reference_v42, plan_reference_v43,
                                      triangle_snapshot_cache_stats, validate_static_clearance)
 from anthroforge.core.vcp.v2.collision import _inside_memberships
 from anthroforge.core.vcp.v2 import collision as collision_impl
@@ -122,7 +122,8 @@ def _nearby(snapshot, routes):
 def _planner_rows(request, snapshot, repeats):
     calls = (("package4", lambda: plan_reference(request, snapshot)),
              ("package41", lambda: plan_reference_v41(request, snapshot)),
-             ("package42", lambda: plan_reference_v42(request, snapshot)))
+             ("package42", lambda: plan_reference_v42(request, snapshot)),
+             ("package43", lambda: plan_reference_v43(request, snapshot)))
     return {name: _planner_row(call, repeats, request, snapshot) for name, call in calls}
 
 

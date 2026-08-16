@@ -1,7 +1,10 @@
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <queue>
 #include <utility>
 #include <vector>
 
@@ -138,7 +141,7 @@ static Context context(const double* start, const double* end, const double* tri
 
 AF_EXPORT int af_fiber_ccd_version() { return 1; }
 
-AF_EXPORT int af_fiber_ccd_capabilities() { return 31; }
+AF_EXPORT int af_fiber_ccd_capabilities() { return 511; }
 
 AF_EXPORT int af_segment_triangle_distances(const double* segments, const double* triangles,
                                              int count, double* distances) {
@@ -390,3 +393,5 @@ AF_EXPORT int af_candidate_pairs(const double* start, const double* end, const i
     delete snapshot;
     return count;
 }
+
+#include "af_fiber_planner43.hpp"

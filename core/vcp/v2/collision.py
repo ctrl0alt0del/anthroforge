@@ -7,6 +7,7 @@ from enum import Enum
 import numpy as np
 
 from .collision_native import (
+    NativeCollisionWorld,
     native_candidates, native_distances, native_inside, native_safe_step, native_snapshot,
     native_snapshot_distances, native_snapshot_inside, native_status,
 )
@@ -95,6 +96,55 @@ class V2SegmentBatch:
     tested_pairs: int
     contained_endpoints: tuple = ()
     backend_version: str = ""
+    blockers: tuple = ()
+    minimum: float = float("inf")
+
+
+@dataclass
+class V2NativeCollisionWorld:
+    native: object
+    owner_tokens: dict
+    collider_ids: tuple
+    instance_indices: tuple
+    backend_version: str
+
+    def validate(self, points, edges, edge_owners, span, threshold):
+        first, second = self._owner_rows(edge_owners, len(edges))
+        clear, blockers, minima, result = self.native.validate(points, edges, first, second, span, threshold)
+        return self._batch_result(clear, blockers, minima, result)
+
+    def validate_instance(self, index, points, edges, edge_owners, span, threshold):
+        first, second = self._owner_rows(edge_owners, len(edges))
+        values = self.native.validate_instance(self.instance_indices[index], points, edges,
+                                               first, second, span, threshold)
+        return self._batch_result(*values)
+
+    def _owner_rows(self, edge_owners, count):
+        owners = _segment_batch_owners(edge_owners, count)
+        first = [self.owner_tokens.get(row[0], 0) for row in owners]
+        return first, [self.owner_tokens.get(row[1], 0) for row in owners]
+
+    def _batch_result(self, clear, blockers, minima, result):
+        ids = tuple(self.collider_ids[index] if 0 <= index < len(self.collider_ids) else "" for index in blockers)
+        minimum = float(np.min(minima)) if len(minima) else float("inf")
+        return V2SegmentBatch(tuple(clear), result.candidates, result.tested,
+                              backend_version=self.backend_version,
+                              blockers=ids, minimum=minimum)
+
+    def lazy_path(self, points, neighbors, start_owner, end_owner, span, threshold):
+        offsets, links = _neighbor_csr(neighbors)
+        owners = (self.owner_tokens.get(str(start_owner or ""), 0),
+                  self.owner_tokens.get(str(end_owner or ""), 0))
+        return self.native.lazy_path(points, offsets, links, owners, span, threshold)
+
+    def nearest(self, points):
+        closest, normals, distances, blockers, contained = self.native.nearest(points)
+        ids = tuple(self.collider_ids[index] if 0 <= index < len(self.collider_ids) else ""
+                    for index in blockers)
+        return closest, normals, distances, ids, contained
+
+    def update_transform(self, index, matrix):
+        self.native.update_transform(self.instance_indices[index], matrix)
 
 
 class V2CollisionSnapshotCache:
@@ -121,6 +171,7 @@ class V2CollisionSnapshotCache:
 
 
 _SNAPSHOT_CACHE = V2CollisionSnapshotCache()
+_WORLD_CACHE = OrderedDict()
 
 
 def cached_triangle_snapshot(colliders, generation):
@@ -128,11 +179,61 @@ def cached_triangle_snapshot(colliders, generation):
 
 
 def clear_triangle_snapshot_cache():
-    _SNAPSHOT_CACHE.clear()
+    _SNAPSHOT_CACHE.clear(); _WORLD_CACHE.clear()
 
 
 def triangle_snapshot_cache_stats():
     return _SNAPSHOT_CACHE.stats()
+
+
+def build_native_collision_world(colliders, transforms=None):
+    items = tuple(colliders or ()); matrices = tuple(transforms or (None,) * len(items))
+    if len(matrices) != len(items):
+        raise ValueError("transforms must match collider count")
+    tokens = _owner_token_map(items); native = NativeCollisionWorld(); indices = []
+    for item, matrix in zip(items, matrices):
+        vertices = np.asarray(item.vertices, dtype=np.float64)
+        triangles = np.asarray(item.triangles, dtype=np.int64)
+        indices.append(native.add(vertices, triangles, tokens.get(item.owner_id, 0),
+                                  len(indices), _closed_mesh(triangles), matrix))
+    native.commit()
+    version = collision_backend_status().version
+    return V2NativeCollisionWorld(native, tokens, tuple(item.collider_id for item in items),
+                                  tuple(indices), version)
+
+
+def cached_native_collision_world(colliders, generation=()):
+    items = tuple(colliders or ()); key = _native_world_key(items, generation)
+    if key in _WORLD_CACHE:
+        _WORLD_CACHE.move_to_end(key); return _WORLD_CACHE[key]
+    _WORLD_CACHE[key] = build_native_collision_world(items)
+    while len(_WORLD_CACHE) > 8:
+        _WORLD_CACHE.popitem(last=False)
+    return _WORLD_CACHE[key]
+
+
+def clear_native_collision_world_cache():
+    _WORLD_CACHE.clear()
+
+
+def _native_world_key(colliders, generation):
+    if generation:
+        return tuple(generation)
+    return tuple((item.collider_id, item.owner_id, item.generation,
+                  hash(item.vertices), hash(item.triangles)) for item in colliders)
+
+
+def _owner_token_map(colliders):
+    owners = sorted({str(item.owner_id or "") for item in colliders if item.owner_id})
+    return {owner: index + 1 for index, owner in enumerate(owners)}
+
+
+def _neighbor_csr(neighbors):
+    lengths = np.asarray([len(row) for row in neighbors], dtype=np.int64)
+    offsets = np.empty(len(neighbors) + 1, dtype=np.int64); offsets[0] = 0
+    np.cumsum(lengths, out=offsets[1:])
+    links = np.asarray([value for row in neighbors for value in row], dtype=np.int64)
+    return np.ascontiguousarray(offsets), np.ascontiguousarray(links)
 
 
 def collision_backend_status(path=None):

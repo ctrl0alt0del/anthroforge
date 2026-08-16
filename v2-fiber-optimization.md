@@ -65,13 +65,10 @@ unsafe resampling chords;
 complex touch ordering.
 Gate: every produced edge passes Package 3 validation.
 
-Status (2026-08-15): Package 4.1 caches the fixed roadmap metric and reduces
-Package 4 median wall time by 33.8% on the skeleton roadmap and 22.4% on skull
-FIBER_14 with bit-exact route/reference parity. It remains isolated and does not
-change V1 runtime behavior. The skeleton result is still 489 ms versus V1's 75 ms;
-strict collision processing is now the main cost. Package 5 therefore remains
-blocked on planner/collision latency and route-quality qualification. See
-`docs/fiber_v2_package4.md` and `docs/fiber_v2_package4_1.md`.
+Status (2026-08-16): Package 4.3 moves cached-metric Lazy A*, mesh-graph search,
+and persistent/refittable collision acceleration into the native backend. It
+preserves Package 4.1 routes while reducing measured planning to 19-53 ms. See
+`docs/fiber_v2_package4_3.md` and `docs/fiber_v2_package4_3_results.md`.
 Package 5 — Unaccelerated local/global solver
 Combine Packages 2–4 without Blender integration:
 project active contacts;
@@ -90,6 +87,13 @@ Nonincreasing accepted merit.
 Exact final validation.
 Deterministic output.
 Complex skeleton fixtures no longer penetrate ribs.
+
+Status (2026-08-16): implemented as an isolated pure-data experiment. All four
+production fixtures converge deterministically and pass strict validation. It is
+3.96x faster than V1 on skull/FIBER_14, but 1.24-2.76x slower on the other
+fixtures. The skull surface result retains visible scalloping, so Package 5 is not
+qualified for live rollout and Package 6 is gated on a coherent surface-contact
+fix plus batched native CCD/validation. See `docs/fiber_v2_package5.md`.
 Package 6 — Adaptive convergence
 Add:
 normalized fixed-point residual;
