@@ -89,6 +89,34 @@ class V2SafeStep:
     backend_version: str = ""
 
 
+@dataclass
+class V2SweepPairCache:
+    key: tuple = ()
+    pairs: object = None
+    priority: tuple = ()
+    hits: int = 0
+    misses: int = 0
+
+    def resolve(self, key, builder):
+        if key == self.key and self.pairs is not None:
+            self.hits += 1; return self.pairs
+        self.misses += 1; self.key = key; self.pairs = self.order(builder())
+        return self.pairs
+
+    def order(self, pairs):
+        if not self.priority or not len(pairs):
+            return pairs
+        first = [index for index, row in enumerate(pairs) if tuple(row) == self.priority]
+        if not first:
+            return pairs
+        self.hits += 1
+        return np.concatenate((pairs[first], np.delete(pairs, first, axis=0)))
+
+    def note(self, pair):
+        if pair is not None:
+            self.priority = tuple(int(value) for value in pair)
+
+
 @dataclass(frozen=True)
 class V2SegmentBatch:
     clear: tuple
@@ -98,6 +126,19 @@ class V2SegmentBatch:
     backend_version: str = ""
     blockers: tuple = ()
     minimum: float = float("inf")
+
+
+@dataclass(frozen=True)
+class V2ContactBatch:
+    active: tuple
+    factors: np.ndarray
+    closest: np.ndarray
+    normals: np.ndarray
+    distances: np.ndarray
+    blockers: tuple
+    candidate_pairs: int
+    tested_pairs: int
+    minimum: float
 
 
 @dataclass
@@ -142,6 +183,24 @@ class V2NativeCollisionWorld:
         ids = tuple(self.collider_ids[index] if 0 <= index < len(self.collider_ids) else ""
                     for index in blockers)
         return closest, normals, distances, ids, contained
+
+    def contacts(self, points, edges, edge_owners, span, threshold, only=(), skip=()):
+        first, second = self._owner_rows(edge_owners, len(edges))
+        filters = (self._owner_tokens(only, len(edges)), self._owner_tokens(skip, len(edges)))
+        rows = self.native.contacts(points, edges, first, second, span, threshold, *filters)
+        active, factors, closest, normals, distances, blockers, result = rows
+        ids = tuple(self.collider_ids[index] if 0 <= index < len(self.collider_ids) else ""
+                    for index in blockers)
+        return V2ContactBatch(tuple(active.astype(bool)), factors, closest, normals, distances,
+                              ids, result.candidates, result.tested, result.minimum)
+
+    def _owner_tokens(self, owners, count):
+        rows = tuple(owners or ())
+        if not rows:
+            return np.zeros(count, dtype=np.int32)
+        if len(rows) != count:
+            raise ValueError("contact owner filters must match edge count")
+        return np.asarray([self.owner_tokens.get(str(value or ""), 0) for value in rows], dtype=np.int32)
 
     def update_transform(self, index, matrix):
         self.native.update_transform(self.instance_indices[index], matrix)
@@ -292,16 +351,19 @@ def validate_static_clearance(points, snapshot, clearance, contacts=(), cyclic=F
 
 def collision_free_step(start, end, snapshot, clearance, contacts=(), cyclic=False,
                         slack=0.0, backend_path=None, time_tolerance=1.0e-5,
-                        interval_budget=262143):
+                        interval_budget=262143, pair_cache=None,
+                        assume_initial_valid=False, pair_envelope=None):
     status = collision_backend_status(backend_path)
     if not status.available:
         return _unavailable_sweep(status)
     source, target = _point_pair(start, end); edges = _chain_edges(len(source), cyclic)
-    initial = validate_static_clearance(source, snapshot, clearance, contacts, cyclic, slack, backend_path)
-    if not initial.valid:
+    initial = None if assume_initial_valid else validate_static_clearance(
+        source, snapshot, clearance, contacts, cyclic, slack, backend_path)
+    if initial is not None and not initial.valid:
         return _invalid_start(initial, status.version)
     return _sweep(source, target, edges, snapshot, contacts, _threshold(clearance, slack),
-                  time_tolerance, interval_budget, backend_path, status.version)
+                  time_tolerance, interval_budget, backend_path, status.version,
+                  pair_cache, pair_envelope)
 
 
 def segment_triangle_distances(segments, triangles, backend_path=None):
@@ -657,41 +719,59 @@ def _static_result(nodes, edges, threshold, version):
                              len(node_values) + len(edge_values), node_bad, edge_bad, contained, version)
 
 
-def _sweep(source, target, edges, snapshot, contacts, clearance, tolerance, budget, path, version):
-    pairs = _candidate_pairs(source, target, edges, snapshot, clearance, path)
-    starts, ends, faces = _sweep_rows(source, target, edges, snapshot, contacts, pairs)
+def _sweep(source, target, edges, snapshot, contacts, clearance, tolerance, budget, path, version,
+           pair_cache=None, pair_envelope=None):
+    envelope = pair_envelope or (source, target)
+    pairs = _cached_candidate_pairs(envelope, edges, snapshot, clearance, path, pair_cache)
+    starts, ends, faces, keys = _sweep_rows(source, target, edges, snapshot, contacts, pairs)
     state = [1.0, False, True, 0, 0, "CLEAR"]
     for first in range(0, len(starts), PAIR_BATCH):
-        _advance_sweep(state, starts[first:first + PAIR_BATCH], ends[first:first + PAIR_BATCH],
-                       faces[first:first + PAIR_BATCH], clearance, tolerance, budget, path)
+        limiting = _advance_sweep(state, starts[first:first + PAIR_BATCH], ends[first:first + PAIR_BATCH],
+                                  faces[first:first + PAIR_BATCH], clearance, tolerance, budget, path)
+        if pair_cache is not None and limiting >= 0:
+            pair_cache.note(keys[first + limiting])
         if not state[2] or state[5] == "BUDGET_EXHAUSTED":
             break
     return _sweep_result(state, len(pairs), min(EDGE_BATCH, len(edges)), min(PAIR_BATCH, len(starts)), version)
 
 
+def _cached_candidate_pairs(envelope, edges, snapshot, padding, path, cache):
+    start, end = envelope; key = _pair_cache_key(start, end, edges, snapshot, padding)
+    build = lambda: _candidate_pairs(start, end, edges, snapshot, padding, path)
+    return build() if cache is None else cache.resolve(key, build)
+
+
+def _pair_cache_key(start, end, edges, snapshot, padding):
+    return (id(snapshot), float(padding), np.asarray(start).tobytes(),
+            np.asarray(end).tobytes(), np.asarray(edges).tobytes())
+
+
 def _sweep_rows(source, target, edges, snapshot, contacts, pairs):
-    starts, ends, faces = [], [], []
+    starts, ends, faces, keys = [], [], [], []
     for edge, face in pairs:
         owner, points = snapshot.face_owners[int(face)], edges[int(edge)]
         for low, high in _tested_intervals(int(edge), owner, contacts):
             starts.append(_subsegment(source[points], low, high))
             ends.append(_subsegment(target[points], low, high))
             faces.append(snapshot.vertices[snapshot.triangles[face]])
+            keys.append((int(edge), int(face)))
     shapes = ((-1, 2, 3), (-1, 2, 3), (-1, 3, 3))
-    return tuple(np.ascontiguousarray(value, dtype=np.float64).reshape(shape)
-                 for value, shape in zip((starts, ends, faces), shapes))
+    arrays = tuple(np.ascontiguousarray(value, dtype=np.float64).reshape(shape)
+                   for value, shape in zip((starts, ends, faces), shapes))
+    return (*arrays, tuple(keys))
 
 
 def _advance_sweep(state, starts, ends, faces, clearance, tolerance, budget, path):
     if not len(starts):
-        return
+        return -1
     scaled = starts + state[0] * (ends - starts)
-    safe, possible, valid, tested, intervals, reason = native_safe_step(
+    safe, possible, valid, tested, intervals, reason, limiting = native_safe_step(
         starts, scaled, faces, clearance, tolerance, budget, path)
     state[0] *= safe; state[1] |= possible; state[2] &= valid
     state[3] += tested; state[4] += intervals
     if reason == "BUDGET_EXHAUSTED" or not valid:
         state[5] = reason
+    return int(limiting)
 
 
 def _sweep_result(state, candidates, edge_batch, pair_batch, version):

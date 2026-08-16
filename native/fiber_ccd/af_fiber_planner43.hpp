@@ -5,6 +5,7 @@ struct AfSearchResult {
     int path_count, status, searches, expansions, validated, rejected, candidates, tested;
     double search_ms, collision_ms;
 };
+struct AfContactResult { int candidates, tested, active, contained; double minimum; };
 struct AfInstance {
     TriangleSnapshot* mesh; int owner, collider, closed; double matrix[16], inverse[16]; Bounds bounds;
 };
@@ -199,20 +200,29 @@ static Vec af_closest_triangle(Vec p, const Vec* t) {
 
 struct AfNearest { Vec point, face_normal; double distance; int instance; };
 
-static void af_nearest_item(const AfInstance& item, int instance, Vec point, AfNearest& best) {
-    int count=int(item.mesh->triangles.size()/3);
-    for(int face_index=0;face_index<count;++face_index){Vec face[3];af_world_face(item,face_index,face);Vec closest=af_closest_triangle(point,face);
-        double distance=norm(sub(point,closest));if(distance<best.distance)best={closest,cross(sub(face[1],face[0]),sub(face[2],face[0])),distance,instance};}
-}
-
-static Vec af_unit(Vec value) {
-    double length=norm(value); return length>eps()?mul(value,1.0/length):Vec{0.0,0.0,0.0};
-}
-
 static double af_bounds_distance(Vec point,const Bounds& bounds){
     double squared=0.0;const double* p=&point.x;
     for(int axis=0;axis<3;++axis){double delta=p[axis]<bounds.lo[axis]?bounds.lo[axis]-p[axis]:p[axis]>bounds.hi[axis]?p[axis]-bounds.hi[axis]:0.0;squared+=delta*delta;}
     return std::sqrt(squared);
+}
+
+static void af_nearest_face(const AfInstance& item,int instance,int face_index,Vec point,AfNearest& best){
+    Vec face[3];af_world_face(item,face_index,face);Vec closest=af_closest_triangle(point,face);
+    double distance=norm(sub(point,closest));
+    if(distance<best.distance)best={closest,cross(sub(face[1],face[0]),sub(face[2],face[0])),distance,instance};
+}
+
+static void af_nearest_item(const AfInstance& item,int instance,Vec point,AfNearest& best){
+    Vec local=af_transform(item.inverse,point);double inverse=std::max(af_inverse_padding(item,1.0),1.0e-12);
+    using Pair=std::pair<double,int>;std::priority_queue<Pair,std::vector<Pair>,std::greater<Pair>> heap;
+    if(!item.mesh->nodes.empty())heap.push({af_bounds_distance(local,item.mesh->nodes[0].bounds)/inverse,0});
+    while(!heap.empty()){auto [lower,node]=heap.top();heap.pop();if(lower>=best.distance)break;const auto& value=item.mesh->nodes[node];
+        if(value.left>=0){heap.push({af_bounds_distance(local,item.mesh->nodes[value.left].bounds)/inverse,value.left});heap.push({af_bounds_distance(local,item.mesh->nodes[value.right].bounds)/inverse,value.right});}
+        else for(int i=value.begin;i<value.end;++i)af_nearest_face(item,instance,item.mesh->faces[i].index,point,best);}
+}
+
+static Vec af_unit(Vec value) {
+    double length=norm(value); return length>eps()?mul(value,1.0/length):Vec{0.0,0.0,0.0};
 }
 
 static AfNearest af_nearest_world(const AfWorld& world, Vec point) {
@@ -221,6 +231,84 @@ static AfNearest af_nearest_world(const AfWorld& world, Vec point) {
     std::stable_sort(order.begin(),order.end());
     for(auto [lower,index]:order){if(lower>=best.distance)break;af_nearest_item(world.items[index],index,point,best);}
     return best;
+}
+
+struct AfSegmentPair { Vec line,surface,normal; double distance,factor; int instance; };
+
+static Vec af_segment_point(Vec point,Vec a,Vec b,double& factor){
+    Vec delta=sub(b,a);double length=dot(delta,delta);factor=length<=eps()?0.0:std::clamp(dot(sub(point,a),delta)/length,0.0,1.0);
+    return add(a,mul(delta,factor));
+}
+
+static void af_take_pair(AfSegmentPair& best,Vec line,Vec surface,double factor,Vec normal,int instance){
+    double distance=norm(sub(line,surface));
+    if(distance<best.distance)best={line,surface,normal,distance,factor,instance};
+}
+
+static void af_segment_edge_pair(Vec a,Vec b,Vec c,Vec d,double& s,double& t){
+    Vec u=sub(b,a),v=sub(d,c),w=sub(a,c);double aa=dot(u,u),bb=dot(u,v),cc=dot(v,v),dd=dot(u,w),ee=dot(v,w);
+    double det=aa*cc-bb*bb;s=det>eps()?std::clamp((bb*ee-cc*dd)/det,0.0,1.0):0.0;
+    t=cc>eps()?std::clamp((bb*s+ee)/cc,0.0,1.0):0.0;
+    s=aa>eps()?std::clamp((bb*t-dd)/aa,0.0,1.0):0.0;
+}
+
+static bool af_hit_factor(Vec a,Vec b,const Vec* face,double& factor){
+    Vec d=sub(b,a),e0=sub(face[1],face[0]),e1=sub(face[2],face[0]),c=cross(d,e1);double det=dot(e0,c);
+    if(std::abs(det)<=eps()*std::max(1.0,norm(d)*norm(e0)*norm(e1)))return false;
+    Vec o=sub(a,face[0]);double inv=1.0/det,u=dot(o,c)*inv;Vec co=cross(o,e0);double v=dot(d,co)*inv;
+    factor=dot(e1,co)*inv;return u>=-eps()&&v>=-eps()&&u+v<=1.0+eps()&&factor>=-eps()&&factor<=1.0+eps();
+}
+
+static AfSegmentPair af_closest_segment_face(Vec a,Vec b,const Vec* face,int instance){
+    Vec normal=cross(sub(face[1],face[0]),sub(face[2],face[0]));AfSegmentPair best{{},{},normal,INFINITY,0.0,instance};double factor=0.0;
+    if(af_hit_factor(a,b,face,factor)){Vec point=add(a,mul(sub(b,a),factor));return {point,point,normal,0.0,factor,instance};}
+    af_take_pair(best,a,af_closest_triangle(a,face),0.0,normal,instance);af_take_pair(best,b,af_closest_triangle(b,face),1.0,normal,instance);
+    for(int i=0;i<3;++i){double s=0.0,t=0.0;af_segment_edge_pair(a,b,face[i],face[(i+1)%3],s,t);
+        af_take_pair(best,add(a,mul(sub(b,a),s)),add(face[i],mul(sub(face[(i+1)%3],face[i]),t)),s,normal,instance);}
+    return best;
+}
+
+static void af_contact_item(const AfInstance& item,int instance,Vec a,Vec b,double threshold,AfSegmentPair& best,AfContactResult& result){
+    Vec la=af_transform(item.inverse,a),lb=af_transform(item.inverse,b);std::vector<int> faces;
+    if(!item.mesh->nodes.empty())collect_candidates(*item.mesh,0,af_segment_bounds(la,lb,af_inverse_padding(item,threshold)),faces);
+    result.candidates+=int(faces.size());
+    for(int index:faces){Vec face[3];af_world_face(item,index,face);auto pair=af_closest_segment_face(a,b,face,instance);++result.tested;if(pair.distance<best.distance)best=pair;}
+}
+
+static void af_contained_contact(const AfInstance& item,int instance,Vec point,double factor,AfSegmentPair& best,AfContactResult& result){
+    if(!af_inside_instance(item,point))return;AfNearest nearest{{},{},INFINITY,-1};af_nearest_item(item,instance,point,nearest);
+    AfSegmentPair row{point,nearest.point,nearest.face_normal,nearest.distance,factor,instance};
+    if(row.distance<best.distance)best=row;++result.contained;
+}
+
+static bool af_contact_filter(const AfInstance& item,int only,int skip){
+    return (!only||item.owner==only)&&(!skip||item.owner!=skip);
+}
+
+static AfSegmentPair af_contact_edge(const AfWorld& world,Vec a,Vec b,int first,int second,int only,int skip,double span,double threshold,AfContactResult& result){
+    AfSegmentPair best{{},{},{},INFINITY,0.0,-1};std::vector<int> hits;
+    if(!world.nodes.empty())af_collect_world(world,0,af_segment_bounds(a,b,threshold),hits);
+    for(int index:hits){const auto& item=world.items[index];if(!af_contact_filter(item,only,skip))continue;auto range=af_test_range(a,b,item,first,second,span);if(range.first>=range.second)continue;
+        Vec low=add(a,mul(sub(b,a),range.first)),high=add(a,mul(sub(b,a),range.second));AfSegmentPair row=best;af_contact_item(item,index,low,high,threshold,row,result);
+        if(row.distance<best.distance){row.factor=range.first+(range.second-range.first)*row.factor;best=row;}}
+    for(int index=0;index<int(world.items.size());++index){const auto& item=world.items[index];if(!af_contact_filter(item,only,skip))continue;
+        if(first!=item.owner)af_contained_contact(item,index,a,0.0,best,result);if(second!=item.owner)af_contained_contact(item,index,b,1.0,best,result);}
+    return best;
+}
+
+static void af_store_contact(const AfWorld& world,const AfSegmentPair& row,int index,double threshold,double* factors,double* closest,double* normals,double* distances,int* blockers,int* active){
+    Vec direction=sub(row.line,row.surface);bool inside=row.instance>=0&&af_inside_instance(world.items[row.instance],row.line);if(inside)direction=mul(direction,-1.0);
+    Vec normal=af_unit(direction);if(norm(normal)<=eps())normal=af_unit(row.normal);double* q=closest+3*index;double* n=normals+3*index;
+    factors[index]=row.factor;q[0]=row.surface.x;q[1]=row.surface.y;q[2]=row.surface.z;n[0]=normal.x;n[1]=normal.y;n[2]=normal.z;
+    distances[index]=row.distance;blockers[index]=row.instance<0?-1:world.items[row.instance].collider;active[index]=row.distance<threshold||inside;
+}
+
+AF_EXPORT int af_world_query_contacts(void* handle,const double* points,const int64_t* edges,const int* first,const int* second,const int* only,const int* skip,int count,double span,double threshold,int* active,double* factors,double* closest,double* normals,double* distances,int* blockers,AfContactResult* output){
+    if(!handle||!points||!edges||!first||!second||!only||!skip||!active||!factors||!closest||!normals||!distances||!blockers||!output||count<0)return 1;
+    const auto& world=*static_cast<AfWorld*>(handle);*output={0,0,0,0,INFINITY};
+    for(int i=0;i<count;++i){Vec a=load3(points+3*edges[2*i]),b=load3(points+3*edges[2*i+1]);auto row=af_contact_edge(world,a,b,first[i],second[i],only[i],skip[i],span,threshold,*output);
+        af_store_contact(world,row,i,threshold,factors,closest,normals,distances,blockers,active);output->active+=active[i];output->minimum=std::min(output->minimum,row.distance);}
+    return 0;
 }
 
 AF_EXPORT int af_world_nearest_points(void* handle,const double* points,int count,double* closest,

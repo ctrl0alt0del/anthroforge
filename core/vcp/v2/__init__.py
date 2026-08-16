@@ -75,9 +75,11 @@ from .planner import (
 from .solver import (
     DEFAULT_CONTACT_WEIGHT,
     V2_SOLVER_P5_VERSION,
+    V2_SOLVER_P51_VERSION,
     V2Package5Result,
     V2Package5Trace,
     solve_package5,
+    solve_package51,
 )
 
 __all__ = (
@@ -105,6 +107,6 @@ __all__ = (
     "V2_PLANNER_VERSION", "V2_PLANNER_41_VERSION", "V2_PLANNER_42_VERSION", "V2_PLANNER_43_VERSION",
     "V2PlannerDiagnostics", "V2PlannerMode", "V2PlannerResult",
     "plan_reference", "plan_reference_v41", "plan_reference_v42", "plan_reference_v43",
-    "DEFAULT_CONTACT_WEIGHT", "V2_SOLVER_P5_VERSION", "V2Package5Result",
-    "V2Package5Trace", "solve_package5",
+    "DEFAULT_CONTACT_WEIGHT", "V2_SOLVER_P5_VERSION", "V2_SOLVER_P51_VERSION",
+    "V2Package5Result", "V2Package5Trace", "solve_package5", "solve_package51",
 )

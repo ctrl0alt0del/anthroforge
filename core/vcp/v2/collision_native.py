@@ -6,13 +6,14 @@ from pathlib import Path
 import numpy as np
 
 
-V2_NATIVE_ABI = 1
-V2_NATIVE_CAPABILITIES = 511
+V2_NATIVE_ABI = 2
+V2_NATIVE_CAPABILITIES = 1023
 
 
 class _NativeMeshSweep(Structure):
     _fields_ = [("safe", c_double)]
-    _fields_ += [(name, c_int) for name in ("possible", "valid", "tested", "intervals", "reason")]
+    _fields_ += [(name, c_int) for name in ("possible", "valid", "tested", "intervals",
+                                                   "reason", "limiting")]
 
 
 class _NativeWorldBatch(Structure):
@@ -24,6 +25,11 @@ class _NativeWorldSearch(Structure):
     _fields_ = [(name, c_int) for name in ("path_count", "status", "searches", "expansions",
                                                    "validated", "rejected", "candidates", "tested")]
     _fields_ += [(name, c_double) for name in ("search_ms", "collision_ms")]
+
+
+class _NativeWorldContacts(Structure):
+    _fields_ = [(name, c_int) for name in ("candidates", "tested", "active", "contained")]
+    _fields_ += [("minimum", c_double)]
 
 
 _REASONS = ("CLEAR", "AABB_CLEAR", "INVALID_START", "POSSIBLE_COLLISION", "BUDGET_EXHAUSTED")
@@ -99,6 +105,7 @@ def _configure_world_queries(library, double, integer, plain):
                                                     POINTER(_NativeWorldBatch)]
     library.af_world_validate_instance.restype = c_int
     _configure_nearest_query(library, double, plain)
+    _configure_contact_query(library, double, integer, plain)
     library.af_world_lazy_path.argtypes = [c_void_p, double, c_int, integer, integer, c_int, c_int,
                                             c_double, c_double, c_int, integer, c_int,
                                             POINTER(_NativeWorldSearch)]
@@ -110,6 +117,14 @@ def _configure_nearest_query(library, double, plain):
     library.af_world_nearest_points.argtypes = [c_void_p, double, c_int, double, double,
                                                  double, plain, plain]
     library.af_world_nearest_points.restype = c_int
+
+
+def _configure_contact_query(library, double, integer, plain):
+    library.af_world_query_contacts.argtypes = [c_void_p, double, integer, plain, plain, plain,
+                                                 plain, c_int,
+                                                 c_double, c_double, plain, double, double, double,
+                                                 double, plain, POINTER(_NativeWorldContacts)]
+    library.af_world_query_contacts.restype = c_int
 
 
 def _configure_graph_queries(library, double, integer):
@@ -232,6 +247,18 @@ class NativeCollisionWorld:
             raise ValueError("invalid native collision-world nearest query")
         return closest, normals, distances, blockers, contained.astype(bool)
 
+    def contacts(self, points, edges, first, second, span, threshold, only=None, skip=None):
+        values, links, owners = _world_validation_inputs(points, edges, first, second)
+        filters = _contact_filters(only, skip, len(links))
+        arrays = _contact_arrays(len(links)); result = _NativeWorldContacts()
+        args = (self.handle, _double(values), _integer(links), _plain(owners[0]), _plain(owners[1]),
+                _plain(filters[0]), _plain(filters[1]),
+                len(links), float(span), float(threshold), _plain(arrays[0]), _double(arrays[1]),
+                _double(arrays[2]), _double(arrays[3]), _double(arrays[4]), _plain(arrays[5]), byref(result))
+        if self.library.af_world_query_contacts(*args):
+            raise ValueError("invalid native collision-world contact query")
+        return (*arrays, result)
+
     def close(self):
         if self.handle:
             self.library.af_world_destroy(self.handle); self.handle = None
@@ -249,6 +276,21 @@ def _world_mesh(vertices, triangles):
     if points.ndim != 2 or points.shape[1:] != (3,) or faces.ndim != 2 or faces.shape[1:] != (3,) or not len(faces):
         raise ValueError("collision-world mesh requires vertices and triangles")
     return points, faces
+
+
+def _contact_arrays(count):
+    active = np.empty(count, dtype=np.int32); factors = np.empty(count, dtype=np.float64)
+    closest = np.empty((count, 3), dtype=np.float64); normals = np.empty_like(closest)
+    distances = np.empty(count, dtype=np.float64); blockers = np.empty(count, dtype=np.int32)
+    return active, factors, closest, normals, distances, blockers
+
+
+def _contact_filters(only, skip, count):
+    first = np.zeros(count, dtype=np.int32) if only is None else np.ascontiguousarray(only, dtype=np.int32)
+    second = np.zeros(count, dtype=np.int32) if skip is None else np.ascontiguousarray(skip, dtype=np.int32)
+    if len(first) != count or len(second) != count:
+        raise ValueError("contact filters must match edge count")
+    return first, second
 
 
 def _matrices(matrix):
@@ -375,4 +417,5 @@ def native_safe_step(starts, ends, triangles, clearance, tolerance, budget, path
     if load_native(path).af_mesh_pair_safe_step(*args):
         raise ValueError("invalid native CCD arguments")
     reason = _REASONS[output.reason] if 0 <= output.reason < len(_REASONS) else "ERROR"
-    return output.safe, bool(output.possible), bool(output.valid), output.tested, output.intervals, reason
+    return (output.safe, bool(output.possible), bool(output.valid), output.tested,
+            output.intervals, reason, output.limiting)

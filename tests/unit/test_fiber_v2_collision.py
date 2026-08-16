@@ -43,10 +43,17 @@ def _dense_first_hit(start, end, triangle, clearance, samples=4001):
 
 
 class FiberV2CollisionTests(unittest.TestCase):
+    def test_package51_pair_cache_reuses_exact_set_and_prioritizes_limiter(self):
+        cache = v2_collision.V2SweepPairCache(); pairs = np.asarray(((0, 1), (1, 2)))
+        self.assertIs(cache.resolve(("a",), lambda: pairs), pairs)
+        self.assertIs(cache.resolve(("a",), lambda: None), pairs); cache.note((1, 2))
+        ordered = cache.resolve(("b",), lambda: pairs.copy())
+        self.assertEqual(tuple(ordered[0]), (1, 2)); self.assertEqual((cache.hits, cache.misses), (2, 2))
+
     def test_packaged_backend_is_available(self):
         status = collision_backend_status()
         self.assertTrue(status.available, status.message)
-        self.assertEqual(status.version, "af_fiber_ccd-1.511")
+        self.assertEqual(status.version, "af_fiber_ccd-2.1023")
 
     def test_package5_nearest_query_returns_surface_normal(self):
         world = build_native_collision_world((_plane(),))
@@ -54,6 +61,15 @@ class FiberV2CollisionTests(unittest.TestCase):
         np.testing.assert_allclose(closest, ((0, 0, 0),), atol=1.0e-12)
         np.testing.assert_allclose(normals, ((0, 0, 1),), atol=1.0e-12)
         self.assertEqual((distances[0], blockers[0], bool(contained[0])), (1.0, "C", False))
+
+    def test_package51_fused_contact_query_returns_edge_factor(self):
+        world = build_native_collision_world((_plane(),))
+        points = np.asarray(((-1, 0, .1), (1, 0, .1)))
+        result = world.contacts(points, ((0, 1),), (("", ""),), 0.0, 0.2)
+        self.assertEqual(result.active, (True,)); self.assertEqual(result.blockers, ("C",))
+        self.assertAlmostEqual(result.distances[0], .1, places=12)
+        self.assertGreaterEqual(result.factors[0], 0.0); self.assertLessEqual(result.factors[0], 1.0)
+        self.assertGreater(result.normals[0, 2], .99)
 
     def test_persistent_snapshot_cache_reuses_generation(self):
         clear_triangle_snapshot_cache(); colliders = (_plane(),)

@@ -5,7 +5,7 @@ import unittest
 
 import numpy as np
 
-from core.vcp.v2 import (V2Termination, build_triangle_snapshot, solve_package5,
+from core.vcp.v2 import (V2Termination, build_triangle_snapshot, solve_package5, solve_package51,
                          solve_structural, validate_static_clearance)
 from tests.unit.test_fiber_v2_planner import (_anchors, _box, _request, _sphere,
                                               _angle_points)
@@ -33,6 +33,11 @@ def _clearance(result, request):
 
 
 class FiberV2Package5Tests(unittest.TestCase):
+    def test_package51_runs_only_final_static_validation(self):
+        result = solve_package51(_sphere_request())
+        self.assertTrue(result.result.validated); self.assertEqual(result.trace.static_validations, 1)
+        self.assertEqual(result.trace.curved_waypoints, 0)
+
     def test_clear_reference_reaches_exact_structural_solution(self):
         request = _request(_anchors(((0, 0, 0), (1, 0.2, 0))), count=17)
         result = solve_package5(request); expected = solve_structural(

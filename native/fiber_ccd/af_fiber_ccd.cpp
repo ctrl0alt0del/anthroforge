@@ -12,7 +12,7 @@
 
 struct Vec { double x, y, z; };
 struct Sweep { double safe, upper, clearance, minimum; int possible, valid, intervals, reason; };
-struct MeshSweep { double safe; int possible, valid, tested, intervals, reason; };
+struct MeshSweep { double safe; int possible, valid, tested, intervals, reason, limiting; };
 struct Context { Vec a0, b0, a1, b1, t[3]; double clearance, speed, guard; };
 struct Search { std::vector<std::pair<double, double>> stack; double safe, minimum; int intervals; };
 struct Bounds { double lo[3], hi[3]; int index; };
@@ -139,9 +139,9 @@ static Context context(const double* start, const double* end, const double* tri
     c.guard=eps()*scale; return c;
 }
 
-AF_EXPORT int af_fiber_ccd_version() { return 1; }
+AF_EXPORT int af_fiber_ccd_version() { return 2; }
 
-AF_EXPORT int af_fiber_ccd_capabilities() { return 511; }
+AF_EXPORT int af_fiber_ccd_capabilities() { return 1023; }
 
 AF_EXPORT int af_segment_triangle_distances(const double* segments, const double* triangles,
                                              int count, double* distances) {
@@ -212,11 +212,11 @@ static void scaled_end(const double* start, const double* end, double safe, doub
     for (int i=0; i<6; ++i) output[i]=start[i]+safe*(end[i]-start[i]);
 }
 
-static bool absorb_mesh(MeshSweep& mesh, const Sweep& pair) {
+static bool absorb_mesh(MeshSweep& mesh, const Sweep& pair, int index) {
     ++mesh.tested; mesh.intervals+=pair.intervals;
     mesh.valid=mesh.valid && pair.valid; mesh.possible=mesh.possible || pair.possible;
     if (pair.reason == 4) mesh.reason=4;
-    mesh.safe*=pair.safe;
+    if (pair.safe<1.0) mesh.limiting=index; mesh.safe*=pair.safe;
     return mesh.valid && mesh.safe > 0.0;
 }
 
@@ -224,11 +224,11 @@ AF_EXPORT int af_mesh_pair_safe_step(const double* starts, const double* ends,
                                       const double* triangles, int pairs, double clearance,
                                       double tolerance, int budget, MeshSweep* output) {
     if (!starts || !ends || !triangles || !output || pairs < 0 || clearance < 0.0) return 1;
-    MeshSweep mesh{1.0,0,1,0,0,0}; double scaled[6];
+    MeshSweep mesh{1.0,0,1,0,0,0,-1}; double scaled[6];
     for (int i=0; i<pairs; ++i) {
         scaled_end(starts+6*i,ends+6*i,mesh.safe,scaled);
         Sweep pair=sweep_pair(starts+6*i,scaled,triangles+9*i,clearance,tolerance,budget);
-        if (!absorb_mesh(mesh,pair)) break;
+        if (!absorb_mesh(mesh,pair,i)) break;
     }
     mesh.reason=!mesh.valid ? 2 : mesh.reason == 4 ? 4 : mesh.possible ? 3 : 0;
     *output=mesh; return 0;

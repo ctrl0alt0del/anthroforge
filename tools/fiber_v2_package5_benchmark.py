@@ -10,7 +10,7 @@ from time import perf_counter
 import bpy
 import numpy as np
 
-from anthroforge.core.vcp.v2 import (build_triangle_snapshot, solve_package5,
+from anthroforge.core.vcp.v2 import (build_triangle_snapshot, solve_package5, solve_package51,
                                      structural_energy, validate_static_clearance)
 from anthroforge.tools import fiber_v2_planner_41_benchmark as p41
 from anthroforge.tools import fiber_v2_planner_benchmark as bench
@@ -88,12 +88,13 @@ def _deterministic(rows):
                for row in rows[1:])
 
 
-def _visual(source, v1, p5, snapshot):
+def _visual(source, v1, p5, p51, snapshot):
     planner = np.asarray(p5.planner.reference); solved = np.asarray(p5.result.points)
-    routes = (np.asarray(source), np.asarray(v1), planner, solved)
+    optimized = np.asarray(p51.result.points); routes = (np.asarray(source), np.asarray(v1), planner, solved, optimized)
     nearby = p41._nearby_faces(snapshot, routes)
     return {"source": np.asarray(source).tolist(), "v1": np.asarray(v1).tolist(),
             "package43": planner.tolist(), "package5": solved.tolist(),
+            "package51": optimized.tolist(),
             "nearby_triangles": nearby.tolist()}
 
 
@@ -103,13 +104,16 @@ def _record(args):
     colliders = bench._colliders(bpy.context.scene, root, depsgraph)
     snapshot = build_triangle_snapshot(colliders); capture_ms = 1000.0 * (perf_counter() - capture)
     anchors, _legacy = bench._open_anchors(root, fiber, depsgraph)
-    request = bench._request(root, fiber, anchors, colliders); solve_package5(request, snapshot)
+    request = bench._request(root, fiber, anchors, colliders); solve_package5(request, snapshot); solve_package51(request, snapshot)
     v1_times, v1_rows = _timed(lambda: _v1_solve(root, fiber, depsgraph), args.repeats)
     p5_times, p5_rows = _timed(lambda: solve_package5(request, snapshot), args.repeats)
-    return _payload(root, fiber, request, snapshot, capture_ms, v1_times, v1_rows, p5_times, p5_rows)
+    p51_times, p51_rows = _timed(lambda: solve_package51(request, snapshot), args.repeats)
+    return _payload(root, fiber, request, snapshot, capture_ms, v1_times, v1_rows,
+                    p5_times, p5_rows, p51_times, p51_rows)
 
 
-def _payload(root, fiber, request, snapshot, capture, v1_times, v1_rows, p5_times, p5_rows):
+def _payload(root, fiber, request, snapshot, capture, v1_times, v1_rows,
+             p5_times, p5_rows, p51_times, p51_rows):
     source = tuple(anchor.point for anchor in request.anchors)
     return {"file": bpy.data.filepath, "file_sha256": bench._file_hash(bpy.data.filepath),
             "root": root.name, "fiber_id": fiber.id, "fiber_name": fiber.name,
@@ -117,7 +121,8 @@ def _payload(root, fiber, request, snapshot, capture, v1_times, v1_rows, p5_time
             "snapshot_capture_ms": capture, "repeats": len(p5_times),
             "v1": _v1_payload(v1_times, v1_rows[-1], request, snapshot),
             "package5": _p5_payload(p5_times, p5_rows, request, snapshot),
-            "visual": _visual(source, v1_rows[-1], p5_rows[-1], snapshot)}
+            "package51": _p5_payload(p51_times, p51_rows, request, snapshot),
+            "visual": _visual(source, v1_rows[-1], p5_rows[-1], p51_rows[-1], snapshot)}
 
 
 def main():
@@ -126,7 +131,8 @@ def main():
     output.write_text(json.dumps(record, indent=2), encoding="utf-8")
     print("AF_V2_PACKAGE5", json.dumps({"v1": record["v1"]["timing"],
           "package5": record["package5"]["timing"],
-          "termination": record["package5"]["termination"]}), flush=True)
+          "package51": record["package51"]["timing"],
+          "termination": record["package51"]["termination"]}), flush=True)
 
 
 if __name__ == "__main__":
