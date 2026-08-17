@@ -172,6 +172,50 @@ AF_EXPORT int af_world_update_transform(void* handle, int index, const double* m
     item.bounds=af_transform_bounds(item.matrix,item.mesh->nodes[0].bounds,index); if (!world.nodes.empty()) af_refit_world(world,0); return 0;
 }
 
+static uint64_t af_edge_key(int64_t first, int64_t second) {
+    uint32_t low=uint32_t(std::min(first,second)),high=uint32_t(std::max(first,second));
+    return (uint64_t(low)<<32)|uint64_t(high);
+}
+
+static int af_mesh_closed(const double* vertices,int vertex_count,const int64_t* faces,int face_count) {
+    if(!vertices||!faces||vertex_count<1||face_count<1)return -1;
+    for(int i=0;i<3*vertex_count;++i)if(!std::isfinite(vertices[i]))return -1;
+    std::unordered_map<uint64_t,int> edges;
+    for(int f=0;f<face_count;++f)for(int e=0;e<3;++e){int64_t a=faces[3*f+e],b=faces[3*f+(e+1)%3];
+        if(a<0||b<0||a>=vertex_count||b>=vertex_count||a>UINT32_MAX||b>UINT32_MAX)return -1;
+        ++edges[af_edge_key(a,b)];}
+    for(const auto& row:edges)if(row.second!=2)return 0;
+    return edges.empty()?0:1;
+}
+
+static bool af_batch_add(AfWorld& world,const double* vertices,int vertex_count,
+                         const int64_t* faces,int face_count,int owner,const double* matrix,
+                         const double* inverse,int& closed) {
+    closed=af_mesh_closed(vertices,vertex_count,faces,face_count);if(closed<0)return false;
+    AfInstance item{create_snapshot(vertices,faces,face_count),owner,int(world.items.size()),closed,{},{},{}};
+    std::copy(matrix,matrix+16,item.matrix);std::copy(inverse,inverse+16,item.inverse);
+    item.bounds=af_transform_bounds(item.matrix,item.mesh->nodes[0].bounds,int(world.items.size()));
+    world.items.push_back(item);return true;
+}
+
+static void af_delete_world(AfWorld* world) {
+    if(!world)return;for(auto& item:world->items)delete item.mesh;delete world;
+}
+
+AF_EXPORT void* af_world_create_batch(const double* const* vertices,const int* vertex_counts,
+                                       const int64_t* const* faces,const int* face_counts,
+                                       const int* owners,int count,const double* matrices,
+                                       const double* inverses,int* closed,int* status) {
+    if(status)*status=1;if(!vertices||!vertex_counts||!faces||!face_counts||!owners||
+       !matrices||!inverses||!closed||!status||count<0)return nullptr;
+    auto* world=new AfWorld();
+    for(int i=0;i<count;++i)if(!af_batch_add(*world,vertices[i],vertex_counts[i],faces[i],
+       face_counts[i],owners[i],matrices+16*i,inverses+16*i,closed[i])){af_delete_world(world);return nullptr;}
+    for(int i=0;i<count;++i){world->items[i].bounds.index=i;world->order.push_back(world->items[i].bounds);}
+    if(!world->order.empty())af_build_world_bvh(*world,0,int(world->order.size()));
+    *status=0;return world;
+}
+
 AF_EXPORT int af_world_validate_edges(void* handle, const double* points, const int64_t* edges,
                                       const int* first, const int* second, int count, double span,
                                       double threshold, int* clear, int* blockers, double* minima,

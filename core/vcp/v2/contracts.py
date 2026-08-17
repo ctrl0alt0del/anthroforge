@@ -6,6 +6,8 @@ from hashlib import sha256
 import json
 from math import isfinite
 
+import numpy as np
+
 
 V2_CONTRACT_VERSION = 1
 V2_ENGINE_VERSION = "fiber-v2-contract-1"
@@ -68,7 +70,16 @@ def _vec3(value, name="point"):
 
 
 def _points(value, name="points"):
+    if isinstance(value, np.ndarray):
+        return _array_points(value, name)
     return tuple(_vec3(item, name) for item in tuple(value or ()))
+
+
+def _array_points(value, name):
+    rows = np.asarray(value, dtype=np.float64)
+    if rows.ndim != 2 or rows.shape[1:] != (3,) or not np.isfinite(rows).all():
+        raise ValueError(f"{name} must contain finite three-coordinate rows")
+    return tuple(map(tuple, rows.tolist()))
 
 
 def _triangle(value):
@@ -79,7 +90,16 @@ def _triangle(value):
 
 
 def _triangles(value):
+    if isinstance(value, np.ndarray):
+        return _array_triangles(value)
     return tuple(_triangle(item) for item in tuple(value or ()))
+
+
+def _array_triangles(value):
+    rows = np.asarray(value, dtype=np.int64)
+    if rows.ndim != 2 or rows.shape[1:] != (3,) or np.any(rows < 0):
+        raise ValueError("triangle indices must be three nonnegative integers")
+    return tuple(map(tuple, rows.tolist()))
 
 
 def _tokens(value):
@@ -89,6 +109,8 @@ def _tokens(value):
 def _plain(value):
     if isinstance(value, Enum):
         return value.value
+    if isinstance(value, np.ndarray):
+        return value.tolist()
     if is_dataclass(value):
         return {item.name: _plain(getattr(value, item.name)) for item in fields(value)}
     if isinstance(value, dict):
@@ -230,6 +252,31 @@ class V2ColliderSnapshot:
     @classmethod
     def from_payload(cls, value):
         return cls(**_payload(value))
+
+
+@dataclass(frozen=True)
+class V2ArrayColliderSnapshot(V2ColliderSnapshot):
+    def __post_init__(self):
+        object.__setattr__(self, "collider_id", str(self.collider_id or ""))
+        object.__setattr__(self, "owner_id", str(self.owner_id or ""))
+        object.__setattr__(self, "vertices", _readonly_array(self.vertices, np.float64, "vertices"))
+        object.__setattr__(self, "triangles", _readonly_array(self.triangles, np.int64, "triangles"))
+        object.__setattr__(self, "generation", _tokens(self.generation))
+        _validate_array_collider(self)
+
+
+def _readonly_array(value, dtype, name):
+    rows = np.ascontiguousarray(value, dtype=dtype)
+    if rows.ndim != 2 or rows.shape[1:] != (3,):
+        raise ValueError(f"collider {name} must have shape (N, 3)")
+    rows.setflags(write=False); return rows
+
+
+def _validate_array_collider(collider):
+    if not collider.collider_id or not np.isfinite(collider.vertices).all():
+        raise ValueError("collider requires an id and finite vertices")
+    if np.any(collider.triangles < 0) or np.any(collider.triangles >= len(collider.vertices)):
+        raise ValueError("triangle index exceeds collider vertex count")
 
 
 def _validate_triangle_bounds(collider):

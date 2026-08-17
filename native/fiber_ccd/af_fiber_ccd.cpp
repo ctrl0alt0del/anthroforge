@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <queue>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -141,7 +142,7 @@ static Context context(const double* start, const double* end, const double* tri
 
 AF_EXPORT int af_fiber_ccd_version() { return 2; }
 
-AF_EXPORT int af_fiber_ccd_capabilities() { return 1023; }
+AF_EXPORT int af_fiber_ccd_capabilities() { return 2047; }
 
 AF_EXPORT int af_segment_triangle_distances(const double* segments, const double* triangles,
                                              int count, double* distances) {

@@ -8,6 +8,7 @@ import numpy as np
 
 V2_NATIVE_ABI = 2
 V2_NATIVE_CAPABILITIES = 1023
+V2_NATIVE_BATCH_CAPABILITY = 1024
 
 
 class _NativeMeshSweep(Structure):
@@ -92,7 +93,14 @@ def _configure_world_calls(library):
     library.af_world_commit.argtypes = [c_void_p]; library.af_world_commit.restype = c_int
     library.af_world_update_transform.argtypes = [c_void_p, c_int, double, double]
     library.af_world_update_transform.restype = c_int
+    _configure_batch_call(library, double, integer, plain)
     _configure_world_queries(library, double, integer, plain)
+
+
+def _configure_batch_call(library, double, integer, plain):
+    library.af_world_create_batch.argtypes = [POINTER(double), plain, POINTER(integer), plain,
+                                               plain, c_int, double, double, plain, plain]
+    library.af_world_create_batch.restype = c_void_p
 
 
 def _configure_world_queries(library, double, integer, plain):
@@ -153,6 +161,14 @@ def native_status(path=None):
         return False, "", str(error)
 
 
+def native_batch_status(path=None):
+    try:
+        library = load_native(path); capabilities = library.af_fiber_ccd_capabilities()
+        return native_status(path)[0] and bool(capabilities & V2_NATIVE_BATCH_CAPABILITY)
+    except (OSError, AttributeError):
+        return False
+
+
 def _double(array):
     return array.ctypes.data_as(POINTER(c_double))
 
@@ -185,6 +201,13 @@ class NativeCollisionWorld:
         self.library = load_native(path); self.handle = self.library.af_world_create()
         if not self.handle:
             raise RuntimeError("native collision world creation failed")
+
+    @classmethod
+    def from_batch(cls, vertices, triangles, owners, matrices=None, path=None):
+        value = cls.__new__(cls); value.library = load_native(path)
+        value.handle, closed = _create_batch_world(value.library, vertices, triangles,
+                                                    owners, matrices)
+        return value, closed
 
     def add(self, vertices, triangles, owner, collider, closed, matrix=None):
         points, faces = _world_mesh(vertices, triangles); transform, inverse = _matrices(matrix)
@@ -276,6 +299,43 @@ def _world_mesh(vertices, triangles):
     if points.ndim != 2 or points.shape[1:] != (3,) or faces.ndim != 2 or faces.shape[1:] != (3,) or not len(faces):
         raise ValueError("collision-world mesh requires vertices and triangles")
     return points, faces
+
+
+def _create_batch_world(library, vertices, triangles, owners, matrices):
+    points, faces, forward, inverse = _batch_inputs(vertices, triangles, matrices)
+    owner_rows = np.ascontiguousarray(owners, dtype=np.int32); closed = np.empty(len(points), dtype=np.int32)
+    status = c_int(); rows = (_double_rows(points), _plain(_counts(points)),
+                              _integer_rows(faces), _plain(_counts(faces)))
+    handle = library.af_world_create_batch(*rows, _plain(owner_rows), len(points), _double(forward),
+                                           _double(inverse), _plain(closed), byref(status))
+    if not handle or status.value:
+        raise ValueError("invalid native batch collision world")
+    return handle, tuple(bool(value) for value in closed)
+
+
+def _batch_inputs(vertices, triangles, matrices):
+    rows = tuple(_world_mesh(a, b) for a, b in zip(vertices, triangles))
+    transforms = tuple(_matrices(value) for value in tuple(matrices or (None,) * len(rows)))
+    if len(transforms) != len(rows):
+        raise ValueError("transforms must match collider count")
+    points, faces = zip(*rows) if rows else ((), ())
+    return points, faces, _matrix_rows(transforms, 0), _matrix_rows(transforms, 1)
+
+
+def _matrix_rows(rows, index):
+    return np.ascontiguousarray([row[index].reshape(16) for row in rows], dtype=np.float64)
+
+
+def _counts(rows):
+    return np.ascontiguousarray([len(row) for row in rows], dtype=np.int32)
+
+
+def _double_rows(rows):
+    return (POINTER(c_double) * len(rows))(*(_double(row) for row in rows))
+
+
+def _integer_rows(rows):
+    return (POINTER(c_int64) * len(rows))(*(_integer(row) for row in rows))
 
 
 def _contact_arrays(count):

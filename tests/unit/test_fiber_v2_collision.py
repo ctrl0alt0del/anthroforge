@@ -105,7 +105,7 @@ class FiberV2CollisionTests(unittest.TestCase):
     def test_packaged_backend_is_available(self):
         status = collision_backend_status()
         self.assertTrue(status.available, status.message)
-        self.assertEqual(status.version, "af_fiber_ccd-2.1023")
+        self.assertEqual(status.version, "af_fiber_ccd-2.2047")
 
     def test_package5_nearest_query_returns_surface_normal(self):
         world = build_native_collision_world((_plane(),))

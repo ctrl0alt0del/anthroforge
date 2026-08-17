@@ -8,7 +8,7 @@ import numpy as np
 
 from .collision_native import (
     NativeCollisionWorld,
-    native_candidates, native_distances, native_inside, native_safe_step, native_snapshot,
+    native_batch_status, native_candidates, native_distances, native_inside, native_safe_step, native_snapshot,
     native_snapshot_distances, native_snapshot_inside, native_status,
 )
 from .contracts import V2ColliderSnapshot
@@ -191,6 +191,7 @@ class V2NativeCollisionWorld:
     collider_ids: tuple
     instance_indices: tuple
     backend_version: str
+    closed_flags: tuple = ()
 
     def validate(self, points, edges, edge_owners, span, threshold):
         first, second = self._owner_rows(edge_owners, len(edges))
@@ -254,13 +255,22 @@ class V2CollisionSnapshotCache:
         self.max_entries = max(1, int(max_entries)); self._rows = OrderedDict()
         self.hits = 0; self.misses = 0
 
-    def get_or_build(self, colliders, generation):
+    def get_or_build(self, colliders, generation, topology=None):
         key = tuple(generation or ())
         if not key:
             raise ValueError("persistent collision snapshots require a generation key")
+        return self._resolve(key, lambda: build_triangle_snapshot(colliders, topology))
+
+    def get_known(self, colliders, generation, closed):
+        key = ("known",) + tuple(generation or ())
+        if len(key) == 1:
+            raise ValueError("persistent collision snapshots require a generation key")
+        return self._resolve(key, lambda: build_triangle_snapshot_known(colliders, closed))
+
+    def _resolve(self, key, builder):
         if key in self._rows:
             self.hits += 1; self._rows.move_to_end(key); return self._rows[key]
-        self.misses += 1; self._rows[key] = build_triangle_snapshot(colliders)
+        self.misses += 1; self._rows[key] = builder()
         while len(self._rows) > self.max_entries:
             self._rows.popitem(last=False)
         return self._rows[key]
@@ -276,8 +286,12 @@ _SNAPSHOT_CACHE = V2CollisionSnapshotCache()
 _WORLD_CACHE = OrderedDict()
 
 
-def cached_triangle_snapshot(colliders, generation):
-    return _SNAPSHOT_CACHE.get_or_build(tuple(colliders or ()), generation)
+def cached_triangle_snapshot(colliders, generation, topology=None):
+    return _SNAPSHOT_CACHE.get_or_build(tuple(colliders or ()), generation, topology)
+
+
+def cached_known_triangle_snapshot(colliders, generation, closed):
+    return _SNAPSHOT_CACHE.get_known(tuple(colliders or ()), generation, tuple(closed or ()))
 
 
 def clear_triangle_snapshot_cache():
@@ -288,27 +302,53 @@ def triangle_snapshot_cache_stats():
     return _SNAPSHOT_CACHE.stats()
 
 
-def build_native_collision_world(colliders, transforms=None):
+def build_native_collision_world(colliders, transforms=None, topology=None):
     items = tuple(colliders or ()); matrices = tuple(transforms or (None,) * len(items))
     if len(matrices) != len(items):
         raise ValueError("transforms must match collider count")
     tokens = _owner_token_map(items); native = NativeCollisionWorld(); indices = []
     for item, matrix in zip(items, matrices):
-        vertices = np.asarray(item.vertices, dtype=np.float64)
-        triangles = np.asarray(item.triangles, dtype=np.int64)
-        indices.append(native.add(vertices, triangles, tokens.get(item.owner_id, 0),
-                                  len(indices), _closed_mesh(triangles), matrix))
+        indices.append(_add_native_collider(native, item, matrix, tokens, indices, topology))
     native.commit()
     version = collision_backend_status().version
     return V2NativeCollisionWorld(native, tokens, tuple(item.collider_id for item in items),
                                   tuple(indices), version)
 
 
-def cached_native_collision_world(colliders, generation=()):
+def build_native_collision_world_batch(colliders, transforms=None):
+    items = tuple(colliders or ()); matrices = tuple(transforms or (None,) * len(items))
+    if len(matrices) != len(items) or not native_batch_status():
+        raise RuntimeError("native batch collision-world backend is unavailable")
+    tokens = _owner_token_map(items); owners = [tokens.get(item.owner_id, 0) for item in items]
+    native, closed = NativeCollisionWorld.from_batch(
+        tuple(item.vertices for item in items), tuple(item.triangles for item in items), owners, matrices)
+    version = collision_backend_status().version; indices = tuple(range(len(items)))
+    return V2NativeCollisionWorld(native, tokens, tuple(item.collider_id for item in items),
+                                  indices, version, closed)
+
+
+def _add_native_collider(native, item, matrix, tokens, indices, topology):
+    vertices = np.asarray(item.vertices, dtype=np.float64)
+    triangles = np.asarray(item.triangles, dtype=np.int64)
+    closed = _collider_closed(item, triangles, topology)
+    return native.add(vertices, triangles, tokens.get(item.owner_id, 0), len(indices), closed, matrix)
+
+
+def cached_native_collision_world(colliders, generation=(), topology=None):
     items = tuple(colliders or ()); key = _native_world_key(items, generation)
     if key in _WORLD_CACHE:
         _WORLD_CACHE.move_to_end(key); return _WORLD_CACHE[key]
-    _WORLD_CACHE[key] = build_native_collision_world(items)
+    _WORLD_CACHE[key] = build_native_collision_world(items, topology=topology)
+    while len(_WORLD_CACHE) > 8:
+        _WORLD_CACHE.popitem(last=False)
+    return _WORLD_CACHE[key]
+
+
+def cached_native_collision_world_batch(colliders, generation=()):
+    items = tuple(colliders or ()); key = ("batch",) + _native_world_key(items, generation)
+    if key in _WORLD_CACHE:
+        _WORLD_CACHE.move_to_end(key); return _WORLD_CACHE[key]
+    _WORLD_CACHE[key] = build_native_collision_world_batch(items)
     while len(_WORLD_CACHE) > 8:
         _WORLD_CACHE.popitem(last=False)
     return _WORLD_CACHE[key]
@@ -321,8 +361,21 @@ def clear_native_collision_world_cache():
 def _native_world_key(colliders, generation):
     if generation:
         return tuple(generation)
-    return tuple((item.collider_id, item.owner_id, item.generation,
-                  hash(item.vertices), hash(item.triangles)) for item in colliders)
+    return tuple(_native_collider_key(item) for item in colliders)
+
+
+def _native_collider_key(item):
+    base = (item.collider_id, item.owner_id, item.generation)
+    if item.generation:
+        return base + (len(item.vertices), len(item.triangles))
+    return base + (_geometry_hash(item.vertices), _geometry_hash(item.triangles))
+
+
+def _geometry_hash(value):
+    try:
+        return hash(value)
+    except TypeError:
+        return hash(np.asarray(value).tobytes())
 
 
 def _owner_token_map(colliders):
@@ -343,22 +396,41 @@ def collision_backend_status(path=None):
     return V2BackendStatus(available, version, message)
 
 
-def build_triangle_snapshot(colliders):
+def build_triangle_snapshot(colliders, topology=None):
+    items = _snapshot_items(colliders)
+    closed = tuple(_collider_closed(item, np.asarray(item.triangles), topology) for item in items)
+    return _assemble_triangle_snapshot(items, closed)
+
+
+def build_triangle_snapshot_known(colliders, closed):
+    items = _snapshot_items(colliders); flags = tuple(bool(value) for value in closed)
+    if len(items) != len(flags):
+        raise ValueError("closed flags must match collider count")
+    return _assemble_triangle_snapshot(items, flags)
+
+
+def _snapshot_items(colliders):
     items = tuple(colliders or ())
     if not all(isinstance(item, V2ColliderSnapshot) for item in items):
         raise ValueError("colliders must contain V2ColliderSnapshot values")
-    vertices, triangles, owners, ids, ranges, vertex_offset, face_offset = [], [], [], [], [], 0, 0
-    for item in items:
-        local_vertices = np.asarray(item.vertices, dtype=np.float64)
-        vertices.append(local_vertices)
-        local_faces = np.asarray(item.triangles, dtype=np.int64)
-        triangles.append(local_faces + vertex_offset)
-        owners.extend((item.owner_id,) * len(item.triangles)); ids.extend((item.collider_id,) * len(item.triangles))
-        ranges.append((item.collider_id, item.owner_id, vertex_offset, len(item.vertices),
-                       face_offset, len(item.triangles), _closed_mesh(local_faces),
-                       tuple(local_vertices.min(axis=0)), tuple(local_vertices.max(axis=0))))
-        vertex_offset += len(item.vertices); face_offset += len(item.triangles)
-    return _triangle_snapshot(vertices, triangles, owners, ids, ranges, len(items))
+    return items
+
+
+def _assemble_triangle_snapshot(items, closed):
+    rows = ([], [], [], [], []); offsets = (0, 0)
+    for item, flag in zip(items, closed):
+        offsets = _append_triangle_snapshot(rows, offsets, item, flag)
+    return _triangle_snapshot(*rows, len(items))
+
+
+def _append_triangle_snapshot(rows, offsets, item, closed):
+    vertices, triangles, owners, ids, ranges = rows; vertex_offset, face_offset = offsets
+    points = np.asarray(item.vertices, dtype=np.float64); faces = np.asarray(item.triangles, dtype=np.int64)
+    vertices.append(points); triangles.append(faces + vertex_offset)
+    owners.extend((item.owner_id,) * len(faces)); ids.extend((item.collider_id,) * len(faces))
+    ranges.append((item.collider_id, item.owner_id, vertex_offset, len(points), face_offset,
+                   len(faces), bool(closed), tuple(points.min(axis=0)), tuple(points.max(axis=0))))
+    return vertex_offset + len(points), face_offset + len(faces)
 
 
 def _triangle_snapshot(vertices, triangles, owners, ids, ranges, count):
@@ -378,6 +450,15 @@ def _closed_mesh(triangles):
     edges = np.sort(edges, axis=1)
     _unique, counts = np.unique(edges, axis=0, return_counts=True)
     return bool(len(counts) and np.all(counts == 2))
+
+
+def _collider_closed(item, triangles, topology):
+    if topology is None:
+        return _closed_mesh(triangles)
+    key = (item.collider_id, item.owner_id, item.generation, len(item.vertices), len(item.triangles))
+    if key not in topology:
+        topology[key] = _closed_mesh(triangles)
+    return topology[key]
 
 
 def validate_static_clearance(points, snapshot, clearance, contacts=(), cyclic=False,

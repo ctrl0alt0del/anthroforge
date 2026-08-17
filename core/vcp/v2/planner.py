@@ -116,23 +116,23 @@ def plan_reference_v42(request, snapshot=None):
     return _plan_reference(request, snapshot, _plan_segments_v42)
 
 
-def plan_reference_v43(request, snapshot=None, owner_contact_factor=2.5):
+def plan_reference_v43(request, snapshot=None, owner_contact_factor=2.5, native_world=None):
     """Return a Package 4.3 fused-native exact-count planner reference."""
     started = perf_counter(); issue = _configuration_issue(request)
     if issue:
         return _failed(V2Termination.INVALID_CONFIGURATION, issue, started)
     if not collision_backend_status().available:
         return _failed(V2Termination.BACKEND_UNAVAILABLE, "native collision backend unavailable", started)
-    state = _v43_state(request, snapshot, owner_contact_factor)
+    state = _v43_state(request, snapshot, owner_contact_factor, native_world)
     invalid = _invalid_anchor(state)
     if invalid:
         return _failed_with_state(state, V2Termination.INVALID_ATTACHMENT, invalid, started)
     return _finish_plan(state, _plan_segments_v41(state), started)
 
 
-def _v43_state(request, snapshot, owner_contact_factor):
+def _v43_state(request, snapshot, owner_contact_factor, native_world=None):
     triangle = snapshot or build_triangle_snapshot(request.colliders)
-    world = cached_native_collision_world(request.colliders)
+    world = native_world or cached_native_collision_world(request.colliders)
     return _PlannerState(request, triangle, {}, {}, native_world=world,
                          owner_contact_factor=float(owner_contact_factor))
 

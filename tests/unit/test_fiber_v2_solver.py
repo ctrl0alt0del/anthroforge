@@ -7,7 +7,8 @@ from unittest.mock import patch
 import numpy as np
 
 from core.vcp.v2 import (V2Termination, build_triangle_snapshot, solve_package5, solve_package51, solve_package6,
-                         solve_package61,
+                         solve_package61, solve_package71, solve_package72,
+                         solve_package8, solve_package81, solve_package82,
                          solve_structural, validate_static_clearance)
 import core.vcp.v2.solver_p61 as p61
 from tests.unit.test_fiber_v2_planner import (_anchors, _box, _request, _sphere,
@@ -36,6 +37,103 @@ def _clearance(result, request):
 
 
 class FiberV2Package5Tests(unittest.TestCase):
+    def test_package82_clear_case_is_exact_and_cap_invariant(self):
+        request = _bent_request(); short = replace(request, settings=replace(request.settings, max_accepted_steps=2))
+        first, second = solve_package82(short), solve_package82(request)
+        self.assertEqual(first.result.termination, V2Termination.CONVERGED)
+        self.assertEqual(first.result.points, second.result.points)
+        self.assertLess(first.result.diagnostics.stationarity_residual, 1.0e-9)
+
+    def test_package82_is_safe_and_deterministic(self):
+        request = _box_request(); first, second = solve_package82(request), solve_package82(request)
+        self.assertEqual(first.result.points, second.result.points)
+        self.assertEqual(first.result.termination, second.result.termination)
+        self.assertTrue(first.result.validated); self.assertTrue(_clearance(first, request).valid)
+
+    def test_package81_clear_case_is_exact_and_cap_invariant(self):
+        request = _bent_request(); short = replace(request, settings=replace(request.settings, max_accepted_steps=2))
+        first, second = solve_package81(short), solve_package81(request)
+        self.assertEqual(first.result.termination, V2Termination.CONVERGED)
+        self.assertEqual(first.result.points, second.result.points)
+        self.assertLess(first.result.diagnostics.stationarity_residual, 1.0e-9)
+
+    def test_package81_is_safe_and_deterministic(self):
+        request = _box_request(); first, second = solve_package81(request), solve_package81(request)
+        self.assertEqual(first.result.points, second.result.points)
+        self.assertEqual(first.result.termination, second.result.termination)
+        self.assertTrue(first.result.validated); self.assertTrue(_clearance(first, request).valid)
+
+    def test_package8_clear_case_is_exact_and_cap_invariant(self):
+        request = _bent_request(); short = replace(request, settings=replace(request.settings, max_accepted_steps=2))
+        first, second = solve_package8(short), solve_package8(request)
+        self.assertEqual(first.result.termination, V2Termination.CONVERGED)
+        self.assertEqual(first.result.points, second.result.points)
+        self.assertLess(first.result.diagnostics.stationarity_residual, 1.0e-9)
+
+    def test_package8_frozen_local_energies_do_not_increase(self):
+        result = solve_package8(_box_request()); values = result.trace.local_energies
+        self.assertTrue(values); self.assertTrue(all(np.isfinite(value) for value in values))
+        self.assertTrue(result.result.validated); self.assertTrue(_clearance(result, _box_request()).valid)
+
+    def test_package8_is_deterministic(self):
+        first, second = solve_package8(_box_request()), solve_package8(_box_request())
+        self.assertEqual(first.result.points, second.result.points)
+        self.assertEqual(first.result.termination, second.result.termination)
+        self.assertEqual(first.trace.reference_signature, second.trace.reference_signature)
+
+    def test_package72_acquires_deterministic_shape_reference(self):
+        first, second = solve_package72(_bent_request()), solve_package72(_bent_request())
+        self.assertGreater(first.trace.acquisition_accepted, 0)
+        self.assertEqual(first.trace.reference_signature, second.trace.reference_signature)
+        self.assertEqual(first.result.points, second.result.points)
+
+    def test_package72_shared_accepted_budget_is_respected(self):
+        request = replace(_box_request(), settings=replace(_box_request().settings, max_accepted_steps=5))
+        result = solve_package72(request)
+        self.assertLessEqual(result.result.diagnostics.accepted_steps, 5)
+        self.assertLessEqual(result.trace.acquisition_accepted, 4)
+
+    def test_package72_rejection_activates_bounded_recovery(self):
+        result = solve_package72(_box_request())
+        self.assertGreaterEqual(result.trace.recovery_activations, 1)
+        self.assertIn("TRUST", result.trace.controller_history)
+        self.assertNotEqual(result.result.termination, V2Termination.BLOCKED)
+
+    def test_package72_accepted_ratios_meet_threshold(self):
+        result = solve_package72(_box_request())
+        finite = [value for value in result.trace.ratio_history if np.isfinite(value)]
+        self.assertTrue(finite); self.assertTrue(all(value >= 0.10 for value in finite))
+
+    def test_package72_output_is_independently_safe(self):
+        request = _box_request(); result = solve_package72(request)
+        self.assertTrue(result.result.validated); self.assertTrue(_clearance(result, request).valid)
+        self.assertEqual(result.result.engine_version, "fiber-v2-solver-package7.2-1")
+
+    def test_package71_clear_case_matches_fixed_reference_solution(self):
+        request = _bent_request(); result = solve_package71(request)
+        pins = {index: anchor.point for index, anchor in zip(result.planner.pin_indices, request.anchors)}
+        expected = solve_structural(result.planner.reference, pins, request.settings)
+        np.testing.assert_allclose(result.result.points, expected.points, atol=2.0e-12)
+        self.assertGreater(result.result.diagnostics.structural_energy, 0.0)
+
+    def test_package71_clear_result_is_cap_invariant(self):
+        request = _bent_request(); short = replace(request, settings=replace(request.settings, max_accepted_steps=2))
+        long = replace(request, settings=replace(request.settings, max_accepted_steps=20))
+        first, second = solve_package71(short), solve_package71(long)
+        self.assertEqual(first.result.termination, V2Termination.CONVERGED)
+        self.assertEqual(first.result.points, second.result.points)
+
+    def test_package71_trace_and_stationarity_use_fixed_reference(self):
+        first, second = solve_package71(_bent_request()), solve_package71(_bent_request())
+        self.assertTrue(first.trace.fixed_reference); self.assertEqual(first.trace.reference_signature, second.trace.reference_signature)
+        self.assertLess(first.result.diagnostics.stationarity_residual, 1.0e-9)
+        self.assertEqual(first.result.points, second.result.points)
+
+    def test_package71_contact_output_remains_independently_safe(self):
+        request = _box_request(); result = solve_package71(request)
+        self.assertTrue(result.result.validated); self.assertTrue(_clearance(result, request).valid)
+        self.assertEqual(result.result.engine_version, "fiber-v2-solver-package7.1-1")
+
     def test_package61_light_workload_preserves_package51_fast_path(self):
         request = _bent_request(); expected = solve_package51(request); result = solve_package61(request)
         self.assertEqual(result.trace.selected_mode, "P51")

@@ -86,6 +86,7 @@ class _SolverState:
     contact_query_ms: float = 0.0
     static_validations: int = 0
     curved_waypoints: int = 0
+    native_world: object = None
 
 
 def solve_package5(request, snapshot=None, contact_weight=DEFAULT_CONTACT_WEIGHT):
@@ -215,7 +216,7 @@ def _surface_retract(state, points):
     owner = _surface_owner(state.request); colliders = _owner_colliders(state.request, owner)
     if not owner or not colliders:
         return np.asarray(points).copy()
-    closest, normals, distances, _ids, contained = cached_native_collision_world(colliders).nearest(points)
+    closest, normals, distances, _ids, contained = _collision_world(state, colliders).nearest(points)
     directions = _contact_directions(points, closest, normals, distances, contained)
     output = closest + 1.5 * state.request.collision_policy.collision_radius * directions
     _restore_pins(output, state.pins); return output
@@ -405,7 +406,7 @@ def _fixed_residual(state):
 def _contact_geometry(state, candidate):
     if not state.request.colliders:
         return candidate.copy(), np.zeros_like(candidate), np.full(len(candidate), np.inf)
-    world = cached_native_collision_world(state.request.colliders)
+    world = _collision_world(state)
     closest, normals, distances, _blockers, contained = world.nearest(candidate)
     directions = _contact_directions(candidate, closest, normals, distances, contained)
     radius = state.request.collision_policy.collision_radius
@@ -560,7 +561,7 @@ def _refresh_native_contacts(state, points=None):
     edges = _chain_links(len(state.points), _cyclic(state)); values = points if points is not None else state.points
     query = _contact_query_rows(state, values, edges)
     radius = state.request.collision_policy.collision_radius; slack = state.request.tolerances.clearance_slack
-    band = max(0.5 * radius, 2.0 * slack); world = cached_native_collision_world(state.request.colliders)
+    band = max(0.5 * radius, 2.0 * slack); world = _collision_world(state)
     rows = world.contacts(query[0], query[1], (("", ""),) * len(query[1]), 0.0,
                           radius + band - slack, query[3], query[4])
     _store_exact_contacts(state, edges, query[2], rows); state.contact_query_ms += _elapsed(started)
@@ -570,6 +571,13 @@ def _refresh_native_contacts(state, points=None):
 def _clear_native_contacts(state):
     state.active.clear(); state.active_edges.clear(); state.contact_rows.clear()
     state.active_counts.append(0)
+
+
+def _collision_world(state, colliders=None):
+    items = tuple(state.request.colliders if colliders is None else colliders)
+    if colliders is None and state.native_world is not None:
+        return state.native_world
+    return cached_native_collision_world(items)
 
 
 def _store_native_contacts(state, edges, rows):

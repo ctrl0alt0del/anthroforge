@@ -764,13 +764,13 @@ def _fiber_handle(scene, fiber_id):
 def _handle_events(root, scene, fiber, handle, count):
     from anthroforge.core.visualization.fiber_sync_runtime import _enqueue_fiber_runtime
     original, values = handle.location.copy(), []
+    distance = .5 * max(float(getattr(fiber, "collision_radius", .002)), 1.0e-7)
     for index in range(max(1, int(count))):
         started = time.perf_counter()
-        handle.location.x = original.x + (1.0e-6 if index % 2 == 0 else 0.0)
+        handle.location.x = original.x + distance * (index + 1) / max(1, int(count))
         _enqueue_fiber_runtime(root, scene, {fiber.id})
         values.append((time.perf_counter() - started) * 1000.0)
-    handle.location = original
-    return values
+    return original, values
 
 
 def _handle_burst(path, args):
@@ -779,16 +779,22 @@ def _handle_burst(path, args):
     fiber = _selected_fiber(root, args.fiber)
     if fiber is None:
         return {"mode": "handle-burst", "error": "Fiber not found."}
-    _activate_fiber(root, fiber)
-    _materialize_handles(sync, root, scene)
-    handle = _fiber_handle(scene, fiber.id)
+    handle = _prepared_handle(sync, root, scene, fiber)
     if handle is None:
         return {"mode": "handle-burst", "error": "Fiber endpoint handle not found."}
     _telemetry_start(scene)
-    values = _handle_events(root, scene, fiber, handle, args.events)
+    original, values = _handle_events(root, scene, fiber, handle, args.events)
     queued, flush_ms = _flush_pending_runtime()
     refinement = _drain_refinements()
-    return _handle_result(values, queued, flush_ms, refinement, _telemetry_result(scene))
+    result = _handle_result(values, queued, flush_ms, refinement, _telemetry_result(scene))
+    handle.location = original
+    return result
+
+
+def _prepared_handle(sync, root, scene, fiber):
+    _activate_fiber(root, fiber)
+    _materialize_handles(sync, root, scene)
+    return _fiber_handle(scene, fiber.id)
 
 
 def _handle_result(values, queued, flush_ms, refinement, telemetry):

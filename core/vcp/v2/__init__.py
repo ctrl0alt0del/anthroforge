@@ -5,6 +5,7 @@ from .contracts import (
     V2_ENGINE_VERSION,
     V2Anchor,
     V2AnchorRole,
+    V2ArrayColliderSnapshot,
     V2ColliderSnapshot,
     V2CollisionPolicy,
     V2Diagnostics,
@@ -33,6 +34,37 @@ from .structural import (
     structural_gradient,
     structural_stationarity,
 )
+from .contact_structural import (
+    DEFAULT_CONTACT_FACTOR_CACHE,
+    V2_CONTACT_STRUCTURAL_VERSION,
+    ContactSlotEnergy,
+    ContactStructuralResult,
+    assemble_contact_matrix,
+    clear_contact_factor_cache,
+    contact_factor_cache_stats,
+    contact_slot_energy,
+    contact_stationarity,
+    solve_contact_structural,
+)
+from .contact_sampled import (
+    DEFAULT_SAMPLED_CONTACT_CACHE,
+    DEFAULT_SAMPLE_FACTORS,
+    V2_SAMPLED_CONTACT_VERSION,
+    SampledContactResult,
+    assemble_sampled_contact_matrix,
+    clear_sampled_contact_cache,
+    sample_edge_points,
+    sampled_contact_cache_stats,
+    sampled_contact_energy,
+    sampled_contact_stationarity,
+    solve_sampled_contact,
+)
+from .contact_unilateral import (
+    V2_UNILATERAL_CONTACT_VERSION,
+    UnilateralConstraint,
+    UnilateralContactResult,
+    solve_unilateral_contact,
+)
 from .collision import (
     EDGE_BATCH,
     PAIR_BATCH,
@@ -47,9 +79,13 @@ from .collision import (
     V2SegmentBatch,
     V2StaticClearance,
     V2TriangleSnapshot,
+    build_native_collision_world_batch,
     build_triangle_snapshot,
+    build_triangle_snapshot_known,
     build_native_collision_world,
+    cached_known_triangle_snapshot,
     cached_native_collision_world,
+    cached_native_collision_world_batch,
     cached_triangle_snapshot,
     clear_triangle_snapshot_cache,
     clear_native_collision_world_cache,
@@ -86,10 +122,24 @@ from .solver import (
 )
 from .solver_p6 import V2_SOLVER_P6_VERSION, V2Package6Trace, solve_package6
 from .solver_p61 import V2_SOLVER_P61_VERSION, V2Package61Trace, solve_package61
+from .solver_v21 import (V2_SOLVER_V21_VERSION, V21Trace, clear_v21_route_cache,
+                         solve_v21, v21_route_cache_stats)
+from .solver_v22 import (V2_SOLVER_V22_VERSION, V22Trace, clear_v22_route_cache,
+                         solve_v22, v22_request_signature, v22_route_cache_stats,
+                         v22_snapshot_key)
+from .solver_v23 import (V2_SOLVER_V23_VERSION, V23Trace, clear_v23_route_cache,
+                         solve_v23, v23_route_cache_stats)
+from .solver_v24 import (V2_SOLVER_V24_VERSION, V24Trace, clear_v24_route_cache,
+                         solve_v24, v24_route_cache_stats)
+from .solver_p71 import V2_SOLVER_P71_VERSION, V2Package71Trace, solve_package71
+from .solver_p72 import V2_SOLVER_P72_VERSION, V2Package72Trace, solve_package72
+from .solver_p8 import V2_SOLVER_P8_VERSION, V2Package8Trace, solve_package8
+from .solver_p81 import V2_SOLVER_P81_VERSION, V2Package81Trace, solve_package81
+from .solver_p82 import V2_SOLVER_P82_VERSION, V2Package82Trace, solve_package82
 
 __all__ = (
     "V2_CONTRACT_VERSION", "V2_ENGINE_VERSION", "V2Anchor",
-    "V2AnchorRole", "V2ColliderSnapshot", "V2CollisionPolicy",
+    "V2AnchorRole", "V2ArrayColliderSnapshot", "V2ColliderSnapshot", "V2CollisionPolicy",
     "V2Diagnostics", "V2Quality", "V2Request",
     "V2ResolvedTolerances", "V2Result", "V2Settings",
     "V2Termination", "V2Topology", "decode_request", "decode_result",
@@ -98,12 +148,18 @@ __all__ = (
     "V2_STRUCTURAL_VERSION", "V2StructuralEnergy", "V2StructuralResult",
     "clear_structural_cache", "solve_structural", "structural_cache_stats",
     "structural_energy", "structural_gradient", "structural_stationarity",
+    "DEFAULT_CONTACT_FACTOR_CACHE", "V2_CONTACT_STRUCTURAL_VERSION",
+    "ContactSlotEnergy", "ContactStructuralResult", "assemble_contact_matrix",
+    "clear_contact_factor_cache", "contact_factor_cache_stats", "contact_slot_energy",
+    "contact_stationarity", "solve_contact_structural",
     "EDGE_BATCH", "PAIR_BATCH", "V2_COLLISION_VERSION",
     "V2BackendStatus", "V2CollisionReason", "V2CollisionWorkload", "V2DistanceCertificateCache", "V2OwnerContact", "V2NativeCollisionWorld",
     "V2SafeStep", "V2StaticClearance", "V2TriangleSnapshot",
     "V2SegmentBatch",
-    "build_triangle_snapshot", "build_native_collision_world", "collision_backend_status",
-    "cached_native_collision_world", "clear_native_collision_world_cache",
+    "build_triangle_snapshot", "build_triangle_snapshot_known", "build_native_collision_world",
+    "build_native_collision_world_batch", "collision_backend_status",
+    "cached_native_collision_world", "cached_native_collision_world_batch",
+    "cached_known_triangle_snapshot", "clear_native_collision_world_cache",
     "cached_triangle_snapshot", "clear_triangle_snapshot_cache",
     "collision_free_step", "point_triangle_distances", "probe_collision_workload",
     "segment_triangle_distances", "validate_static_clearance",
@@ -116,4 +172,22 @@ __all__ = (
     "V2Package5Result", "V2Package5Trace", "solve_package5", "solve_package51",
     "V2_SOLVER_P6_VERSION", "V2Package6Trace", "solve_package6",
     "V2_SOLVER_P61_VERSION", "V2Package61Trace", "solve_package61",
+    "V2_SOLVER_V21_VERSION", "V21Trace", "clear_v21_route_cache",
+    "solve_v21", "v21_route_cache_stats",
+    "V2_SOLVER_V22_VERSION", "V22Trace", "clear_v22_route_cache",
+    "solve_v22", "v22_request_signature", "v22_route_cache_stats", "v22_snapshot_key",
+    "V2_SOLVER_V23_VERSION", "V23Trace", "clear_v23_route_cache",
+    "solve_v23", "v23_route_cache_stats",
+    "V2_SOLVER_V24_VERSION", "V24Trace", "clear_v24_route_cache",
+    "solve_v24", "v24_route_cache_stats",
+    "V2_SOLVER_P71_VERSION", "V2Package71Trace", "solve_package71",
+    "V2_SOLVER_P72_VERSION", "V2Package72Trace", "solve_package72",
+    "V2_SOLVER_P8_VERSION", "V2Package8Trace", "solve_package8",
+    "V2_SAMPLED_CONTACT_VERSION", "DEFAULT_SAMPLED_CONTACT_CACHE", "DEFAULT_SAMPLE_FACTORS",
+    "SampledContactResult", "assemble_sampled_contact_matrix", "clear_sampled_contact_cache",
+    "sample_edge_points", "sampled_contact_cache_stats", "sampled_contact_energy",
+    "sampled_contact_stationarity", "solve_sampled_contact",
+    "V2_SOLVER_P81_VERSION", "V2Package81Trace", "solve_package81",
+    "V2_UNILATERAL_CONTACT_VERSION", "UnilateralConstraint", "UnilateralContactResult",
+    "solve_unilateral_contact", "V2_SOLVER_P82_VERSION", "V2Package82Trace", "solve_package82",
 )
