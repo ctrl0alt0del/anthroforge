@@ -16,6 +16,21 @@ from ...core.vcp.runtime_state import (
 )
 
 
+_STATUS_LABELS = {
+    "UNKNOWN": ("Not Evaluated This Session", "QUESTION"),
+    "REFINING": ("Refining", "TIME"), "CONVERGED": ("Converged", "CHECKMARK"),
+    "PLANNER_PREVIEW": ("Planner Preview", "HIDE_OFF"),
+    "NO_FEASIBLE_PATH": ("No Feasible Planner Path", "ERROR"),
+    "NOT_CONVERGED": ("Not Converged", "ERROR"), "STALLED": ("Stalled", "ERROR"),
+    "BLOCKED": ("Blocked", "ERROR"), "BUDGET_EXHAUSTED": ("Budget Exhausted", "TIME"),
+    "UNSAFE_OUTPUT": ("Unsafe Output", "ERROR"),
+    "BACKEND_UNAVAILABLE": ("Backend Unavailable", "ERROR"),
+    "INVALID_CONFIGURATION": ("Invalid Configuration", "ERROR"),
+    "INVALID_ATTACHMENT": ("Invalid Attachment", "ERROR"),
+    "CANCELLED": ("Cancelled", "CANCEL"), "SUPERSEDED": ("Superseded", "CANCEL"),
+}
+
+
 class AF_PT_FiberEditPanel(bpy.types.Panel):
     bl_label = "Edit Fiber VCP"
     bl_idname = "AF_PT_fiber_edit_panel"
@@ -115,13 +130,9 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         status_box.label(text="Status: Unknown", icon="QUESTION")
 
     def _draw_known_status(self, box, fiber, status):
-        labels = {"REFINING": ("Refining", "TIME"), "CONVERGED": ("Converged", "CHECKMARK"),
-                  "PLANNER_PREVIEW": ("Planner Preview", "HIDE_OFF"),
-                  "NO_FEASIBLE_PATH": ("No Feasible Planner Path", "ERROR"),
-                  "NOT_CONVERGED": ("Not Converged", "ERROR")}
-        if status not in labels:
+        if status not in _STATUS_LABELS:
             return False
-        text, icon = labels[status]
+        text, icon = _STATUS_LABELS[status]
         box.label(text=f"Status: {text}", icon=icon)
         self._draw_residuals(box, fiber) if status == "NOT_CONVERGED" else None
         return True

@@ -242,12 +242,33 @@ def _bounds(colliders):
 
 
 def _solve_result(session, result_type):
+    if _planner_preview_requested(session):
+        return result_type(**_planner_result_values(session))
     result, trace = session.package.result, session.package.trace
     diagnostics = result.diagnostics
     penetration = max(float(diagnostics.node_clearance_residual),
                       float(diagnostics.edge_clearance_residual))
     values = _result_values(session, result, trace, penetration)
     return result_type(**values)
+
+
+def _planner_preview_requested(session):
+    return bool(getattr(session.fiber, "preview_planner_route", False) and
+                getattr(session.package, "planner", None) is not None)
+
+
+def _planner_result_values(session):
+    planner, trace = session.package.planner, session.package.trace
+    succeeded = bool(getattr(planner, "succeeded", False))
+    reason = FiberTermination.PLANNER_PREVIEW.value if succeeded else planner.termination.value
+    points = [Vector(row) for row in planner.reference] if succeeded else []
+    error = "" if succeeded else str(planner.message or reason)
+    return dict(points=points, done=True, converged=False, invalid_reason=error,
+                mode=planner.mode.value, planner_ms=float(getattr(trace, "planner_ms", 0.0)),
+                active_count=len(session.colliders), termination_reason=reason,
+                validated=succeeded, engine_version=V2_PRODUCTION_VERSION,
+                diagnostics=planner.diagnostics, telemetry=session.telemetry, engine="V2",
+                backend_version=collision_backend_status().version, selection=session.selection)
 
 
 def _result_values(session, result, trace, penetration):

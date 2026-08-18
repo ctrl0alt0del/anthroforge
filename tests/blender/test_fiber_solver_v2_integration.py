@@ -19,7 +19,8 @@ for value in (str(BLENDER_TEST_ROOT), str(TEST_ROOT), str(ADDON_ROOT.parent)):
 
 from anthroforge.core.vcp.fiber_progressive import _can_finish_direct
 from anthroforge.core.vcp.fiber_solver import FiberSolver
-from anthroforge.core.vcp.v2 import V2Diagnostics, V2Result, V2Termination
+from anthroforge.core.vcp.v2 import (V2Diagnostics, V2PlannerDiagnostics, V2PlannerMode,
+                                     V2PlannerResult, V2Result, V2Termination)
 from anthroforge.core.vcp.v2.collision import V2BackendStatus
 from anthroforge.core.vcp.fiber_solver_v2 import (
     CYCLIC,
@@ -33,8 +34,10 @@ from anthroforge.core.vcp.prop_update_guard import suppress_vcp_prop_updates
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
 from anthroforge.core.visualization.fiber_sync_helpers import cached_fiber_points, mark_fiber_output_stale
 from anthroforge.core.visualization.fiber_refinement import drain_fiber_refinements, request_fiber_refinement
+from anthroforge.core.visualization import sync_runner
 from anthroforge.core.vcp.runtime_state import fiber_recompute_status
 from anthroforge.core.visualization.muscle_sync_runtime import collect_fiber_points
+from anthroforge.ui.panels.fiber_edit_panel import _STATUS_LABELS
 from _helpers import BlenderTestCase, find_flagged, mesh_object, root, scp_with_object
 
 
@@ -136,6 +139,24 @@ class FiberSolverV2IntegrationTests(unittest.TestCase):
         self.assertTrue(_can_finish_direct(v1))
 
 class FiberSolverV2WorkflowTests(BlenderTestCase):
+    def test_v2_planner_preview_uses_validated_planner_not_blocked_solver(self):
+        root_obj, fiber = _legacy_fiber_setup(); package = _planner_package(24)
+        proxy = _fiber_proxy(fiber); persisted = proxy.get("af_fiber_points_world")
+        with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V2", "AF_FIBER_DEFER_MS": "0"}):
+            with patch("anthroforge.core.vcp.fiber_v2_runtime.solve_v2", return_value=package):
+                fiber.preview_planner_route = True
+                while sync_runner._PENDING:
+                    sync_runner._flush_pending()
+                self.assertTrue(drain_fiber_refinements())
+        self.assertEqual((fiber_recompute_status(fiber), proxy.get("af_fiber_display_mode")),
+                         ("PLANNER_PREVIEW", "PLANNER_PREVIEW"))
+        self.assertEqual((len(proxy.data.splines[0].points), proxy.get("af_fiber_points_world")),
+                         (24, persisted))
+
+    def test_v2_terminal_statuses_have_ui_labels(self):
+        expected = {"UNKNOWN", "BLOCKED", "STALLED", "BUDGET_EXHAUSTED", "UNSAFE_OUTPUT"}
+        self.assertTrue(expected.issubset(_STATUS_LABELS))
+
     def test_synchronous_api_drains_selected_v2_session(self):
         root_obj, fiber = _v2_fiber_setup(); package = _stalled_package(24)
         solver = FiberSolver()
@@ -271,6 +292,15 @@ def _stalled_package(count, termination=V2Termination.STALLED):
     result = V2Result("runtime-test", termination, points, diagnostics,
                       True, "DIRECT", "validated recovery", "test-pin-runtime")
     return SimpleNamespace(result=result, trace=SimpleNamespace(planner_ms=1.0))
+
+
+def _planner_package(count):
+    package = _stalled_package(count, V2Termination.BLOCKED)
+    points = tuple((2.0 * index / (count - 1), .1, 0.0) for index in range(count))
+    planner = V2PlannerResult(V2Termination.CONVERGED, V2PlannerMode.ROADMAP,
+                              reference=points, corridor=points,
+                              diagnostics=V2PlannerDiagnostics(planner_ms=1.0))
+    return SimpleNamespace(result=package.result, trace=package.trace, planner=planner)
 
 
 def _fiber_proxy(fiber):
