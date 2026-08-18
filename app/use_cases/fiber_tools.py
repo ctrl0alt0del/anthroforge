@@ -1,5 +1,4 @@
 import json
-import os
 
 try:
     from ...core.vcp.runtime_state import (
@@ -71,10 +70,8 @@ def recompute_fiber(context, fiber_id="", max_passes=12):
     fiber, error = _resolved_fiber(root, fiber_id)
     if fiber is None:
         return failure(error)
-    _prepare_v2_migration(root, context.scene, fiber)
     request = _request_refinement()(root, context.scene, fiber, show_preview=True)
     if not request.ok:
-        _cancel_v2_migration(fiber)
         return failure(request.error or _invalid_message(fiber))
     return success(f"Refining {fiber.id} in the background", value=fiber)
 
@@ -87,20 +84,8 @@ def restore_legacy_fiber(context, fiber_id=""):
         return failure(error or "No legacy Fiber shape is available.")
     _restore_legacy_state(fiber)
     proxy = _fiber_sync().apply_points(root, context.scene, fiber, points, commit=True)
+    _write_legacy_provenance(proxy)
     return success("Legacy Fiber shape restored.", value=proxy)
-
-
-def _prepare_v2_migration(root, scene, fiber):
-    if int(getattr(fiber, "solver_version", 1)) >= 2 or not _v2_rollout_enabled():
-        return
-    if not str(getattr(fiber, "legacy_points_json", "") or ""):
-        _save_legacy_snapshot(root, scene, fiber)
-    fiber["af_pending_solver_version"] = 2
-
-
-def _v2_rollout_enabled():
-    value = str(os.environ.get("AF_FIBER_V2_ROLLOUT", "0") or "0").strip().lower()
-    return value in {"1", "true", "yes", "on"}
 
 
 def _save_legacy_snapshot(root, scene, fiber):
@@ -124,9 +109,22 @@ def _legacy_diagnostics(fiber):
 
 def _cancel_v2_migration(fiber):
     try:
-        del fiber["af_pending_solver_version"]
-    except Exception:
-        return
+        from ...core.visualization.fiber_engine_migration import clear_engine_migration
+    except ImportError:
+        from core.visualization.fiber_engine_migration import clear_engine_migration
+    clear_engine_migration(fiber)
+
+
+def _write_legacy_provenance(proxy):
+    try:
+        from ...core.vcp.fiber_engine_registry import V1_PRODUCTION_VERSION
+        from ...core.vcp.fiber_engine_selection import resolve_fiber_engine
+        from ...core.visualization.fiber_engine_migration import write_engine_provenance
+    except ImportError:
+        from core.vcp.fiber_engine_registry import V1_PRODUCTION_VERSION
+        from core.vcp.fiber_engine_selection import resolve_fiber_engine
+        from core.visualization.fiber_engine_migration import write_engine_provenance
+    write_engine_provenance(proxy, resolve_fiber_engine("V1"), V1_PRODUCTION_VERSION)
 
 
 def _restore_legacy_state(fiber):

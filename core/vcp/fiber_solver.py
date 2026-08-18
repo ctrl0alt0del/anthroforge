@@ -126,20 +126,11 @@ class FiberSolver:
 
     def _base_params(self, fiber_prop, node_count, iterations):
         shorten, bend = self._strengths(fiber_prop)
-        version = self._solver_version(fiber_prop)
         return {
             "node_count": node_count, "iterations": iterations, "margin": self._collision_radius(fiber_prop), "shorten_strength": shorten,
-            "bend_strength": bend, "segment_collisions": version >= 2 or bool(getattr(fiber_prop, "use_segment_collisions", False)), "eps_disp": 1e-5, "eps_pen": 1e-5,
-            "solver_version": version,
+            "bend_strength": bend, "segment_collisions": bool(getattr(fiber_prop, "use_segment_collisions", False)), "eps_disp": 1e-5, "eps_pen": 1e-5,
+            "solver_version": 1,
         }
-
-    def _solver_version(self, fiber_prop):
-        version = max(1, int(getattr(fiber_prop, "solver_version", 1) or 1))
-        try:
-            pending = int(fiber_prop.get("af_pending_solver_version", 0) or 0)
-        except Exception:
-            pending = 0
-        return max(version, 2 if pending == 2 else 1)
 
     def _collision_radius(self, fiber_prop):
         value = getattr(fiber_prop, "collision_radius", self._default_margin())
@@ -238,10 +229,12 @@ class FiberSolver:
             nodes[idx] = pt.copy()
 
     def solve_points(self, root, fiber_prop, scene, depsgraph, bake=False):
-        telemetry_count("fiber_solves")
-        if is_loop_fiber(fiber_prop):
-            return self._solve_solved_loop(root, fiber_prop, scene, depsgraph, bake)
-        return self._solve_open_fiber(root, fiber_prop, scene, depsgraph, bake)
+        from .fiber_progressive import begin_fiber_solve
+        quality = "FINAL" if bake else "INTERACTIVE"
+        session = begin_fiber_solve(self, root, fiber_prop, scene, depsgraph, quality)
+        while not session.done:
+            session.step(1.0e9)
+        return session.result().points
 
     def _solve_open_fiber(self, root, fiber_prop, scene, depsgraph, bake):
         _runtime, anchors, issue = self._open_anchors(root, scene, depsgraph, fiber_prop)

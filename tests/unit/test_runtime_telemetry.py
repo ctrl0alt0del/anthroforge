@@ -64,6 +64,14 @@ class RuntimeTelemetryTests(unittest.TestCase):
         saved = runtime_trace.request_telemetry()[0]
         self.assertEqual((saved["iterations"], saved["collision_queries"], saved["progressive_slices"]["count"]), (3, 4, 1))
 
+    def test_engine_telemetry_records_production_and_backend_versions(self):
+        selection = SimpleNamespace(requested="V2", actual="V2", source="DEFAULT",
+                                    fallback_reason="", error="")
+        record = {}
+        runtime_trace.telemetry_fiber_engine(selection, 1, record, "prod-1", "native-1")
+        row = record["fiber_engines"][0]
+        self.assertEqual((row["engine_version"], row["backend_version"]), ("prod-1", "native-1"))
+
 
 if __name__ == "__main__":
     unittest.main()

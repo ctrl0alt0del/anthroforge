@@ -12,6 +12,9 @@ from core.vcp.v2 import (
     plan_reference_v41, plan_reference_v42, validate_static_clearance,
     plan_reference_v43,
 )
+from core.vcp.v2.collision import V2SegmentBatch
+from core.vcp.v2.planner import validate_native_owner_chords
+from core.vcp.v2 import solver_v23 as v23
 
 
 def _anchors(points, owner=""):
@@ -77,7 +80,42 @@ def _angle_points(values):
     return tuple((np.cos(value), np.sin(value), 0.0) for value in values)
 
 
+def _scaled_sphere(scale):
+    source = _sphere()
+    points = tuple(tuple(float(scale) * value for value in point) for point in source.vertices)
+    return V2ColliderSnapshot(source.collider_id, source.owner_id, points, source.triangles)
+
+
+class _OwnerBlindWorld:
+    def validate(self, points, edges, owners, span, threshold):
+        _ = points, owners, span, threshold
+        return V2SegmentBatch((True,) * len(edges), 0, 0, blockers=("",) * len(edges))
+
+    def nearest(self, points):
+        values = np.asarray(points, dtype=np.float64); count = len(values)
+        return values, np.zeros_like(values), np.zeros(count), ("SPHERE",) * count, np.ones(count, bool)
+
+
 class FiberV2PlannerTests(unittest.TestCase):
+    def test_chord_guard_repairs_wide_direct_surface_handoff(self):
+        collider = _scaled_sphere(5.4); points = _angle_points((0.0, .31, .62, .93))
+        scaled = tuple(tuple(5.4 * value for value in point) for point in points)
+        request = _request(_anchors(scaled, "SPHERE"), (collider,), 64, .002)
+        snapshot = build_triangle_snapshot((collider,)); fixed = plan_reference_v43(request, snapshot, 8.0)
+        checked = validate_static_clearance(fixed.reference, snapshot, .002, fixed.contacts, slack=.00002)
+        self.assertEqual((fixed.termination, fixed.mode, len(fixed.reference)),
+                         (V2Termination.CONVERGED, V2PlannerMode.SURFACE, 64))
+        self.assertTrue(checked.valid)
+
+    def test_owner_chord_guard_rejects_contained_clear_edge(self):
+        collider = _scaled_sphere(5.4); points = _angle_points((0.0, .31))
+        rows = tuple(tuple(5.4 * value for value in point) for point in points)
+        request = _request(_anchors(rows, "SPHERE"), (collider,), 16, .002)
+        result = validate_native_owner_chords(request, _OwnerBlindWorld(), np.asarray(rows), ((0, 1),),
+                                              (("SPHERE", "SPHERE"),), .016, .00198)
+        self.assertEqual(result.clear, (False,))
+        self.assertEqual(v23._wide_direct_policy(request, _OwnerBlindWorld()), (False, True))
+
     def test_direct_reference_has_exact_count_and_pins(self):
         result = plan_reference(_request(_anchors(((0, 0, 0), (1, 0, 0))), count=17))
         self.assertEqual((result.termination, result.mode),
@@ -184,14 +222,23 @@ class FiberV2PlannerTests(unittest.TestCase):
         self.assertEqual((old.termination, old.mode, old.reference),
                          (new.termination, new.mode, new.reference))
 
-    def test_v43_matches_v41_direct_roadmap_and_surface(self):
+    def test_v43_matches_v41_direct_and_roadmap(self):
         requests = (_request(_anchors(((0, 0, 0), (1, 0, 0))), count=17),
-                    _request(_anchors(((-1, 0, 0), (1, 0, 0))), (_box(),), 24, 0.05),
-                    _request(_anchors(_angle_points((0, .12, .24, .36)), "SPHERE"), (_sphere(),), 64, .02))
+                    _request(_anchors(((-1, 0, 0), (1, 0, 0))), (_box(),), 24, 0.05))
         for request in requests:
             old, new = plan_reference_v41(request), plan_reference_v43(request)
             self.assertEqual((old.termination, old.mode, old.reference, old.pin_indices),
                              (new.termination, new.mode, new.reference, new.pin_indices))
+
+    def test_v43_surface_projection_is_deterministic_and_safe(self):
+        collider = _sphere(); points = _angle_points((0, .12, .24, .36))
+        request = _request(_anchors(points, "SPHERE"), (collider,), 64, .02)
+        first, second = plan_reference_v43(request), plan_reference_v43(request)
+        checked = validate_static_clearance(first.reference, build_triangle_snapshot((collider,)),
+                                            .02, first.contacts, slack=.0002)
+        self.assertEqual((first.termination, first.mode, first.reference),
+                         (V2Termination.CONVERGED, V2PlannerMode.SURFACE, second.reference))
+        self.assertTrue(checked.valid)
 
     def test_v43_rejects_unrelated_hard_anchor_before_graph_search(self):
         request = _request(_anchors(((0, 0, 0), (1, 0, 0)), "OWNER"), (_box(),), 16, 0.05)

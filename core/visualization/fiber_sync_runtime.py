@@ -143,19 +143,12 @@ def _ordered_fibers(fibers):
 
 
 def _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake):
-    obj = sync._find_fiber_proxy(vis_col, root.name, fiber.id)
-    if obj is None:
-        obj = sync._create_fiber_proxy(vis_col, root, fiber.id)
-    if not bool(getattr(fiber, "preview_planner_route", False)):
-        obj.pop("af_fiber_display_mode", None)
+    _ = vis_col, depsgraph
+    from .fiber_refinement import request_fiber_refinement
     if sync._fiber_prefer_bake(fiber):
         sync._set_fiber_prefer_bake(fiber, False)
-    use_bake = bool(bake)
-    points = sync._solver.solve_points(root=root, fiber_prop=fiber, scene=scene, depsgraph=depsgraph, bake=use_bake)
-    if _sync_commit_allowed(fiber, points):
-        sync._update_curve_points(obj, points, fiber.thickness, bake=use_bake, cyclic=sync._fiber_cyclic(fiber))
-        return
-    _retain_or_clear_failed(sync, root, scene, fiber, obj, points)
+    quality = "FINAL" if bake else "INTERACTIVE"
+    return request_fiber_refinement(root, scene, fiber, show_preview=True, quality=quality)
 
 
 def _sync_commit_allowed(fiber, points):
@@ -314,6 +307,8 @@ def _selection_objects(index, fiber_ids):
 def _sync_target_fibers(sync, vis_col, root, scene, depsgraph, bake, target_fiber_ids):
     for fiber in _fibers_to_sync(root, target_fiber_ids):
         _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake)
+    from .fiber_refinement import drain_fiber_refinements
+    drain_fiber_refinements()
 
 
 def _find_fiber(root, fiber_id):

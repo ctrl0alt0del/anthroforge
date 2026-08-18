@@ -2,7 +2,6 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
-import os
 from time import perf_counter
 
 import numpy as np
@@ -10,14 +9,17 @@ from mathutils import Vector
 
 from ..deps.runtime_trace import current_request_telemetry, telemetry_slice, telemetry_timing
 from .fiber_collision import CollisionOracle, _collider_surface
-from .fiber_engine import FiberPhase
-from .v2 import (V2Anchor, V2AnchorRole, V2ArrayColliderSnapshot, V2CollisionPolicy,
-                 V2Quality, V2Request, V2ResolvedTolerances, V2Settings, V2Termination,
-                 V2Topology, collision_backend_status, solve_pin_smoothing)
+from .fiber_engine import FiberPhase, FiberTermination
+from .v2.collision import collision_backend_status
+from .v2.contracts import (V2Anchor, V2AnchorRole, V2ArrayColliderSnapshot,
+                           V2CollisionPolicy, V2Quality, V2Request,
+                           V2ResolvedTolerances, V2Settings, V2Termination,
+                           V2Topology)
+from .v2.production import V2_PRODUCTION_VERSION, solve_v2
 
 
-_ENGINE_FLAG = "AF_FIBER_V2_RUNTIME"
 _CAPTURE_LIMIT = 128
+_CAPTURE_BYTES_LIMIT = 256 * 1024 * 1024
 _CAPTURE_CACHE = OrderedDict()
 
 
@@ -39,11 +41,13 @@ class V2RuntimeSession:
     package: object = None
     invalid_reason: str = ""
     runtime_error: str = ""
+    termination_reason: str = ""
     done: bool = False
     generation: int = 0
     phase: str = FiberPhase.COLLIDERS.value
     elapsed_ms: float = 0.0
     telemetry: object = None
+    selection: object = None
 
     def step(self, time_budget_ms=12.0):
         started = perf_counter()
@@ -61,37 +65,47 @@ class V2RuntimeSession:
         from .fiber_progressive import FiberSolveResult
         if self.package is None:
             error = self.invalid_reason or self.runtime_error
-            return FiberSolveResult(points=list(self.preview), done=self.done, invalid_reason=error)
+            return FiberSolveResult(points=list(self.preview), done=self.done, invalid_reason=error,
+                                    termination_reason=self.termination_reason, engine="V2",
+                                    engine_version=V2_PRODUCTION_VERSION,
+                                    backend_version=collision_backend_status().version,
+                                    selection=self.selection)
         return _solve_result(self, FiberSolveResult)
 
 
-def begin_v2_runtime(solver, root, fiber, scene, depsgraph, quality):
-    if not _runtime_enabled() or solver._solver_version(fiber) < 2:
-        return None
-    if str(getattr(fiber, "topology_mode", "OPEN")) != "OPEN":
-        return None
+def begin_v2_runtime(solver, root, fiber, scene, depsgraph, quality, selection):
     session = V2RuntimeSession(solver, root, fiber, scene, depsgraph, _quality(quality))
+    session.selection = selection
     session.telemetry = current_request_telemetry()
     _initialize(session)
     return session
 
 
-def _runtime_enabled():
-    value = str(os.environ.get(_ENGINE_FLAG, "") or "").strip().upper()
-    return value in {"1", "TRUE", "YES", "ON", "PIN", "PIN_SMOOTHING"}
-
-
 def _initialize(session):
+    if not _backend_ready(session):
+        return
     _runtime, anchors, issue = session.solver._open_anchors(
         session.root, session.scene, session.depsgraph, session.fiber)
     if issue or not anchors:
         session.invalid_reason, session.done = str(issue or "Invalid Fiber anchors."), True
+        session.termination_reason = FiberTermination.INVALID_ATTACHMENT.value
         return
     session.anchors, session.preview = anchors, [row.point.copy() for row in anchors]
     session.params = session.solver._runtime_params(session.fiber, session.quality == "FINAL")
+    session.params["solver_version"], session.params["segment_collisions"] = 2, True
     session.oracle = CollisionOracle(session.root, session.scene, session.depsgraph,
                                      session.params["margin"], session.solver.surface_offset)
     _attach_sources(session)
+
+
+def _backend_ready(session):
+    status = collision_backend_status()
+    if status.available:
+        return True
+    session.invalid_reason = status.message or "V2 collision backend unavailable."
+    session.termination_reason = FiberTermination.BACKEND_UNAVAILABLE.value
+    session.done = True
+    return False
 
 
 def _attach_sources(session):
@@ -135,14 +149,24 @@ def _capture_collider(source, index):
 
 
 def _capture_key(source, index):
-    return str(source.get("sid", "") or ""), int(index), repr(source.get("stamp", ()))
+    backend = collision_backend_status().version
+    return (V2_PRODUCTION_VERSION, backend, str(source.get("sid", "") or ""),
+            int(index), repr(source.get("stamp", ())))
 
 
 def _store_capture(key, value):
     _CAPTURE_CACHE[key] = value; _CAPTURE_CACHE.move_to_end(key)
-    while len(_CAPTURE_CACHE) > _CAPTURE_LIMIT:
-        _CAPTURE_CACHE.popitem(last=False)
+    _trim_capture_cache()
     return value
+
+
+def _trim_capture_cache():
+    while len(_CAPTURE_CACHE) > _CAPTURE_LIMIT or _capture_bytes() > _CAPTURE_BYTES_LIMIT:
+        _CAPTURE_CACHE.popitem(last=False)
+
+
+def _capture_bytes():
+    return sum(row.vertices.nbytes + row.triangles.nbytes for row in _CAPTURE_CACHE.values())
 
 
 def clear_v2_runtime_capture_cache():
@@ -150,16 +174,18 @@ def clear_v2_runtime_capture_cache():
 
 
 def v2_runtime_capture_cache_stats():
-    return {"entries": len(_CAPTURE_CACHE), "limit": _CAPTURE_LIMIT}
+    return {"entries": len(_CAPTURE_CACHE), "bytes": _capture_bytes(),
+            "entry_limit": _CAPTURE_LIMIT, "byte_limit": _CAPTURE_BYTES_LIMIT}
 
 
 def _solve(session):
     session.phase = FiberPhase.LOCAL_STEP.value
     try:
         request = _request(session)
-        session.package = solve_pin_smoothing(request, preview=session.quality != "FINAL")
+        session.package = solve_v2(request, preview=session.quality != "FINAL")
     except Exception as error:
         session.runtime_error = str(error)
+        session.termination_reason = FiberTermination.UNSAFE_OUTPUT.value
     session.done, session.generation = True, session.generation + 1
     session.phase = FiberPhase.DONE.value
 
@@ -183,7 +209,8 @@ def _request_value(session, settings, policy, anchors):
     tolerances = _tolerances(session.colliders, policy.collision_radius, settings.quality)
     return V2Request(token, _runtime_id(session.scene), _runtime_id(session.root), revision,
                      settings, tolerances, policy, anchors, tuple(session.colliders),
-                     str(session.fiber.symmetry_mode), axis, origin)
+                     str(session.fiber.symmetry_mode), axis, origin,
+                     engine_version=V2_PRODUCTION_VERSION)
 
 
 def _anchor(anchor, index, count):
@@ -225,17 +252,20 @@ def _solve_result(session, result_type):
 
 def _result_values(session, result, trace, penetration):
     termination = result.termination
-    return dict(points=[Vector(row) for row in result.points], done=True,
-                converged=termination is V2Termination.CONVERGED,
-                stalled=termination is V2Termination.STALLED,
-                blocked=termination is V2Termination.BLOCKED,
-                invalid_reason=_result_error(result), mode=result.route_branch,
-                planner_ms=float(getattr(trace, "planner_ms", 0.0)),
-                refine_ms=max(0.0, session.elapsed_ms - float(getattr(trace, "planner_ms", 0.0))),
-                active_count=len(session.colliders), max_disp=float(result.diagnostics.fixed_point_residual),
-                max_pen=penetration, termination_reason=termination.value,
-                validated=bool(result.validated), engine_version=result.engine_version,
-                diagnostics=result.diagnostics, telemetry=session.telemetry)
+    values = dict(points=[Vector(row) for row in result.points], done=True,
+                  converged=termination is V2Termination.CONVERGED,
+                  stalled=termination is V2Termination.STALLED,
+                  blocked=termination is V2Termination.BLOCKED,
+                  invalid_reason=_result_error(result), mode=result.route_branch,
+                  planner_ms=float(getattr(trace, "planner_ms", 0.0)),
+                  refine_ms=max(0.0, session.elapsed_ms - float(getattr(trace, "planner_ms", 0.0))),
+                  active_count=len(session.colliders), max_disp=float(result.diagnostics.fixed_point_residual),
+                  max_pen=penetration, termination_reason=termination.value,
+                  validated=bool(result.validated), engine_version=result.engine_version,
+                  diagnostics=result.diagnostics, telemetry=session.telemetry)
+    values.update(engine="V2", backend_version=result.backend_version,
+                  selection=session.selection)
+    return values
 
 
 def _result_error(result):

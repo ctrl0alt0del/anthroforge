@@ -1,4 +1,4 @@
-"""Exercise the opt-in pin-smoothing V2 through the real refinement runtime."""
+"""Exercise a selected production Fiber engine through the real runtime."""
 
 import argparse
 import json
@@ -13,6 +13,7 @@ import numpy as np
 from anthroforge.core.visualization import sync_runner
 from anthroforge.core.visualization.fiber_refinement import (drain_fiber_refinements,
                                                               request_fiber_refinement)
+from anthroforge.core.vcp.prop_update_guard import suppress_vcp_prop_updates
 from anthroforge.core.vcp.runtime_state import (fiber_eps_pen, fiber_recompute_status)
 from anthroforge.tools import fiber_v2_planner_benchmark as common
 from anthroforge.tools import fiber_v25_branch2_sweep as sweep
@@ -22,6 +23,8 @@ def _args():
     parser = argparse.ArgumentParser(); parser.add_argument("--output", required=True)
     parser.add_argument("--fiber-id", default="FIBER_2"); parser.add_argument("--comparison", default="")
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--engine", choices=("V1", "V2"), default="V2")
+    parser.add_argument("--nodes", type=int, default=0)
     values = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     return parser.parse_args(values)
 
@@ -47,6 +50,13 @@ def _proxy(root, fiber):
     return next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_proxy")
                 and not obj.get("af_fiber_mirror_proxy") and obj.get("af_root_name") == root.name
                 and obj.get("af_fiber_id") == fiber.id)
+
+
+def _prepare_fiber(fiber, nodes=0):
+    with suppress_vcp_prop_updates():
+        fiber.preview_planner_route = False
+        if nodes:
+            fiber.node_count = int(nodes)
 
 
 def _points(proxy):
@@ -120,6 +130,7 @@ def _record(args, root, fiber, proxy):
     edited = _measure(lambda: _property_edit(fiber)); edited_points = _points(proxy)
     visual, delta = _comparison(args.comparison, current)
     payload = {"file": bpy.data.filepath, "file_sha256": common._file_hash(bpy.data.filepath),
+               "requested_engine": args.engine,
                "fiber": fiber.id, "cold_migration_ms": cold, "warm_refinement_ms": warm,
                "property_full_cycle_ms": edited, "state_after_migration": migrated,
                "state_after_interactive": interactive, "state_after_property": _state(fiber, proxy),
@@ -131,7 +142,9 @@ def _record(args, root, fiber, proxy):
 
 
 def main():
-    _ensure_addon(); args = _args(); root = _root(); fiber = _fiber(root, args.fiber_id)
+    _ensure_addon(); args = _args(); os.environ["AF_FIBER_ENGINE"] = args.engine
+    root = _root(); fiber = _fiber(root, args.fiber_id)
+    _prepare_fiber(fiber, args.nodes)
     bpy.context.view_layer.objects.active = root; root.select_set(True)
     record = _record(args, root, fiber, _proxy(root, fiber))
     output = Path(args.output); output.parent.mkdir(parents=True, exist_ok=True)

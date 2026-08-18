@@ -19,7 +19,7 @@ from .collision_native import native_mesh_shortest_path
 V2_PLANNER_VERSION = "fiber-v2-planner-1"
 V2_PLANNER_41_VERSION = "fiber-v2-planner-1.1"
 V2_PLANNER_42_VERSION = "fiber-v2-planner-1.2"
-V2_PLANNER_43_VERSION = "fiber-v2-planner-1.3"
+V2_PLANNER_43_VERSION = "fiber-v2-planner-1.4"
 _SPARSE_LIMIT = 96
 _DENSE_LIMIT = 240
 _SPARSE_NEIGHBORS = 24
@@ -413,7 +413,9 @@ def _plan_pair(state, start, end):
 def _plan_pair_v41(state, start, end):
     if _edge_clear(state, start.point, end.point, start.owner_id, end.owner_id):
         return _direct_segment(start, end)
-    surface = _surface_route(state, start, end)
+    owner = str(start.owner_id or "") if start.owner_id == end.owner_id else ""
+    surface = _projected_surface_route(state, start, end, owner) if owner else None
+    surface = surface or _surface_route(state, start, end)
     if surface is not None:
         return surface
     route = _roadmap_route_v41(state, start, end)
@@ -438,6 +440,49 @@ def _surface_route(state, start, end):
                   for item in state.request.colliders if item.owner_id == owner]
     routes = [route for route in candidates if route is not None]
     return min(routes, key=lambda route: _route_length(route.points)) if routes else None
+
+
+def _projected_surface_route(state, start, end, owner):
+    colliders = tuple(row for row in state.request.colliders if row.owner_id == owner)
+    if state.native_world is None or not colliders:
+        return None
+    world = cached_native_collision_world(colliders)
+    samples = _projected_samples(start.point, end.point, _radius(state))
+    closest, normals, _distances, _blockers, contained = world.nearest(samples)
+    directions = _projection_directions(samples, closest, normals, contained)
+    return _best_projected_route(state, start, end, closest, directions)
+
+
+def _projected_samples(start, end, radius):
+    first, second = np.asarray(start), np.asarray(end)
+    count = min(32, max(8, int(ceil(np.linalg.norm(second - first) / max(8.0 * radius, 1.0e-6)))))
+    factors = np.linspace(0.0, 1.0, count + 1)[1:-1]
+    return first + factors[:, None] * (second - first)
+
+
+def _projection_directions(samples, closest, normals, contained):
+    delta = np.asarray(closest) - samples; lengths = np.linalg.norm(delta, axis=1)
+    use_delta = np.asarray(contained, dtype=bool) & (lengths > 1.0e-12)
+    directions = np.asarray(normals, dtype=np.float64).copy()
+    directions[use_delta] = delta[use_delta] / lengths[use_delta, None]
+    return directions / np.maximum(np.linalg.norm(directions, axis=1)[:, None], 1.0e-12)
+
+
+def _best_projected_route(state, start, end, closest, directions):
+    for factor in _SURFACE_FACTORS:
+        route = _projected_route(state, start, end, closest, directions, factor)
+        if _route_clear(state, route, start.owner_id, end.owner_id):
+            points = _shortcut_route(state, route, start.owner_id, end.owner_id)
+            return _SegmentRoute(points, V2PlannerMode.SURFACE,
+                                 V2PlannerBranch.SURFACE_BRIDGE, str(start.owner_id), factor)
+    return None
+
+
+def _projected_route(state, start, end, closest, directions, factor):
+    offset = _radius(state) * float(factor)
+    rows = [np.asarray(start.point), *(np.asarray(closest) + directions * offset),
+            np.asarray(end.point)]
+    return _dedupe(rows)
 
 
 def _surface_on_collider(state, collider, start, end):
@@ -1033,14 +1078,74 @@ def _batch_edge_states(state, points, edges, owners):
 
 def _native_edge_states(state, points, edges, owners):
     started = perf_counter()
-    result = state.native_world.validate(points, edges, owners, _state_contact_span(state),
-                                         _radius(state) - _slack(state))
+    result = validate_native_owner_chords(state.request, state.native_world, points, edges, owners,
+                                          _state_contact_span(state), _radius(state) - _slack(state))
     state.native_collision_ms += 1000.0 * (perf_counter() - started)
     state.tested_edges += len(edges); state.edge_batches += int(bool(len(edges)))
     state.rejected_edges += sum(not value for value in result.clear)
     state.candidate_pairs += result.candidate_pairs; state.tested_pairs += result.tested_pairs
     _store_edge_states(state, points, edges, owners, result.clear)
     return result.clear
+
+
+def validate_native_owner_chords(request, world, points, edges, owners, span, threshold):
+    result = world.validate(points, edges, owners, span, threshold)
+    return guard_native_owner_chords(request, world, points, edges, owners, span, threshold, result)
+
+
+def guard_native_owner_chords(request, world, points, edges, owners, span, threshold, result):
+    probes, rows = _owner_chord_probes(points, edges, owners, span, threshold, result.clear)
+    failures = _owner_probe_failures(world, probes, rows, _collider_owner_map(request))
+    return _reject_owner_chords(result, failures)
+
+
+def _collider_owner_map(request):
+    return {item.collider_id: item.owner_id for item in request.colliders}
+
+
+def _owner_chord_probes(points, edges, owners, span, threshold, clear):
+    values, probes, rows = np.asarray(points, dtype=np.float64), [], []
+    for edge_index, (edge, owner) in enumerate(zip(edges, owners)):
+        if clear[edge_index]:
+            _append_owner_probes(values[np.asarray(edge, dtype=np.int64)], owner, span,
+                                 threshold, edge_index, probes, rows)
+    return np.asarray(probes, dtype=np.float64).reshape((-1, 3)), tuple(rows)
+
+
+def _append_owner_probes(edge, owners, span, threshold, index, probes, rows):
+    length = float(np.linalg.norm(edge[1] - edge[0]))
+    low = float(span) / max(length, 1.0e-12) if owners[0] else 0.0
+    high = 1.0 - float(span) / max(length, 1.0e-12) if owners[1] else 1.0
+    if low >= high:
+        return
+    offset = min((high - low) * .1, max(1.0e-9, float(threshold) / max(length, 1.0e-12)))
+    _append_owner_probe(edge, low + offset, owners[0], index, probes, rows)
+    _append_owner_probe(edge, high - offset, owners[1], index, probes, rows)
+
+
+def _append_owner_probe(edge, factor, owner, index, probes, rows):
+    if owner:
+        probes.append(edge[0] + float(factor) * (edge[1] - edge[0]))
+        rows.append((int(index), str(owner)))
+
+
+def _owner_probe_failures(world, probes, rows, owner_map):
+    if not len(probes):
+        return ()
+    _closest, _normals, _distances, blockers, contained = world.nearest(probes)
+    return tuple((edge, blocker) for (edge, owner), blocker, inside in zip(rows, blockers, contained)
+                 if inside and owner_map.get(str(blocker or ""), "") == owner)
+
+
+def _reject_owner_chords(result, failures):
+    if not failures:
+        return result
+    clear, blockers = list(result.clear), list(result.blockers or ("",) * len(result.clear))
+    for edge, blocker in failures:
+        clear[edge], blockers[edge] = False, str(blocker or "")
+    contained = tuple(dict.fromkeys((*result.contained_endpoints, *failures)))
+    return replace(result, clear=tuple(clear), blockers=tuple(blockers),
+                   contained_endpoints=contained)
 
 
 def _store_edge_states(state, points, edges, owners, values):

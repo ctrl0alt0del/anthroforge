@@ -25,6 +25,10 @@ from ..vcp.runtime_state import (
     set_fiber_route_mode,
 )
 from .fiber_sync import register_fiber_sync
+from .fiber_engine_migration import (claim_engine_migration, clear_engine_migration,
+                                     commit_engine_migration, migration_owned,
+                                     pending_engine_points, prepare_engine_migration,
+                                     rollback_engine_migration, write_engine_provenance)
 from .fiber_sync_helpers import mark_fiber_output_current, mark_fiber_output_stale, persisted_fiber_points
 
 
@@ -71,16 +75,23 @@ def request_fiber_refinement(root, scene, fiber, show_preview=False, quality="FI
     if root is None or scene is None or fiber is None:
         return RefinementRequest(False, "Fiber refinement context is unavailable.")
     key = _job_key(scene, root, fiber.id)
-    session = begin_fiber_solve(
-        register_fiber_sync()._solver, root, fiber, scene, _depsgraph(scene), quality)
+    session = _prepared_session(root, scene, fiber, quality)
     if session.invalid_reason:
-        _abort_request(key, root, scene, fiber)
+        _abort_request(key, root, scene, fiber, session)
         return RefinementRequest(False, session.invalid_reason)
     _supersede_job(key)
     job = _new_job(key, scene, root, fiber, session)
     mark_fiber_output_stale(scene, root.name, fiber.id)
     proxy = _initial_proxy(job, show_preview)
     return _start_or_finish(job, proxy)
+
+
+def _prepared_session(root, scene, fiber, quality):
+    from ..vcp.fiber_engine_registry import selection_for_fiber
+    selection = selection_for_fiber(fiber)
+    prepare_engine_migration(root, scene, fiber, selection)
+    return begin_fiber_solve(register_fiber_sync()._solver, root, fiber, scene,
+                             _depsgraph(scene), quality, selection=selection)
 
 
 def cancel_fiber_refinement(scene, fiber_id, mark_unknown=True):
@@ -129,7 +140,7 @@ def _new_job(key, scene, root, fiber, session):
                              previous_status=fiber_recompute_status(fiber),
                              previous_points=previous,
                              retain_preview=retain)
-    _claim_pending_version(fiber, token)
+    claim_engine_migration(fiber, token)
     job.last_apply, job.last_generation = monotonic(), session.generation
     return job
 
@@ -137,6 +148,9 @@ def _new_job(key, scene, root, fiber, session):
 def _initial_proxy(job, show_preview):
     root, scene, fiber = _resolved_job_data(job)
     proxy = _find_proxy(scene, root.name, fiber.id)
+    if job.retain_preview:
+        job.proxy_name = "" if proxy is None else proxy.name
+        return proxy
     if show_preview or proxy is None:
         proxy = register_fiber_sync().apply_points(
             root, scene, fiber, job.session.preview, bake=False, commit=False)
@@ -218,7 +232,7 @@ def _apply_refined_geometry(job, result, root, scene, fiber, now):
     if _retain_safe_preview(job, commit, now):
         return
     proxy = register_fiber_sync().apply_points(root, scene, fiber, result.points,
-                                               bake=result.done, commit=commit)
+                                               bake=_job_bake(job, result), commit=commit)
     None if proxy is None else proxy.pop("af_fiber_display_mode", None)
     job.output_committed = bool(result.done and commit and proxy is not None)
     job.proxy_name = "" if proxy is None else proxy.name
@@ -272,14 +286,28 @@ def _finish_refined_job(job, result):
     committed = bool(job.output_committed and _commit_allowed(job, result))
     kept = bool(not committed and _keep_failed_preview(job, result))
     _restore_previous_output(job, stale=True) if not committed and not kept else None
+    _publish_commit_identity(job, result) if committed else None
     _finish_pending_version(job, committed)
-    publish_fiber_cache(job.session, result) if committed else None
+    _publish_result_cache(job, result) if committed else None
     telemetry_cache_snapshot(getattr(job.session, "telemetry", None))
     _detach_job(job)
     _sync_final(job) if committed else None
 
 
+def _publish_commit_identity(job, result):
+    root, scene, fiber = _owned_job_data(job)
+    proxy = _find_proxy(scene, root.name, fiber.id) if root and scene and fiber else None
+    _commit_provenance(job, result, fiber, proxy)
+
+
+def _publish_result_cache(job, result):
+    if str(getattr(result, "engine", "V1")) == "V1":
+        publish_fiber_cache(job.session, result)
+
+
 def _keep_failed_preview(job, result):
+    if getattr(job, "retain_preview", False):
+        return _mark_retained_failed_preview(job)
     root, scene, fiber = _owned_job_data(job)
     points = _failed_preview_points(job, result, fiber)
     if root is None or scene is None or fiber is None or not points:
@@ -293,15 +321,33 @@ def _keep_failed_preview(job, result):
     return True
 
 
+def _mark_retained_failed_preview(job):
+    root, scene, fiber = _owned_job_data(job)
+    proxy = _find_proxy(scene, root.name, fiber.id) if root and scene and fiber else None
+    if proxy is None:
+        return False
+    proxy["af_fiber_display_mode"] = "FAILED_PREVIEW"
+    mark_fiber_output_stale(scene, root.name, fiber.id)
+    return True
+
+
 def _failed_preview_points(job, result, fiber):
     if fiber is None or str(getattr(job.session, "quality", "FINAL")) != "INTERACTIVE":
         return ()
-    if _pending_version(fiber) == 2 or getattr(result, "invalid_reason", ""):
+    if getattr(result, "invalid_reason", ""):
         return ()
     points = tuple(getattr(result, "points", ()) or ())
     expected = int(getattr(job.session, "params", {}).get("node_count", 0))
     finite = all(all(isfinite(float(value)) for value in point) for point in points)
-    return points if len(points) == expected and finite else ()
+    failed = str(getattr(result, "termination_reason", "")) in {
+        FiberTermination.BLOCKED.value, FiberTermination.NO_FEASIBLE_PATH.value}
+    valid_count = len(points) >= 2 if failed else len(points) == expected
+    return points if valid_count and finite else ()
+
+
+def _job_bake(job, result):
+    quality = str(getattr(job.session, "quality", "INTERACTIVE") or "INTERACTIVE")
+    return bool(result.done and quality == "FINAL")
 
 
 def _finish_planner_preview_job(job):
@@ -311,13 +357,13 @@ def _finish_planner_preview_job(job):
 
 
 def _planner_preview_result(result):
-    reasons = (FiberTermination.PLANNER_PREVIEW.value,
-               FiberTermination.NO_FEASIBLE_PATH.value)
-    return str(getattr(result, "termination_reason", "")) in reasons
+    return str(getattr(result, "termination_reason", "")) == FiberTermination.PLANNER_PREVIEW.value
 
 
 def _commit_allowed(job, result):
     if not (_valid_job(job) and result.done and not result.invalid_reason):
+        return False
+    if not _termination_committable(result):
         return False
     fiber = _owned_job_data(job)[2]
     if _pending_version(fiber) == 2 and not _validated_result(result):
@@ -328,8 +374,16 @@ def _commit_allowed(job, result):
     return bool(valid and _surface_route_clear(job, result))
 
 
+def _termination_committable(result):
+    if str(getattr(result, "engine", "V1")) != "V2":
+        return True
+    allowed = {FiberTermination.CONVERGED.value, FiberTermination.STALLED.value,
+               FiberTermination.BUDGET_EXHAUSTED.value}
+    return str(getattr(result, "termination_reason", "")) in allowed
+
+
 def _result_safe(fiber, result):
-    if int(getattr(fiber, "solver_version", 1) or 1) >= 2:
+    if str(getattr(result, "engine", "V1")) == "V2":
         return bool(_validated_result(result) and float(result.max_pen) < 1.0e-5)
     if not _requires_collision_truth(fiber):
         return True
@@ -369,11 +423,12 @@ def _owner_surface_curve_clear(job, points, collider):
 
 def _finish_pending_version(job, committed):
     fiber = _owned_job_data(job)[2]
-    if fiber is None or not _job_owns_pending(job, fiber):
+    if fiber is None or not migration_owned(fiber, job.token):
         return
     if committed:
-        _set_solver_version(fiber, 2)
-    _clear_pending_version(fiber)
+        commit_engine_migration(fiber, job.session.selection, job.token)
+    else:
+        rollback_engine_migration(fiber, job.token)
 
 
 def _restore_previous_output(job, stale=False):
@@ -399,10 +454,15 @@ def _restore_fiber_output(root, scene, fiber, stale=False, fallback=()):
 
 
 def _rollback_points(scene, root_name, fiber):
-    raw = str(getattr(fiber, "legacy_points_json", "") or "") if _pending_version(fiber) == 2 else ""
-    if raw:
-        return _json_points(raw)
+    pending = pending_engine_points(fiber)
+    if pending:
+        return _vector_points(pending)
     return persisted_fiber_points(scene, root_name, fiber.id)
+
+
+def _vector_points(points):
+    from mathutils import Vector
+    return [Vector(row) for row in points]
 
 
 def _json_points(raw):
@@ -428,22 +488,15 @@ def _pending_version(fiber):
 
 
 def _clear_pending_version(fiber):
-    for key in ("af_pending_solver_version", "af_pending_solver_token"):
-        try:
-            del fiber[key]
-        except Exception:
-            pass
+    clear_engine_migration(fiber)
 
 
 def _claim_pending_version(fiber, token):
-    if _pending_version(fiber) == 2:
-        fiber["af_pending_solver_token"] = int(token)
+    claim_engine_migration(fiber, token)
 
 
 def _job_owns_pending(job, fiber):
-    if _pending_version(fiber) != 2:
-        return False
-    return int(fiber.get("af_pending_solver_token", 0) or 0) == job.token
+    return migration_owned(fiber, job.token)
 
 
 def _next_token(fiber):
@@ -484,13 +537,25 @@ def _sync_final(job):
                   source="fiber_refinement", event_type="FIBER_SOLVE_READY", payload=payload)
 
 
-def _abort_request(key, root, scene, fiber):
+def _abort_request(key, root, scene, fiber, session):
     job = _JOBS.get(key)
     if job is not None:
-        _terminate_job(job, FiberTermination.CANCELLED, mark_unknown=True, stale=True)
-        return
-    _restore_fiber_output(root, scene, fiber, stale=True)
-    _clear_pending_version(fiber)
+        _terminate_job(job, FiberTermination.CANCELLED, mark_unknown=False, stale=False)
+    _restore_fiber_output(root, scene, fiber, stale=_request_failure_stale(session))
+    rollback_engine_migration(fiber)
+    _record_request_failure(fiber, session)
+
+
+def _request_failure_stale(session):
+    reason = str(getattr(session, "termination_reason", "") or "")
+    return reason == FiberTermination.INVALID_ATTACHMENT.value
+
+
+def _record_request_failure(fiber, session):
+    reason = str(getattr(session, "termination_reason", "") or FiberTermination.INVALID_CONFIGURATION.value)
+    set_fiber_invalid_reason(fiber, str(getattr(session, "invalid_reason", "") or reason))
+    set_fiber_recompute_status(fiber, reason)
+    set_fiber_not_converged(fiber, True)
 
 
 def _supersede_job(key):
@@ -515,7 +580,7 @@ def _terminate_job(job, reason, mark_unknown, stale=False):
     fiber = _owned_job_data(job)[2]
     _restore_previous_output(job, stale=stale)
     if fiber is not None and _job_owns_pending(job, fiber):
-        _clear_pending_version(fiber)
+        rollback_engine_migration(fiber, job.token)
     _restore_job_status(job, fiber, mark_unknown)
     _mark_terminated(job, reason)
     _detach_job(job)
@@ -540,6 +605,15 @@ def _detach_job(job):
     _JOBS.pop(job.key, None)
     while job.key in _QUEUE:
         _QUEUE.remove(job.key)
+
+
+def _commit_provenance(job, result, fiber, proxy):
+    selection = getattr(job.session, "selection", None)
+    if selection is None:
+        return
+    commit_engine_migration(fiber, selection, job.token)
+    write_engine_provenance(proxy, selection, result.engine_version,
+                            getattr(result, "backend_version", ""))
 
 
 def _valid_job(job):

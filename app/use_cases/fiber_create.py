@@ -108,6 +108,7 @@ def _sync_created_fiber(root, scene, fiber, surface):
 def _mark_transient_preview(scene, root_name, fiber_id):
     proxy = _find_proxy(scene, root_name, fiber_id)
     if proxy is not None:
+        proxy.pop("af_fiber_display_mode", None)
         proxy["af_fiber_output_state"] = "STALE"
 
 
@@ -392,14 +393,8 @@ def _fiber_defaults():
         "bend_stiffness": 0.02,
         "thickness": 0.01,
     }
-    values["solver_version"] = 2 if _v2_rollout_enabled() else 1
+    values["solver_version"] = 1
     return values
-
-
-def _v2_rollout_enabled():
-    import os
-    value = str(os.environ.get("AF_FIBER_V2_ROLLOUT", "0") or "0").strip().lower()
-    return value in {"1", "true", "yes", "on"}
 
 
 def _apply_values(item, values):

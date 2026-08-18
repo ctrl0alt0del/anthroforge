@@ -363,6 +363,7 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         self.assertTrue(drain_fiber_refinements())
         retained = _fiber_curve_points_world(fiber.id)
         self.assertEqual(len(retained), len(preview))
+        self.assertEqual(proxy.get("af_fiber_display_mode"), "FAILED_PREVIEW")
         self.assertFalse(_polyline_has_interior_samples(retained, limit=0.99))
 
     def test_mirrored_proxy_selection_maps_back_to_target_scp(self):

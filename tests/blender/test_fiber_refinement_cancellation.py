@@ -50,7 +50,7 @@ def _begin_migration():
     proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
     set_fiber_recompute_status(fiber, "CONVERGED")
     before = (proxy["af_fiber_points_world"], int(proxy.get("af_fiber_output_generation", 0)))
-    with patch.dict(os.environ, {"AF_FIBER_V2_ROLLOUT": "1"}):
+    with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V2"}):
         assert bpy.ops.af.recompute_fiber(fiber_id=fiber.id) == {"FINISHED"}
     job = next(iter(fiber_refinement._JOBS.values()))
     _warp_preview(root_obj, fiber, proxy)

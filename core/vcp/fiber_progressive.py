@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from time import perf_counter
 
-from ..deps.runtime_trace import current_request_telemetry, telemetry_count, telemetry_slice, telemetry_timing
+from ..deps.runtime_trace import (current_request_telemetry, telemetry_count,
+                                  telemetry_fiber_engine, telemetry_slice,
+                                  telemetry_timing)
 from .fiber_collision import CollisionOracle
 from .fiber_engine import FiberPhase, FiberTermination
 from .fiber_loop import loop_pin_targets
@@ -10,6 +12,9 @@ from .fiber_microbatch import (
     iteration_result, start_iteration,
 )
 from .fiber_modes import is_loop_fiber
+from .fiber_engine_selection import FiberEngineKind
+from .fiber_engine_registry import (adapter_for_selection, selected_backend_status,
+                                    selection_for_fiber)
 from .fiber_planner import DIRECT, LOCAL_FALLBACK, ROADMAP
 from .fiber_planner_progressive import begin_progressive_plan, advance_progressive_plan
 from .fiber_validation import (
@@ -39,6 +44,9 @@ class FiberSolveResult:
     engine_version: str = ""
     diagnostics: object = None
     telemetry: object = None
+    engine: str = "V1"
+    backend_version: str = ""
+    selection: object = None
 
 
 @dataclass
@@ -98,6 +106,7 @@ class FiberSolveSession:
     planner_work: object = None
     iteration_work: object = None
     validation_work: object = None
+    selection: object = None
 
     def step(self, time_budget_ms=12.0):
         if self.done:
@@ -126,21 +135,41 @@ class FiberSolveSession:
             mode=self.mode, planner_ms=self.planner_ms, refine_ms=self.refine_ms,
             active_count=self.active_count, max_disp=disp, max_pen=pen,
             termination_reason=reason,
-            validated=bool(self.done and self.converged and pen < 1.0e-5))
+            validated=bool(self.done and self.converged and pen < 1.0e-5),
+            engine="V1", engine_version="fiber-v1-legacy-1", selection=self.selection)
 
 
-def begin_fiber_solve(solver, root, fiber, scene, depsgraph, quality="FINAL"):
+def begin_fiber_solve(solver, root, fiber, scene, depsgraph, quality="FINAL",
+                      selection=None, explicit_engine=None):
     telemetry_count("fiber_solves")
-    from .fiber_v2_runtime import begin_v2_runtime
-    runtime = begin_v2_runtime(solver, root, fiber, scene, depsgraph, quality)
-    if runtime is not None:
-        return runtime
+    selection = selection or selection_for_fiber(fiber, explicit_engine)
+    adapter, backend = adapter_for_selection(selection), selected_backend_status(selection)
+    telemetry_fiber_engine(selection, getattr(fiber, "solver_version", 1),
+                           engine_version="" if adapter is None else adapter.version,
+                           backend_version="" if backend is None else backend.version)
+    return _begin_selected(solver, root, fiber, scene, depsgraph, quality, selection)
+
+
+def _begin_selected(solver, root, fiber, scene, depsgraph, quality, selection):
+    if not selection.valid:
+        return _invalid_engine_session(solver, root, fiber, scene, depsgraph, quality, selection)
+    if selection.actual is FiberEngineKind.V2:
+        from .fiber_v2_runtime import begin_v2_runtime
+        return begin_v2_runtime(solver, root, fiber, scene, depsgraph, quality, selection)
     session = FiberSolveSession(solver, root, fiber, scene, depsgraph, _quality(quality))
+    session.selection = selection
     session.telemetry = current_request_telemetry()
     session.loop = is_loop_fiber(fiber)
     session = _init_loop(session) if session.loop else _init_open(session)
     if not session.done:
         _init_colliders(session)
+    return session
+
+
+def _invalid_engine_session(solver, root, fiber, scene, depsgraph, quality, selection):
+    session = FiberSolveSession(solver, root, fiber, scene, depsgraph, _quality(quality))
+    session.selection = selection
+    _finish_invalid(session, selection.error)
     return session
 
 
@@ -182,6 +211,9 @@ def _init_common(session, anchor_fn):
         return
     session.anchors = anchors
     session.params = session.solver._runtime_params(session.fiber, _is_final(session))
+    session.params["solver_version"] = 1
+    session.params["segment_collisions"] = bool(
+        getattr(session.fiber, "use_segment_collisions", False))
 
 
 def _init_colliders(session):
@@ -218,6 +250,9 @@ def _finish_planner_preview(session):
     session.done, session.converged = True, valid
     session.preview_validated = valid
     session.active_count = len(session.planned_ids)
+    session.solver._store_status(session.fiber, valid, 0.0, 0.0)
+    session.solver._store_metrics(session.fiber, session.mode, session.planner_ms,
+                                  0.0, session.active_count)
     session.generation += 1
     session.phase = FiberPhase.DONE.value
     reason = FiberTermination.PLANNER_PREVIEW if valid else FiberTermination.NO_FEASIBLE_PATH
@@ -546,7 +581,9 @@ def _termination_reason(session):
 
 def _invalid_termination(issue):
     text = str(issue or "").lower()
-    if "anchor" in text or "node" in text or "configuration" in text:
+    if "legacy attachment" in text:
+        return FiberTermination.INVALID_ATTACHMENT.value
+    if any(value in text for value in ("anchor", "node", "configuration", "engine")):
         return FiberTermination.INVALID_CONFIGURATION.value
     return FiberTermination.INVALID_ATTACHMENT.value
 

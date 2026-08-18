@@ -42,6 +42,7 @@ def _base_parser():
 
 
 def _add_solve_args(parser):
+    parser.add_argument("--engine", choices=("V1", "V2"), default="V2")
     parser.add_argument("--nodes", type=int, default=0)
     parser.add_argument("--iterations", type=int, default=0)
     parser.add_argument("--variant", choices=("baseline", "same-owner", "hoist-zones", "explicit-empty", "hoist-empty"), default="baseline")
@@ -1014,6 +1015,7 @@ def _probe_metadata(args):
 
 def _main():
     args = _args()
+    os.environ["AF_FIBER_ENGINE"] = args.engine
     result = _run(args)
     result["benchmark_metadata"] = _probe_metadata(args)
     print("AF_PROBE_JSON=" + json.dumps(result, sort_keys=True))

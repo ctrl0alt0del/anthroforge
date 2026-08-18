@@ -14,6 +14,6 @@ def empty_dirty_hints():
 def dirty_hints_for(entity_type, ids):
     dirty = DirtyHints({et: set() for et in get_registered_entity_types()})
     et = str(entity_type or "").strip().upper()
-    if et in dirty:
+    if et:
         dirty[et] = set(ids or set())
     return dirty

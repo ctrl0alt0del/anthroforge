@@ -1,4 +1,3 @@
-from collections import Counter
 from pathlib import Path
 import sys
 from unittest.mock import patch
@@ -10,17 +9,10 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
         sys.path.insert(0, value)
 
 import bpy
-from mathutils import Vector
-
 from _helpers import BlenderTestCase, fiber, mesh_object, root, scp_with_object
 from core.deps.runtime_trace import clear_request_telemetry, request_telemetry, set_request_telemetry
 from core.visualization import sync_runner
 from core.visualization.fiber_sync import register_fiber_sync
-
-
-def _solver_points(**kwargs):
-    count = int(kwargs["fiber_prop"].node_count)
-    return [Vector((float(index), 0.0, 0.0)) for index in range(count)]
 
 
 class ScpSyncAmplificationTests(BlenderTestCase):
@@ -37,10 +29,10 @@ class ScpSyncAmplificationTests(BlenderTestCase):
         sync, payload = register_fiber_sync(), {"scp_apply_target_ids": [source.id]}
         sync_runner.clear_pending_runtime(keep_timer=False)
         set_request_telemetry(True); clear_request_telemetry()
-        with patch.object(sync._solver, "solve_points", side_effect=_solver_points) as solve:
+        with patch("core.visualization.fiber_refinement.request_fiber_refinement") as request:
             sync_runner.sync_from_dirty_hints(root_obj, bpy.context.scene, {"SCP": {source.id}},
                                               source="depsgraph", event_type="SCP_UPDATE", payload=payload, full=False)
-        counts = Counter(call.kwargs["fiber_prop"].id for call in solve.call_args_list)
+        requested = [call.args[2].id for call in request.call_args_list]
         sources = [record["source"] for record in request_telemetry()]
-        self.assertEqual((counts, sources, len(sync_runner._TAIL_PENDING)),
-                         (Counter({item.id: 1 for item in fibers}), ["depsgraph"], 0))
+        self.assertEqual((requested, sources, len(sync_runner._TAIL_PENDING)),
+                         ([item.id for item in fibers], ["depsgraph"], 0))

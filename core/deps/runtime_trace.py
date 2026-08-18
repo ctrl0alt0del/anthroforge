@@ -202,6 +202,22 @@ def telemetry_timing(name, milliseconds, record=None):
     timings[str(name)] = timings.get(str(name), 0.0) + max(0.0, float(milliseconds))
 
 
+def telemetry_fiber_engine(selection, stored_version, record=None, engine_version="", backend_version=""):
+    target = _telemetry_target(record)
+    if target is None:
+        return
+    row = {"requested": _engine_value(selection.requested),
+           "actual": _engine_value(selection.actual), "source": selection.source,
+           "fallback_reason": selection.fallback_reason, "error": selection.error,
+           "stored_version": int(stored_version), "engine_version": str(engine_version),
+           "backend_version": str(backend_version)}
+    target.setdefault("fiber_engines", []).append(row)
+
+
+def _engine_value(value):
+    return "" if value is None else str(getattr(value, "value", value))
+
+
 def telemetry_slice(milliseconds, phase="", record=None):
     target = _telemetry_target(record)
     if target is None:

@@ -13,7 +13,7 @@ from .collision import (build_triangle_snapshot, cached_native_collision_world,
                         cached_triangle_snapshot, collision_backend_status,
                         triangle_snapshot_cache_stats)
 from .contracts import V2Diagnostics, V2Quality, V2Result, V2Termination, V2Topology
-from .planner import plan_reference_v43
+from .planner import guard_native_owner_chords, plan_reference_v43
 
 
 V2_SOLVER_V23_VERSION = "fiber-v2.3-solver-1"
@@ -97,7 +97,8 @@ def _preview_reuse(request, snapshot, record, preview):
 
 
 def _full_plan(request, snapshot, world):
-    if _wide_direct(request, world):
+    direct, contained = _wide_direct_policy(request, world)
+    if direct or contained:
         return plan_reference_v43(request, snapshot, 8.0, world), 1
     first = plan_reference_v43(request, snapshot, native_world=world)
     if not first.succeeded or first.mode.value != "ROADMAP":
@@ -107,14 +108,20 @@ def _full_plan(request, snapshot, world):
 
 
 def _wide_direct(request, world):
+    return _wide_direct_policy(request, world)[0]
+
+
+def _wide_direct_policy(request, world):
     if not request.colliders:
-        return True
+        return True, False
     points = np.asarray([anchor.point for anchor in request.anchors], dtype=np.float64)
     edges = v21._anchor_edges(len(points), request.settings.topology is V2Topology.CYCLIC)
     owners = tuple((request.anchors[a].owner_id, request.anchors[b].owner_id) for a, b in edges)
     span = max(8.0 * request.collision_policy.collision_radius, 1.0e-7)
     clearance = request.collision_policy.collision_radius - request.tolerances.clearance_slack
-    return all(world.validate(points, edges, owners, span, clearance).clear)
+    raw = world.validate(points, edges, owners, span, clearance)
+    guarded = guard_native_owner_chords(request, world, points, edges, owners, span, clearance, raw)
+    return all(guarded.clear), bool(all(raw.clear) and not all(guarded.clear))
 
 
 def _cache_get(key, cache=None):
