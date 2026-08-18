@@ -33,6 +33,24 @@ class V2PlannerMode(str, Enum):
     ROADMAP = "ROADMAP"
 
 
+class V2PlannerBranch(str, Enum):
+    DIRECT = "DIRECT"
+    SURFACE_BRIDGE = "SURFACE_BRIDGE"
+    SURFACE_MESH = "SURFACE_MESH"
+    ROADMAP = "ROADMAP"
+
+
+@dataclass(frozen=True)
+class V2PlannerSpan:
+    first_edge: int
+    edge_count: int
+    branch: V2PlannerBranch
+    owner_id: str = ""
+    lift_factor: float = 0.0
+    start_anchor: int = 0
+    end_anchor: int = 0
+
+
 @dataclass(frozen=True)
 class V2PlannerDiagnostics:
     candidate_nodes: int = 0
@@ -65,6 +83,7 @@ class V2PlannerResult:
     collider_ids: tuple = ()
     diagnostics: V2PlannerDiagnostics = V2PlannerDiagnostics()
     message: str = ""
+    spans: tuple = ()
 
     @property
     def succeeded(self):
@@ -99,6 +118,9 @@ class _PlannerState:
 class _SegmentRoute:
     points: tuple
     mode: V2PlannerMode
+    branch: V2PlannerBranch
+    owner_id: str = ""
+    lift_factor: float = 0.0
 
 
 def plan_reference(request, snapshot=None):
@@ -285,7 +307,8 @@ def _surface_chain_variant(state, points, graph, anchors, lifts):
         route = _surface_graph_pair(state, points, graph, start, end, lifts[index:index + 2])
         if route is None:
             return None
-        output.append(_SegmentRoute(route, V2PlannerMode.SURFACE))
+        output.append(_SegmentRoute(route, V2PlannerMode.SURFACE,
+                                    V2PlannerBranch.SURFACE_MESH, str(start.owner_id or "")))
     return tuple(output)
 
 
@@ -333,13 +356,14 @@ def _dedupe_global(points):
 
 def _plan_chain_pair(state, start, end, shared):
     if _edge_clear(state, start.point, end.point, start.owner_id, end.owner_id):
-        return _SegmentRoute((start.point, end.point), V2PlannerMode.DIRECT)
+        return _direct_segment(start, end)
     surface = _surface_route(state, start, end)
     if surface is not None:
-        return _SegmentRoute(surface, V2PlannerMode.SURFACE)
+        return surface
     points = _chain_pair_candidates(start, end, shared)
     route = _search_chain_roadmap(state, points, start.owner_id, end.owner_id)
-    return None if route is None else _SegmentRoute(_shortcut_route(state, route, start.owner_id, end.owner_id), V2PlannerMode.ROADMAP)
+    route = None if route is None else _shortcut_route(state, route, start.owner_id, end.owner_id)
+    return _roadmap_segment(route) if route is not None else None
 
 
 def _chain_pair_candidates(start, end, shared):
@@ -378,22 +402,32 @@ def _plan_segments_with(state, pair_planner):
 
 def _plan_pair(state, start, end):
     if _edge_clear(state, start.point, end.point, start.owner_id, end.owner_id):
-        return _SegmentRoute((start.point, end.point), V2PlannerMode.DIRECT)
+        return _direct_segment(start, end)
     surface = _surface_route(state, start, end)
     if surface is not None:
-        return _SegmentRoute(surface, V2PlannerMode.SURFACE)
+        return surface
     route = _roadmap_route(state, start, end)
-    return None if route is None else _SegmentRoute(route, V2PlannerMode.ROADMAP)
+    return _roadmap_segment(route) if route is not None else None
 
 
 def _plan_pair_v41(state, start, end):
     if _edge_clear(state, start.point, end.point, start.owner_id, end.owner_id):
-        return _SegmentRoute((start.point, end.point), V2PlannerMode.DIRECT)
+        return _direct_segment(start, end)
     surface = _surface_route(state, start, end)
     if surface is not None:
-        return _SegmentRoute(surface, V2PlannerMode.SURFACE)
+        return surface
     route = _roadmap_route_v41(state, start, end)
-    return None if route is None else _SegmentRoute(route, V2PlannerMode.ROADMAP)
+    return _roadmap_segment(route) if route is not None else None
+
+
+def _direct_segment(start, end):
+    owner = str(start.owner_id or "") if start.owner_id == end.owner_id else ""
+    return _SegmentRoute((start.point, end.point), V2PlannerMode.DIRECT,
+                         V2PlannerBranch.DIRECT, owner)
+
+
+def _roadmap_segment(points):
+    return _SegmentRoute(points, V2PlannerMode.ROADMAP, V2PlannerBranch.ROADMAP)
 
 
 def _surface_route(state, start, end):
@@ -403,7 +437,7 @@ def _surface_route(state, start, end):
     candidates = [_surface_on_collider(state, item, start, end)
                   for item in state.request.colliders if item.owner_id == owner]
     routes = [route for route in candidates if route is not None]
-    return min(routes, key=_route_length) if routes else None
+    return min(routes, key=lambda route: _route_length(route.points)) if routes else None
 
 
 def _surface_on_collider(state, collider, start, end):
@@ -415,11 +449,19 @@ def _surface_on_collider(state, collider, start, end):
     normals = _vertex_normals(points, faces)
     local = _local_surface_bridge(state, start, end, normals[first], normals[last])
     if local is not None:
-        return local
+        route, factor = local
+        return _SegmentRoute(route, V2PlannerMode.SURFACE,
+                             V2PlannerBranch.SURFACE_BRIDGE, str(start.owner_id), factor)
+    return _mesh_surface_segment(state, points, faces, first, last, start, end)
+
+
+def _mesh_surface_segment(state, points, faces, first, last, start, end):
     indices = _surface_mesh_path(state, points, faces, first, last)
     if not indices:
         return None
-    return _best_offset_route(state, points, faces, indices, start, end)
+    route = _best_offset_route(state, points, faces, indices, start, end)
+    return (_SegmentRoute(route, V2PlannerMode.SURFACE, V2PlannerBranch.SURFACE_MESH,
+                          str(start.owner_id)) if route is not None else None)
 
 
 def _surface_mesh_path(state, points, faces, start, goal):
@@ -436,7 +478,7 @@ def _local_surface_bridge(state, start, end, first_normal, last_normal):
             route = _bridge_points(state, start.point, end.point, first_normal,
                                    last_normal, factor * sign)
             if _route_clear(state, route, start.owner_id, end.owner_id):
-                return _shortcut_route(state, route, start.owner_id, end.owner_id)
+                return _shortcut_route(state, route, start.owner_id, end.owner_id), factor * sign
     return None
 
 
@@ -1108,22 +1150,30 @@ def _edge_allocations(routes, edge_budget):
 
 
 def _subdivide_routes(routes, allocations, cyclic):
-    points, pins, allocation_index, edge_index = [], [0], 0, 0
-    for route in routes:
+    points, pins, spans, allocation_index, edge_index = [], [0], [], 0, 0
+    for anchor_index, route in enumerate(routes):
+        first_edge = edge_index
         for start, end in zip(route.points[:-1], route.points[1:]):
             count = allocations[allocation_index]; allocation_index += 1
             if not points:
                 points.append(tuple(start))
             points.extend(tuple(_lerp(start, end, step / count)) for step in range(1, count + 1))
             edge_index += count
+        spans.append(_planner_span(route, first_edge, edge_index, anchor_index, len(routes), cyclic))
         pins.append(edge_index)
     if cyclic:
         points.pop(); pins.pop()
-    return tuple(points), tuple(pins)
+    return tuple(points), tuple(pins), tuple(spans)
+
+
+def _planner_span(route, first, last, anchor, count, cyclic):
+    end_anchor = (anchor + 1) % count if cyclic else anchor + 1
+    return V2PlannerSpan(first, last - first, route.branch, route.owner_id,
+                         route.lift_factor, anchor, end_anchor)
 
 
 def _validated_result(state, routes, handoff, started, handoff_started):
-    reference, pins = handoff; contacts = _authored_contacts(state, reference, pins)
+    reference, pins, spans = handoff; contacts = _authored_contacts(state, reference, pins)
     result = validate_static_clearance(reference, state.snapshot, _radius(state), contacts,
                                        cyclic=_cyclic(state.request), slack=_slack(state))
     if not result.valid:
@@ -1133,7 +1183,7 @@ def _validated_result(state, routes, handoff, started, handoff_started):
     diag = _diagnostics(state, corridor, started, handoff_started, result)
     ids = tuple(item.collider_id for item in state.request.colliders)
     return V2PlannerResult(V2Termination.CONVERGED, mode, reference, corridor,
-                           pins, contacts, ids, diag)
+                           pins, contacts, ids, diag, spans=spans)
 
 
 def _authored_contacts(state, points, pins):

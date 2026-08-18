@@ -320,7 +320,7 @@ def _commit_allowed(job, result):
     if not (_valid_job(job) and result.done and not result.invalid_reason):
         return False
     fiber = _owned_job_data(job)[2]
-    if _pending_version(fiber) == 2 and not result.converged:
+    if _pending_version(fiber) == 2 and not _validated_result(result):
         return False
     expected = int(job.session.params.get("node_count", 0))
     finite = all(all(isfinite(float(value)) for value in point) for point in result.points)
@@ -330,10 +330,14 @@ def _commit_allowed(job, result):
 
 def _result_safe(fiber, result):
     if int(getattr(fiber, "solver_version", 1) or 1) >= 2:
-        return bool(result.converged and float(result.max_pen) < 1.0e-5)
+        return bool(_validated_result(result) and float(result.max_pen) < 1.0e-5)
     if not _requires_collision_truth(fiber):
         return True
     return float(result.max_pen) < 1.0e-5
+
+
+def _validated_result(result):
+    return bool(getattr(result, "validated", False))
 
 
 def _requires_collision_truth(fiber):
@@ -465,6 +469,8 @@ def _result_status(result):
     reason = str(getattr(result, "termination_reason", ""))
     if reason in (FiberTermination.PLANNER_PREVIEW.value,
                   FiberTermination.NO_FEASIBLE_PATH.value):
+        return reason
+    if getattr(result, "engine_version", "") and reason:
         return reason
     return "CONVERGED" if result.converged else "NOT_CONVERGED"
 

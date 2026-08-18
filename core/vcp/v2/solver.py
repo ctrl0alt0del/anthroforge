@@ -194,7 +194,8 @@ def _candidate_value_p51(state):
     state.structural = _base_candidate(state)
     if state.planner.mode.value == "SURFACE":
         state.contact_changed = False; _clear_native_contacts(state)
-        return _record_candidate(state, _surface_candidate(state))
+        policy = getattr(state, "surface_candidate_policy", _surface_candidate)
+        return _record_candidate(state, policy(state))
     candidate = state.structural
     state.contact_changed = _refresh_native_contacts(state)
     candidate = _metric_project(state, candidate) if state.active else candidate
@@ -390,7 +391,7 @@ def _finish(state, termination, message, started):
 
 
 def _diagnostics(state, checked):
-    energy = structural_energy(state.points, state.points, state.request.settings)
+    energy = structural_energy(state.points, state.points, _effective_settings(state))
     fixed = _fixed_residual(state); stationarity = _stationarity(state)
     contact = _contact_energy(state, checked)
     return V2Diagnostics(energy.fidelity, energy.length, energy.curvature, contact,
@@ -428,21 +429,26 @@ def _contact_energy(state, checked):
 
 
 def _merit(state, points):
-    energy = structural_energy(points, points, state.request.settings)
+    energy = structural_energy(points, points, _effective_settings(state))
     return energy.length + energy.curvature
 
 
 def _stationarity(state):
     gradient = structural_gradient(state.points, state.points, state.pins,
-                                    state.request.settings)
+                                    _effective_settings(state))
     scale = max(state.request.tolerances.length_scale, 1.0e-12)
     return float(np.max(np.linalg.norm(gradient, axis=1)) * scale) if len(gradient) else 0.0
 
 
 def _base_candidate(state):
-    settings = replace(state.request.settings, fidelity_weight=PROXIMAL_WEIGHT)
+    weight = getattr(state, "proximal_weight", PROXIMAL_WEIGHT)
+    settings = replace(_effective_settings(state), fidelity_weight=weight)
     before = perf_counter(); result = solve_structural(state.points, state.pins, settings)
     state.solve_ms += _elapsed(before); return result.points.copy()
+
+
+def _effective_settings(state):
+    return getattr(state, "structural_settings", state.request.settings)
 
 
 def _contact_directions(points, closest, normals, distances, contained):
@@ -525,9 +531,10 @@ def _constraint_response(state, row):
     indices, weights, normal = row; rhs = np.zeros_like(state.points)
     for index, weight in zip(indices, weights):
         rhs[index] += weight * normal
-    settings = replace(state.request.settings, fidelity_weight=PROXIMAL_WEIGHT)
+    proximal = getattr(state, "proximal_weight", PROXIMAL_WEIGHT)
+    settings = replace(_effective_settings(state), fidelity_weight=proximal)
     zeros = {index: (0.0, 0.0, 0.0) for index in state.pins}
-    return solve_structural(rhs / PROXIMAL_WEIGHT, zeros, settings).points
+    return solve_structural(rhs / proximal, zeros, settings).points
 
 
 def _accept_fractions(state, candidate, safe_step):

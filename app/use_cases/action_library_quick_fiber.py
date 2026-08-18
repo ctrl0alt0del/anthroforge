@@ -78,8 +78,10 @@ def _create_fiber(root, points):
     origin, insertion = points[0], points[-1]
     touches = tuple((point.scp_id, point.attach_param) for point in points[1:-1])
     with suppress_vcp_prop_updates():
-        return _new_fiber(root, origin.scp_id, insertion.scp_id,
-                          origin.attach_param, insertion.attach_param, touches)
+        fiber = _new_fiber(root, origin.scp_id, insertion.scp_id,
+                           origin.attach_param, insertion.attach_param, touches)
+        fiber.use_segment_collisions = True
+    return fiber
 
 
 def _rollback_fiber(root, scene, fiber_id):

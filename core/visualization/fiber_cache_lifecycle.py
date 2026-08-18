@@ -5,6 +5,7 @@ from ..deps.runtime_context_build import clear_runtime_context_cache
 from ..utils import clear_geometry_generations, clear_scene_cache, note_geometry_updates, scene_for_id
 from ..vcp.fiber_collision import clear_collider_generations, note_collider_updates
 from ..vcp.fiber_solver_v2 import clear_factor_cache
+from ..vcp.fiber_v2_runtime import clear_v2_runtime_capture_cache
 from ..vcp.v2 import clear_triangle_snapshot_cache
 
 
@@ -14,6 +15,7 @@ def invalidate_fiber_caches(scene=None, root=None, fiber_ids=None):
     _cancel_refinements(scene, ids)
     _clear_solver_cache(ids)
     clear_factor_cache()
+    clear_v2_runtime_capture_cache() if ids is None else None
     clear_triangle_snapshot_cache() if ids is None else None
     clear_runtime_context_cache(root)
     clear_scene_cache(scene)

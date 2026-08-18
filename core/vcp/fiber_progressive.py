@@ -35,6 +35,9 @@ class FiberSolveResult:
     max_disp: float = 0.0
     max_pen: float = 0.0
     termination_reason: str = ""
+    validated: bool = False
+    engine_version: str = ""
+    diagnostics: object = None
     telemetry: object = None
 
 
@@ -122,11 +125,16 @@ class FiberSolveSession:
             stalled=self.stalled, blocked=blocked, invalid_reason=self.invalid_reason,
             mode=self.mode, planner_ms=self.planner_ms, refine_ms=self.refine_ms,
             active_count=self.active_count, max_disp=disp, max_pen=pen,
-            termination_reason=reason)
+            termination_reason=reason,
+            validated=bool(self.done and self.converged and pen < 1.0e-5))
 
 
 def begin_fiber_solve(solver, root, fiber, scene, depsgraph, quality="FINAL"):
     telemetry_count("fiber_solves")
+    from .fiber_v2_runtime import begin_v2_runtime
+    runtime = begin_v2_runtime(solver, root, fiber, scene, depsgraph, quality)
+    if runtime is not None:
+        return runtime
     session = FiberSolveSession(solver, root, fiber, scene, depsgraph, _quality(quality))
     session.telemetry = current_request_telemetry()
     session.loop = is_loop_fiber(fiber)

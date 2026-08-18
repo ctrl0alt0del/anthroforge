@@ -19,6 +19,7 @@ for value in (str(BLENDER_TEST_ROOT), str(TEST_ROOT), str(ADDON_ROOT.parent)):
 
 from anthroforge.core.vcp.fiber_progressive import _can_finish_direct
 from anthroforge.core.vcp.fiber_solver import FiberSolver
+from anthroforge.core.vcp.v2 import V2Diagnostics, V2Result, V2Termination
 from anthroforge.core.vcp.fiber_solver_v2 import (
     CYCLIC,
     OPEN,
@@ -30,7 +31,8 @@ from anthroforge.core.vcp.fiber_solver_v2 import (
 from anthroforge.core.vcp.prop_update_guard import suppress_vcp_prop_updates
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
 from anthroforge.core.visualization.fiber_sync_helpers import cached_fiber_points, mark_fiber_output_stale
-from anthroforge.core.visualization.fiber_refinement import drain_fiber_refinements
+from anthroforge.core.visualization.fiber_refinement import drain_fiber_refinements, request_fiber_refinement
+from anthroforge.core.vcp.runtime_state import fiber_recompute_status
 from anthroforge.core.visualization.muscle_sync_runtime import collect_fiber_points
 from _helpers import BlenderTestCase, find_flagged, mesh_object, root, scp_with_object
 
@@ -132,7 +134,6 @@ class FiberSolverV2IntegrationTests(unittest.TestCase):
         v1 = _direct_session(solver)
         self.assertTrue(_can_finish_direct(v1))
 
-
 class FiberSolverV2WorkflowTests(BlenderTestCase):
     def test_v2_sync_produces_exact_count_and_endpoint_pins(self):
         root_obj, fiber = _v2_fiber_setup()
@@ -176,6 +177,16 @@ class FiberSolverV2WorkflowTests(BlenderTestCase):
         self.assertIsNone(cached_fiber_points(bpy.context.scene, root_obj.name, fiber.id))
         self.assertIsNone(collect_fiber_points(root_obj, bpy.context.scene, (fiber,)))
 
+    def test_validated_stalled_runtime_result_commits_as_current(self):
+        root_obj, fiber = _v2_fiber_setup(); package = _stalled_package(24)
+        with patch.dict(os.environ, {"AF_FIBER_V2_RUNTIME": "PIN_SMOOTHING"}):
+            with patch("anthroforge.core.vcp.fiber_v2_runtime.solve_pin_smoothing", return_value=package):
+                request_fiber_refinement(root_obj, bpy.context.scene, fiber, True, "INTERACTIVE")
+                self.assertTrue(drain_fiber_refinements())
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        self.assertEqual((proxy.get("af_fiber_output_state"), fiber_recompute_status(fiber)),
+                         ("CURRENT", "STALLED"))
+
 
 def _direct_session(solver):
     anchor = lambda x: SimpleNamespace(point=Vector((x, 0, 0)), owner_id="")
@@ -183,6 +194,14 @@ def _direct_session(solver):
     return SimpleNamespace(solver=solver, params={"solver_version": 1}, mode="DIRECT",
                            guides=[], preview=[Vector(), Vector((1, 0, 0))],
                            anchors=[anchor(0), anchor(1)], oracle=oracle)
+
+
+def _stalled_package(count):
+    points = tuple((2.0 * index / (count - 1), 0.0, 0.0) for index in range(count))
+    diagnostics = V2Diagnostics(fixed_point_residual=1.0e-5)
+    result = V2Result("runtime-test", V2Termination.STALLED, points, diagnostics,
+                      True, "DIRECT", "validated recovery", "test-pin-runtime")
+    return SimpleNamespace(result=result, trace=SimpleNamespace(planner_ms=1.0))
 
 
 def _v2_fiber_setup():

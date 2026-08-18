@@ -104,8 +104,10 @@ from .planner import (
     V2_PLANNER_43_VERSION,
     V2_PLANNER_VERSION,
     V2PlannerDiagnostics,
+    V2PlannerBranch,
     V2PlannerMode,
     V2PlannerResult,
+    V2PlannerSpan,
     plan_reference,
     plan_reference_v41,
     plan_reference_v42,
@@ -131,6 +133,10 @@ from .solver_v23 import (V2_SOLVER_V23_VERSION, V23Trace, clear_v23_route_cache,
                          solve_v23, v23_route_cache_stats)
 from .solver_v24 import (V2_SOLVER_V24_VERSION, V24Trace, clear_v24_route_cache,
                          solve_v24, v24_route_cache_stats)
+from .solver_v25_branch2 import (V2_SOLVER_V25_BRANCH2_VERSION, V25Branch2Trace,
+                                 solve_v25_branch2)
+from .solver_pin_smoothing import (PIN_SMOOTHING_VERSION, PinSmoothingTrace,
+                                   solve_pin_smoothing)
 from .solver_p71 import V2_SOLVER_P71_VERSION, V2Package71Trace, solve_package71
 from .solver_p72 import V2_SOLVER_P72_VERSION, V2Package72Trace, solve_package72
 from .solver_p8 import V2_SOLVER_P8_VERSION, V2Package8Trace, solve_package8
@@ -166,7 +172,8 @@ __all__ = (
     "validate_segment_clearance_batch",
     "triangle_snapshot_cache_stats",
     "V2_PLANNER_VERSION", "V2_PLANNER_41_VERSION", "V2_PLANNER_42_VERSION", "V2_PLANNER_43_VERSION",
-    "V2PlannerDiagnostics", "V2PlannerMode", "V2PlannerResult",
+    "V2PlannerDiagnostics", "V2PlannerBranch", "V2PlannerMode", "V2PlannerResult",
+    "V2PlannerSpan",
     "plan_reference", "plan_reference_v41", "plan_reference_v42", "plan_reference_v43",
     "DEFAULT_CONTACT_WEIGHT", "V2_SOLVER_P5_VERSION", "V2_SOLVER_P51_VERSION",
     "V2Package5Result", "V2Package5Trace", "solve_package5", "solve_package51",
@@ -180,6 +187,8 @@ __all__ = (
     "solve_v23", "v23_route_cache_stats",
     "V2_SOLVER_V24_VERSION", "V24Trace", "clear_v24_route_cache",
     "solve_v24", "v24_route_cache_stats",
+    "V2_SOLVER_V25_BRANCH2_VERSION", "V25Branch2Trace", "solve_v25_branch2",
+    "PIN_SMOOTHING_VERSION", "PinSmoothingTrace", "solve_pin_smoothing",
     "V2_SOLVER_P71_VERSION", "V2Package71Trace", "solve_package71",
     "V2_SOLVER_P72_VERSION", "V2Package72Trace", "solve_package72",
     "V2_SOLVER_P8_VERSION", "V2Package8Trace", "solve_package8",

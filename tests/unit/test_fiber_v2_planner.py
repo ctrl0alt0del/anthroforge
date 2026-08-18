@@ -7,7 +7,7 @@ import numpy as np
 
 from core.vcp.v2 import (
     V2Anchor, V2AnchorRole, V2ColliderSnapshot, V2CollisionPolicy,
-    V2PlannerMode, V2Quality, V2Request, V2ResolvedTolerances, V2Settings,
+    V2PlannerBranch, V2PlannerMode, V2Quality, V2Request, V2ResolvedTolerances, V2Settings,
     V2Termination, V2Topology, build_triangle_snapshot, plan_reference,
     plan_reference_v41, plan_reference_v42, validate_static_clearance,
     plan_reference_v43,
@@ -83,6 +83,8 @@ class FiberV2PlannerTests(unittest.TestCase):
         self.assertEqual((result.termination, result.mode),
                          (V2Termination.CONVERGED, V2PlannerMode.DIRECT))
         self.assertEqual((len(result.reference), result.pin_indices), (17, (0, 16)))
+        self.assertEqual((result.spans[0].branch, result.spans[0].edge_count),
+                         (V2PlannerBranch.DIRECT, 16))
 
     def test_unrelated_box_uses_safe_roadmap_and_preserves_corners(self):
         collider = _box(); request = _request(_anchors(((-1, 0, 0), (1, 0, 0))), (collider,), 16, 0.05)
@@ -102,6 +104,16 @@ class FiberV2PlannerTests(unittest.TestCase):
         self.assertEqual((result.mode, len(result.reference)), (V2PlannerMode.SURFACE, 64))
         self.assertTrue(np.all(np.diff(angles) >= -1.0e-9))
         self.assertLess(float(np.ptp(angles)), 0.5)
+
+    def test_surface_bridge_metadata_matches_exact_count_spans(self):
+        collider = _sphere(); points = _angle_points((0.0, 0.12, 0.24, 0.36))
+        result = plan_reference_v43(_request(_anchors(points, "SPHERE"), (collider,), 64, 0.02))
+        self.assertEqual({row.branch for row in result.spans},
+                         {V2PlannerBranch.SURFACE_BRIDGE})
+        self.assertEqual(sum(row.edge_count for row in result.spans), 63)
+        self.assertEqual(tuple(row.first_edge for row in result.spans), result.pin_indices[:-1])
+        self.assertEqual(tuple((row.start_anchor, row.end_anchor) for row in result.spans),
+                         ((0, 1), (1, 2), (2, 3)))
 
     def test_result_is_deterministic(self):
         request = _request(_anchors(((-1, 0, 0), (1, 0, 0))), (_box(),), 24, 0.05)

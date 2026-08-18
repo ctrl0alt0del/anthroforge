@@ -20,6 +20,7 @@ from anthroforge.core.visualization.fiber_refinement import (
     drain_fiber_refinements,
     fiber_refinement_state,
 )
+from anthroforge.core.vcp.runtime_state import fiber_eps_pen
 from anthroforge.operators import action_library_quick_fiber as modal_ops
 
 
@@ -58,6 +59,8 @@ class QuickFiberTests(BlenderTestCase):
         self.assertNotIn("af_fiber_points_world", proxy)
         self.assertLess(len(proxy.data.splines[0].points), fiber.node_count)
         self.assertTrue(drain_fiber_refinements())
+        self.assertTrue(fiber.use_segment_collisions)
+        self.assertLess(fiber_eps_pen(fiber), 1.0e-5)
         self.assertEqual(len(json.loads(proxy["af_fiber_points_world"])), fiber.node_count)
         self.assertEqual(len(proxy.data.splines[0].points), fiber.node_count)
         self.assertEqual((bpy.context.active_object, tuple(bpy.context.selected_objects)), (proxy, (proxy,)))
