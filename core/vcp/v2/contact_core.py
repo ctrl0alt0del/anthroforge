@@ -919,15 +919,25 @@ def _merge_contacts(state, fresh):
     state.injected += sum(key not in current for key in output)
     clear_gap = _activation(state) - _radius(state)
     for key, row in current.items():
-        if key in output or key in migrated:
-            continue
-        multiplier = max(0.0, row.multiplier - state.mu * clear_gap); streak = row.clear_streak + 1
-        if streak < 2 or multiplier > state.mu * _slack(state):
-            output[key] = replace(row, gap=clear_gap, linearized_gap=float("nan"),
-                                  multiplier=multiplier, clear_streak=streak)
-        else:
-            state.retired += 1
+        if key in output or key in migrated: continue
+        if row.feature_id == "LIMITING": _retire_limiter(state); continue
+        retained = _retained_contact(state, row, clear_gap)
+        if retained is None: state.retired += 1
+        else: output[key] = retained
     return output
+
+
+def _retire_limiter(state):
+    state.retired += 1; state.energy_streak = 0
+    if state.acceleration_enabled: state.acceleration.reset()
+
+
+def _retained_contact(state, row, clear_gap):
+    multiplier = max(0.0, row.multiplier - state.mu * clear_gap)
+    streak = row.clear_streak + 1
+    if streak >= 2 and multiplier <= state.mu * _slack(state): return None
+    return replace(row, gap=clear_gap, linearized_gap=float("nan"),
+                   multiplier=multiplier, clear_streak=streak)
 def _migrate_limiters(current, output):
     migrated = set()
     for key, prior in current.items():

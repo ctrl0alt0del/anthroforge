@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -6,7 +7,8 @@ from core.vcp.v2.acceleration import AndersonHistory
 from core.vcp.v2.collision import build_native_collision_world
 from core.vcp.v2.collision_native import (native_contact_block_solve,
                                           native_structural_contact_responses)
-from core.vcp.v2.contact_core import begin_contact_core, solve_contact_core
+from core.vcp.v2.contact_core import (V2Contact, _merge_contacts,
+                                      begin_contact_core, solve_contact_core)
 from core.vcp.v2.contracts import V2ColliderSnapshot
 from core.vcp.v2.structural import (_base_bands, _static_settings, assemble_normal_matrix,
                                     smooth_coefficients)
@@ -15,6 +17,12 @@ from core.vcp.v2.subfiber_sqp import (_span_settings, solve_subfiber_sqp,
 from core.vcp.v2.trust_sqp import update_trust_radius
 from tests.unit.test_fiber_v2_solver import _box_request
 from tests.unit.test_fiber_v2_planner import _anchors, _request
+
+
+def _contact_state(request, contact):
+    return SimpleNamespace(request=request, contacts={contact.key: contact}, injected=0,
+                           retired=0, mu=100.0, energy_streak=3,
+                           acceleration_enabled=False)
 
 
 def _assembled_dense(request, current, contacts, mu):
@@ -47,6 +55,19 @@ def _dense_response(matrix, jacobian, pins):
 
 
 class FiberV2ContactCoreTests(unittest.TestCase):
+    def test_unmatched_ccd_limiter_retires_immediately(self):
+        limiter = V2Contact(8, .63, "C", 4, "LIMITING", (0, 1, 0), 0.0, multiplier=274.0)
+        state = _contact_state(_box_request(), limiter)
+        self.assertEqual(_merge_contacts(state, ()), {})
+        self.assertEqual((state.retired, state.energy_streak), (1, 0))
+
+    def test_ccd_limiter_migrates_to_current_surface_contact(self):
+        limiter = V2Contact(8, .63, "C", 4, "LIMITING", (0, 1, 0), 0.0, multiplier=274.0)
+        fresh = V2Contact(8, .61, "C", 7, "DISTANCE", (0, 1, 0), .0001)
+        output = _merge_contacts(_contact_state(_box_request(), limiter), (fresh,))
+        self.assertEqual(tuple(output.values())[0].feature_id, "DISTANCE")
+        self.assertEqual(tuple(output.values())[0].multiplier, 274.0)
+
     def test_anderson_accelerates_stable_affine_fixed_point(self):
         base = np.zeros(3); fast = base.copy(); history = AndersonHistory(4)
         for _index in range(6): base = .8 * base + np.ones(3)
