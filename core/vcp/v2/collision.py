@@ -87,6 +87,42 @@ class V2SafeStep:
     max_edge_batch: int
     max_pair_batch: int
     backend_version: str = ""
+    limiting_pairs: tuple = ()
+
+
+@dataclass
+class V2SweepSession:
+    starts: np.ndarray
+    ends: np.ndarray
+    faces: np.ndarray
+    keys: tuple
+    candidates: int
+    edge_batch: int
+    version: str
+    clearance: float
+    tolerance: float
+    budget: int
+    path: object = None
+    pair_cache: object = None
+    state: list = field(default_factory=lambda: [1.0, False, True, 0, 0, "CLEAR", None])
+    index: int = 0
+    result: object = None
+
+    @property
+    def done(self):
+        return self.result is not None
+
+    def step(self, pair_limit=PAIR_BATCH):
+        if self.done: return self.result
+        first = self.index; last = min(len(self.starts), first + max(1, int(pair_limit)))
+        limiting = _advance_sweep(self.state, self.starts[first:last], self.ends[first:last],
+                                  self.faces[first:last], self.clearance, self.tolerance,
+                                  self.budget, self.path)
+        _note_sweep_limiter(self, first, limiting); self.index = last
+        if last >= len(self.starts) or not self.state[2] or self.state[5] == "BUDGET_EXHAUSTED":
+            self.result = _sweep_result(self.state, self.candidates, self.edge_batch,
+                                        min(PAIR_BATCH, len(self.starts)), self.version)
+        return self.result
 
 
 @dataclass(frozen=True)
@@ -184,6 +220,29 @@ class V2ContactBatch:
     minimum: float
 
 
+@dataclass(frozen=True)
+class V2ContactPair:
+    edge: int
+    collider_id: str
+    instance: int
+    face: int
+    factor: float
+    distance: float
+    closest: tuple
+    normal: tuple
+    contained: bool = False
+
+
+@dataclass(frozen=True)
+class V2ContactPairBatch:
+    pairs: tuple
+    candidate_pairs: int
+    tested_pairs: int
+    contained_pairs: int
+    minimum: float
+    backend_version: str = ""
+
+
 @dataclass
 class V2NativeCollisionWorld:
     native: object
@@ -237,6 +296,23 @@ class V2NativeCollisionWorld:
                     for index in blockers)
         return V2ContactBatch(tuple(active.astype(bool)), factors, closest, normals, distances,
                               ids, result.candidates, result.tested, result.minimum)
+
+    def contact_pairs(self, points, edges, edge_owners, span, threshold, only=(), skip=()):
+        first, second = self._owner_rows(edge_owners, len(edges))
+        filters = (self._owner_tokens(only, len(edges)), self._owner_tokens(skip, len(edges)))
+        rows, result = self.native.contact_pairs(points, edges, first, second, span,
+                                                 threshold, *filters)
+        pairs = tuple(self._contact_pair(row) for row in rows)
+        return V2ContactPairBatch(pairs, result.candidates, result.tested, result.contained,
+                                  result.minimum, self.backend_version)
+
+    def _contact_pair(self, row):
+        collider = self.collider_ids[row.collider] if 0 <= row.collider < len(self.collider_ids) else ""
+        closest = tuple(float(value) for value in row.closest)
+        normal = tuple(float(value) for value in row.normal)
+        return V2ContactPair(int(row.edge), collider, int(row.instance), int(row.face),
+                             float(row.factor), float(row.distance), closest, normal,
+                             bool(row.contained))
 
     def _owner_tokens(self, owners, count):
         rows = tuple(owners or ())
@@ -477,17 +553,49 @@ def collision_free_step(start, end, snapshot, clearance, contacts=(), cyclic=Fal
                         slack=0.0, backend_path=None, time_tolerance=1.0e-5,
                         interval_budget=262143, pair_cache=None,
                         assume_initial_valid=False, pair_envelope=None, distance_cache=None):
-    status = collision_backend_status(backend_path)
-    if not status.available:
-        return _unavailable_sweep(status)
-    source, target = _point_pair(start, end); edges = _chain_edges(len(source), cyclic)
-    initial = None if assume_initial_valid else validate_static_clearance(
+    session = begin_collision_free_step(start, end, snapshot, clearance, contacts, cyclic,
+        slack, backend_path, time_tolerance, interval_budget, pair_cache,
+        assume_initial_valid, pair_envelope, distance_cache)
+    while not session.done: session.step()
+    return session.result
+
+
+def begin_collision_free_step(start, end, snapshot, clearance, contacts=(), cyclic=False,
+                              slack=0.0, backend_path=None, time_tolerance=1.0e-5,
+                              interval_budget=262143, pair_cache=None,
+                              assume_initial_valid=False, pair_envelope=None, distance_cache=None):
+    status = collision_backend_status(backend_path); source, target = _point_pair(start, end)
+    edges = _chain_edges(len(source), cyclic)
+    initial = None if assume_initial_valid or not status.available else validate_static_clearance(
         source, snapshot, clearance, contacts, cyclic, slack, backend_path)
-    if initial is not None and not initial.valid:
-        return _invalid_start(initial, status.version)
-    return _sweep(source, target, edges, snapshot, contacts, _threshold(clearance, slack),
-                  time_tolerance, interval_budget, backend_path, status.version,
-                  pair_cache, pair_envelope, distance_cache)
+    if not status.available: return _finished_sweep(_unavailable_sweep(status), status.version)
+    if initial is not None and not initial.valid: return _finished_sweep(_invalid_start(initial, status.version), status.version)
+    return _prepare_sweep_session(source, target, edges, snapshot, contacts,
+        _threshold(clearance, slack), time_tolerance, interval_budget, backend_path,
+        status.version, pair_cache, pair_envelope, distance_cache)
+
+
+def _prepare_sweep_session(source, target, edges, snapshot, contacts, clearance, tolerance,
+                           budget, path, version, cache, envelope, distance_cache):
+    pair_bounds = envelope or (source, target)
+    pairs = _cached_candidate_pairs(pair_bounds, edges, snapshot, clearance, path, cache)
+    starts, ends, faces, keys = _certified_sweep_rows(
+        source, target, edges, snapshot, contacts, pairs, clearance, path, distance_cache)
+    return V2SweepSession(starts, ends, faces, keys, len(pairs),
+                          min(EDGE_BATCH, len(edges)), version, clearance,
+                          tolerance, budget, path, cache)
+
+
+def _finished_sweep(result, version):
+    return V2SweepSession(np.empty((0, 2, 3)), np.empty((0, 2, 3)),
+                          np.empty((0, 3, 3)), (), 0, 0, version,
+                          0.0, 0.0, 0, result=result)
+
+
+def _note_sweep_limiter(session, first, limiting):
+    if limiting < 0: return
+    if session.pair_cache is not None: session.pair_cache.note(session.keys[first + limiting])
+    session.state[6] = session.keys[first + limiting]
 
 
 def probe_collision_workload(start, end, snapshot, clearance, contacts=(), cyclic=False,
@@ -878,12 +986,14 @@ def _sweep(source, target, edges, snapshot, contacts, clearance, tolerance, budg
     pairs = _cached_candidate_pairs(envelope, edges, snapshot, clearance, path, pair_cache)
     starts, ends, faces, keys = _certified_sweep_rows(
         source, target, edges, snapshot, contacts, pairs, clearance, path, distance_cache)
-    state = [1.0, False, True, 0, 0, "CLEAR"]
+    state = [1.0, False, True, 0, 0, "CLEAR", None]
     for first in range(0, len(starts), PAIR_BATCH):
         limiting = _advance_sweep(state, starts[first:first + PAIR_BATCH], ends[first:first + PAIR_BATCH],
                                   faces[first:first + PAIR_BATCH], clearance, tolerance, budget, path)
         if pair_cache is not None and limiting >= 0:
             pair_cache.note(keys[first + limiting])
+        if limiting >= 0:
+            state[6] = keys[first + limiting]
         if not state[2] or state[5] == "BUDGET_EXHAUSTED":
             break
     return _sweep_result(state, len(pairs), min(EDGE_BATCH, len(edges)), min(PAIR_BATCH, len(starts)), version)
@@ -965,12 +1075,13 @@ def _advance_sweep(state, starts, ends, faces, clearance, tolerance, budget, pat
 
 
 def _sweep_result(state, candidates, edge_batch, pair_batch, version):
-    safe, possible, valid, tested, intervals, native_reason = state
+    safe, possible, valid, tested, intervals, native_reason, limiting = state
     uncertain = native_reason == "BUDGET_EXHAUSTED"
     reason = V2CollisionReason.CCD_UNCERTAIN if uncertain else V2CollisionReason.INVALID_START if not valid else V2CollisionReason.COLLISION if possible else V2CollisionReason.CLEAR
     accepted = valid and not uncertain
     return V2SafeStep(float(safe), accepted, valid, reason, int(candidates), int(tested),
-                      int(intervals), int(edge_batch), int(pair_batch), version)
+                      int(intervals), int(edge_batch), int(pair_batch), version,
+                      () if limiting is None else (tuple(limiting),))
 
 
 def _unavailable_static(status):

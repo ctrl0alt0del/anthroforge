@@ -47,6 +47,7 @@ class FiberSolveResult:
     engine: str = "V1"
     backend_version: str = ""
     selection: object = None
+    display_mode: str = ""
 
 
 @dataclass

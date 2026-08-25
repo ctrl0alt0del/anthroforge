@@ -18,6 +18,7 @@ from core.vcp.v2 import (
     triangle_snapshot_cache_stats,
     validate_segment_clearance_batch, validate_static_clearance,
 )
+from core.vcp.v2.collision import begin_collision_free_step
 
 
 def _collider(vertices, triangles=((0, 1, 2),), owner="BODY", collider_id="C"):
@@ -105,7 +106,7 @@ class FiberV2CollisionTests(unittest.TestCase):
     def test_packaged_backend_is_available(self):
         status = collision_backend_status()
         self.assertTrue(status.available, status.message)
-        self.assertEqual(status.version, "af_fiber_ccd-2.2047")
+        self.assertEqual(status.version, "af_fiber_ccd-3.8191")
 
     def test_package5_nearest_query_returns_surface_normal(self):
         world = build_native_collision_world((_plane(),))
@@ -345,6 +346,16 @@ class FiberV2CollisionTests(unittest.TestCase):
         self.assertGreater(result.candidate_pairs, 128)
         self.assertLessEqual(result.max_edge_batch, EDGE_BATCH)
         self.assertLessEqual(result.max_pair_batch, PAIR_BATCH)
+
+    def test_resumable_sweep_matches_synchronous_result(self):
+        snapshot = build_triangle_snapshot((_plane(),))
+        start = np.asarray(((-1, 0, 1), (1, 0, 1)), dtype=float)
+        end = np.asarray(((-1, 0, -1), (1, 0, -1)), dtype=float)
+        expected = collision_free_step(start, end, snapshot, 0.01)
+        session = begin_collision_free_step(start, end, snapshot, 0.01)
+        while not session.done:
+            session.step()
+        self.assertEqual(session.result, expected)
 
     def test_collision_module_is_blender_and_v1_independent(self):
         path = Path(__file__).parents[2] / "core" / "vcp" / "v2" / "collision.py"

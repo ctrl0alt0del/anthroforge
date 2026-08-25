@@ -2,6 +2,12 @@
 
 Date: 2026-08-18
 
+Update 2026-08-20: the accepted facade is now
+`fiber-v2-production-3`, backed by native ABI 3 and the integrated augmented-
+Lagrangian collision core. See
+[`fiber_v2_production3_collision_core_report.md`](fiber_v2_production3_collision_core_report.md)
+for implementation details, real-file results, and the remaining rollout gates.
+
 ## Decision
 
 AnthroForge will have one production Fiber engine selector:
@@ -43,10 +49,10 @@ Implemented on 2026-08-18:
 - focused selector, topology, migration, cancellation, supersession,
   publication, cache, and compatibility regressions.
 
-Not yet complete:
+Not yet complete after production-3:
 
-- the accepted V2 solve is still atomic after collider capture; the PLAN,
-  CONTACTS, GLOBAL, CCD, and VALIDATE internals are not independently resumable;
+- CONTACT and CCD are resumable, but evaluated Blender mesh/BVH capture and
+  some seed-contact acquisition can still exceed the slice deadline;
 - SCP work shares generation-keyed caches but not one explicit immutable
   batch-capture object;
 - live SCP draining still blocks the runtime pass until the batch finishes;
@@ -100,7 +106,7 @@ Consequently the production stack explicitly assembles Packages 1, 2, and 3
 with the Package 4.3 planner. It does not assume that choosing Package 4.3 alone
 implicitly supplies the structural solver or every Package 4.2 experiment.
 
-The initial facade version is `fiber-v2-production-1`. Any change that can alter
+The current facade version is `fiber-v2-production-3`. Any change that can alter
 points, route selection, collision truth, or termination increments this version
 and invalidates exact-result caches.
 

@@ -143,7 +143,7 @@ class FiberSolverV2WorkflowTests(BlenderTestCase):
         root_obj, fiber = _legacy_fiber_setup(); package = _planner_package(24)
         proxy = _fiber_proxy(fiber); persisted = proxy.get("af_fiber_points_world")
         with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V2", "AF_FIBER_DEFER_MS": "0"}):
-            with patch("anthroforge.core.vcp.fiber_v2_runtime.solve_v2", return_value=package):
+            with patch("anthroforge.core.vcp.fiber_v2_runtime.begin_v2", return_value=_PackageSession(package)):
                 fiber.preview_planner_route = True
                 while sync_runner._PENDING:
                     sync_runner._flush_pending()
@@ -161,7 +161,7 @@ class FiberSolverV2WorkflowTests(BlenderTestCase):
         root_obj, fiber = _v2_fiber_setup(); package = _stalled_package(24)
         solver = FiberSolver()
         with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V2"}):
-            with patch("anthroforge.core.vcp.fiber_v2_runtime.solve_v2", return_value=package) as solve:
+            with patch("anthroforge.core.vcp.fiber_v2_runtime.begin_v2", return_value=_PackageSession(package)) as solve:
                 points = solver.solve_points(root_obj, fiber, bpy.context.scene,
                                              bpy.context.evaluated_depsgraph_get())
         self.assertEqual((solve.call_count, len(points)), (1, 24))
@@ -171,7 +171,7 @@ class FiberSolverV2WorkflowTests(BlenderTestCase):
         sync = register_fiber_sync(); sync.clear_solver_cache(fiber.id)
         package = _stalled_package(24, V2Termination.CONVERGED)
         with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V2"}):
-            with patch("anthroforge.core.vcp.fiber_v2_runtime.solve_v2", return_value=package):
+            with patch("anthroforge.core.vcp.fiber_v2_runtime.begin_v2", return_value=_PackageSession(package)):
                 sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene, bake=False)
         proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
         points = [Vector(row) for row in json.loads(proxy["af_fiber_points_world"])]
@@ -216,7 +216,7 @@ class FiberSolverV2WorkflowTests(BlenderTestCase):
     def test_validated_stalled_runtime_result_commits_as_current(self):
         root_obj, fiber = _v2_fiber_setup(); package = _stalled_package(24)
         with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V2"}):
-            with patch("anthroforge.core.vcp.fiber_v2_runtime.solve_v2", return_value=package):
+            with patch("anthroforge.core.vcp.fiber_v2_runtime.begin_v2", return_value=_PackageSession(package)):
                 request_fiber_refinement(root_obj, bpy.context.scene, fiber, True, "INTERACTIVE")
                 self.assertTrue(drain_fiber_refinements())
         proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
@@ -307,9 +307,23 @@ def _fiber_proxy(fiber):
     return find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
 
 
+class _PackageSession:
+    def __init__(self, package):
+        self.package, self.done = package, True
+
+    @property
+    def points(self):
+        return self.package.result.points
+
+    infeasible = False
+
+    def step(self):
+        return self.package
+
+
 def _commit_v2(case, root_obj, fiber, package, quality="FINAL"):
     with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V2"}):
-        with patch("anthroforge.core.vcp.fiber_v2_runtime.solve_v2", return_value=package):
+        with patch("anthroforge.core.vcp.fiber_v2_runtime.begin_v2", return_value=_PackageSession(package)):
             request = request_fiber_refinement(root_obj, bpy.context.scene, fiber, True, quality)
             case.assertTrue(request.ok)
             case.assertTrue(drain_fiber_refinements())

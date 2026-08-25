@@ -99,5 +99,10 @@ class FiberOwnerContactTests(unittest.TestCase):
         self.assertFalse(fiber_refinement._result_safe(
             fiber, type("Result", (), {"converged": False, "max_pen": 0.5})()))
 
+    def test_v2_commit_uses_resolved_native_validation(self):
+        fiber = type("Fiber", (), {})()
+        result = type("Result", (), {"engine": "V2", "validated": True, "max_pen": 2.0e-5})()
+        self.assertTrue(fiber_refinement._result_safe(fiber, result))
+
 if __name__ == "__main__":
     unittest.main()

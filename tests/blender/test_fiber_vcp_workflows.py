@@ -1105,11 +1105,12 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual((fiber.legacy_points_json, fiber.legacy_status), ("", ""))
         self.assertEqual((fiber.legacy_eps_disp, fiber.legacy_eps_pen), (0.0, 0.0))
 
-    def test_new_fiber_engine_override_does_not_change_uncommitted_provenance(self):
+    def test_new_fiber_v2_commit_updates_provenance_atomically(self):
         with patch.dict("os.environ", {"AF_FIBER_ENGINE": "V2"}):
             _root_obj, fiber, _origin, _insert = _fiber_setup()
         proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
-        self.assertEqual((fiber.solver_version, proxy.get("af_fiber_output_engine")), (1, None))
+        self.assertEqual((fiber.solver_version, proxy.get("af_fiber_output_engine")), (2, "V2"))
+        self.assertEqual(proxy.get("af_fiber_output_engine_version"), "fiber-v2-production-3")
 
     def test_bake_iteration_policy_edit_does_not_trigger_runtime(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup()

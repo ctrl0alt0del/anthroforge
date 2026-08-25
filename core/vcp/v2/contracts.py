@@ -9,8 +9,9 @@ from math import isfinite
 import numpy as np
 
 
-V2_CONTRACT_VERSION = 1
-V2_ENGINE_VERSION = "fiber-v2-contract-1"
+V2_CONTRACT_VERSION = 2
+V2_ENGINE_VERSION = "fiber-v2-contract-2"
+V2_DECODE_VERSIONS = (1, V2_CONTRACT_VERSION)
 
 
 class V2Quality(str, Enum):
@@ -303,10 +304,29 @@ class V2Diagnostics:
     accepted_steps: int = 0
     rejected_steps: int = 0
     accelerated_steps: int = 0
+    feasibility_iterations: int = 0
+    max_constraint_violation: float = 0.0
+    aggregate_constraint_violation: float = 0.0
+    active_contacts: int = 0
+    injected_contacts: int = 0
+    retired_contacts: int = 0
+    limiting_contacts: int = 0
+    contact_groups: int = 0
+    multiplier_updates: int = 0
+    native_contact_ms: float = 0.0
+    native_assembly_ms: float = 0.0
+    native_factor_ms: float = 0.0
+    native_solve_ms: float = 0.0
+    native_ccd_ms: float = 0.0
+    native_validation_ms: float = 0.0
+    block_factor_condition: float = 0.0
+    feasibility_reached_from_invalid: bool = False
 
     def __post_init__(self):
         _set_diagnostic_floats(self)
         _set_diagnostic_counts(self)
+        object.__setattr__(self, "feasibility_reached_from_invalid",
+                           bool(self.feasibility_reached_from_invalid))
         if self.ccd_step_fraction > 1.0:
             raise ValueError("ccd_step_fraction must not exceed one")
 
@@ -352,8 +372,7 @@ class V2Request:
     def __post_init__(self):
         _set_request_identity(self)
         _set_request_data(self)
-        if self.contract_version != V2_CONTRACT_VERSION:
-            raise ValueError("unsupported V2 contract version")
+        _validate_contract_version(self.contract_version)
 
     def signature_payload(self):
         payload = _plain(self)
@@ -365,7 +384,7 @@ class V2Request:
         cached = getattr(self, "_signature_cache", "")
         if cached:
             return cached
-        value = stable_contract_signature(self.signature_payload())
+        value = stable_contract_signature(_request_signature_payload(self))
         object.__setattr__(self, "_signature_cache", value)
         return value
 
@@ -379,6 +398,29 @@ def _set_request_identity(request):
     for name in ("scene_id", "root_id", "source_revision", "symmetry_mode", "engine_version"):
         object.__setattr__(request, name, str(getattr(request, name) or ""))
     object.__setattr__(request, "contract_version", int(request.contract_version))
+
+
+def _request_signature_payload(request):
+    names = ("scene_id", "root_id", "source_revision", "settings", "tolerances",
+             "collision_policy", "anchors", "symmetry_mode", "symmetry_axis",
+             "symmetry_origin", "contract_version", "engine_version")
+    payload = {name: _plain(getattr(request, name)) for name in names}
+    payload["colliders"] = [_collider_signature(row) for row in request.colliders]
+    return payload
+
+
+def _collider_signature(collider):
+    generation = tuple(collider.generation)
+    digest = "" if generation else _collider_geometry_digest(collider)
+    return (collider.collider_id, collider.owner_id, generation,
+            len(collider.vertices), len(collider.triangles), digest)
+
+
+def _collider_geometry_digest(collider):
+    digest = sha256()
+    digest.update(np.ascontiguousarray(collider.vertices, dtype=np.float64).tobytes())
+    digest.update(np.ascontiguousarray(collider.triangles, dtype=np.int64).tobytes())
+    return digest.hexdigest()
 
 
 def _set_request_data(request):
@@ -434,8 +476,7 @@ class V2Result:
 
     def __post_init__(self):
         _set_result_values(self)
-        if self.contract_version != V2_CONTRACT_VERSION:
-            raise ValueError("unsupported V2 contract version")
+        _validate_contract_version(self.contract_version)
 
     @property
     def successful(self):
@@ -454,6 +495,11 @@ def _set_result_values(result):
     object.__setattr__(result, "validated", bool(result.validated))
     object.__setattr__(result, "contract_version", int(result.contract_version))
     _validate_result_values(result)
+
+
+def _validate_contract_version(value):
+    if int(value) not in V2_DECODE_VERSIONS:
+        raise ValueError("unsupported V2 contract version")
 
 
 def _validate_result_values(result):

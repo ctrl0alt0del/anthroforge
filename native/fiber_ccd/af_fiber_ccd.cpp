@@ -6,6 +6,7 @@
 #include <limits>
 #include <queue>
 #include <unordered_map>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -140,9 +141,9 @@ static Context context(const double* start, const double* end, const double* tri
     c.guard=eps()*scale; return c;
 }
 
-AF_EXPORT int af_fiber_ccd_version() { return 2; }
+AF_EXPORT int af_fiber_ccd_version() { return 3; }
 
-AF_EXPORT int af_fiber_ccd_capabilities() { return 2047; }
+AF_EXPORT int af_fiber_ccd_capabilities() { return 8191; }
 
 AF_EXPORT int af_segment_triangle_distances(const double* segments, const double* triangles,
                                              int count, double* distances) {
@@ -396,3 +397,4 @@ AF_EXPORT int af_candidate_pairs(const double* start, const double* end, const i
 }
 
 #include "af_fiber_planner43.hpp"
+#include "af_fiber_contact3.hpp"

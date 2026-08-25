@@ -6,8 +6,8 @@ from pathlib import Path
 import numpy as np
 
 
-V2_NATIVE_ABI = 2
-V2_NATIVE_CAPABILITIES = 1023
+V2_NATIVE_ABI = 3
+V2_NATIVE_CAPABILITIES = 8191
 V2_NATIVE_BATCH_CAPABILITY = 1024
 
 
@@ -33,12 +33,23 @@ class _NativeWorldContacts(Structure):
     _fields_ += [("minimum", c_double)]
 
 
+class _NativeBlockResult(Structure):
+    _fields_ = [(name, c_double) for name in ("condition", "assembly_ms", "factor_ms", "solve_ms")]
+    _fields_ += [("count", c_int), ("valid", c_int)]
+
+
+class _NativeContactPair(Structure):
+    _fields_ = [(name, c_int) for name in ("edge", "collider", "instance", "face", "contained")]
+    _fields_ += [("factor", c_double), ("distance", c_double)]
+    _fields_ += [(name, c_double * 3) for name in ("closest", "normal")]
+
+
 _REASONS = ("CLEAR", "AABB_CLEAR", "INVALID_START", "POSSIBLE_COLLISION", "BUDGET_EXHAUSTED")
 _LIBRARIES = {}
 
 
 def native_path():
-    return Path(__file__).resolve().parents[3] / "native" / "fiber_ccd" / "af_fiber_ccd.dll"
+    return Path(__file__).resolve().parents[3] / "native" / "fiber_ccd" / "af_fiber_ccd_v3.dll"
 
 
 def clear_native_libraries():
@@ -49,7 +60,33 @@ def _configure(library):
     _configure_collision_calls(library)
     _configure_snapshot_calls(library)
     _configure_world_calls(library)
+    _configure_v3_calls(library)
     return library
+
+
+def _configure_v3_calls(library):
+    double, integer, plain = POINTER(c_double), POINTER(c_int64), POINTER(c_int)
+    library.af_block_pentadiagonal_solve.argtypes = [double, double, double, double, c_int,
+                                                      double, POINTER(_NativeBlockResult)]
+    library.af_block_pentadiagonal_solve.restype = c_int
+    library.af_world_query_contact_pairs.argtypes = [c_void_p, double, integer, plain, plain,
+                                                      plain, plain, c_int, c_double, c_double,
+                                                      POINTER(_NativeContactPair), c_int,
+                                                      POINTER(_NativeWorldContacts)]
+    library.af_world_query_contact_pairs.restype = c_int
+    library.af_contact_block_solve.argtypes = [double, double, double, double, double, integer,
+                                                double, double, double, double, c_int, c_double,
+                                                integer, double, c_int, c_int, double,
+                                                POINTER(_NativeBlockResult)]
+    library.af_contact_block_solve.restype = c_int
+    _configure_response_call(library, double, integer)
+
+
+def _configure_response_call(library, double, integer):
+    library.af_structural_contact_responses.argtypes = [double, double, double, double,
+        integer, double, double, c_int, integer, double, c_int, c_int, double, double,
+        POINTER(_NativeBlockResult)]
+    library.af_structural_contact_responses.restype = c_int
 
 
 def _configure_collision_calls(library):
@@ -282,6 +319,24 @@ class NativeCollisionWorld:
             raise ValueError("invalid native collision-world contact query")
         return (*arrays, result)
 
+    def contact_pairs(self, points, edges, first, second, span, threshold, only=None, skip=None):
+        values, links, owners = _world_validation_inputs(points, edges, first, second)
+        filters = _contact_filters(only, skip, len(links))
+        base = (self.handle, _double(values), _integer(links), _plain(owners[0]), _plain(owners[1]),
+                _plain(filters[0]), _plain(filters[1]), len(links), float(span), float(threshold))
+        count = self._contact_pair_count(base)
+        rows = (_NativeContactPair * count)(); result = _NativeWorldContacts()
+        if self.library.af_world_query_contact_pairs(*base, rows, count, byref(result)) < 0:
+            raise ValueError("invalid native all-contact query")
+        return rows, result
+
+    def _contact_pair_count(self, base):
+        result = _NativeWorldContacts()
+        count = self.library.af_world_query_contact_pairs(*base, None, 0, byref(result))
+        if count < 0:
+            raise ValueError("invalid native all-contact query")
+        return count
+
     def close(self):
         if self.handle:
             self.library.af_world_destroy(self.handle); self.handle = None
@@ -362,6 +417,82 @@ def _matrices(matrix):
 
 def _plain(array):
     return array.ctypes.data_as(POINTER(c_int))
+
+
+def native_block_solve(diagonal, lower1, lower2, rhs, path=None):
+    blocks = tuple(_block_array(value, len(rhs)) for value in (diagonal, lower1, lower2))
+    values = np.ascontiguousarray(rhs, dtype=np.float64); output = np.empty_like(values)
+    result = _NativeBlockResult(); library = load_native(path)
+    code = library.af_block_pentadiagonal_solve(*(_double(value) for value in blocks),
+                                                 _double(values), len(values), _double(output), byref(result))
+    if code or not result.valid:
+        raise np.linalg.LinAlgError("native block-pentadiagonal factorization failed")
+    return output, _block_result(result)
+
+
+def _block_array(value, count):
+    array = np.ascontiguousarray(value, dtype=np.float64)
+    if array.shape != (count, 3, 3) or not np.isfinite(array).all():
+        raise ValueError("block bands must be finite (N, 3, 3) arrays")
+    return array
+
+
+def native_contact_block_solve(base, rhs, current, contacts, pins, targets, mu, path=None):
+    count = len(current); bands = tuple(_scalar_band(value, count) for value in base)
+    values = np.ascontiguousarray(rhs, dtype=np.float64); points = np.ascontiguousarray(current, dtype=np.float64)
+    edges, factors, normals, gaps, multipliers = _contact_arrays_v3(contacts)
+    pin_rows = np.ascontiguousarray(pins, dtype=np.int64); pin_values = np.ascontiguousarray(targets, dtype=np.float64)
+    output = np.empty_like(points); result = _NativeBlockResult(); library = load_native(path)
+    args = (*(_double(row) for row in bands), _double(values), _double(points), _integer(edges),
+            _double(factors), _double(normals), _double(gaps), _double(multipliers), len(edges), float(mu),
+            _integer(pin_rows), _double(pin_values), len(pin_rows), count, _double(output), byref(result))
+    if library.af_contact_block_solve(*args) or not result.valid:
+        raise np.linalg.LinAlgError("native contact block factorization failed")
+    return output, _block_result(result)
+
+
+def native_structural_contact_responses(base, rhs, contacts, pins, targets, path=None):
+    count = len(rhs); bands = tuple(_scalar_band(value, count) for value in base)
+    values = np.ascontiguousarray(rhs, dtype=np.float64); arrays = _response_arrays(contacts)
+    pin_rows = np.ascontiguousarray(pins, dtype=np.int64)
+    pin_values = np.ascontiguousarray(targets, dtype=np.float64)
+    output = np.empty_like(values); responses = np.empty((len(arrays[0]), count, 3))
+    result = _NativeBlockResult(); library = load_native(path)
+    args = (*(_double(row) for row in bands), _double(values), _integer(arrays[0]),
+        _double(arrays[1]), _double(arrays[2]), len(arrays[0]), _integer(pin_rows),
+        _double(pin_values), len(pin_rows), count, _double(output), _double(responses), byref(result))
+    if library.af_structural_contact_responses(*args) or not result.valid:
+        raise np.linalg.LinAlgError("native structural contact responses failed")
+    return output, responses, _block_result(result)
+
+
+def _response_arrays(contacts):
+    rows = tuple(contacts); edges = np.ascontiguousarray([row[0] for row in rows], dtype=np.int64)
+    factors = np.ascontiguousarray([row[1] for row in rows], dtype=np.float64)
+    normals = np.ascontiguousarray([row[2] for row in rows], dtype=np.float64).reshape((-1, 3))
+    return edges, factors, normals
+
+
+def _contact_arrays_v3(contacts):
+    rows = tuple(contacts)
+    edges = np.ascontiguousarray([row[0] for row in rows], dtype=np.int64)
+    factors = np.ascontiguousarray([row[1] for row in rows], dtype=np.float64)
+    normals = np.ascontiguousarray([row[2] for row in rows], dtype=np.float64).reshape((-1, 3))
+    gaps = np.ascontiguousarray([row[3] for row in rows], dtype=np.float64)
+    multipliers = np.ascontiguousarray([row[4] for row in rows], dtype=np.float64)
+    return edges, factors, normals, gaps, multipliers
+
+
+def _scalar_band(value, count):
+    array = np.ascontiguousarray(value, dtype=np.float64)
+    if array.shape != (count,) or not np.isfinite(array).all():
+        raise ValueError("base bands must be finite N-vectors")
+    return array
+
+
+def _block_result(result):
+    return {"condition": float(result.condition), "assembly_ms": float(result.assembly_ms),
+            "factor_ms": float(result.factor_ms), "solve_ms": float(result.solve_ms)}
 
 
 def _world_validation_inputs(points, edges, first, second):

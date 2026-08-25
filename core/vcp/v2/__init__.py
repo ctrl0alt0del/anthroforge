@@ -74,6 +74,8 @@ from .collision import (
     V2BackendStatus,
     V2CollisionReason,
     V2CollisionWorkload,
+    V2ContactPair,
+    V2ContactPairBatch,
     V2DistanceCertificateCache,
     V2OwnerContact,
     V2NativeCollisionWorld,
@@ -100,6 +102,9 @@ from .collision import (
     validate_segment_clearance_batch,
     triangle_snapshot_cache_stats,
 )
+from .contact_core import (V2_CONTACT_CORE_VERSION, V2Contact, V2ContactCoreResult,
+                           V2ContactCoreTrace, V2ContactGroup, V2FeasibilityState,
+                           solve_contact_core)
 from .planner import (
     V2_PLANNER_41_VERSION,
     V2_PLANNER_42_VERSION,
@@ -179,7 +184,8 @@ __all__ = (
     "clear_contact_factor_cache", "contact_factor_cache_stats", "contact_slot_energy",
     "contact_stationarity", "solve_contact_structural",
     "EDGE_BATCH", "PAIR_BATCH", "V2_COLLISION_VERSION",
-    "V2BackendStatus", "V2CollisionReason", "V2CollisionWorkload", "V2DistanceCertificateCache", "V2OwnerContact", "V2NativeCollisionWorld",
+    "V2BackendStatus", "V2CollisionReason", "V2CollisionWorkload", "V2ContactPair",
+    "V2ContactPairBatch", "V2DistanceCertificateCache", "V2OwnerContact", "V2NativeCollisionWorld",
     "V2SafeStep", "V2StaticClearance", "V2TriangleSnapshot",
     "V2SegmentBatch",
     "build_triangle_snapshot", "build_triangle_snapshot_known", "build_native_collision_world",
@@ -214,6 +220,8 @@ __all__ = (
     "sampled_contact_stationarity", "solve_sampled_contact",
     "V2_UNILATERAL_CONTACT_VERSION", "UnilateralConstraint", "UnilateralContactResult",
     "solve_unilateral_contact", "V2_PRODUCTION_VERSION", "V2_ACCEPTED_FEATURES",
+    "V2_CONTACT_CORE_VERSION", "V2Contact", "V2ContactCoreResult", "V2ContactCoreTrace",
+    "V2ContactGroup", "V2FeasibilityState", "solve_contact_core",
     "solve_v2", "v2_backend_status", "clear_v2_production_caches",
     "v2_production_cache_stats",
 )

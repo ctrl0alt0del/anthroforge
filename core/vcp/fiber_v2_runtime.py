@@ -15,7 +15,7 @@ from .v2.contracts import (V2Anchor, V2AnchorRole, V2ArrayColliderSnapshot,
                            V2CollisionPolicy, V2Quality, V2Request,
                            V2ResolvedTolerances, V2Settings, V2Termination,
                            V2Topology)
-from .v2.production import V2_PRODUCTION_VERSION, solve_v2
+from .v2.production import V2_PRODUCTION_VERSION, begin_v2
 
 
 _CAPTURE_LIMIT = 128
@@ -39,6 +39,7 @@ class V2RuntimeSession:
     source_colliders: tuple = ()
     capture_index: int = 0
     package: object = None
+    core_session: object = None
     invalid_reason: str = ""
     runtime_error: str = ""
     termination_reason: str = ""
@@ -69,7 +70,8 @@ class V2RuntimeSession:
                                     termination_reason=self.termination_reason, engine="V2",
                                     engine_version=V2_PRODUCTION_VERSION,
                                     backend_version=collision_backend_status().version,
-                                    selection=self.selection)
+                                    selection=self.selection, display_mode=_display_mode(self),
+                                    validated=_preview_validated(self))
         return _solve_result(self, FiberSolveResult)
 
 
@@ -180,14 +182,47 @@ def v2_runtime_capture_cache_stats():
 
 def _solve(session):
     session.phase = FiberPhase.LOCAL_STEP.value
+    if session.core_session is None:
+        _begin_core(session); return
     try:
-        request = _request(session)
-        session.package = solve_v2(request, preview=session.quality != "FINAL")
+        session.package = session.core_session.step()
     except Exception as error:
         session.runtime_error = str(error)
         session.termination_reason = FiberTermination.UNSAFE_OUTPUT.value
-    session.done, session.generation = True, session.generation + 1
-    session.phase = FiberPhase.DONE.value
+    _update_core_runtime(session)
+
+
+def _begin_core(session):
+    try:
+        session.core_session = begin_v2(_request(session), preview=session.quality != "FINAL")
+    except Exception as error:
+        session.runtime_error, session.done = str(error), True
+    _update_core_runtime(session)
+
+
+def _update_core_runtime(session):
+    core = session.core_session
+    if core is None:
+        session.generation += 1; session.phase = FiberPhase.DONE.value; return
+    if core is not None and len(core.points): session.preview = [Vector(row) for row in core.points]
+    session.generation += 1; session.done = bool(core is not None and core.done)
+    session.phase = _core_phase(core)
+    if session.done: session.package = core.package
+
+
+def _core_phase(core):
+    if core is None or core.done: return FiberPhase.DONE.value
+    return FiberPhase.CONTACTS.value if core.infeasible else FiberPhase.GLOBAL_STEP.value
+
+
+def _display_mode(session):
+    core = session.core_session
+    return "SOLVING_INFEASIBLE" if core is not None and core.infeasible and not core.done else ""
+
+
+def _preview_validated(session):
+    core = session.core_session
+    return bool(core is not None and not core.infeasible)
 
 
 def _request(session):

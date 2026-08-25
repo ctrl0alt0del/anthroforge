@@ -233,10 +233,17 @@ def _apply_refined_geometry(job, result, root, scene, fiber, now):
         return
     proxy = register_fiber_sync().apply_points(root, scene, fiber, result.points,
                                                bake=_job_bake(job, result), commit=commit)
-    None if proxy is None else proxy.pop("af_fiber_display_mode", None)
+    _set_refinement_display(proxy, result)
     job.output_committed = bool(result.done and commit and proxy is not None)
     job.proxy_name = "" if proxy is None else proxy.name
     job.last_apply, job.last_generation = now, job.session.generation
+
+
+def _set_refinement_display(proxy, result):
+    if proxy is None: return
+    mode = str(getattr(result, "display_mode", "") or "")
+    if mode: proxy["af_fiber_display_mode"] = mode; proxy["af_fiber_output_state"] = "STALE"
+    else: proxy.pop("af_fiber_display_mode", None)
 
 
 def _apply_planner_preview(job, result, root, scene, fiber, now):
@@ -384,7 +391,7 @@ def _termination_committable(result):
 
 def _result_safe(fiber, result):
     if str(getattr(result, "engine", "V1")) == "V2":
-        return bool(_validated_result(result) and float(result.max_pen) < 1.0e-5)
+        return _validated_result(result)
     if not _requires_collision_truth(fiber):
         return True
     return float(result.max_pen) < 1.0e-5

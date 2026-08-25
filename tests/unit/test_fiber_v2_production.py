@@ -8,7 +8,7 @@ from core.vcp.v2.production import V2_ACCEPTED_FEATURES, V2_PRODUCTION_VERSION
 class FiberV2ProductionFacadeTests(unittest.TestCase):
     def test_manifest_is_immutable_and_versioned(self):
         self.assertIsInstance(V2_ACCEPTED_FEATURES, tuple)
-        self.assertEqual(V2_PRODUCTION_VERSION, "fiber-v2-production-2")
+        self.assertEqual(V2_PRODUCTION_VERSION, "fiber-v2-production-3")
 
     def test_production_import_excludes_rejected_solvers(self):
         code = _production_import_probe()

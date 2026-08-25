@@ -54,11 +54,18 @@ class FiberV2ContractTests(unittest.TestCase):
     def test_signature_covers_solution_defining_fields(self):
         request = _request()
         variants = (replace(request, source_revision="revision-5"),
-                    replace(request, engine_version="fiber-v2-contract-2"),
+                    replace(request, engine_version="fiber-v2-contract-3"),
                     replace(request, symmetry_mode="MIRROR"),
                     replace(request, settings=replace(request.settings, node_count=128)),
                     replace(request, colliders=(_collider(("mesh-2",)),)))
         self.assertTrue(all(item.signature() != request.signature() for item in variants))
+
+    def test_signature_hashes_geometry_when_generation_is_absent(self):
+        request = _request(); first = _collider(())
+        second = replace(first, vertices=((0, 0, 0), (2, 0, 0), (0, 1, 0)))
+        left = replace(request, colliders=(first,))
+        right = replace(request, colliders=(second,))
+        self.assertNotEqual(left.signature(), right.signature())
 
     def test_input_lists_are_copied_into_immutable_tuples(self):
         vertices = [[0, 0, 0], [1, 0, 0], [0, 1, 0]]
