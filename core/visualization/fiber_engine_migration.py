@@ -87,7 +87,7 @@ def _save_pending(root, scene, fiber, current, target):
 
 
 def _save_legacy_once(root, scene, fiber, current, target):
-    if current != 1 or target != 2 or str(getattr(fiber, "legacy_points_json", "") or ""):
+    if current != 1 or target not in (2, 3) or str(getattr(fiber, "legacy_points_json", "") or ""):
         return
     points = persisted_fiber_points(scene, root.name, fiber.id) or ()
     fiber.legacy_points_json = _encoded_points(points)
@@ -110,7 +110,7 @@ def _set_version(fiber, value):
 
 
 def _engine_number(engine):
-    return 2 if engine is FiberEngineKind.V2 else 1
+    return {FiberEngineKind.V1: 1, FiberEngineKind.V2: 2, FiberEngineKind.V3: 3}[engine]
 
 
 def _stored_version(fiber):

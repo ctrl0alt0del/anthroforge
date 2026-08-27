@@ -332,7 +332,7 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
 
     muscle_id: bpy.props.StringProperty(name="Muscle ID", default="")
 
-    solver_version: bpy.props.IntProperty(name="Solver Version", default=1, min=1, max=2, update=_on_fiber_prop_update)
+    solver_version: bpy.props.IntProperty(name="Solver Version", default=1, min=1, max=3, update=_on_fiber_prop_update)
     collision_radius: bpy.props.FloatProperty(name="Collision Radius", subtype="DISTANCE", default=0.002,
                                               min=0.0, update=_on_fiber_prop_update)
     use_warm_start: bpy.props.BoolProperty(name="Use Warm Start", default=True, update=_on_fiber_prop_update)

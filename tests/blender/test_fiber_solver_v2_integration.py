@@ -277,6 +277,21 @@ class FiberSolverV2WorkflowTests(BlenderTestCase):
         self.assertEqual((fiber.solver_version, _fiber_proxy(fiber).get("af_fiber_output_engine")), (2, "V2"))
         self.assertEqual(fiber.legacy_points_json, legacy)
 
+    def test_v3_opt_in_uses_final_budget_and_commits_v3_provenance(self):
+        root_obj, fiber = _legacy_fiber_setup(); captured = {}
+        package = _v3_package(fiber.node_count)
+        def factory(request, **values):
+            captured.update(request=request, values=values)
+            return _PackageSession(package)
+        with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V3"}):
+            with patch("anthroforge.core.vcp.v3.production.begin_v3", side_effect=factory):
+                request = request_fiber_refinement(root_obj, bpy.context.scene, fiber, True, "INTERACTIVE")
+                self.assertTrue(request.ok); self.assertTrue(drain_fiber_refinements())
+        proxy = _fiber_proxy(fiber)
+        self.assertEqual((fiber.solver_version, proxy.get("af_fiber_output_engine")), (3, "V3"))
+        self.assertEqual(captured["request"].settings.max_accepted_steps, fiber.iterations_bake)
+        self.assertEqual(captured["values"]["checkpoint_steps"], fiber.iterations_interactive)
+
 
 def _direct_session(solver):
     anchor = lambda x: SimpleNamespace(point=Vector((x, 0, 0)), owner_id="")
@@ -292,6 +307,14 @@ def _stalled_package(count, termination=V2Termination.STALLED):
     result = V2Result("runtime-test", termination, points, diagnostics,
                       True, "DIRECT", "validated recovery", "test-pin-runtime")
     return SimpleNamespace(result=result, trace=SimpleNamespace(planner_ms=1.0))
+
+
+def _v3_package(count):
+    package = _stalled_package(count); result = package.result
+    package.result = V2Result(result.request_signature, result.termination, result.points,
+        result.diagnostics, result.validated, result.route_branch, result.message,
+        "fiber-v3-production-1", result.backend_version)
+    return package
 
 
 def _planner_package(count):

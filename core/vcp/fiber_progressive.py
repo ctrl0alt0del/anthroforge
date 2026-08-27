@@ -154,9 +154,8 @@ def begin_fiber_solve(solver, root, fiber, scene, depsgraph, quality="FINAL",
 def _begin_selected(solver, root, fiber, scene, depsgraph, quality, selection):
     if not selection.valid:
         return _invalid_engine_session(solver, root, fiber, scene, depsgraph, quality, selection)
-    if selection.actual is FiberEngineKind.V2:
-        from .fiber_v2_runtime import begin_v2_runtime
-        return begin_v2_runtime(solver, root, fiber, scene, depsgraph, quality, selection)
+    if selection.actual in {FiberEngineKind.V2, FiberEngineKind.V3}:
+        return _begin_numeric(solver, root, fiber, scene, depsgraph, quality, selection)
     session = FiberSolveSession(solver, root, fiber, scene, depsgraph, _quality(quality))
     session.selection = selection
     session.telemetry = current_request_telemetry()
@@ -165,6 +164,12 @@ def _begin_selected(solver, root, fiber, scene, depsgraph, quality, selection):
     if not session.done:
         _init_colliders(session)
     return session
+
+
+def _begin_numeric(solver, root, fiber, scene, depsgraph, quality, selection):
+    from .fiber_v2_runtime import begin_v2_runtime, begin_v3_runtime
+    factory = begin_v3_runtime if selection.actual is FiberEngineKind.V3 else begin_v2_runtime
+    return factory(solver, root, fiber, scene, depsgraph, quality, selection)
 
 
 def _invalid_engine_session(solver, root, fiber, scene, depsgraph, quality, selection):

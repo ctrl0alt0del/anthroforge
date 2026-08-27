@@ -1,7 +1,5 @@
 """Blender-independent accepted Fiber Solver V2 APIs."""
 
-from importlib import import_module
-
 from .contracts import (
     V2_CONTRACT_VERSION,
     V2_ENGINE_VERSION,
@@ -146,27 +144,6 @@ from .production import (V2_ACCEPTED_FEATURES, V2_PRODUCTION_VERSION,
                          clear_v2_production_caches, solve_v2,
                          v2_backend_status, v2_production_cache_stats)
 
-
-_EXPERIMENTAL_EXPORTS = {
-    "V2_SOLVER_V25_BRANCH2_VERSION": "solver_v25_branch2", "V25Branch2Trace": "solver_v25_branch2",
-    "solve_v25_branch2": "solver_v25_branch2", "V2_SOLVER_P71_VERSION": "solver_p71",
-    "V2Package71Trace": "solver_p71", "solve_package71": "solver_p71",
-    "V2_SOLVER_P72_VERSION": "solver_p72", "V2Package72Trace": "solver_p72",
-    "solve_package72": "solver_p72", "V2_SOLVER_P8_VERSION": "solver_p8",
-    "V2Package8Trace": "solver_p8", "solve_package8": "solver_p8",
-    "V2_SOLVER_P81_VERSION": "solver_p81", "V2Package81Trace": "solver_p81",
-    "solve_package81": "solver_p81", "V2_SOLVER_P82_VERSION": "solver_p82",
-    "V2Package82Trace": "solver_p82", "solve_package82": "solver_p82",
-}
-
-
-def __getattr__(name):
-    module = _EXPERIMENTAL_EXPORTS.get(name)
-    if module is None:
-        raise AttributeError(name)
-    value = getattr(import_module(f"{__name__}.{module}"), name)
-    globals()[name] = value
-    return value
 
 __all__ = (
     "V2_CONTRACT_VERSION", "V2_ENGINE_VERSION", "V2Anchor",

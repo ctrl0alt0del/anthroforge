@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from .fiber_engine_selection import FiberEngineKind, select_fiber_engine
 from .v2.production import V2_PRODUCTION_VERSION, v2_backend_status
+from .v3.production import V3_PRODUCTION_VERSION, v3_backend_status
 
 
 V1_PRODUCTION_VERSION = "fiber-v1-legacy-1"
@@ -19,6 +20,7 @@ class FiberEngineAdapter:
 FIBER_ENGINE_REGISTRY = {
     FiberEngineKind.V1: FiberEngineAdapter(FiberEngineKind.V1, V1_PRODUCTION_VERSION),
     FiberEngineKind.V2: FiberEngineAdapter(FiberEngineKind.V2, V2_PRODUCTION_VERSION, True),
+    FiberEngineKind.V3: FiberEngineAdapter(FiberEngineKind.V3, V3_PRODUCTION_VERSION, True),
 }
 
 
@@ -33,4 +35,5 @@ def adapter_for_selection(selection):
 
 def selected_backend_status(selection):
     adapter = adapter_for_selection(selection)
-    return v2_backend_status() if adapter and adapter.requires_native_backend else None
+    if not adapter or not adapter.requires_native_backend: return None
+    return v3_backend_status() if adapter.kind is FiberEngineKind.V3 else v2_backend_status()

@@ -1,4 +1,4 @@
-"""Experimental active-set trust-region step for the Fiber V2 contact core."""
+"""Accepted active-set trust-region step shared by Fiber V2 and V3."""
 
 from dataclasses import dataclass, replace
 from time import perf_counter
@@ -20,10 +20,6 @@ class V2TrustSqpStep:
     tangential_norm: float
     solve_ms: float
     condition: float
-    variant: str = "BASE"
-    normal_fraction: float = 1.0
-    tangential_fraction: float = 1.0
-    soc_norm: float = 0.0
     regularization: float = 0.0
     structural_condition: float = 0.0
     constraint_condition: float = 0.0
@@ -44,36 +40,6 @@ def solve_trust_sqp(points, reference, settings, contacts, pins, trust_radius,
     return V2TrustSqpStep(candidate, solved[2], tuple(solved[3]), violation, energy,
         normal, tangent, elapsed, max(problem[2]["condition"], solved[4]), regularization=regularization,
         structural_condition=problem[2]["condition"], constraint_condition=solved[4])
-
-
-def solve_composite_sqp(points, reference, settings, contacts, pins, trust_radius, variant,
-                        true_length_epsilon=None, spacing_weight=0.0, regularization=0.0):
-    started = perf_counter(); rows = _linear_contacts(points, contacts)
-    problem = _native_problem(points, reference, settings, contacts, pins,
-                              true_length_epsilon, spacing_weight, regularization)
-    solved = _active_set(problem[0], problem[1], rows, np.asarray(points).reshape(-1))
-    normal, tangent = _step_vectors(points, solved[0].reshape((-1, 3)), rows, solved[1])
-    delta, fractions = _composite_delta(normal, tangent, len(points), trust_radius, variant)
-    candidate = _pinned_candidate(points, delta, pins)
-    violation = _linearized_violation(points, candidate, rows)
-    energy = objective_energy(candidate, reference, settings, true_length_epsilon, spacing_weight).total
-    elapsed = 1000.0 * (perf_counter() - started)
-    return V2TrustSqpStep(candidate, solved[2], tuple(solved[3]), violation, energy,
-        float(np.linalg.norm(normal)), float(np.linalg.norm(tangent)), elapsed,
-        max(problem[2]["condition"], solved[4]), variant, *fractions, regularization=regularization,
-        structural_condition=problem[2]["condition"], constraint_condition=solved[4])
-
-
-def second_order_correction(candidate, contacts, pins, trust_radius):
-    rows = tuple(row for row in contacts if row.gap < 0.0)
-    if not rows: return np.ascontiguousarray(candidate), 0.0, 0.0
-    jacobian = np.asarray([_contact_jacobian(len(candidate), row) for row in rows])
-    jacobian = _free_jacobian(jacobian, pins); target = -np.asarray([row.gap for row in rows])
-    schur = jacobian @ jacobian.T; regularized = _regularized(schur)
-    correction = jacobian.T @ np.linalg.lstsq(regularized, target, rcond=1.0e-10)[0]
-    correction = _limit_flat(correction, len(candidate), .5 * trust_radius)[0]
-    output = _pinned_candidate(candidate, correction, pins)
-    return output, float(np.linalg.norm(correction)), float(np.linalg.cond(regularized))
 
 
 def update_trust_radius(radius, minimum, maximum, ratio, accepted, boundary, contact_changed=False):
@@ -276,55 +242,6 @@ def _trust_limited(points, candidate, pins, radius):
     output = points + fraction * delta
     for index, target in pins.items(): output[index] = target
     return np.ascontiguousarray(output)
-
-
-def _composite_delta(normal, tangent, count, radius, variant):
-    if variant == "TANGENTIAL":
-        limited, fraction = _limit_flat(tangent, count, radius)
-        return limited, (0.0, fraction)
-    limited, normal_fraction = _limit_flat(normal, count, radius)
-    tangent_fraction = _tangent_fraction(limited, tangent, count, radius)
-    return limited + tangent_fraction * tangent, (normal_fraction, tangent_fraction)
-
-
-def _limit_flat(values, count, radius):
-    rows = np.asarray(values, dtype=np.float64).reshape((count, 3))
-    maximum = max((float(value) for value in np.linalg.norm(rows, axis=1)), default=0.0)
-    fraction = min(1.0, float(radius) / max(maximum, np.finfo(float).eps))
-    return fraction * rows.reshape(-1), fraction
-
-
-def _tangent_fraction(normal, tangent, count, radius):
-    if not np.any(tangent): return 0.0
-    low, high = 0.0, 1.0
-    for _iteration in range(24):
-        middle = .5 * (low + high)
-        if _within_radius(normal + middle * tangent, count, radius): low = middle
-        else: high = middle
-    return low
-
-
-def _within_radius(values, count, radius):
-    rows = np.asarray(values).reshape((count, 3))
-    maximum = max((float(value) for value in np.linalg.norm(rows, axis=1)), default=0.0)
-    return maximum <= float(radius) * (1.0 + 1.0e-12)
-
-
-def _pinned_candidate(points, delta, pins):
-    output = np.asarray(points, dtype=np.float64) + np.asarray(delta).reshape((-1, 3))
-    for index, target in pins.items(): output[index] = target
-    return np.ascontiguousarray(output)
-
-
-def _free_jacobian(jacobian, pins):
-    output = np.asarray(jacobian, dtype=np.float64).copy()
-    for index in pins: output[:, 3 * index:3 * index + 3] = 0.0
-    return output
-
-
-def _regularized(matrix):
-    scale = max(1.0, float(np.linalg.norm(matrix, ord=np.inf)))
-    return matrix + (1.0e-10 * scale) * np.eye(len(matrix))
 
 
 def _step_components(points, candidate, rows, active):

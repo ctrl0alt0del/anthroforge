@@ -11,6 +11,7 @@ FIBER_ENGINE_ENV = "AF_FIBER_ENGINE"
 class FiberEngineKind(str, Enum):
     V1 = "V1"
     V2 = "V2"
+    V3 = "V3"
 
 
 @dataclass(frozen=True)
@@ -41,8 +42,9 @@ def select_fiber_engine(topology, explicit=None, environ=None):
         return selection
     if str(topology or "OPEN").upper() == "OPEN":
         return selection
+    reason = f"{selection.requested.value}_TOPOLOGY_COMPATIBILITY"
     return FiberEngineSelection(selection.requested, FiberEngineKind.V1,
-                                selection.source, "V2_TOPOLOGY_COMPATIBILITY")
+                                selection.source, reason)
 
 
 def _selection_value(explicit, environ):
@@ -59,4 +61,4 @@ def _normalized(value):
 
 
 def _invalid_message(value):
-    return f"Invalid {FIBER_ENGINE_ENV} value: {value!r}; expected V1 or V2."
+    return f"Invalid {FIBER_ENGINE_ENV} value: {value!r}; expected V1, V2, or V3."

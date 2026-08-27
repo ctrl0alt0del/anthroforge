@@ -4,28 +4,23 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from core.vcp.v2.acceleration import AndersonHistory
 from core.vcp.v2.collision import build_native_collision_world
 from core.vcp.v2.collision_native import (native_contact_block_solve,
                                           native_structural_contact_responses)
-from core.vcp.v2.contact_core import (V2Contact, V2ContactExperiment, _collapse_contacts,
+from core.vcp.v2.contact_core import (V2Contact, _collapse_contacts,
                                       _adapt_quality, _effective_settings, _limiter_changed, _merge_contacts,
-                                      _projection_available, _stationary_rejection, _update_regularization,
+                                      _stationary_rejection, _update_regularization,
                                       begin_contact_core, solve_contact_core)
 from core.vcp.v2.contracts import V2ColliderSnapshot, V2Settings
-from core.vcp.v2.structural import (_base_bands, _static_settings, assemble_normal_matrix,
-                                    smooth_coefficients)
-from core.vcp.v2.subfiber_sqp import (_span_settings, solve_subfiber_sqp,
-                                      solve_subfiber_sqp_fixed)
+from core.vcp.v2.structural import _base_bands, _static_settings, assemble_normal_matrix
 from core.vcp.v2.trust_sqp import update_trust_radius
+from core.vcp.v3.policy import V3_PRODUCTION_POLICY
 from tests.unit.test_fiber_v2_solver import _box_request
-from tests.unit.test_fiber_v2_planner import _anchors, _request
 
 
 def _contact_state(request, contact):
     return SimpleNamespace(request=request, contacts={contact.key: contact}, injected=0,
-                           retired=0, mu=100.0, energy_streak=3,
-                           acceleration_enabled=False)
+                           retired=0, mu=100.0, energy_streak=3)
 
 
 def _assembled_dense(request, current, contacts, mu):
@@ -58,21 +53,6 @@ def _dense_response(matrix, jacobian, pins):
 
 
 class FiberV2ContactCoreTests(unittest.TestCase):
-    def test_structural_ccd_projection_is_isolated_and_validated(self):
-        package = solve_contact_core(_box_request(), use_planner=False, use_filter_sqp=True,
-            experiment=V2ContactExperiment(structural_ccd_projection=True))
-        stats = dict(package.trace.experiment_stats)
-        self.assertTrue(package.result.validated, package.result.message)
-        self.assertGreater(stats["projection_attempts"], 0)
-        self.assertGreater(stats["projection_solves"], 0)
-
-    def test_structural_projection_skips_dense_ccd_batches(self):
-        state = SimpleNamespace(experiment=V2ContactExperiment(True), projection_disabled=False,
-                                projection_skipped_dense=0)
-        self.assertTrue(_projection_available(state, SimpleNamespace(candidate_pairs=256)))
-        self.assertFalse(_projection_available(state, SimpleNamespace(candidate_pairs=257)))
-        self.assertEqual(state.projection_skipped_dense, 1)
-
     def test_unmatched_ccd_limiter_retires_immediately(self):
         limiter = V2Contact(8, .63, "C", 4, "LIMITING", (0, 1, 0), 0.0, multiplier=274.0)
         state = _contact_state(_box_request(), limiter)
@@ -94,37 +74,34 @@ class FiberV2ContactCoreTests(unittest.TestCase):
         self.assertEqual(len(output), 2)
         self.assertEqual(output[0].multiplier, 7.0)
 
-    def test_stable_limiter_ignores_same_feature_linearization_drift(self):
+    def test_limiter_tracks_same_feature_linearization_drift(self):
         first = V2Contact(3, .2, "C", 7, "LIMITING", (0, 1, 0), 0.0, 0.0)
         moved = replace(first, factor=.8, gap=-.1, linearized_gap=-.1)
-        stable = SimpleNamespace(experiment=V2ContactExperiment(stable_limiters=True))
-        legacy = SimpleNamespace(experiment=V2ContactExperiment())
-        self.assertFalse(_limiter_changed(stable, first, moved))
-        self.assertTrue(_limiter_changed(legacy, first, moved))
+        self.assertTrue(_limiter_changed(SimpleNamespace(), first, moved))
 
     def test_adaptive_quality_detects_collapsed_sampling(self):
         points = np.asarray(((0, 0, 0), (.01, 0, 0), (.02, 0, 0), (1, 0, 0)), dtype=float)
-        state = SimpleNamespace(experiment=V2ContactExperiment(adaptive_quality=True), points=points,
+        state = SimpleNamespace(policy=V3_PRODUCTION_POLICY, points=points,
             accepted=4, rejected=0, condition=1.0, quality_adapted=False, quality_spacing=False,
-            quality_trigger="", energy_streak=3, pending_sqp=None, acceleration=AndersonHistory(4))
+            quality_trigger="", energy_streak=3, pending_sqp=None)
         _adapt_quality(state)
         self.assertTrue(state.quality_adapted); self.assertTrue(state.quality_spacing)
 
     def test_adaptive_quality_never_restores_curvature(self):
         settings = V2Settings(node_count=4, curvature_weight=7.0)
-        state = SimpleNamespace(experiment=V2ContactExperiment(adaptive_quality=True),
+        state = SimpleNamespace(policy=V3_PRODUCTION_POLICY,
                                 request=SimpleNamespace(settings=settings), quality_adapted=True)
         self.assertEqual(_effective_settings(state).curvature_weight, 0.0)
 
     def test_adaptive_quality_ignores_condition_without_collapse(self):
         points = np.asarray(((0, 0, 0), (1, 0, 0), (2, 0, 0), (3, 0, 0)), dtype=float)
-        state = SimpleNamespace(experiment=V2ContactExperiment(adaptive_quality=True), points=points,
+        state = SimpleNamespace(policy=V3_PRODUCTION_POLICY, points=points,
             accepted=4, rejected=100, condition=1.0e30, quality_adapted=False,
             quality_spacing=False, quality_trigger="")
         _adapt_quality(state); self.assertFalse(state.quality_adapted)
 
     def test_adaptive_regularization_grows_and_shrinks_step_penalty(self):
-        state = SimpleNamespace(experiment=V2ContactExperiment(adaptive_regularized_sqp=True),
+        state = SimpleNamespace(policy=V3_PRODUCTION_POLICY,
             regularization_scale=10.0, sqp_regularization=.01, regularization_increases=0,
             regularization_decreases=0, regularization_history=[], condition=1.0)
         _update_regularization(state, -.5, False)
@@ -140,21 +117,6 @@ class FiberV2ContactCoreTests(unittest.TestCase):
         self.assertTrue(_stationary_rejection(state, "MODEL_RATIO:-inf"))
         state.contacts = {contact.key: replace(contact, feature_id="LIMITING")}
         self.assertFalse(_stationary_rejection(state, "MODEL_RATIO:-inf"))
-
-    def test_anderson_accelerates_stable_affine_fixed_point(self):
-        base = np.zeros(3); fast = base.copy(); history = AndersonHistory(4)
-        for _index in range(6): base = .8 * base + np.ones(3)
-        for _index in range(6):
-            mapped = .8 * fast + np.ones(3)
-            fast, _used = history.propose(fast, mapped, ("stable",))
-        self.assertLess(np.linalg.norm(fast - 5.0), np.linalg.norm(base - 5.0))
-
-    def test_anderson_restarts_when_contact_signature_changes(self):
-        history = AndersonHistory(4); point = np.zeros(3)
-        for _index in range(3):
-            mapped = .5 * point + 1.0; point, _used = history.propose(point, mapped, ("A",))
-        _value, used = history.propose(point, .5 * point + 1.0, ("B",))
-        self.assertFalse(used); self.assertEqual(len(history.points), 1)
 
     def test_native_contact_block_matches_dense_reference(self):
         request = _box_request(); count = request.settings.node_count
@@ -211,13 +173,6 @@ class FiberV2ContactCoreTests(unittest.TestCase):
         self.assertEqual((result.result.points[0], result.result.points[-1]),
                          (request.anchors[0].point, request.anchors[-1].point))
 
-    def test_accelerated_intersecting_seed_remains_independently_valid(self):
-        request = _box_request()
-        package = solve_contact_core(request, use_planner=False, use_acceleration=True)
-        self.assertTrue(package.result.validated, package.result.message)
-        self.assertLessEqual(package.result.diagnostics.max_constraint_violation,
-                              request.tolerances.clearance_slack)
-
     def test_filter_sqp_intersecting_seed_converges_with_fewer_rejections(self):
         request = _box_request(); baseline = solve_contact_core(request, use_planner=False)
         package = solve_contact_core(request, use_planner=False, use_filter_sqp=True)
@@ -245,59 +200,6 @@ class FiberV2ContactCoreTests(unittest.TestCase):
         self.assertEqual(len(proposal["turn_degrees"]), request.settings.node_count)
         self.assertEqual(len(proposal["gradient"]["total_norms"]), request.settings.node_count)
         self.assertIn("sqp", proposal); self.assertIn("feasibility", proposal)
-
-    def test_subfiber_sqp_preserves_authored_hard_kink(self):
-        anchors = _anchors(((0, 0, 0), (1, 1, 0), (2, 0, 0)))
-        package = solve_subfiber_sqp(_request(anchors, count=33), use_planner=False)
-        points = np.asarray(package.result.points); middle = package.trace.spans[0].last_node
-        self.assertTrue(package.result.validated, package.result.message)
-        np.testing.assert_allclose(points[middle], anchors[1].point, atol=1e-12)
-        np.testing.assert_allclose(points[:middle + 1, 0], points[:middle + 1, 1], atol=1e-10)
-        np.testing.assert_allclose(points[middle:, 0] + points[middle:, 1], 2.0, atol=1e-10)
-
-    def test_subfiber_sqp_advances_spans_in_round_robin(self):
-        anchors = _anchors(((0, 0, 0), (.5, .2, 0), (1, 0, 0), (1.5, .3, 0)))
-        package = solve_subfiber_sqp(_request(anchors, count=40), use_planner=False)
-        self.assertEqual(len(package.trace.spans), 3)
-        self.assertEqual(len(package.result.points), 40)
-        self.assertGreaterEqual(package.trace.outer_rounds,
-                                max(span.completed_round for span in package.trace.spans))
-
-    def test_subfiber_sqp_propagates_diagnostic_iterations(self):
-        anchors = _anchors(((0, 0, 0), (1, 1, 0), (2, 0, 0)))
-        package = solve_subfiber_sqp_fixed(_request(anchors, count=33), use_planner=False,
-                                           diagnostic_trace=True)
-        self.assertEqual(len(package.trace.spans), 2)
-        self.assertTrue(all(span.iterations for span in package.trace.spans))
-        self.assertTrue(all(span.iterations[-1]["stage"] == "FINISH"
-                            for span in package.trace.spans))
-
-    def test_fixed_subfiber_preserves_global_structural_coefficients(self):
-        request = _request(_anchors(((0, 0, 0), (1, 1, 0), (2, 0, 0))), count=64)
-        global_values = smooth_coefficients(64, _static_settings(request.settings))
-        local = _span_settings(request.settings, 13, True)
-        local_values = smooth_coefficients(13, _static_settings(local))
-        np.testing.assert_allclose(local_values[1:], global_values[1:], rtol=1e-14)
-
-    def test_fixed_subfiber_removes_only_cross_pin_bend_row(self):
-        request = _request(_anchors(((0, 0, 0), (1, 1, 0), (2, 0, 0))), count=9)
-        static = _static_settings(request.settings); expected = assemble_normal_matrix(9, static)
-        bend = smooth_coefficients(9, static)[2]; stencil = np.zeros(9)
-        stencil[3:6] = (1, -2, 1); expected -= bend * np.outer(stencil, stencil)
-        split = np.zeros((9, 9))
-        for indices in (np.arange(5), np.arange(4, 9)):
-            local = _static_settings(_span_settings(request.settings, 5, True))
-            split[np.ix_(indices, indices)] += assemble_normal_matrix(5, local)
-        free = (1, 2, 3, 5, 6, 7)
-        np.testing.assert_allclose(split[np.ix_(free, free)], expected[np.ix_(free, free)])
-
-    def test_fixed_subfiber_uses_one_global_accepted_step_cap(self):
-        anchors = _anchors(((0, 0, 0), (.5, .2, 0), (1, 0, 0), (1.5, .3, 0)))
-        request = _request(anchors, count=40)
-        package = solve_subfiber_sqp_fixed(request, use_planner=False)
-        self.assertLessEqual(package.result.diagnostics.accepted_steps,
-                             request.settings.max_accepted_steps + len(package.trace.spans) - 1)
-        self.assertEqual(len(package.result.points), request.settings.node_count)
 
     def test_resumable_session_matches_synchronous_result(self):
         request = _box_request(); expected = solve_contact_core(request, use_planner=False)

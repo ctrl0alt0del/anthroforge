@@ -31,6 +31,11 @@ class V2RuntimeSession:
     scene: object
     depsgraph: object
     quality: str
+    engine: str = "V2"
+    engine_version: str = V2_PRODUCTION_VERSION
+    solver_version: int = 2
+    core_factory: object = None
+    checkpoint_steps: int = 0
     anchors: list = field(default_factory=list)
     params: dict = field(default_factory=dict)
     oracle: object = None
@@ -67,8 +72,8 @@ class V2RuntimeSession:
         if self.package is None:
             error = self.invalid_reason or self.runtime_error
             return FiberSolveResult(points=list(self.preview), done=self.done, invalid_reason=error,
-                                    termination_reason=self.termination_reason, engine="V2",
-                                    engine_version=V2_PRODUCTION_VERSION,
+                                    termination_reason=self.termination_reason, engine=self.engine,
+                                    engine_version=self.engine_version,
                                     backend_version=collision_backend_status().version,
                                     selection=self.selection, display_mode=_display_mode(self),
                                     validated=_preview_validated(self))
@@ -77,9 +82,20 @@ class V2RuntimeSession:
 
 def begin_v2_runtime(solver, root, fiber, scene, depsgraph, quality, selection):
     session = V2RuntimeSession(solver, root, fiber, scene, depsgraph, _quality(quality))
+    session.core_factory = begin_v2
     session.selection = selection
     session.telemetry = current_request_telemetry()
     _initialize(session)
+    return session
+
+
+def begin_v3_runtime(solver, root, fiber, scene, depsgraph, quality, selection):
+    from .v3.production import V3_PRODUCTION_VERSION, begin_v3
+    session = V2RuntimeSession(solver, root, fiber, scene, depsgraph, _quality(quality))
+    session.engine, session.engine_version, session.solver_version = "V3", V3_PRODUCTION_VERSION, 3
+    session.core_factory = begin_v3; session.selection = selection
+    session.checkpoint_steps = max(0, int(getattr(fiber, "iterations_interactive", 0) or 0))
+    session.telemetry = current_request_telemetry(); _initialize(session)
     return session
 
 
@@ -93,8 +109,9 @@ def _initialize(session):
         session.termination_reason = FiberTermination.INVALID_ATTACHMENT.value
         return
     session.anchors, session.preview = anchors, [row.point.copy() for row in anchors]
-    session.params = session.solver._runtime_params(session.fiber, session.quality == "FINAL")
-    session.params["solver_version"], session.params["segment_collisions"] = 2, True
+    final_budget = session.quality == "FINAL" or session.engine == "V3"
+    session.params = session.solver._runtime_params(session.fiber, final_budget)
+    session.params["solver_version"], session.params["segment_collisions"] = session.solver_version, True
     session.oracle = CollisionOracle(session.root, session.scene, session.depsgraph,
                                      session.params["margin"], session.solver.surface_offset)
     _attach_sources(session)
@@ -152,8 +169,7 @@ def _capture_collider(source, index):
 
 def _capture_key(source, index):
     backend = collision_backend_status().version
-    return (V2_PRODUCTION_VERSION, backend, str(source.get("sid", "") or ""),
-            int(index), repr(source.get("stamp", ())))
+    return (backend, str(source.get("sid", "") or ""), int(index), repr(source.get("stamp", ())))
 
 
 def _store_capture(key, value):
@@ -194,10 +210,17 @@ def _solve(session):
 
 def _begin_core(session):
     try:
-        session.core_session = begin_v2(_request(session), preview=session.quality != "FINAL")
+        session.core_session = _start_core(session)
     except Exception as error:
         session.runtime_error, session.done = str(error), True
     _update_core_runtime(session)
+
+
+def _start_core(session):
+    factory = session.core_factory or begin_v2
+    values = dict(preview=session.quality != "FINAL")
+    if session.engine == "V3": values["checkpoint_steps"] = session.checkpoint_steps
+    return factory(_request(session), **values)
 
 
 def _update_core_runtime(session):
@@ -245,7 +268,7 @@ def _request_value(session, settings, policy, anchors):
     return V2Request(token, _runtime_id(session.scene), _runtime_id(session.root), revision,
                      settings, tolerances, policy, anchors, tuple(session.colliders),
                      str(session.fiber.symmetry_mode), axis, origin,
-                     engine_version=V2_PRODUCTION_VERSION)
+                     engine_version=session.engine_version)
 
 
 def _anchor(anchor, index, count):
@@ -301,8 +324,8 @@ def _planner_result_values(session):
     return dict(points=points, done=True, converged=False, invalid_reason=error,
                 mode=planner.mode.value, planner_ms=float(getattr(trace, "planner_ms", 0.0)),
                 active_count=len(session.colliders), termination_reason=reason,
-                validated=succeeded, engine_version=V2_PRODUCTION_VERSION,
-                diagnostics=planner.diagnostics, telemetry=session.telemetry, engine="V2",
+                validated=succeeded, engine_version=session.engine_version,
+                diagnostics=planner.diagnostics, telemetry=session.telemetry, engine=session.engine,
                 backend_version=collision_backend_status().version, selection=session.selection)
 
 
@@ -319,7 +342,7 @@ def _result_values(session, result, trace, penetration):
                   max_pen=penetration, termination_reason=termination.value,
                   validated=bool(result.validated), engine_version=result.engine_version,
                   diagnostics=result.diagnostics, telemetry=session.telemetry)
-    values.update(engine="V2", backend_version=result.backend_version,
+    values.update(engine=session.engine, backend_version=result.backend_version,
                   selection=session.selection)
     return values
 

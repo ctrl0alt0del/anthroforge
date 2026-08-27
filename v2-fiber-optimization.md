@@ -93,7 +93,8 @@ production fixtures converge deterministically and pass strict validation. It is
 3.96x faster than V1 on skull/FIBER_14, but 1.24-2.76x slower on the other
 fixtures. The skull surface result retains visible scalloping, so Package 5 is not
 qualified for live rollout and Package 6 is gated on a coherent surface-contact
-fix plus batched native CCD/validation. See `docs/fiber_v2_package5.md`.
+fix plus batched native CCD/validation. The accepted production subset is recorded
+in `docs/fiber_v3_accepted_manifest.md`.
 Package 6 — Adaptive convergence
 Add:
 normalized fixed-point residual;

@@ -373,7 +373,7 @@ def _commit_allowed(job, result):
     if not _termination_committable(result):
         return False
     fiber = _owned_job_data(job)[2]
-    if _pending_version(fiber) == 2 and not _validated_result(result):
+    if _pending_version(fiber) in (2, 3) and not _validated_result(result):
         return False
     expected = int(job.session.params.get("node_count", 0))
     finite = all(all(isfinite(float(value)) for value in point) for point in result.points)
@@ -382,7 +382,7 @@ def _commit_allowed(job, result):
 
 
 def _termination_committable(result):
-    if str(getattr(result, "engine", "V1")) != "V2":
+    if str(getattr(result, "engine", "V1")) not in {"V2", "V3"}:
         return True
     allowed = {FiberTermination.CONVERGED.value, FiberTermination.STALLED.value,
                FiberTermination.BUDGET_EXHAUSTED.value}
@@ -390,7 +390,7 @@ def _termination_committable(result):
 
 
 def _result_safe(fiber, result):
-    if str(getattr(result, "engine", "V1")) == "V2":
+    if str(getattr(result, "engine", "V1")) in {"V2", "V3"}:
         return _validated_result(result)
     if not _requires_collision_truth(fiber):
         return True
