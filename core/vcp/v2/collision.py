@@ -1047,18 +1047,36 @@ def _pair_cache_key(start, end, edges, snapshot, padding):
 
 
 def _sweep_rows(source, target, edges, snapshot, contacts, pairs):
-    starts, ends, faces, keys = [], [], [], []
+    rows = _sweep_interval_rows(snapshot, contacts, pairs)
+    if not len(rows): return _empty_sweep_rows()
+    edge_rows, face_rows = rows[:, 0].astype(int), rows[:, 1].astype(int)
+    nodes = np.asarray(edges, dtype=np.int64)[edge_rows]
+    starts = _interval_segments(np.asarray(source)[nodes], rows[:, 2], rows[:, 3])
+    ends = _interval_segments(np.asarray(target)[nodes], rows[:, 2], rows[:, 3])
+    faces = snapshot.vertices[snapshot.triangles[face_rows]]
+    keys = tuple(zip(map(int, edge_rows), map(int, face_rows)))
+    return np.ascontiguousarray(starts), np.ascontiguousarray(ends), np.ascontiguousarray(faces), keys
+
+
+def _sweep_interval_rows(snapshot, contacts, pairs):
+    rows = []
     for edge, face in pairs:
-        owner, points = snapshot.face_owners[int(face)], edges[int(edge)]
-        for low, high in _tested_intervals(int(edge), owner, contacts):
-            starts.append(_subsegment(source[points], low, high))
-            ends.append(_subsegment(target[points], low, high))
-            faces.append(snapshot.vertices[snapshot.triangles[face]])
-            keys.append((int(edge), int(face)))
-    shapes = ((-1, 2, 3), (-1, 2, 3), (-1, 3, 3))
-    arrays = tuple(np.ascontiguousarray(value, dtype=np.float64).reshape(shape)
-                   for value, shape in zip((starts, ends, faces), shapes))
-    return (*arrays, tuple(keys))
+        owner = snapshot.face_owners[int(face)]
+        rows.extend((int(edge), int(face), low, high)
+                    for low, high in _tested_intervals(int(edge), owner, contacts))
+    return np.asarray(rows, dtype=np.float64).reshape((-1, 4))
+
+
+def _interval_segments(points, low, high):
+    first = points[:, 0]; delta = points[:, 1] - first
+    starts = first + np.asarray(low)[:, None] * delta
+    ends = first + np.asarray(high)[:, None] * delta
+    return np.stack((starts, ends), axis=1)
+
+
+def _empty_sweep_rows():
+    return (np.empty((0, 2, 3)), np.empty((0, 2, 3)),
+            np.empty((0, 3, 3)), ())
 
 
 def _advance_sweep(state, starts, ends, faces, clearance, tolerance, budget, path):

@@ -1,12 +1,12 @@
 """Experimental active-set trust-region step for the Fiber V2 contact core."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 
 import numpy as np
 
 from .collision_native import native_structural_contact_responses
-from .structural import _base_bands, _static_settings, structural_energy
+from .structural import _base_bands, _normal_gradient, _static_settings, structural_energy
 
 
 @dataclass(frozen=True)
@@ -24,35 +24,44 @@ class V2TrustSqpStep:
     normal_fraction: float = 1.0
     tangential_fraction: float = 1.0
     soc_norm: float = 0.0
+    regularization: float = 0.0
+    structural_condition: float = 0.0
+    constraint_condition: float = 0.0
 
 
-def solve_trust_sqp(points, reference, settings, contacts, pins, trust_radius):
+def solve_trust_sqp(points, reference, settings, contacts, pins, trust_radius,
+                    true_length_epsilon=None, spacing_weight=0.0, regularization=0.0):
     started = perf_counter(); rows = _linear_contacts(points, contacts)
-    problem = _native_problem(reference, settings, contacts, pins)
+    problem = _native_problem(points, reference, settings, contacts, pins,
+                              true_length_epsilon, spacing_weight, regularization)
     solved = _active_set(problem[0], problem[1], rows, np.asarray(points).reshape(-1))
     candidate = solved[0].reshape((-1, 3))
     candidate = _trust_limited(points, candidate, pins, trust_radius)
     normal, tangent = _step_components(points, candidate, rows, solved[1])
     violation = _linearized_violation(points, candidate, rows)
-    energy = structural_energy(candidate, reference, settings).total
+    energy = objective_energy(candidate, reference, settings, true_length_epsilon, spacing_weight).total
     elapsed = 1000.0 * (perf_counter() - started)
     return V2TrustSqpStep(candidate, solved[2], tuple(solved[3]), violation, energy,
-                          normal, tangent, elapsed, max(problem[2]["condition"], solved[4]))
+        normal, tangent, elapsed, max(problem[2]["condition"], solved[4]), regularization=regularization,
+        structural_condition=problem[2]["condition"], constraint_condition=solved[4])
 
 
-def solve_composite_sqp(points, reference, settings, contacts, pins, trust_radius, variant):
+def solve_composite_sqp(points, reference, settings, contacts, pins, trust_radius, variant,
+                        true_length_epsilon=None, spacing_weight=0.0, regularization=0.0):
     started = perf_counter(); rows = _linear_contacts(points, contacts)
-    problem = _native_problem(reference, settings, contacts, pins)
+    problem = _native_problem(points, reference, settings, contacts, pins,
+                              true_length_epsilon, spacing_weight, regularization)
     solved = _active_set(problem[0], problem[1], rows, np.asarray(points).reshape(-1))
     normal, tangent = _step_vectors(points, solved[0].reshape((-1, 3)), rows, solved[1])
     delta, fractions = _composite_delta(normal, tangent, len(points), trust_radius, variant)
     candidate = _pinned_candidate(points, delta, pins)
     violation = _linearized_violation(points, candidate, rows)
-    energy = structural_energy(candidate, reference, settings).total
+    energy = objective_energy(candidate, reference, settings, true_length_epsilon, spacing_weight).total
     elapsed = 1000.0 * (perf_counter() - started)
     return V2TrustSqpStep(candidate, solved[2], tuple(solved[3]), violation, energy,
         float(np.linalg.norm(normal)), float(np.linalg.norm(tangent)), elapsed,
-        max(problem[2]["condition"], solved[4]), variant, *fractions)
+        max(problem[2]["condition"], solved[4]), variant, *fractions, regularization=regularization,
+        structural_condition=problem[2]["condition"], constraint_condition=solved[4])
 
 
 def second_order_correction(candidate, contacts, pins, trust_radius):
@@ -75,10 +84,12 @@ def update_trust_radius(radius, minimum, maximum, ratio, accepted, boundary, con
     return max(minimum, min(maximum, radius))
 
 
-def model_reduction(points, candidate, reference, settings, contacts, pins, feasible):
+def model_reduction(points, candidate, reference, settings, contacts, pins, feasible,
+                    true_length_epsilon=None, spacing_weight=0.0, regularization=0.0):
     if feasible:
-        before = structural_energy(points, reference, settings).total
-        return before - structural_energy(candidate, reference, settings).total
+        before = _model_energy(points, points, reference, settings, true_length_epsilon, spacing_weight)
+        after = _model_energy(candidate, points, reference, settings, true_length_epsilon, spacing_weight)
+        return before - after - _proximal_energy(candidate, points, regularization)
     rows = _linear_contacts(points, contacts)
     return _contact_merit(rows, points, points) - _contact_merit(rows, points, candidate)
 
@@ -88,12 +99,117 @@ def actual_reduction(before, after, energy_before, energy_after, feasible):
     return _feasibility_merit(before) - _feasibility_merit(after)
 
 
-def _native_problem(reference, settings, contacts, pins):
-    count = len(reference); bands = _base_bands(count, _static_settings(settings))
+def _native_problem(points, reference, settings, contacts, pins, epsilon=None,
+                    spacing_weight=0.0, regularization=0.0):
+    count = len(reference); bands = _objective_bands(points, settings, epsilon)
     rhs = settings.fidelity_weight * np.asarray(reference, dtype=np.float64)
+    bands, rhs = _spacing_model(bands, rhs, points, spacing_weight)
+    bands, rhs = _proximal_model(bands, rhs, points, regularization)
     rows = tuple((row.edge, row.factor, row.normal) for row in contacts)
     indices = tuple(sorted(pins)); targets = tuple(pins[index] for index in indices)
     return native_structural_contact_responses(bands, rhs, rows, indices, targets)
+
+
+def _proximal_model(bands, rhs, points, weight):
+    if weight <= 0.0: return bands, rhs
+    diagonal, lower1, lower2 = (value.copy() for value in bands)
+    diagonal += float(weight); target = np.asarray(rhs) + float(weight) * np.asarray(points)
+    return (diagonal, lower1, lower2), target
+
+
+def _proximal_energy(values, center, weight):
+    delta = np.asarray(values, dtype=np.float64) - np.asarray(center, dtype=np.float64)
+    return max(0.0, float(weight)) * float(np.sum(delta * delta))
+
+
+def objective_energy(points, reference, settings, epsilon=None, spacing_weight=0.0):
+    base = _length_energy(points, reference, settings, epsilon)
+    spacing = _spacing_energy(points, spacing_weight)
+    return replace(base, fidelity=base.fidelity + spacing)
+
+
+def objective_gradient(points, reference, settings, epsilon=None, spacing_weight=0.0):
+    gradient = _length_gradient(points, reference, settings, epsilon)
+    return gradient + _spacing_gradient(points, spacing_weight)
+
+
+def objective_diagonal(points, settings, epsilon=None, spacing_weight=0.0):
+    return _objective_bands(points, settings, epsilon)[0] + float(spacing_weight)
+
+
+def _length_energy(points, reference, settings, epsilon):
+    if epsilon is None: return structural_energy(points, reference, settings)
+    base = structural_energy(points, reference, replace(settings, length_weight=0.0))
+    lengths = _edge_lengths(np.diff(np.asarray(points, dtype=np.float64), axis=0), epsilon)
+    return replace(base, length=float(settings.length_weight) * float(np.sum(lengths)))
+
+
+def _length_gradient(points, reference, settings, epsilon):
+    if epsilon is None: return _quadratic_gradient(points, reference, settings)
+    gradient = _quadratic_gradient(points, reference, replace(settings, length_weight=0.0))
+    edges = np.diff(np.asarray(points, dtype=np.float64), axis=0)
+    scaled = .5 * float(settings.length_weight) * edges / _edge_lengths(edges, epsilon)[:, None]
+    gradient[:-1] -= scaled; gradient[1:] += scaled
+    return gradient
+
+
+def _spacing_model(bands, rhs, points, weight):
+    if weight <= 0.0: return bands, rhs
+    diagonal, lower1, lower2 = (value.copy() for value in bands)
+    diagonal += float(weight)
+    target = np.asarray(rhs) + float(weight) * np.asarray(points)
+    target -= _spacing_gradient(points, weight)
+    return (diagonal, lower1, lower2), target
+
+
+def _spacing_energy(points, weight):
+    lengths = np.linalg.norm(np.diff(np.asarray(points), axis=0), axis=1)
+    if weight <= 0.0 or not len(lengths): return 0.0
+    return float(weight) * float(np.sum((lengths - np.mean(lengths)) ** 2))
+
+
+def _spacing_gradient(points, weight):
+    values = np.asarray(points, dtype=np.float64); output = np.zeros_like(values)
+    edges = np.diff(values, axis=0); lengths = np.linalg.norm(edges, axis=1)
+    if weight <= 0.0 or not len(lengths): return output
+    units = np.divide(edges, lengths[:, None], out=np.zeros_like(edges), where=lengths[:, None] > 1.0e-15)
+    scaled = float(weight) * (lengths - np.mean(lengths))[:, None] * units
+    output[:-1] -= scaled; output[1:] += scaled
+    return output
+
+
+def _quadratic_gradient(points, reference, settings):
+    return _normal_gradient(np.asarray(points), np.asarray(reference), _static_settings(settings))
+
+
+def _objective_bands(points, settings, epsilon):
+    if epsilon is None: return _base_bands(len(points), _static_settings(settings))
+    base = _base_bands(len(points), _static_settings(replace(settings, length_weight=0.0)))
+    return _add_weighted_length(base, _edge_scales(points, settings, epsilon))
+
+
+def _add_weighted_length(bands, scales):
+    diagonal, lower1, lower2 = (value.copy() for value in bands)
+    diagonal[:-1] += scales; diagonal[1:] += scales; lower1[1:] -= scales
+    return diagonal, lower1, lower2
+
+
+def _edge_scales(points, settings, epsilon):
+    edges = np.diff(np.asarray(points, dtype=np.float64), axis=0)
+    return .5 * float(settings.length_weight) / _edge_lengths(edges, epsilon)
+
+
+def _edge_lengths(edges, epsilon):
+    return np.sqrt(np.sum(edges * edges, axis=1) + float(epsilon) ** 2)
+
+
+def _model_energy(values, linearization, reference, settings, epsilon, spacing_weight=0.0):
+    if epsilon is None:
+        return structural_energy(values, reference, settings).total + _spacing_energy(values, spacing_weight)
+    base = structural_energy(values, reference, replace(settings, length_weight=0.0)).total
+    edges = np.diff(np.asarray(values), axis=0); scales = _edge_scales(linearization, settings, epsilon)
+    return float(base + np.sum(scales * np.sum(edges * edges, axis=1)) +
+                 _spacing_energy(values, spacing_weight))
 
 
 def _linear_contacts(points, contacts):

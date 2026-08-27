@@ -33,6 +33,7 @@ class V2SubfiberSpanTrace:
     rejection_reasons: tuple
     iterations: tuple
     experiment_stats: tuple
+    regularization_history: tuple
     total_ms: float
 
 
@@ -81,28 +82,45 @@ def _initial_seed(request, direct, indices, planner):
 def _sessions(request, snapshot, seed, indices, fixed, diagnostic, experiment):
     output = []
     for span, (first, last) in enumerate(zip(indices[:-1], indices[1:])):
-        subrequest = _span_request(request, seed, span, first, last, fixed)
+        local = _span_experiment(experiment, seed[first:last + 1])
+        subrequest = _span_request(request, seed, span, first, last, fixed,
+                                   _true_length_experiment(local), _curvature_scale(local))
         output.append(begin_contact_core(subrequest, snapshot, use_planner=False,
-            use_filter_sqp=True, diagnostic_trace=diagnostic, experiment=experiment))
+            use_filter_sqp=True, diagnostic_trace=diagnostic, experiment=local))
     return tuple(output)
 
 
-def _span_request(request, seed, span, first, last, fixed=False):
+def _span_request(request, seed, span, first, last, fixed=False, true_length=False,
+                  curvature_scale=1.0):
     roles = V2AnchorRole.ENDPOINT_A, V2AnchorRole.ENDPOINT_B
     anchors = tuple(replace(request.anchors[span + index], role=roles[index]) for index in range(2))
-    settings = _span_settings(request.settings, last - first + 1, fixed)
+    settings = _span_settings(request.settings, last - first + 1, fixed,
+                              true_length, curvature_scale)
     warm = tuple(map(tuple, np.asarray(seed[first:last + 1], dtype=np.float64)))
     return replace(request, token=request.token * 1000 + span + 1,
                    source_revision=f"{request.source_revision}:span:{span}",
                    settings=settings, anchors=anchors, warm_seed=warm)
 
 
-def _span_settings(settings, count, fixed):
-    if not fixed: return replace(settings, node_count=count)
+def _span_settings(settings, count, fixed, true_length=False, curvature_scale=1.0):
+    bend = settings.curvature_weight * float(curvature_scale)
+    if not fixed: return replace(settings, node_count=count, curvature_weight=bend)
     ratio = (settings.node_count - 1) / max(1, count - 1)
+    length = settings.length_weight if true_length else settings.length_weight * ratio
     return replace(settings, node_count=count,
-        length_weight=settings.length_weight * ratio,
-        curvature_weight=settings.curvature_weight * ratio ** 3)
+        length_weight=length, curvature_weight=bend * ratio ** 3)
+
+
+def _true_length_experiment(experiment):
+    return bool(getattr(experiment, "true_length_irls", False))
+
+
+def _span_experiment(experiment, points):
+    return experiment
+
+
+def _curvature_scale(experiment):
+    return float(getattr(experiment, "curvature_weight_scale", 1.0))
 
 
 def _drain_round_robin(sessions, _request=None, _indices=None):
@@ -244,4 +262,5 @@ def _span_trace(index, package, indices, completed):
         diagnostics.fixed_point_residual, diagnostics.stationarity_residual,
         diagnostics.block_factor_condition, trace.final_contacts,
         trace.stationarity_profile, trace.rejection_reasons,
-        trace.iteration_trace, trace.experiment_stats, trace.total_ms)
+        trace.iteration_trace, trace.experiment_stats, trace.regularization_history,
+        trace.total_ms)

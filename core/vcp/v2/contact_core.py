@@ -16,10 +16,10 @@ from .composite_sqp import (normalize_composite_variant, second_order_correction
 from .contracts import V2Diagnostics, V2Result, V2Termination, V2Topology
 from .planner import (V2PlannerDiagnostics, V2PlannerMode, V2PlannerResult,
                       plan_reference_v43)
-from .structural import (_base_bands, _normal_gradient, _static_settings,
-                         structural_energy)
+from .structural import _base_bands, _static_settings
 from .trust_sqp import (actual_reduction, model_reduction, solve_trust_sqp,
-                        update_trust_radius)
+                         objective_diagonal, objective_energy, objective_gradient,
+                         update_trust_radius)
 
 
 V2_CONTACT_CORE_VERSION = "fiber-v2-production-3"
@@ -29,6 +29,15 @@ V2_CONTACT_CORE_VERSION = "fiber-v2-production-3"
 class V2ContactExperiment:
     structural_ccd_projection: bool = False
     sqp_variant: str = "BASE"
+    true_length_irls: bool = False
+    true_length_epsilon_ratio: float = 1.0e-4
+    stable_limiters: bool = False
+    contact_manifold_reduction: bool = False
+    spacing_weight_ratio: float = 0.0
+    curvature_weight_scale: float = 1.0
+    adaptive_quality: bool = False
+    sqp_regularization_ratio: float = 0.0
+    adaptive_regularized_sqp: bool = False
 
 
 @dataclass(frozen=True)
@@ -98,6 +107,7 @@ class V2ContactCoreTrace:
     reference_points: tuple = ()
     pin_indices: tuple = ()
     experiment_stats: tuple = ()
+    regularization_history: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -215,6 +225,13 @@ class _ContactState:
     diagnostic_events: list = None
     diagnostic_proposal: int = 0
     experiment: object = None
+    quality_adapted: bool = False
+    quality_spacing: bool = False
+    quality_trigger: str = ""
+    sqp_regularization: float = 0.0
+    regularization_scale: float = 0.0
+    regularization_increases: int = 0
+    regularization_decreases: int = 0
     projection_attempts: int = 0
     projection_accepts: int = 0
     projection_solves: int = 0
@@ -322,6 +339,7 @@ def _prime_state(request, accelerate=False, adaptive=False, recovery=False, filt
         acceleration_enabled=bool(accelerate), adaptive_trust_enabled=bool(adaptive),
         stall_recovery_enabled=bool(recovery), filter_sqp_enabled=bool(filter_sqp),
         diagnostic_enabled=bool(diagnostic), experiment=experiment or V2ContactExperiment())
+    state.mu = _initial_penalty(request, _effective_settings(state))
     _initialize_lists(state); _initialize_controller(state)
     return state
 
@@ -366,6 +384,7 @@ def _initialize_lists(state):
     state.ccd_step_history = []
     state.model_ratio_history, state.normal_step_history = [], []
     state.tangent_step_history = []
+    state.regularization_history = []
     state.diagnostic_events = [] if state.diagnostic_enabled else None
 
 
@@ -375,6 +394,39 @@ def _initialize_controller(state):
     state.min_trust = max(.25 * radius, state.request.tolerances.numeric_floor)
     state.max_trust = max(state.trust_radius, .25 * scale)
     state.acceleration = AndersonHistory(4)
+    _initialize_regularization(state)
+
+
+def _initialize_regularization(state):
+    ratio = max(0.0, float(getattr(state.experiment, "sqp_regularization_ratio", 0.0)))
+    if _experiment_enabled(state, "adaptive_regularized_sqp") and ratio <= 0.0: ratio = 1.0e-6
+    diagonal = objective_diagonal(state.points, _effective_settings(state),
+                                  _true_length_epsilon(state), _spacing_weight(state))
+    state.regularization_scale = max(float(np.median(diagonal)), state.request.tolerances.numeric_floor)
+    state.sqp_regularization = ratio * state.regularization_scale
+    state.regularization_history.append(state.sqp_regularization)
+
+
+def _update_regularization(state, ratio, accepted, contact_changed=False):
+    if not _experiment_enabled(state, "adaptive_regularized_sqp"): return
+    factor = _regularization_factor(state, ratio, accepted, contact_changed)
+    low, high = 1.0e-10 * state.regularization_scale, 1.0e2 * state.regularization_scale
+    value = min(high, max(low, factor * state.sqp_regularization))
+    state.regularization_increases += int(value > state.sqp_regularization)
+    state.regularization_decreases += int(value < state.sqp_regularization)
+    state.sqp_regularization = value; state.regularization_history.append(value)
+
+
+def _regularization_factor(state, ratio, accepted, contact_changed):
+    if not accepted: return 4.0 if not contact_changed else 2.0
+    if np.isfinite(ratio) and ratio > .75: return .5
+    if not np.isfinite(ratio) or ratio < .25: return 2.0
+    return 2.0 if _regularization_condition(state) > 1.0e12 else 1.0
+
+
+def _regularization_condition(state):
+    step = state.pending_sqp
+    return state.condition if step is None else float(step.structural_condition)
 
 
 def _optional_planner(request, snapshot, world, enabled):
@@ -464,8 +516,9 @@ def _resample(points, count):
     return np.ascontiguousarray(rows)
 
 
-def _initial_penalty(request):
-    diagonal = _base_bands(request.settings.node_count, _static_settings(request.settings))[0]
+def _initial_penalty(request, settings=None):
+    settings = request.settings if settings is None else settings
+    diagonal = _base_bands(settings.node_count, _static_settings(settings))[0]
     return max(float(np.median(diagonal)), 1.0)
 
 
@@ -484,6 +537,7 @@ def _pin_issue(state):
 
 def _iteration(state):
     if state.pending_sweep is not None: return _advance_feasible_sweep(state)
+    _adapt_quality(state)
     candidate = _solve_candidate(state)
     if state.metrics.feasible:
         _begin_feasible_sweep(state, candidate); return _advance_feasible_sweep(state)
@@ -509,7 +563,8 @@ def _complete_trial(state, accepted):
 
 def _regroup(state):
     state.regroupings += 1; state.stalled = 0; state.contacts = {}; state.group_sides = {}
-    state.mu = _initial_penalty(state.request); state.acceleration.reset(); _refresh_state(state)
+    state.mu = _initial_penalty(state.request, _effective_settings(state))
+    state.acceleration.reset(); _refresh_state(state)
 
 
 def _solve_candidate(state):
@@ -528,9 +583,12 @@ def _solve_candidate(state):
 def _solve_sqp_candidate(state):
     variant = _sqp_variant(state)
     solver = _sqp_solver(variant)
-    arguments = (state.points, state.q, state.request.settings,
-                 tuple(state.contacts.values()), state.pins, state.trust_radius)
-    step = solver(*arguments) if variant == "BASE" else solver(*arguments, variant)
+    arguments = (state.points, state.q, _effective_settings(state),
+                  tuple(state.contacts.values()), state.pins, state.trust_radius)
+    epsilon, spacing = _true_length_epsilon(state), _spacing_weight(state)
+    proximal = state.sqp_regularization
+    step = solver(*arguments, epsilon, spacing, proximal) if variant == "BASE" else solver(
+        *arguments, variant, epsilon, spacing, proximal)
     step = _apply_experimental_soc(state, step, variant)
     state.pending_sqp = step; state.sqp_solve_ms += step.solve_ms
     state.condition = step.condition; state.condition_history.append(step.condition)
@@ -627,7 +685,7 @@ def _filter_fractions():
 
 
 def _structural_merit(state, points):
-    return structural_energy(points, state.q, state.request.settings).total
+    return _objective(state, points).total
 
 
 def _begin_feasible_sweep(state, candidate):
@@ -764,8 +822,9 @@ def _trust_growth(state):
 def _sqp_ratio(state, candidate, metrics, contacts=None):
     contacts = tuple(state.contacts.values()) if contacts is None else tuple(contacts)
     feasible = state.metrics.feasible
-    predicted = model_reduction(state.points, candidate, state.q, state.request.settings,
-                                contacts, state.pins, feasible)
+    predicted = model_reduction(state.points, candidate, state.q, _effective_settings(state),
+        contacts, state.pins, feasible, _true_length_epsilon(state), _spacing_weight(state),
+        state.sqp_regularization)
     before = _structural_merit(state, state.points); after = _structural_merit(state, candidate)
     actual = actual_reduction(state.metrics, metrics, before, after, feasible)
     floor = max(state.request.tolerances.numeric_floor ** 2, 1.0e-16)
@@ -774,6 +833,7 @@ def _sqp_ratio(state, candidate, metrics, contacts=None):
 
 
 def _update_sqp_controller(state, ratio, accepted, contact_changed=False):
+    _update_regularization(state, ratio, accepted, contact_changed)
     boundary = _at_trust_boundary(state)
     state.trust_radius = update_trust_radius(state.trust_radius, state.min_trust,
     state.max_trust, ratio, accepted, boundary, contact_changed)
@@ -848,8 +908,9 @@ def _projection_inject(state, contacts, candidate, sweep):
 
 
 def _projection_solve(state, contacts):
-    solved = solve_trust_sqp(state.points, state.q, state.request.settings,
-        contacts, state.pins, state.trust_radius)
+    solved = solve_trust_sqp(state.points, state.q, _effective_settings(state),
+        contacts, state.pins, state.trust_radius, _true_length_epsilon(state),
+        _spacing_weight(state), state.sqp_regularization)
     state.projection_solves += 1; state.sqp_solve_ms += solved.solve_ms
     state.condition = max(state.condition, solved.condition)
     _trace_event(state, "PROJECT", solved.points, extra=_sqp_step_trace(solved))
@@ -917,8 +978,9 @@ def _face_identity(snapshot, face):
 
 def _limiter_changed(state, prior, contact):
     if prior.triangle_id != contact.triangle_id: return True
-    if abs(prior.factor - contact.factor) > 1.0e-6: return True
     if np.dot(prior.normal, contact.normal) < 1.0 - 1.0e-6: return True
+    if _experiment_enabled(state, "stable_limiters"): return False
+    if abs(prior.factor - contact.factor) > 1.0e-6: return True
     return abs(prior.linearized_gap - contact.linearized_gap) > _slack(state)
 
 
@@ -982,10 +1044,26 @@ def _duplicate_contact(state, contacts, row):
 
 
 def _same_contact_geometry(state, first, second):
+    if _experiment_enabled(state, "contact_manifold_reduction"):
+        return _same_contact_manifold(state, first, second)
     if (first.edge, first.collider_id, first.feature_id) != (second.edge, second.collider_id, second.feature_id): return False
     if abs(first.factor - second.factor) > 1.0e-6: return False
     if abs(first.gap - second.gap) > _slack(state): return False
     return bool(np.dot(first.normal, second.normal) >= 1.0 - 1.0e-6)
+
+
+def _same_contact_manifold(state, first, second):
+    if (first.edge, first.collider_id) != (second.edge, second.collider_id): return False
+    if "CONTAINMENT" in (first.feature_id, second.feature_id): return False
+    if np.dot(first.normal, second.normal) < np.cos(np.deg2rad(3.0)): return False
+    tolerance = max(4.0 * _slack(state), .01 * _radius(state))
+    return abs(_contact_plane(state, first) - _contact_plane(state, second)) <= tolerance
+
+
+def _contact_plane(state, contact):
+    edge = state.points[contact.edge:contact.edge + 2]
+    sample = edge[0] + contact.factor * (edge[1] - edge[0])
+    return float(np.dot(sample, contact.normal) - contact.gap)
 
 
 def _contact_from_pair(state, points, pair):
@@ -1089,7 +1167,7 @@ def _escape_trial(state, points, first, last, direction, base, order):
         proposed = points.copy(); proposed[movable] += distance * direction
         violation = _raw_violation(_query_raw(state, proposed))
         if violation < base:
-            merit = structural_energy(proposed, state.q, state.request.settings).total
+            merit = _objective(state, proposed).total
             scored.append(((*violation, merit, order, distance), tuple(direction), distance))
         if violation[0] <= _slack(state): break
     return min(scored) if scored else None
@@ -1209,7 +1287,7 @@ def _update_energy_streak(state, old):
 
 
 def _energy(state, points):
-    structural = structural_energy(points, state.q, state.request.settings).total
+    structural = _objective(state, points).total
     contact = sum(_contact_energy(row, state.mu) for row in state.contacts.values())
     return float(structural + contact)
 
@@ -1220,11 +1298,12 @@ def _contact_energy(contact, mu):
 
 
 def _stationarity(state):
-    gradient = _normal_gradient(state.points, state.q, _static_settings(state.request.settings))
+    gradient = _objective_gradient(state, state.points)
     for row in state.contacts.values():
         _add_contact_gradient(gradient, row, state.mu)
     gradient[list(state.pins)] = 0.0
-    diagonal = _base_bands(len(state.q), _static_settings(state.request.settings))[0]
+    diagonal = objective_diagonal(state.points, _effective_settings(state),
+                                  _true_length_epsilon(state), _spacing_weight(state))
     scale = max(1.0, float(np.median(diagonal)) * state.request.tolerances.length_scale)
     return float(np.max(np.linalg.norm(gradient, axis=1)) / scale)
 
@@ -1248,7 +1327,8 @@ def _adapt_penalty(state):
     recent = [row[0] for row in state.feasibility_history[-4:]]
     progress = recent[-1] <= .5 * recent[0]
     if not progress and state.condition < 1.0e8:
-        state.mu = min(2.0 * state.mu, 16.0 * _initial_penalty(state.request))
+        base = _initial_penalty(state.request, _effective_settings(state))
+        state.mu = min(2.0 * state.mu, 16.0 * base)
 
 
 def _finish(state, termination, message, started):
@@ -1273,24 +1353,34 @@ def _core_trace(state, started):
         tuple(state.ccd_step_history), tuple(state.model_ratio_history),
         tuple(state.normal_step_history), tuple(state.tangent_step_history), state.sqp_solve_ms,
         tuple(state.diagnostic_events or ()), tuple(map(tuple, state.q)), tuple(state.pin_indices),
-        _experiment_stats(state))
+        _experiment_stats(state), tuple(state.regularization_history))
 
 
 def _experiment_stats(state):
-    base = (("projection_attempts", state.projection_attempts),
-            ("projection_accepts", state.projection_accepts),
-            ("projection_solves", state.projection_solves),
-            ("projection_injections", state.projection_injections),
-            ("projection_aborts", state.projection_aborts),
-            ("projection_disabled", int(state.projection_disabled)),
-            ("projection_skipped_dense", state.projection_skipped_dense),
-            ("composite_steps", state.composite_steps),
-            ("tangential_steps", state.tangential_steps),
-            ("soc_attempts", state.soc_attempts),
-            ("soc_applied", state.soc_applied),
-            ("soc_ms", state.soc_ms),
-            ("soc_norm_total", state.soc_norm_total))
-    return base
+    return _base_experiment_stats(state) + _length_experiment_stats(state)
+
+
+def _base_experiment_stats(state):
+    names = ("projection_attempts", "projection_accepts", "projection_solves",
+        "projection_injections", "projection_aborts", "projection_skipped_dense",
+        "composite_steps", "tangential_steps", "soc_attempts", "soc_applied",
+        "soc_ms", "soc_norm_total")
+    rows = tuple((name, getattr(state, name)) for name in names)
+    return rows + (("projection_disabled", int(state.projection_disabled)),)
+
+
+def _length_experiment_stats(state):
+    enabled = int(_experiment_enabled(state, "true_length_irls"))
+    return (("true_length_irls", enabled), ("true_length_epsilon", _true_length_epsilon(state) or 0.0),
+            ("spacing_weight", _spacing_weight(state)),
+            ("stable_limiters", int(_experiment_enabled(state, "stable_limiters"))),
+            ("manifold_reduction", int(_experiment_enabled(state, "contact_manifold_reduction"))),
+            ("quality_adapted", int(state.quality_adapted)),
+            ("quality_spacing", int(state.quality_spacing)),
+            ("quality_trigger", state.quality_trigger),
+            ("sqp_regularization", state.sqp_regularization),
+            ("regularization_increases", state.regularization_increases),
+            ("regularization_decreases", state.regularization_decreases))
 
 
 def _trace_event(state, stage, points=None, decision="", extra=None, contacts=None, metrics=None):
@@ -1349,7 +1439,7 @@ def _turn_profile(points):
 
 
 def _objective_trace(state, points, contacts):
-    energy = structural_energy(points, state.q, state.request.settings)
+    energy = _objective(state, points)
     contact = sum(_contact_energy(row, state.mu) for row in contacts)
     return {"energy": {"fidelity": float(energy.fidelity), "length": float(energy.length),
         "curvature": float(energy.curvature), "contact": float(contact),
@@ -1357,7 +1447,7 @@ def _objective_trace(state, points, contacts):
 
 
 def _gradient_trace(state, points, contacts):
-    structural = _normal_gradient(points, state.q, _static_settings(state.request.settings))
+    structural = _objective_gradient(state, points)
     contact = np.zeros_like(structural)
     for row in contacts: _add_contact_gradient(contact, row, state.mu)
     total = structural + contact; total[list(state.pins)] = 0.0
@@ -1402,7 +1492,10 @@ def _sqp_step_trace(step):
         "condition": _finite_or_none(step.condition), "active_keys": tuple(step.active_keys),
         "multipliers": _scalar_rows(step.multipliers), "variant": step.variant,
         "normal_fraction": float(step.normal_fraction),
-        "tangential_fraction": float(step.tangential_fraction), "soc_norm": float(step.soc_norm)}
+        "tangential_fraction": float(step.tangential_fraction), "soc_norm": float(step.soc_norm),
+        "regularization": float(step.regularization),
+        "structural_condition": _finite_or_none(step.structural_condition),
+        "constraint_condition": _finite_or_none(step.constraint_condition)}
     return {"sqp": payload}
 
 
@@ -1439,7 +1532,7 @@ def _contact_trace(state):
 
 
 def _stationarity_profile(state):
-    gradient = _normal_gradient(state.points, state.q, _static_settings(state.request.settings))
+    gradient = _objective_gradient(state, state.points)
     for row in state.contacts.values(): _add_contact_gradient(gradient, row, state.mu)
     gradient[list(state.pins)] = 0.0; norms = np.linalg.norm(gradient, axis=1)
     order = np.argsort(-norms, kind="stable")[:5]
@@ -1447,7 +1540,7 @@ def _stationarity_profile(state):
 
 
 def _diagnostics(state):
-    energy = structural_energy(state.points, state.q, state.request.settings)
+    energy = _objective(state, state.points)
     contact = max(0.0, sum(_contact_energy(row, state.mu) for row in state.contacts.values()))
     values = _diagnostic_values(state)
     return V2Diagnostics(energy.fidelity, energy.length, energy.curvature, contact,
@@ -1467,7 +1560,7 @@ def _diagnostic_values(state):
         native_contact_ms=state.contact_ms, native_assembly_ms=state.assembly_ms,
         native_factor_ms=state.factor_ms, native_solve_ms=state.solve_ms,
         native_ccd_ms=state.ccd_ms, native_validation_ms=state.validation_ms,
-        block_factor_condition=state.condition,
+        block_factor_condition=_finite_or_zero(state.condition),
         feasibility_reached_from_invalid=state.started_invalid and state.metrics.feasible)
 
 
@@ -1555,3 +1648,63 @@ def _finite_or_zero(value):
 
 def _experiment_enabled(state, name):
     return bool(getattr(getattr(state, "experiment", None), name, False))
+
+
+def _objective(state, points):
+    return objective_energy(points, state.q, _effective_settings(state),
+                            _true_length_epsilon(state), _spacing_weight(state))
+
+
+def _objective_gradient(state, points):
+    return objective_gradient(points, state.q, _effective_settings(state),
+                              _true_length_epsilon(state), _spacing_weight(state))
+
+
+def _spacing_weight(state):
+    ratio = _spacing_ratio(state)
+    if ratio <= 0.0: return 0.0
+    lengths = np.linalg.norm(np.diff(state.points, axis=0), axis=1)
+    scale = max(float(np.mean(lengths)), state.request.tolerances.numeric_floor)
+    return ratio * float(state.request.settings.length_weight) / scale
+
+
+def _spacing_ratio(state):
+    if _experiment_enabled(state, "adaptive_quality"):
+        return .5 if state.quality_adapted and state.quality_spacing else 0.0
+    return float(getattr(getattr(state, "experiment", None), "spacing_weight_ratio", 0.0))
+
+
+def _effective_settings(state):
+    settings = state.request.settings
+    if not _experiment_enabled(state, "adaptive_quality"): return settings
+    return replace(settings, curvature_weight=0.0)
+
+
+def _adapt_quality(state):
+    if not _quality_can_adapt(state): return
+    if state.accepted >= 4 and _segment_cv(state.points) > .75:
+        _enable_quality(state, True, "NODE_SPACING")
+
+
+def _quality_can_adapt(state):
+    return bool(_experiment_enabled(state, "adaptive_quality") and not state.quality_adapted)
+
+
+def _enable_quality(state, spacing, reason):
+    state.quality_adapted = True; state.quality_spacing = bool(spacing)
+    state.quality_trigger = str(reason); state.energy_streak = 0
+    state.pending_sqp = None; state.acceleration.reset()
+
+
+def _segment_cv(points):
+    edges = np.diff(np.asarray(points, dtype=np.float64), axis=0)
+    lengths = np.linalg.norm(edges, axis=1); mean = float(np.mean(lengths)) if len(lengths) else 0.0
+    return float(np.std(lengths) / mean) if mean > 0.0 else 0.0
+
+
+def _true_length_epsilon(state):
+    if not _experiment_enabled(state, "true_length_irls"): return None
+    ratio = float(getattr(state.experiment, "true_length_epsilon_ratio", 1.0e-4))
+    edges = np.linalg.norm(np.diff(state.q, axis=0), axis=1)
+    scale = max(float(np.mean(edges)), state.request.tolerances.numeric_floor)
+    return max(state.request.tolerances.numeric_floor, ratio * scale)

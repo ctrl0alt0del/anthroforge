@@ -46,10 +46,11 @@ class _NativeContactPair(Structure):
 
 _REASONS = ("CLEAR", "AABB_CLEAR", "INVALID_START", "POSSIBLE_COLLISION", "BUDGET_EXHAUSTED")
 _LIBRARIES = {}
+_DEFAULT_NATIVE_PATH = Path(__file__).resolve().parents[3] / "native" / "fiber_ccd" / "af_fiber_ccd_v3.dll"
 
 
 def native_path():
-    return Path(__file__).resolve().parents[3] / "native" / "fiber_ccd" / "af_fiber_ccd_v3.dll"
+    return _DEFAULT_NATIVE_PATH
 
 
 def clear_native_libraries():
@@ -194,7 +195,7 @@ def _configure_graph_queries(library, double, integer):
 
 
 def load_native(path=None):
-    key = str(Path(path or native_path()).resolve())
+    key = str(_DEFAULT_NATIVE_PATH if path is None else Path(path).resolve())
     if key not in _LIBRARIES:
         _LIBRARIES[key] = _configure(CDLL(key))
     return _LIBRARIES[key]
@@ -248,6 +249,7 @@ class NativeTriangleSnapshot:
 class NativeCollisionWorld:
     def __init__(self, path=None):
         self.library = load_native(path); self.handle = self.library.af_world_create()
+        self._contact_pair_capacity = 256
         if not self.handle:
             raise RuntimeError("native collision world creation failed")
 
@@ -256,6 +258,7 @@ class NativeCollisionWorld:
         value = cls.__new__(cls); value.library = load_native(path)
         value.handle, closed = _create_batch_world(value.library, vertices, triangles,
                                                     owners, matrices)
+        value._contact_pair_capacity = 256
         return value, closed
 
     def add(self, vertices, triangles, owner, collider, closed, matrix=None):
@@ -336,11 +339,24 @@ class NativeCollisionWorld:
         filters = _contact_filters(only, skip, len(links))
         base = (self.handle, _double(values), _integer(links), _plain(owners[0]), _plain(owners[1]),
                 _plain(filters[0]), _plain(filters[1]), len(links), float(span), float(threshold))
-        count = self._contact_pair_count(base)
-        rows = (_NativeContactPair * count)(); result = _NativeWorldContacts()
-        if self.library.af_world_query_contact_pairs(*base, rows, count, byref(result)) < 0:
-            raise ValueError("invalid native all-contact query")
-        return rows, result
+        return self._contact_pair_rows(base)
+
+    def _contact_pair_rows(self, base):
+        capacity = max(1, self._contact_pair_capacity); result = _NativeWorldContacts()
+        rows = (_NativeContactPair * capacity)()
+        count = self.library.af_world_query_contact_pairs(*base, rows, capacity, byref(result))
+        if count == -2: return self._retry_contact_pairs(base, result.active)
+        if count < 0: raise ValueError("invalid native all-contact query")
+        self._contact_pair_capacity = max(capacity, count)
+        return rows[:count], result
+
+    def _retry_contact_pairs(self, base, required):
+        capacity = max(1, int(required)); rows = (_NativeContactPair * capacity)()
+        result = _NativeWorldContacts()
+        count = self.library.af_world_query_contact_pairs(*base, rows, capacity, byref(result))
+        if count < 0: raise ValueError("invalid native all-contact query")
+        self._contact_pair_capacity = capacity
+        return rows[:count], result
 
     def _contact_pair_count(self, base):
         result = _NativeWorldContacts()

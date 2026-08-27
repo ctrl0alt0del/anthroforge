@@ -9,9 +9,10 @@ from core.vcp.v2.collision import build_native_collision_world
 from core.vcp.v2.collision_native import (native_contact_block_solve,
                                           native_structural_contact_responses)
 from core.vcp.v2.contact_core import (V2Contact, V2ContactExperiment, _collapse_contacts,
-                                      _merge_contacts, _projection_available, _stationary_rejection,
+                                      _adapt_quality, _effective_settings, _limiter_changed, _merge_contacts,
+                                      _projection_available, _stationary_rejection, _update_regularization,
                                       begin_contact_core, solve_contact_core)
-from core.vcp.v2.contracts import V2ColliderSnapshot
+from core.vcp.v2.contracts import V2ColliderSnapshot, V2Settings
 from core.vcp.v2.structural import (_base_bands, _static_settings, assemble_normal_matrix,
                                     smooth_coefficients)
 from core.vcp.v2.subfiber_sqp import (_span_settings, solve_subfiber_sqp,
@@ -92,6 +93,44 @@ class FiberV2ContactCoreTests(unittest.TestCase):
         output = _collapse_contacts(_contact_state(_box_request(), first), (duplicate, distinct, first))
         self.assertEqual(len(output), 2)
         self.assertEqual(output[0].multiplier, 7.0)
+
+    def test_stable_limiter_ignores_same_feature_linearization_drift(self):
+        first = V2Contact(3, .2, "C", 7, "LIMITING", (0, 1, 0), 0.0, 0.0)
+        moved = replace(first, factor=.8, gap=-.1, linearized_gap=-.1)
+        stable = SimpleNamespace(experiment=V2ContactExperiment(stable_limiters=True))
+        legacy = SimpleNamespace(experiment=V2ContactExperiment())
+        self.assertFalse(_limiter_changed(stable, first, moved))
+        self.assertTrue(_limiter_changed(legacy, first, moved))
+
+    def test_adaptive_quality_detects_collapsed_sampling(self):
+        points = np.asarray(((0, 0, 0), (.01, 0, 0), (.02, 0, 0), (1, 0, 0)), dtype=float)
+        state = SimpleNamespace(experiment=V2ContactExperiment(adaptive_quality=True), points=points,
+            accepted=4, rejected=0, condition=1.0, quality_adapted=False, quality_spacing=False,
+            quality_trigger="", energy_streak=3, pending_sqp=None, acceleration=AndersonHistory(4))
+        _adapt_quality(state)
+        self.assertTrue(state.quality_adapted); self.assertTrue(state.quality_spacing)
+
+    def test_adaptive_quality_never_restores_curvature(self):
+        settings = V2Settings(node_count=4, curvature_weight=7.0)
+        state = SimpleNamespace(experiment=V2ContactExperiment(adaptive_quality=True),
+                                request=SimpleNamespace(settings=settings), quality_adapted=True)
+        self.assertEqual(_effective_settings(state).curvature_weight, 0.0)
+
+    def test_adaptive_quality_ignores_condition_without_collapse(self):
+        points = np.asarray(((0, 0, 0), (1, 0, 0), (2, 0, 0), (3, 0, 0)), dtype=float)
+        state = SimpleNamespace(experiment=V2ContactExperiment(adaptive_quality=True), points=points,
+            accepted=4, rejected=100, condition=1.0e30, quality_adapted=False,
+            quality_spacing=False, quality_trigger="")
+        _adapt_quality(state); self.assertFalse(state.quality_adapted)
+
+    def test_adaptive_regularization_grows_and_shrinks_step_penalty(self):
+        state = SimpleNamespace(experiment=V2ContactExperiment(adaptive_regularized_sqp=True),
+            regularization_scale=10.0, sqp_regularization=.01, regularization_increases=0,
+            regularization_decreases=0, regularization_history=[], condition=1.0)
+        _update_regularization(state, -.5, False)
+        self.assertEqual(state.sqp_regularization, .04)
+        _update_regularization(state, .9, True)
+        self.assertEqual(state.sqp_regularization, .02)
 
     def test_sqp_repeated_stationary_model_rejection_converges(self):
         contact = V2Contact(0, .5, "C", 2, "DISTANCE", (1, 0, 0), 0.0)
