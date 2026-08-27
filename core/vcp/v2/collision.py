@@ -9,7 +9,7 @@ import numpy as np
 from .collision_native import (
     NativeCollisionWorld,
     native_batch_status, native_candidates, native_distances, native_inside, native_safe_step, native_snapshot,
-    native_snapshot_distances, native_snapshot_inside, native_status,
+    native_snapshot_distances, native_snapshot_inside, native_status, native_worker_threads,
 )
 from .contracts import V2ColliderSnapshot
 
@@ -32,6 +32,7 @@ class V2BackendStatus:
     available: bool
     version: str = ""
     message: str = ""
+    worker_threads: int = 1
 
 
 @dataclass(frozen=True)
@@ -469,7 +470,8 @@ def _neighbor_csr(neighbors):
 
 def collision_backend_status(path=None):
     available, version, message = native_status(path)
-    return V2BackendStatus(available, version, message)
+    workers = native_worker_threads(path) if available else 1
+    return V2BackendStatus(available, version, message, workers)
 
 
 def build_triangle_snapshot(colliders, topology=None):

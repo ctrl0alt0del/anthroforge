@@ -133,7 +133,8 @@ def _extra_diagnostics(rows):
         native_factor_ms=total("native_factor_ms"), native_solve_ms=total("native_solve_ms"),
         native_ccd_ms=total("native_ccd_ms"), native_validation_ms=total("native_validation_ms"),
         block_factor_condition=maximum("block_factor_condition"),
-        feasibility_reached_from_invalid=any(row.feasibility_reached_from_invalid for row in rows))
+        feasibility_reached_from_invalid=any(row.feasibility_reached_from_invalid for row in rows),
+        native_worker_threads=maximum("native_worker_threads"))
 
 
 def _trace(packages, indices, rounds, completed, planner, started):

@@ -9,6 +9,9 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 #define AF_EXPORT extern "C" __declspec(dllexport)
 
@@ -32,6 +35,26 @@ static Vec cross(Vec a, Vec b) { return {a.y*b.z-a.z*b.y, a.z*b.x-a.x*b.z, a.x*b
 static double norm(Vec a) { return std::sqrt(dot(a, a)); }
 static Vec load3(const double* p) { return {p[0], p[1], p[2]}; }
 static double eps() { return 128.0 * std::numeric_limits<double>::epsilon(); }
+
+static int af_parallel_limit() {
+#ifdef _OPENMP
+    return std::max(1,std::min(4,omp_get_num_procs()));
+#else
+    return 1;
+#endif
+}
+
+static int af_requested_workers=af_parallel_limit();
+static int af_parallel_workers(int count) { return count<16?1:af_requested_workers; }
+static bool af_parallel_batch(int count) { return af_parallel_workers(count)>1; }
+
+static int af_parallel_capability() {
+#ifdef _OPENMP
+    return 8192;
+#else
+    return 0;
+#endif
+}
 
 static double point_segment(Vec p, Vec a, Vec b) {
     Vec d = sub(b, a);
@@ -143,11 +166,18 @@ static Context context(const double* start, const double* end, const double* tri
 
 AF_EXPORT int af_fiber_ccd_version() { return 3; }
 
-AF_EXPORT int af_fiber_ccd_capabilities() { return 8191; }
+AF_EXPORT int af_fiber_ccd_capabilities() { return 8191|af_parallel_capability(); }
+
+AF_EXPORT int af_fiber_worker_threads() { return af_requested_workers; }
+
+AF_EXPORT int af_fiber_set_worker_threads(int count) {
+    if(count<1)return 1;af_requested_workers=std::min(count,af_parallel_limit());return 0;
+}
 
 AF_EXPORT int af_segment_triangle_distances(const double* segments, const double* triangles,
                                              int count, double* distances) {
     if (!segments || !triangles || !distances || count < 0) return 1;
+#pragma omp parallel for schedule(static) if(af_parallel_batch(count)) num_threads(af_parallel_workers(count))
     for (int i=0; i<count; ++i) {
         Vec face[3]={load3(triangles+9*i),load3(triangles+9*i+3),load3(triangles+9*i+6)};
         distances[i]=segment_triangle(load3(segments+6*i),load3(segments+6*i+3),face);
@@ -182,9 +212,10 @@ static bool point_inside_mesh(Vec point, const double* vertices, const int64_t* 
 }
 
 AF_EXPORT int af_points_inside_closed_mesh(const double* points, int point_count,
-                                            const double* vertices, const int64_t* triangles,
-                                            int triangle_count, int* inside) {
+                                             const double* vertices, const int64_t* triangles,
+                                             int triangle_count, int* inside) {
     if (!points || !vertices || !triangles || !inside || point_count < 0 || triangle_count < 0) return 1;
+#pragma omp parallel for schedule(static) if(af_parallel_batch(point_count)) num_threads(af_parallel_workers(point_count))
     for (int p=0; p<point_count; ++p) {
         inside[p]=point_inside_mesh(load3(points+3*p),vertices,triangles,triangle_count) ? 1 : 0;
     }
@@ -325,12 +356,19 @@ static void snapshot_face(const TriangleSnapshot& snapshot, int index, Vec* face
     for (int i=0; i<3; ++i) face[i]=snapshot.vertices[size_t(snapshot.triangles[size_t(3*index+i)])];
 }
 
+static bool snapshot_faces_valid(const TriangleSnapshot& snapshot,const int64_t* faces,int count) {
+    for(int i=0;i<count;++i)if(faces[i]<0||faces[i]*3+2>=int64_t(snapshot.triangles.size()))return false;
+    return true;
+}
+
 AF_EXPORT int af_snapshot_segment_triangle_distances(void* handle, const double* segments,
                                                        const int64_t* faces, int count, double* distances) {
     if (!handle || !segments || !faces || !distances || count < 0) return 1;
     const auto& snapshot=*static_cast<TriangleSnapshot*>(handle);
+    if(!snapshot_faces_valid(snapshot,faces,count))return 1;
+#pragma omp parallel for schedule(static) if(af_parallel_batch(count)) num_threads(af_parallel_workers(count))
     for (int i=0; i<count; ++i) {
-        int face_index=int(faces[i]); if (face_index<0 || face_index*3+2>=int(snapshot.triangles.size())) return 1;
+        int face_index=int(faces[i]);
         Vec face[3]; snapshot_face(snapshot,face_index,face);
         distances[i]=segment_triangle(load3(segments+6*i),load3(segments+6*i+3),face);
     }
@@ -372,6 +410,7 @@ AF_EXPORT int af_snapshot_points_inside_range(void* handle, const double* points
     if (!handle || !points || !inside || point_count<0 || face_start<0 || face_count<0) return 1;
     const auto& snapshot=*static_cast<TriangleSnapshot*>(handle);
     if (face_start+face_count>int(snapshot.triangles.size()/3)) return 1;
+#pragma omp parallel for schedule(static) if(af_parallel_batch(point_count)) num_threads(af_parallel_workers(point_count))
     for (int i=0; i<point_count; ++i) inside[i]=snapshot_inside(snapshot,load3(points+3*i),face_start,face_count);
     return 0;
 }

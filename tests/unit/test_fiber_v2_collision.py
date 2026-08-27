@@ -19,6 +19,7 @@ from core.vcp.v2 import (
     validate_segment_clearance_batch, validate_static_clearance,
 )
 from core.vcp.v2.collision import begin_collision_free_step
+from core.vcp.v2.collision_native import load_native
 
 
 def _collider(vertices, triangles=((0, 1, 2),), owner="BODY", collider_id="C"):
@@ -42,6 +43,19 @@ def _dense_first_hit(start, end, triangle, clearance, samples=4001):
         if segment_triangle_distance(*segment, triangle) <= clearance:
             return float(time)
     return None
+
+
+def _bits(value):
+    return (value.dtype.str, value.shape, value.tobytes()) if isinstance(value, np.ndarray) else value
+
+
+def _thread_payload(world, points, edges):
+    owners = (("", ""),) * len(edges); valid = world.validate(points, edges, owners, 0.0, 0.2)
+    nearest = world.nearest(points); contacts = world.contacts(points, edges, owners, 0.0, 0.2)
+    pairs = world.contact_pairs(points, edges, owners, 0.0, 0.2)
+    return (valid.clear, valid.blockers, valid.minimum, tuple(_bits(row) for row in nearest),
+            contacts.active, contacts.blockers, _bits(contacts.factors), _bits(contacts.closest),
+            _bits(contacts.normals), _bits(contacts.distances), pairs)
 
 
 class FiberV2CollisionTests(unittest.TestCase):
@@ -106,7 +120,18 @@ class FiberV2CollisionTests(unittest.TestCase):
     def test_packaged_backend_is_available(self):
         status = collision_backend_status()
         self.assertTrue(status.available, status.message)
-        self.assertEqual(status.version, "af_fiber_ccd-3.8191")
+        self.assertEqual(status.version, f"af_fiber_ccd-3.16383.t{status.worker_threads}")
+        self.assertGreaterEqual(status.worker_threads, 1); self.assertLessEqual(status.worker_threads, 4)
+
+    def test_native_parallel_batches_match_scalar_bitwise(self):
+        points = np.column_stack((np.linspace(-1, 1, 65), np.zeros(65), np.full(65, .1)))
+        edges = tuple((index, index + 1) for index in range(64)); world = build_native_collision_world((_plane(),))
+        library = load_native(); previous = library.af_fiber_worker_threads()
+        try:
+            self.assertEqual(library.af_fiber_set_worker_threads(1), 0); serial = _thread_payload(world, points, edges)
+            self.assertEqual(library.af_fiber_set_worker_threads(4), 0); threaded = _thread_payload(world, points, edges)
+        finally: library.af_fiber_set_worker_threads(previous)
+        self.assertEqual(serial, threaded)
 
     def test_package5_nearest_query_returns_surface_normal(self):
         world = build_native_collision_world((_plane(),))

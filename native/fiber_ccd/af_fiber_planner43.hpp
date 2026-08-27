@@ -114,32 +114,57 @@ static bool af_validate_edge(const AfWorld& world, Vec a, Vec b, int first, int 
     return !af_edge_contained(world,a,b,first,second,blocker,result);
 }
 
-static int af_validate_world(const AfWorld& world, const double* points, const int64_t* edges,
-                             const int* first, const int* second, int count, double span,
-                             double threshold, int* clear, int* blockers, double* minima, AfBatchResult& result) {
-    result={0,0,0,0,INFINITY};
-    for (int i=0; i<count; ++i) { Vec a=load3(points+3*edges[2*i]),b=load3(points+3*edges[2*i+1]); int blocker=-1;
-        int tested=result.tested; bool valid=af_validate_edge(world,a,b,first[i],second[i],span,threshold,blocker,result);
-        clear[i]=valid; blockers[i]=blocker; minima[i]=result.tested==tested ? INFINITY:result.minimum; result.rejected+=!valid; }
-    return 0;
-}
-
 static bool af_validate_one(const AfInstance& item, Vec a, Vec b, int first, int second,
-                            double span, double threshold, int& blocker, AfBatchResult& result) {
+                             double span, double threshold, int& blocker, AfBatchResult& result) {
     bool clear=af_instance_clear(item,a,b,first,second,span,threshold,result);
     if (clear && first!=item.owner && af_inside_instance(item,a)) clear=false,++result.contained;
     if (clear && second!=item.owner && af_inside_instance(item,b)) clear=false,++result.contained;
     if (!clear) blocker=item.collider; return clear;
 }
 
+struct AfValidationRow { AfBatchResult result; int clear=0,blocker=-1; };
+
+static void af_merge_batch(AfBatchResult& out,const AfBatchResult& row) {
+    out.candidates+=row.candidates;out.tested+=row.tested;out.contained+=row.contained;
+    out.minimum=std::min(out.minimum,row.minimum);
+}
+
+static AfValidationRow af_world_validation_row(const AfWorld& world,Vec a,Vec b,int first,
+                                                int second,double span,double threshold) {
+    AfValidationRow row{{0,0,0,0,INFINITY}};
+    row.clear=af_validate_edge(world,a,b,first,second,span,threshold,row.blocker,row.result);return row;
+}
+
+static AfValidationRow af_instance_validation_row(const AfInstance& item,Vec a,Vec b,int first,
+                                                   int second,double span,double threshold) {
+    AfValidationRow row{{0,0,0,0,INFINITY}};
+    row.clear=af_validate_one(item,a,b,first,second,span,threshold,row.blocker,row.result);return row;
+}
+
+static void af_store_validation(const AfValidationRow& row,int index,int* clear,int* blockers,
+                                double* minima,AfBatchResult& result) {
+    af_merge_batch(result,row.result);result.rejected+=!row.clear;clear[index]=row.clear;
+    blockers[index]=row.blocker;minima[index]=row.result.tested?result.minimum:INFINITY;
+}
+
+static int af_validate_world(const AfWorld& world,const double* points,const int64_t* edges,
+                             const int* first,const int* second,int count,double span,double threshold,
+                             int* clear,int* blockers,double* minima,AfBatchResult& result) {
+    std::vector<AfValidationRow> rows(count);result={0,0,0,0,INFINITY};
+#pragma omp parallel for schedule(static) if(af_parallel_batch(count)) num_threads(af_parallel_workers(count))
+    for(int i=0;i<count;++i){Vec a=load3(points+3*edges[2*i]),b=load3(points+3*edges[2*i+1]);
+        rows[i]=af_world_validation_row(world,a,b,first[i],second[i],span,threshold);}
+    for(int i=0;i<count;++i)af_store_validation(rows[i],i,clear,blockers,minima,result);return 0;
+}
+
 static int af_validate_instance(const AfInstance& item, const double* points, const int64_t* edges,
-                                const int* first, const int* second, int count, double span,
-                                double threshold, int* clear, int* blockers, double* minima, AfBatchResult& result) {
-    result={0,0,0,0,INFINITY};
-    for (int i=0; i<count; ++i) { Vec a=load3(points+3*edges[2*i]),b=load3(points+3*edges[2*i+1]); int blocker=-1;
-        int tested=result.tested; bool valid=af_validate_one(item,a,b,first[i],second[i],span,threshold,blocker,result);
-        clear[i]=valid; blockers[i]=blocker; minima[i]=result.tested==tested ? INFINITY:result.minimum; result.rejected+=!valid; }
-    return 0;
+                                 const int* first, const int* second, int count, double span,
+                                 double threshold, int* clear, int* blockers, double* minima, AfBatchResult& result) {
+    std::vector<AfValidationRow> rows(count);result={0,0,0,0,INFINITY};
+#pragma omp parallel for schedule(static) if(af_parallel_batch(count)) num_threads(af_parallel_workers(count))
+    for(int i=0;i<count;++i){Vec a=load3(points+3*edges[2*i]),b=load3(points+3*edges[2*i+1]);
+        rows[i]=af_instance_validation_row(item,a,b,first[i],second[i],span,threshold);}
+    for(int i=0;i<count;++i)af_store_validation(rows[i],i,clear,blockers,minima,result);return 0;
 }
 
 AF_EXPORT void* af_world_create() { return new AfWorld(); }
@@ -347,17 +372,38 @@ static void af_store_contact(const AfWorld& world,const AfSegmentPair& row,int i
     distances[index]=row.distance;blockers[index]=row.instance<0?-1:world.items[row.instance].collider;active[index]=row.distance<threshold||inside;
 }
 
+struct AfContactRow { AfSegmentPair pair; AfContactResult result; };
+
+static AfContactRow af_contact_row(const AfWorld& world,Vec a,Vec b,int first,int second,int only,
+                                   int skip,double span,double threshold) {
+    AfContactRow row{{},{0,0,0,0,INFINITY}};
+    row.pair=af_contact_edge(world,a,b,first,second,only,skip,span,threshold,row.result);return row;
+}
+
+static void af_merge_contact(AfContactResult& out,const AfContactResult& row) {
+    out.candidates+=row.candidates;out.tested+=row.tested;out.contained+=row.contained;
+}
+
+static void af_store_contact_row(const AfWorld& world,const AfContactRow& row,int index,double threshold,
+        double* factors,double* closest,double* normals,double* distances,int* blockers,int* active,AfContactResult& output) {
+    af_merge_contact(output,row.result);af_store_contact(world,row.pair,index,threshold,factors,closest,normals,distances,blockers,active);
+    output.active+=active[index];output.minimum=std::min(output.minimum,row.pair.distance);
+}
+
 AF_EXPORT int af_world_query_contacts(void* handle,const double* points,const int64_t* edges,const int* first,const int* second,const int* only,const int* skip,int count,double span,double threshold,int* active,double* factors,double* closest,double* normals,double* distances,int* blockers,AfContactResult* output){
     if(!handle||!points||!edges||!first||!second||!only||!skip||!active||!factors||!closest||!normals||!distances||!blockers||!output||count<0)return 1;
-    const auto& world=*static_cast<AfWorld*>(handle);*output={0,0,0,0,INFINITY};
-    for(int i=0;i<count;++i){Vec a=load3(points+3*edges[2*i]),b=load3(points+3*edges[2*i+1]);auto row=af_contact_edge(world,a,b,first[i],second[i],only[i],skip[i],span,threshold,*output);
-        af_store_contact(world,row,i,threshold,factors,closest,normals,distances,blockers,active);output->active+=active[i];output->minimum=std::min(output->minimum,row.distance);}
+    const auto& world=*static_cast<AfWorld*>(handle);std::vector<AfContactRow> rows(count);*output={0,0,0,0,INFINITY};
+#pragma omp parallel for schedule(static) if(af_parallel_batch(count)) num_threads(af_parallel_workers(count))
+    for(int i=0;i<count;++i){Vec a=load3(points+3*edges[2*i]),b=load3(points+3*edges[2*i+1]);
+        rows[i]=af_contact_row(world,a,b,first[i],second[i],only[i],skip[i],span,threshold);}
+    for(int i=0;i<count;++i)af_store_contact_row(world,rows[i],i,threshold,factors,closest,normals,distances,blockers,active,*output);
     return 0;
 }
 
 AF_EXPORT int af_world_nearest_points(void* handle,const double* points,int count,double* closest,
-                                      double* normals,double* distances,int* blockers,int* contained){
+                                       double* normals,double* distances,int* blockers,int* contained){
     if(!handle||!points||!closest||!normals||!distances||!blockers||!contained||count<0)return 1;const auto& world=*static_cast<AfWorld*>(handle);
+#pragma omp parallel for schedule(static) if(af_parallel_batch(count)) num_threads(af_parallel_workers(count))
     for(int i=0;i<count;++i){Vec point=load3(points+3*i);AfNearest best=af_nearest_world(world,point);bool inside=best.instance>=0&&af_inside_instance(world.items[best.instance],point);
         Vec direction=inside?sub(best.point,point):sub(point,best.point);Vec normal=af_unit(direction);if(norm(normal)<=eps())normal=af_unit(best.face_normal);
         double* q=closest+3*i;double* n=normals+3*i;q[0]=best.point.x;q[1]=best.point.y;q[2]=best.point.z;n[0]=normal.x;n[1]=normal.y;n[2]=normal.z;

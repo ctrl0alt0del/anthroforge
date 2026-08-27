@@ -234,8 +234,8 @@ static void af_append_contained(const AfInstance& item,int instance,int edge,Vec
 }
 
 static void af_collect_edge_contacts(const AfWorld& world,int edge,Vec a,Vec b,int first,int second,
-                                     int only,int skip,double span,double threshold,
-                                     std::vector<AfContactPair>& rows,AfContactResult& result) {
+                                      int only,int skip,double span,double threshold,
+                                      std::vector<AfContactPair>& rows,AfContactResult& result) {
     std::vector<int> hits;if(!world.nodes.empty())af_collect_world(world,0,af_segment_bounds(a,b,threshold),hits);
     for(int index:hits){const auto& item=world.items[index];if(!af_contact_filter(item,only,skip))continue;
         auto range=af_test_range(a,b,item,first,second,span);if(range.first>=range.second)continue;
@@ -245,14 +245,28 @@ static void af_collect_edge_contacts(const AfWorld& world,int edge,Vec a,Vec b,i
         if(first!=item.owner)af_append_contained(item,index,edge,a,0.0,rows,result);if(second!=item.owner)af_append_contained(item,index,edge,b,1.0,rows,result);}
 }
 
+struct AfPairRows { std::vector<AfContactPair> rows; AfContactResult result{0,0,0,0,INFINITY}; };
+
+static AfPairRows af_pair_rows(const AfWorld& world,int edge,Vec a,Vec b,int first,int second,
+                               int only,int skip,double span,double threshold) {
+    AfPairRows out;af_collect_edge_contacts(world,edge,a,b,first,second,only,skip,span,threshold,out.rows,out.result);return out;
+}
+
+static void af_merge_pair_rows(std::vector<AfContactPair>& rows,AfContactResult& result,AfPairRows& batch) {
+    result.candidates+=batch.result.candidates;result.tested+=batch.result.tested;
+    result.contained+=batch.result.contained;rows.insert(rows.end(),batch.rows.begin(),batch.rows.end());
+}
+
 AF_EXPORT int af_world_query_contact_pairs(void* handle,const double* points,const int64_t* edges,
-                                            const int* first,const int* second,const int* only,const int* skip,
-                                            int count,double span,double threshold,AfContactPair* output,
-                                            int capacity,AfContactResult* result) {
+                                             const int* first,const int* second,const int* only,const int* skip,
+                                             int count,double span,double threshold,AfContactPair* output,
+                                             int capacity,AfContactResult* result) {
     if(!handle||!points||!edges||!first||!second||!only||!skip||!result||count<0||capacity<0)return -1;
-    const auto& world=*static_cast<AfWorld*>(handle);std::vector<AfContactPair> rows;*result={0,0,0,0,INFINITY};
-    for(int i=0;i<count;++i)af_collect_edge_contacts(world,i,load3(points+3*edges[2*i]),load3(points+3*edges[2*i+1]),
-        first[i],second[i],only[i],skip[i],span,threshold,rows,*result);
+    const auto& world=*static_cast<AfWorld*>(handle);std::vector<AfContactPair> rows;std::vector<AfPairRows> batches(count);*result={0,0,0,0,INFINITY};
+#pragma omp parallel for schedule(static) if(af_parallel_batch(count)) num_threads(af_parallel_workers(count))
+    for(int i=0;i<count;++i)batches[i]=af_pair_rows(world,i,load3(points+3*edges[2*i]),load3(points+3*edges[2*i+1]),
+        first[i],second[i],only[i],skip[i],span,threshold);
+    for(auto& batch:batches)af_merge_pair_rows(rows,*result,batch);
     std::stable_sort(rows.begin(),rows.end(),[](const auto& a,const auto& b){return std::tie(a.edge,a.collider,a.face,a.factor)<std::tie(b.edge,b.collider,b.face,b.factor);});
     result->active=int(rows.size());result->minimum=INFINITY;for(const auto& row:rows)result->minimum=std::min(result->minimum,row.distance);
     if(output&&capacity<int(rows.size()))return -2;if(output)std::copy(rows.begin(),rows.end(),output);return int(rows.size());

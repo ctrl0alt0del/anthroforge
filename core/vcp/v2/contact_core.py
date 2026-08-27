@@ -1341,7 +1341,8 @@ def _diagnostic_values(state):
         native_factor_ms=state.factor_ms, native_solve_ms=state.solve_ms,
         native_ccd_ms=state.ccd_ms, native_validation_ms=state.validation_ms,
         block_factor_condition=_finite_or_zero(state.condition),
-        feasibility_reached_from_invalid=state.started_invalid and state.metrics.feasible)
+        feasibility_reached_from_invalid=state.started_invalid and state.metrics.feasible,
+        native_worker_threads=collision_backend_status().worker_threads)
 
 
 def _failed_package(request, termination, message, started):

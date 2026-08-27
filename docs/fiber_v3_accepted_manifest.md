@@ -37,6 +37,12 @@ continues beyond that cap nor substitutes an earlier state using visual metrics.
 - Local owner exemptions, containment handling and pin/surface recovery.
 - Integrated unilateral contacts, infeasible-start filtering and limiting-pair injection.
 - Cached native loader, reusable contact buffers and vectorized swept segments.
+- Deterministic native parallelism for contacts, nearest-point queries and static validation.
+
+Native workers write only independent indexed rows. Reductions and output aggregation retain
+their original serial order, while CCD remains serial because changing its reduction can change
+the nonlinear solver trajectory. The selected worker count is recorded in backend provenance,
+diagnostics and cache identity.
 
 The machine-readable authority is `core/vcp/v3/manifest.py`; the immutable
 numeric authority is `core/vcp/v3/policy.py`.

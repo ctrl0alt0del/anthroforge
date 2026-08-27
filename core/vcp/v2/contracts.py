@@ -321,6 +321,7 @@ class V2Diagnostics:
     native_validation_ms: float = 0.0
     block_factor_condition: float = 0.0
     feasibility_reached_from_invalid: bool = False
+    native_worker_threads: int = 1
 
     def __post_init__(self):
         _set_diagnostic_floats(self)

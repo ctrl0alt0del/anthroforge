@@ -1,13 +1,14 @@
 """Private ctypes binding for the packaged Fiber V2 collision DLL."""
 
 from ctypes import CDLL, POINTER, Structure, byref, c_double, c_int, c_int64, c_void_p
+from os import environ
 from pathlib import Path
 
 import numpy as np
 
 
 V2_NATIVE_ABI = 3
-V2_NATIVE_CAPABILITIES = 8191
+V2_NATIVE_CAPABILITIES = 16383
 V2_NATIVE_BATCH_CAPABILITY = 1024
 
 
@@ -58,11 +59,28 @@ def clear_native_libraries():
 
 
 def _configure(library):
+    _configure_thread_calls(library)
     _configure_collision_calls(library)
     _configure_snapshot_calls(library)
     _configure_world_calls(library)
     _configure_v3_calls(library)
     return library
+
+
+def _configure_thread_calls(library):
+    library.af_fiber_worker_threads.restype = c_int
+    library.af_fiber_set_worker_threads.argtypes = [c_int]
+    library.af_fiber_set_worker_threads.restype = c_int
+    if library.af_fiber_set_worker_threads(_requested_native_threads()):
+        raise ValueError("invalid native Fiber worker count")
+
+
+def _requested_native_threads():
+    raw = environ.get("AF_FIBER_NATIVE_THREADS", "4").strip()
+    try: value = int(raw)
+    except ValueError as error: raise ValueError("AF_FIBER_NATIVE_THREADS must be an integer") from error
+    if value < 1 or value > 64: raise ValueError("AF_FIBER_NATIVE_THREADS must be in [1, 64]")
+    return value
 
 
 def _configure_v3_calls(library):
@@ -206,9 +224,15 @@ def native_status(path=None):
         library = load_native(path)
         version, capabilities = library.af_fiber_ccd_version(), library.af_fiber_ccd_capabilities()
         available = version == V2_NATIVE_ABI and capabilities & V2_NATIVE_CAPABILITIES == V2_NATIVE_CAPABILITIES
-        return available, f"af_fiber_ccd-{version}.{capabilities}", "" if available else "incompatible ABI"
-    except (OSError, AttributeError) as error:
+        workers = library.af_fiber_worker_threads()
+        return available, f"af_fiber_ccd-{version}.{capabilities}.t{workers}", "" if available else "incompatible ABI"
+    except (OSError, AttributeError, ValueError) as error:
         return False, "", str(error)
+
+
+def native_worker_threads(path=None):
+    try: return int(load_native(path).af_fiber_worker_threads())
+    except (OSError, AttributeError, ValueError): return 1
 
 
 def native_batch_status(path=None):

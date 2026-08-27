@@ -6,6 +6,7 @@ from importlib.util import find_spec
 
 import numpy as np
 
+from core.vcp.v2.collision import collision_backend_status
 from core.vcp.v3.manifest import V3_ACCEPTED_REFERENCE, V3_REJECTED_MODULES
 from core.vcp.v3.policy import V3_PRODUCTION_POLICY, V3ShortcutMode, accepted_v3_request
 from core.vcp.v3.production import V3_PRODUCTION_VERSION, begin_v3, solve_v3
@@ -38,6 +39,8 @@ class FiberV3ProductionTests(unittest.TestCase):
         package = solve_v3(_bent_request(8), use_planner=False)
         self.assertEqual(package.result.engine_version, V3_PRODUCTION_VERSION)
         self.assertEqual(package.result.diagnostics.effective_curvature_weight, 0.0)
+        self.assertEqual(package.result.diagnostics.native_worker_threads,
+                         collision_backend_status().worker_threads)
 
     def test_checkpoint_continues_to_terminal_result(self):
         session = begin_v3(_bent_request(12), checkpoint_steps=2, use_planner=False)
