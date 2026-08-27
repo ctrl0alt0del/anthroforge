@@ -66,20 +66,32 @@ def _configure(library):
 
 def _configure_v3_calls(library):
     double, integer, plain = POINTER(c_double), POINTER(c_int64), POINTER(c_int)
+    _configure_block_calls(library, double)
+    _configure_contact_pair_call(library, double, integer, plain)
+    _configure_contact_solve_call(library, double, integer)
+    _configure_response_call(library, double, integer)
+
+
+def _configure_block_calls(library, double):
     library.af_block_pentadiagonal_solve.argtypes = [double, double, double, double, c_int,
                                                       double, POINTER(_NativeBlockResult)]
     library.af_block_pentadiagonal_solve.restype = c_int
+
+
+def _configure_contact_pair_call(library, double, integer, plain):
     library.af_world_query_contact_pairs.argtypes = [c_void_p, double, integer, plain, plain,
                                                       plain, plain, c_int, c_double, c_double,
                                                       POINTER(_NativeContactPair), c_int,
                                                       POINTER(_NativeWorldContacts)]
     library.af_world_query_contact_pairs.restype = c_int
+
+
+def _configure_contact_solve_call(library, double, integer):
     library.af_contact_block_solve.argtypes = [double, double, double, double, double, integer,
                                                 double, double, double, double, c_int, c_double,
                                                 integer, double, c_int, c_int, double,
                                                 POINTER(_NativeBlockResult)]
     library.af_contact_block_solve.restype = c_int
-    _configure_response_call(library, double, integer)
 
 
 def _configure_response_call(library, double, integer):

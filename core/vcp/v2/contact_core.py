@@ -8,8 +8,11 @@ import numpy as np
 from .acceleration import AndersonHistory
 from .collision import (V2OwnerContact, build_triangle_snapshot_known,
                         begin_collision_free_step, cached_native_collision_world_batch,
+                        collision_free_step,
                         collision_backend_status)
 from .collision_native import native_contact_block_solve
+from .composite_sqp import (normalize_composite_variant, second_order_correction,
+                            solve_composite_sqp)
 from .contracts import V2Diagnostics, V2Result, V2Termination, V2Topology
 from .planner import (V2PlannerDiagnostics, V2PlannerMode, V2PlannerResult,
                       plan_reference_v43)
@@ -20,6 +23,12 @@ from .trust_sqp import (actual_reduction, model_reduction, solve_trust_sqp,
 
 
 V2_CONTACT_CORE_VERSION = "fiber-v2-production-3"
+
+
+@dataclass(frozen=True)
+class V2ContactExperiment:
+    structural_ccd_projection: bool = False
+    sqp_variant: str = "BASE"
 
 
 @dataclass(frozen=True)
@@ -85,6 +94,10 @@ class V2ContactCoreTrace:
     normal_step_history: tuple = ()
     tangent_step_history: tuple = ()
     sqp_solve_ms: float = 0.0
+    iteration_trace: tuple = ()
+    reference_points: tuple = ()
+    pin_indices: tuple = ()
+    experiment_stats: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -117,6 +130,8 @@ class V2ContactCoreSession:
     seed_candidates: tuple = ()
     seed_index: int = 0
     seed_best: object = None
+    diagnostic_trace: bool = False
+    experiment: object = None
 
     def step(self):
         return _advance_contact_session(self)
@@ -196,15 +211,33 @@ class _ContactState:
     sqp_solve_ms: float = 0.0
     injection_streak: int = 0
     owner_span_override: float = 0.0
+    diagnostic_enabled: bool = False
+    diagnostic_events: list = None
+    diagnostic_proposal: int = 0
+    experiment: object = None
+    projection_attempts: int = 0
+    projection_accepts: int = 0
+    projection_solves: int = 0
+    projection_injections: int = 0
+    projection_aborts: int = 0
+    projection_failure_streak: int = 0
+    projection_disabled: bool = False
+    projection_skipped_dense: int = 0
+    composite_steps: int = 0
+    tangential_steps: int = 0
+    soc_attempts: int = 0
+    soc_applied: int = 0
+    soc_ms: float = 0.0
+    soc_norm_total: float = 0.0
 
 
 def solve_contact_core(request, snapshot=None, preview=False, use_planner=True,
                        use_acceleration=False, use_adaptive_trust=False,
                        use_stall_recovery=False, use_filter_sqp=False,
-                       owner_span_override=0.0):
+                       owner_span_override=0.0, diagnostic_trace=False, experiment=None):
     session = begin_contact_core(request, snapshot, preview, use_planner,
         use_acceleration, use_adaptive_trust, use_stall_recovery, use_filter_sqp,
-        owner_span_override)
+        owner_span_override, diagnostic_trace, experiment)
     while not session.done: session.step()
     return session.package
 
@@ -212,10 +245,12 @@ def solve_contact_core(request, snapshot=None, preview=False, use_planner=True,
 def begin_contact_core(request, snapshot=None, preview=False, use_planner=True,
                        use_acceleration=False, use_adaptive_trust=False,
                        use_stall_recovery=False, use_filter_sqp=False,
-                       owner_span_override=0.0):
+                       owner_span_override=0.0, diagnostic_trace=False, experiment=None):
     session = V2ContactCoreSession(request, snapshot, preview, use_planner,
         use_acceleration, use_adaptive_trust, use_stall_recovery, use_filter_sqp,
         perf_counter())
+    session.diagnostic_trace = bool(diagnostic_trace)
+    session.experiment = experiment or V2ContactExperiment()
     _initialize_contact_session(session)
     if session.state is not None: session.state.owner_span_override = float(owner_span_override)
     return session
@@ -230,7 +265,7 @@ def _initialize_contact_session(session):
         _fail_contact_session(session, V2Termination.INVALID_CONFIGURATION, issue); return
     session.state = _prime_state(request, session.use_acceleration,
         session.use_adaptive_trust, session.use_stall_recovery,
-        session.use_filter_sqp); session.phase = "WORLD"
+        session.use_filter_sqp, session.diagnostic_trace, session.experiment); session.phase = "WORLD"
 
 
 def _advance_contact_session(session):
@@ -278,14 +313,17 @@ def _configuration_issue(request):
     return ""
 
 
-def _prime_state(request, accelerate=False, adaptive=False, recovery=False, filter_sqp=False):
+def _prime_state(request, accelerate=False, adaptive=False, recovery=False, filter_sqp=False,
+                 diagnostic=False, experiment=None):
     q, indices = _direct_reference(request); pins = _pin_targets(request, indices)
     metrics = V2FeasibilityState(float("inf"), float("inf"), 0, 0.0, False)
     state = _ContactState(request, None, None, _planner_unavailable("pending"),
         q, q.copy(), indices, pins, {}, (), _initial_penalty(request), metrics, True,
         acceleration_enabled=bool(accelerate), adaptive_trust_enabled=bool(adaptive),
-        stall_recovery_enabled=bool(recovery), filter_sqp_enabled=bool(filter_sqp))
-    _initialize_lists(state); _initialize_controller(state); return state
+        stall_recovery_enabled=bool(recovery), filter_sqp_enabled=bool(filter_sqp),
+        diagnostic_enabled=bool(diagnostic), experiment=experiment or V2ContactExperiment())
+    _initialize_lists(state); _initialize_controller(state)
+    return state
 
 
 def _prepare_world(session):
@@ -328,6 +366,7 @@ def _initialize_lists(state):
     state.ccd_step_history = []
     state.model_ratio_history, state.normal_step_history = [], []
     state.tangent_step_history = []
+    state.diagnostic_events = [] if state.diagnostic_enabled else None
 
 
 def _initialize_controller(state):
@@ -389,6 +428,7 @@ def _adopt_seed(state, record):
     state.group_sides = record[5]; state.contacts = {row.key: row for row in record[2]}
     state.metrics = record[3]; state.injected += len(state.contacts)
     state.feasibility_history.append((state.metrics.maximum_violation, state.metrics.squared_violation))
+    _trace_event(state, "SEED", decision="SELECTED")
 
 
 def _seed_candidates(state):
@@ -486,13 +526,44 @@ def _solve_candidate(state):
 
 
 def _solve_sqp_candidate(state):
-    step = solve_trust_sqp(state.points, state.q, state.request.settings,
-        tuple(state.contacts.values()), state.pins, state.trust_radius)
+    variant = _sqp_variant(state)
+    solver = _sqp_solver(variant)
+    arguments = (state.points, state.q, state.request.settings,
+                 tuple(state.contacts.values()), state.pins, state.trust_radius)
+    step = solver(*arguments) if variant == "BASE" else solver(*arguments, variant)
+    step = _apply_experimental_soc(state, step, variant)
     state.pending_sqp = step; state.sqp_solve_ms += step.solve_ms
     state.condition = step.condition; state.condition_history.append(step.condition)
     state.normal_step_history.append(step.normal_norm)
     state.tangent_step_history.append(step.tangential_norm)
+    _trace_sqp_proposal(state, step)
     return step.points
+
+
+def _sqp_variant(state):
+    return normalize_composite_variant(getattr(state.experiment, "sqp_variant", "BASE"))
+
+
+def _sqp_solver(variant):
+    return solve_trust_sqp if variant == "BASE" else solve_composite_sqp
+
+
+def _apply_experimental_soc(state, step, variant):
+    if variant != "COMPOSITE_SOC": return _count_composite(state, step, variant)
+    started = perf_counter(); state.soc_attempts += 1
+    contacts = _query_raw(state, step.points)
+    points, norm, condition = second_order_correction(
+        step.points, contacts, state.pins, state.trust_radius)
+    state.soc_ms += _elapsed(started); state.soc_norm_total += norm
+    state.soc_applied += int(norm > state.request.tolerances.numeric_floor)
+    corrected = replace(step, points=points, condition=max(step.condition, condition), soc_norm=norm)
+    return _count_composite(state, corrected, variant)
+
+
+def _count_composite(state, step, variant):
+    state.composite_steps += int(variant in {"COMPOSITE", "COMPOSITE_SOC"})
+    state.tangential_steps += int(variant == "TANGENTIAL")
+    return step
 
 
 def _accelerated_candidate(state, candidate):
@@ -530,8 +601,13 @@ def _accept_infeasible_candidate(state, candidate):
 def _accept_sqp_infeasible(state, candidate):
     fresh, metrics = _measure(state, candidate); accepted = _filter_improves(state.metrics, metrics)
     ratio = _sqp_ratio(state, candidate, metrics); _update_sqp_controller(state, ratio, accepted)
-    if accepted: _adopt(state, candidate, fresh, metrics)
-    else: state.rejected += 1
+    _trace_trial(state, candidate, fresh, metrics, ratio)
+    if accepted:
+        movement = _accepted_movement(state, candidate)
+        _adopt(state, candidate, fresh, metrics)
+        _trace_event(state, "DECISION", decision="ACCEPT_INFEASIBLE", extra={"accepted_step_norms": movement})
+    else:
+        state.rejected += 1; _trace_event(state, "DECISION", decision="REJECT:FILTER")
     return accepted
 
 
@@ -570,36 +646,85 @@ def _advance_feasible_sweep(state):
     if step is None: return False
     started = state.pending_sweep._started; candidate = state.pending_candidate
     state.pending_sweep = None; state.pending_candidate = None
-    _record_ccd(state, step, started)
-    return _complete_trial(state, _accept_feasible_step(state, candidate, step))
+    _record_ccd(state, step, started, candidate)
+    accepted = _accept_feasible_step(state, candidate, step)
+    if isinstance(accepted, tuple): return accepted
+    return _complete_trial(state, accepted)
 
 
 def _accept_feasible_step(state, candidate, step):
-    if step.limiting_pairs and step.safe_step < 1.0 and _inject_limiting(state, candidate, step):
-        return _reject_feasible(state, "INJECT_LIMITING", True)
+    limiting = _limiting_outcome(state, candidate, step)
+    if limiting is not None: return limiting
     if not step.valid or step.safe_step <= state.request.tolerances.numeric_floor:
         reason = f"{step.reason.value}:{tuple(step.limiting_pairs)}"
         _refresh_state(state); return _reject_feasible(state, reason)
-    fraction = 1.0 if step.safe_step >= 1.0 else .999 * step.safe_step
-    proposed = state.points + fraction * (candidate - state.points); _restore_pins(proposed, state.pins)
-    fresh, metrics = _measure(state, proposed)
+    proposed, fresh, metrics = _feasible_trial(state, candidate, step)
     if not metrics.feasible:
+        _trace_trial(state, proposed, fresh, metrics, None)
         reason = f"INFEASIBLE:{metrics.maximum_violation:.9g}:{metrics.penetrating_groups}"
         return _reject_feasible(state, reason)
     ratio = _sqp_ratio(state, proposed, metrics) if state.filter_sqp_enabled else 1.0
-    if state.filter_sqp_enabled and ratio < .1: return _reject_feasible(state, f"MODEL_RATIO:{ratio:.6g}")
+    _trace_trial(state, proposed, fresh, metrics, ratio)
+    if state.filter_sqp_enabled and ratio < .1:
+        return _model_rejection(state, ratio)
     return _commit_feasible_candidate(state, proposed, fresh, metrics, step, ratio)
 
 
+def _limiting_outcome(state, candidate, step):
+    if not step.limiting_pairs or step.safe_step >= 1.0: return None
+    trial = _structural_projection_trial(state, candidate, step)
+    if trial is not None: return _accept_projection_trial(state, trial)
+    injected = _inject_limiting(state, candidate, step)
+    if injected: return _reject_feasible(state, "INJECT_LIMITING", True)
+    return None
+
+
+def _accept_projection_trial(state, trial):
+    proposed, fresh, metrics, solved, sweep, contacts = trial
+    state.pending_sqp = solved; ratio = _sqp_ratio(state, proposed, metrics, contacts)
+    _trace_trial(state, proposed, fresh, metrics, ratio)
+    if ratio < .1: return _model_rejection(state, ratio)
+    state.projection_accepts += 1
+    return _commit_feasible_candidate(state, proposed, fresh, metrics, sweep, ratio)
+
+
+def _feasible_trial(state, candidate, step):
+    fraction = 1.0 if step.safe_step >= 1.0 else .999 * step.safe_step
+    proposed = state.points + fraction * (candidate - state.points)
+    _restore_pins(proposed, state.pins); fresh, metrics = _measure(state, proposed)
+    return proposed, fresh, metrics
+
+
 def _commit_feasible_candidate(state, proposed, fresh, metrics, step, ratio):
-    state.injection_streak = 0
+    movement = _accepted_movement(state, proposed); state.injection_streak = 0
     if state.filter_sqp_enabled: _accept_controller(state, step, ratio)
     _adopt(state, proposed, fresh, metrics)
     if not state.filter_sqp_enabled: _accept_controller(state, step, ratio)
+    _trace_event(state, "DECISION", decision="ACCEPT", extra={"accepted_step_norms": movement})
     return True
+
+
+def _model_rejection(state, ratio):
+    reason = f"MODEL_RATIO:{ratio:.6g}"
+    if _stationary_rejection(state, reason):
+        _trace_event(state, "DECISION", decision="CONVERGED_STATIONARY")
+        return V2Termination.CONVERGED, "SQP stationary after repeated nondecreasing trials"
+    return _reject_feasible(state, reason)
+
+
+def _stationary_rejection(state, reason):
+    tolerance = state.request.tolerances
+    if not str(reason).startswith("MODEL_RATIO:") or state.stalled < 2: return False
+    if any(row.feature_id == "LIMITING" for row in state.contacts.values()): return False
+    return bool(state.metrics.feasible and
+                state.fixed_residual <= tolerance.fixed_point_tolerance and
+                state.stationarity <= tolerance.stationarity_tolerance)
+
+
 def _reject_feasible(state, reason, contact_changed=False):
     state.rejected += 1
     state.rejection_reasons.append(str(reason))
+    _trace_event(state, "DECISION", decision=f"REJECT:{reason}")
     state.full_step_streak = 0
     repeated = _repeated_injection(state) if contact_changed else False
     if contact_changed and not repeated: state.stalled = -1
@@ -636,8 +761,9 @@ def _trust_growth(state):
     state.full_step_streak = 0; return 1.5
 
 
-def _sqp_ratio(state, candidate, metrics):
-    contacts = tuple(state.contacts.values()); feasible = state.metrics.feasible
+def _sqp_ratio(state, candidate, metrics, contacts=None):
+    contacts = tuple(state.contacts.values()) if contacts is None else tuple(contacts)
+    feasible = state.metrics.feasible
     predicted = model_reduction(state.points, candidate, state.q, state.request.settings,
                                 contacts, state.pins, feasible)
     before = _structural_merit(state, state.points); after = _structural_merit(state, candidate)
@@ -662,11 +788,12 @@ def _at_trust_boundary(state):
     return maximum >= .8 * state.trust_radius
 
 
-def _record_ccd(state, step, started):
+def _record_ccd(state, step, started, candidate=None):
     state.ccd_ms += _elapsed(started); state.limiting += len(step.limiting_pairs)
     state.ccd_candidates += step.candidate_pairs; state.ccd_tested += step.tested_pairs
     state.limiting_history.append(tuple(step.limiting_pairs))
     state.ccd_step_history.append((step.safe_step, step.reason.value, step.initially_valid))
+    _trace_ccd(state, step, candidate)
 
 
 def _trusted_candidate(state, candidate):
@@ -678,15 +805,100 @@ def _trusted_candidate(state, candidate):
     return state.points + fraction * delta
 
 
+def _structural_projection_trial(state, candidate, sweep):
+    if not _projection_available(state, sweep): return None
+    state.projection_attempts += 1; contacts = dict(state.contacts)
+    for _iteration in range(6):
+        if not _projection_inject(state, contacts, candidate, sweep): return _projection_abort(state)
+        solved = _projection_solve(state, tuple(contacts.values()))
+        candidate = np.ascontiguousarray(solved.points); _restore_pins(candidate, state.pins)
+        sweep = _projection_sweep(state, candidate)
+        if sweep.valid and sweep.safe_step >= 1.0:
+            result = _projection_result(state, candidate)
+            if result is not None: return _projection_success(state, result, solved, sweep, contacts)
+            return _projection_abort(state)
+    return _projection_abort(state)
+
+
+def _projection_available(state, sweep):
+    if not _experiment_enabled(state, "structural_ccd_projection") or state.projection_disabled: return False
+    if sweep.candidate_pairs <= 256: return True
+    state.projection_skipped_dense += 1; return False
+
+
+def _projection_success(state, result, solved, sweep, contacts):
+    state.projection_failure_streak = 0
+    return (*result, solved, sweep, tuple(contacts.values()))
+
+
+def _projection_abort(state):
+    state.projection_aborts += 1; state.projection_failure_streak += 1
+    state.projection_disabled = state.projection_failure_streak >= 2
+    return None
+
+
+def _projection_inject(state, contacts, candidate, sweep):
+    changed = 0
+    for row in _limiting_rows(state, state.points, candidate, sweep):
+        prior = contacts.get(row.key)
+        if prior is None or _limiter_changed(state, prior, row):
+            contacts[row.key] = row; changed += 1
+    state.projection_injections += changed
+    return changed
+
+
+def _projection_solve(state, contacts):
+    solved = solve_trust_sqp(state.points, state.q, state.request.settings,
+        contacts, state.pins, state.trust_radius)
+    state.projection_solves += 1; state.sqp_solve_ms += solved.solve_ms
+    state.condition = max(state.condition, solved.condition)
+    _trace_event(state, "PROJECT", solved.points, extra=_sqp_step_trace(solved))
+    return solved
+
+
+def _projection_sweep(state, target):
+    started = perf_counter(); contacts = _motion_contacts(state, state.points, target)
+    result = collision_free_step(state.points, target, state.snapshot, _radius(state), contacts,
+        slack=_slack(state), assume_initial_valid=True)
+    state.ccd_ms += _elapsed(started); state.ccd_candidates += result.candidate_pairs
+    state.ccd_tested += result.tested_pairs; state.limiting += len(result.limiting_pairs)
+    return result
+
+
+def _projection_result(state, points):
+    fresh, metrics = _measure(state, points); before = _structural_merit(state, state.points)
+    after = _structural_merit(state, points); floor = state.request.tolerances.numeric_floor ** 2
+    accepted = metrics.feasible and np.isfinite(points).all() and before - after > floor
+    _trace_event(state, "PROJECT_RESULT", points, decision="CANDIDATE" if accepted else "REJECT")
+    return (points, fresh, metrics) if accepted else None
+
+
 def _inject_limiting(state, candidate, step):
-    impact = state.points + step.safe_step * (candidate - state.points)
+    injected = False
+    for contact in _limiting_rows(state, state.points, candidate, step):
+        prior = state.contacts.get(contact.key); existing = prior is not None
+        if prior is not None: contact = replace(contact, multiplier=prior.multiplier, age=prior.age + 1)
+        state.contacts[contact.key] = contact
+        if not existing: state.injected += 1
+        injected |= prior is None or _limiter_changed(state, prior, contact)
+    return injected
+
+
+def _limiting_rows(state, source, target, step):
+    impact = source + step.safe_step * (target - source)
     batch = state.world.contact_pairs(impact, _edges(len(impact)), _edge_owners(state, impact),
                                       _owner_span(state, impact), 2.0 * _activation(state))
-    injected = False
-    for key in step.limiting_pairs:
-        pair = _limiting_pair(state, batch.pairs, key)
-        if pair is not None: injected |= bool(_store_limiting(state, impact, pair))
-    return injected
+    pairs = (_limiting_pair(state, batch.pairs, key) for key in step.limiting_pairs)
+    rows = tuple(_limiting_contact(state, source, pair) for pair in pairs if pair is not None)
+    return rows
+
+
+def _limiting_contact(state, source, pair):
+    contact = _contact_from_pair(state, source, pair); plane = float(np.dot(pair.normal, pair.closest) + _radius(state))
+    sample = source[pair.edge] + pair.factor * (source[pair.edge + 1] - source[pair.edge])
+    gap = float(np.dot(sample, pair.normal) - plane)
+    return replace(contact, feature_id="LIMITING", gap=gap, linearized_gap=gap,
+                   normal=tuple(pair.normal))
 
 
 def _limiting_pair(state, pairs, key):
@@ -701,24 +913,6 @@ def _face_identity(snapshot, face):
         if int(row[4]) <= face < int(row[4]) + int(row[5]):
             return str(row[0]), face - int(row[4])
     return "", -1
-
-
-def _store_limiting(state, points, pair):
-    contact = _contact_from_pair(state, points, pair)
-    contact = replace(contact, feature_id="LIMITING", linearized_gap=_limiting_gap(state, pair))
-    prior = state.contacts.get(contact.key); existing = prior is not None
-    if prior is not None:
-        contact = replace(contact, multiplier=prior.multiplier, age=prior.age + 1)
-    state.contacts[contact.key] = contact
-    if not existing: state.injected += 1
-    return prior is None or _limiter_changed(state, prior, contact)
-
-
-def _limiting_gap(state, pair):
-    first = state.points[pair.edge]; second = state.points[pair.edge + 1]
-    sample = first + float(pair.factor) * (second - first)
-    offset = sample - np.asarray(pair.closest, dtype=np.float64)
-    return float(np.dot(offset, np.asarray(pair.normal)) - _radius(state))
 
 
 def _limiter_changed(state, prior, contact):
@@ -766,8 +960,32 @@ def _query_contacts(state, points):
     started = perf_counter(); edges = _edges(len(points)); owners = _edge_owners(state, points)
     batch = state.world.contact_pairs(points, edges, owners, _owner_span(state, points), _activation(state))
     fresh = tuple(_contact_from_pair(state, points, row) for row in batch.pairs)
+    if state.filter_sqp_enabled: fresh = _collapse_contacts(state, fresh)
     fresh = _coherent_contacts(state, points, fresh)
     state.contact_ms += _elapsed(started); return fresh
+
+
+def _collapse_contacts(state, contacts):
+    output = []
+    for row in sorted(contacts, key=lambda value: value.key):
+        index = _duplicate_contact(state, output, row)
+        if index < 0: output.append(row); continue
+        prior = output[index]
+        output[index] = replace(prior, multiplier=max(prior.multiplier, row.multiplier))
+    return tuple(output)
+
+
+def _duplicate_contact(state, contacts, row):
+    for index, prior in enumerate(contacts):
+        if _same_contact_geometry(state, prior, row): return index
+    return -1
+
+
+def _same_contact_geometry(state, first, second):
+    if (first.edge, first.collider_id, first.feature_id) != (second.edge, second.collider_id, second.feature_id): return False
+    if abs(first.factor - second.factor) > 1.0e-6: return False
+    if abs(first.gap - second.gap) > _slack(state): return False
+    return bool(np.dot(first.normal, second.normal) >= 1.0 - 1.0e-6)
 
 
 def _contact_from_pair(state, points, pair):
@@ -955,7 +1173,7 @@ def _same_contact_span(first, second):
 
 
 def _adopt(state, points, fresh, metrics):
-    previous = state.points.copy(); old_energy = _energy(state, previous)
+    previous = state.points.copy(); old_energy = _energy(state, previous); pending = state.pending_sqp
     state.points = np.ascontiguousarray(points); state.contacts = _merge_contacts(state, fresh)
     if state.filter_sqp_enabled: _apply_sqp_multipliers(state)
     else: _update_multipliers(state)
@@ -965,6 +1183,8 @@ def _adopt(state, points, fresh, metrics):
     state.stationarity = _stationarity(state); _update_energy_streak(state, old_energy)
     state.fixed_history.append(state.fixed_residual); state.stationarity_history.append(state.stationarity)
     state.feasibility_history.append((metrics.maximum_violation, metrics.squared_violation))
+
+
 def _apply_sqp_multipliers(state):
     step = state.pending_sqp; duals = {} if step is None else dict(zip(step.active_keys, step.multipliers))
     state.contacts = {key: replace(row, multiplier=max(0.0, duals.get(key, 0.0)))
@@ -1036,6 +1256,7 @@ def _finish(state, termination, message, started):
     validated = bool(metrics.feasible and np.isfinite(state.points).all())
     if not validated and termination is V2Termination.CONVERGED:
         termination, message = V2Termination.UNSAFE_OUTPUT, "final native validation invariant failed"
+    _trace_event(state, "FINISH", decision=termination.value, metrics=metrics)
     diagnostics = _diagnostics(state); route = state.planner.mode.value if state.planner.succeeded else "DIRECT"
     result = V2Result(state.request.signature(), termination, tuple(map(tuple, state.points)), diagnostics,
                       validated, route, message, V2_CONTACT_CORE_VERSION,
@@ -1050,7 +1271,166 @@ def _core_trace(state, started):
         tuple(state.fixed_history), tuple(state.stationarity_history), tuple(state.trust_history),
         tuple(state.rejection_reasons), _contact_trace(state), _stationarity_profile(state),
         tuple(state.ccd_step_history), tuple(state.model_ratio_history),
-        tuple(state.normal_step_history), tuple(state.tangent_step_history), state.sqp_solve_ms)
+        tuple(state.normal_step_history), tuple(state.tangent_step_history), state.sqp_solve_ms,
+        tuple(state.diagnostic_events or ()), tuple(map(tuple, state.q)), tuple(state.pin_indices),
+        _experiment_stats(state))
+
+
+def _experiment_stats(state):
+    base = (("projection_attempts", state.projection_attempts),
+            ("projection_accepts", state.projection_accepts),
+            ("projection_solves", state.projection_solves),
+            ("projection_injections", state.projection_injections),
+            ("projection_aborts", state.projection_aborts),
+            ("projection_disabled", int(state.projection_disabled)),
+            ("projection_skipped_dense", state.projection_skipped_dense),
+            ("composite_steps", state.composite_steps),
+            ("tangential_steps", state.tangential_steps),
+            ("soc_attempts", state.soc_attempts),
+            ("soc_applied", state.soc_applied),
+            ("soc_ms", state.soc_ms),
+            ("soc_norm_total", state.soc_norm_total))
+    return base
+
+
+def _trace_event(state, stage, points=None, decision="", extra=None, contacts=None, metrics=None):
+    if not state.diagnostic_enabled: return
+    values = state.points if points is None else np.asarray(points, dtype=np.float64)
+    rows = tuple(state.contacts.values()) if contacts is None else tuple(contacts)
+    record = _trace_header(state, stage, decision, metrics or state.metrics)
+    record.update(_geometry_trace(state, values)); record.update(_objective_trace(state, values, rows))
+    record.update(_gradient_trace(state, values, rows)); record["contacts"] = _diagnostic_contacts(state, rows)
+    if extra: record.update(extra)
+    state.diagnostic_events.append(record)
+
+
+def _trace_sqp_proposal(state, step):
+    if not state.diagnostic_enabled: return
+    state.diagnostic_proposal += 1
+    _trace_event(state, "PROPOSE", step.points, extra=_sqp_step_trace(step))
+
+
+def _trace_ccd(state, step, candidate):
+    if not state.diagnostic_enabled: return
+    _trace_event(state, "CCD", candidate, extra=_ccd_step_trace(step))
+
+
+def _accepted_movement(state, points):
+    if not state.diagnostic_enabled: return ()
+    return _scalar_rows(np.linalg.norm(points - state.points, axis=1))
+
+
+def _trace_header(state, stage, decision, metrics):
+    return {"proposal": state.diagnostic_proposal, "stage": str(stage), "decision": str(decision),
+        "accepted": state.accepted, "rejected": state.rejected, "stalled": state.stalled,
+        "trust_radius": state.trust_radius, "penalty": state.mu, "energy_streak": state.energy_streak,
+        "fixed_residual": _finite_or_none(state.fixed_residual),
+        "stationarity_residual": _finite_or_none(state.stationarity),
+        "condition": _finite_or_none(state.condition), "feasibility": _metrics_payload(metrics),
+        "active_contacts": len(state.contacts), "injected": state.injected,
+        "retired": state.retired, "limiting": state.limiting, "regroupings": state.regroupings}
+
+
+def _geometry_trace(state, points):
+    delta = points - state.points; lengths = np.linalg.norm(np.diff(points, axis=0), axis=1)
+    reference = np.linalg.norm(points - state.q, axis=1)
+    return {"points": _vector_rows(points), "step_norms": _scalar_rows(np.linalg.norm(delta, axis=1)),
+        "segment_lengths": _scalar_rows(lengths), "turn_degrees": _scalar_rows(_turn_profile(points)),
+        "reference_distances": _scalar_rows(reference), "maximum_step": float(np.max(np.linalg.norm(delta, axis=1)))}
+
+
+def _turn_profile(points):
+    output = np.zeros(len(points), dtype=np.float64)
+    if len(points) < 3: return output
+    before = points[1:-1] - points[:-2]; after = points[2:] - points[1:-1]
+    scale = np.linalg.norm(before, axis=1) * np.linalg.norm(after, axis=1)
+    cosine = np.divide(np.sum(before * after, axis=1), scale, out=np.ones(len(scale)), where=scale > 1.0e-20)
+    output[1:-1] = np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0))); return output
+
+
+def _objective_trace(state, points, contacts):
+    energy = structural_energy(points, state.q, state.request.settings)
+    contact = sum(_contact_energy(row, state.mu) for row in contacts)
+    return {"energy": {"fidelity": float(energy.fidelity), "length": float(energy.length),
+        "curvature": float(energy.curvature), "contact": float(contact),
+        "structural": float(energy.total), "total": float(energy.total + contact)}}
+
+
+def _gradient_trace(state, points, contacts):
+    structural = _normal_gradient(points, state.q, _static_settings(state.request.settings))
+    contact = np.zeros_like(structural)
+    for row in contacts: _add_contact_gradient(contact, row, state.mu)
+    total = structural + contact; total[list(state.pins)] = 0.0
+    return {"gradient": {"structural": _vector_rows(structural), "contact": _vector_rows(contact),
+        "total": _vector_rows(total), "structural_norms": _scalar_rows(np.linalg.norm(structural, axis=1)),
+        "contact_norms": _scalar_rows(np.linalg.norm(contact, axis=1)),
+        "total_norms": _scalar_rows(np.linalg.norm(total, axis=1)),
+        "opposition_cosine": _scalar_rows(_opposition_profile(structural, contact))}}
+
+
+def _opposition_profile(first, second):
+    scale = np.linalg.norm(first, axis=1) * np.linalg.norm(second, axis=1)
+    return np.divide(np.sum(first * second, axis=1), scale,
+                     out=np.zeros(len(first), dtype=np.float64), where=scale > 1.0e-20)
+
+
+def _diagnostic_contacts(state, contacts):
+    return tuple(_diagnostic_contact(state, row) for row in contacts)
+
+
+def _diagnostic_contact(state, row):
+    gap = row.linearized_gap if np.isfinite(row.linearized_gap) else row.gap
+    force = max(0.0, row.multiplier - state.mu * gap)
+    return {"key": row.key, "edge": row.edge, "factor": row.factor,
+        "collider": row.collider_id, "triangle": row.triangle_id, "feature": row.feature_id,
+        "normal": tuple(map(float, row.normal)), "gap": float(row.gap),
+        "linearized_gap": _finite_or_none(row.linearized_gap), "multiplier": float(row.multiplier),
+        "active_force": float(force), "complementarity": float(abs(row.multiplier * row.gap)),
+        "group": row.group, "age": row.age, "clear_streak": row.clear_streak}
+
+
+def _trace_trial(state, points, contacts, metrics, ratio):
+    if not state.diagnostic_enabled: return
+    extra = {"model_ratio": _finite_or_none(ratio), "trial_feasibility": _metrics_payload(metrics)}
+    _trace_event(state, "TRIAL", points, extra=extra, contacts=contacts, metrics=metrics)
+
+
+def _sqp_step_trace(step):
+    payload = {"predicted_violation": float(step.predicted_violation),
+        "predicted_energy": float(step.predicted_energy), "normal_norm": float(step.normal_norm),
+        "tangential_norm": float(step.tangential_norm), "solve_ms": float(step.solve_ms),
+        "condition": _finite_or_none(step.condition), "active_keys": tuple(step.active_keys),
+        "multipliers": _scalar_rows(step.multipliers), "variant": step.variant,
+        "normal_fraction": float(step.normal_fraction),
+        "tangential_fraction": float(step.tangential_fraction), "soc_norm": float(step.soc_norm)}
+    return {"sqp": payload}
+
+
+def _ccd_step_trace(step):
+    return {"ccd": {"safe_step": float(step.safe_step), "valid": bool(step.valid),
+        "initially_valid": bool(step.initially_valid), "reason": step.reason.value,
+        "limiting_pairs": tuple(step.limiting_pairs), "candidate_pairs": int(step.candidate_pairs),
+        "tested_pairs": int(step.tested_pairs), "intervals": int(step.intervals)}}
+
+
+def _metrics_payload(metrics):
+    return {"feasible": bool(metrics.feasible), "maximum_violation": float(metrics.maximum_violation),
+        "squared_violation": float(metrics.squared_violation),
+        "new_collision_count": int(metrics.new_collision_count), "pin_residual": float(metrics.pin_residual),
+        "penetrating_groups": tuple(metrics.penetrating_groups)}
+
+
+def _vector_rows(values):
+    return tuple(tuple(map(float, row)) for row in np.asarray(values, dtype=np.float64))
+
+
+def _scalar_rows(values):
+    return tuple(map(float, np.asarray(values, dtype=np.float64)))
+
+
+def _finite_or_none(value):
+    if value is None: return None
+    return float(value) if np.isfinite(value) else None
 
 
 def _contact_trace(state):
@@ -1171,3 +1551,7 @@ def _elapsed(started):
 
 def _finite_or_zero(value):
     return float(value) if np.isfinite(value) else 0.0
+
+
+def _experiment_enabled(state, name):
+    return bool(getattr(getattr(state, "experiment", None), name, False))

@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -7,7 +8,8 @@ from core.vcp.v2.acceleration import AndersonHistory
 from core.vcp.v2.collision import build_native_collision_world
 from core.vcp.v2.collision_native import (native_contact_block_solve,
                                           native_structural_contact_responses)
-from core.vcp.v2.contact_core import (V2Contact, _merge_contacts,
+from core.vcp.v2.contact_core import (V2Contact, V2ContactExperiment, _collapse_contacts,
+                                      _merge_contacts, _projection_available, _stationary_rejection,
                                       begin_contact_core, solve_contact_core)
 from core.vcp.v2.contracts import V2ColliderSnapshot
 from core.vcp.v2.structural import (_base_bands, _static_settings, assemble_normal_matrix,
@@ -55,6 +57,21 @@ def _dense_response(matrix, jacobian, pins):
 
 
 class FiberV2ContactCoreTests(unittest.TestCase):
+    def test_structural_ccd_projection_is_isolated_and_validated(self):
+        package = solve_contact_core(_box_request(), use_planner=False, use_filter_sqp=True,
+            experiment=V2ContactExperiment(structural_ccd_projection=True))
+        stats = dict(package.trace.experiment_stats)
+        self.assertTrue(package.result.validated, package.result.message)
+        self.assertGreater(stats["projection_attempts"], 0)
+        self.assertGreater(stats["projection_solves"], 0)
+
+    def test_structural_projection_skips_dense_ccd_batches(self):
+        state = SimpleNamespace(experiment=V2ContactExperiment(True), projection_disabled=False,
+                                projection_skipped_dense=0)
+        self.assertTrue(_projection_available(state, SimpleNamespace(candidate_pairs=256)))
+        self.assertFalse(_projection_available(state, SimpleNamespace(candidate_pairs=257)))
+        self.assertEqual(state.projection_skipped_dense, 1)
+
     def test_unmatched_ccd_limiter_retires_immediately(self):
         limiter = V2Contact(8, .63, "C", 4, "LIMITING", (0, 1, 0), 0.0, multiplier=274.0)
         state = _contact_state(_box_request(), limiter)
@@ -67,6 +84,23 @@ class FiberV2ContactCoreTests(unittest.TestCase):
         output = _merge_contacts(_contact_state(_box_request(), limiter), (fresh,))
         self.assertEqual(tuple(output.values())[0].feature_id, "DISTANCE")
         self.assertEqual(tuple(output.values())[0].multiplier, 274.0)
+
+    def test_sqp_collapses_adjacent_triangle_duplicate_contacts(self):
+        first = V2Contact(8, .63, "C", 2, "DISTANCE", (0, 1, 0), 0.0, multiplier=4.0)
+        duplicate = V2Contact(8, .63, "C", 10, "DISTANCE", (0, 1, 0), 0.0, multiplier=7.0)
+        distinct = V2Contact(8, .63, "C", 11, "DISTANCE", (1, 0, 0), 0.0)
+        output = _collapse_contacts(_contact_state(_box_request(), first), (duplicate, distinct, first))
+        self.assertEqual(len(output), 2)
+        self.assertEqual(output[0].multiplier, 7.0)
+
+    def test_sqp_repeated_stationary_model_rejection_converges(self):
+        contact = V2Contact(0, .5, "C", 2, "DISTANCE", (1, 0, 0), 0.0)
+        state = _contact_state(_box_request(), contact)
+        state.metrics = SimpleNamespace(feasible=True); state.stalled = 2
+        state.fixed_residual = 1.0e-6; state.stationarity = 1.0e-6
+        self.assertTrue(_stationary_rejection(state, "MODEL_RATIO:-inf"))
+        state.contacts = {contact.key: replace(contact, feature_id="LIMITING")}
+        self.assertFalse(_stationary_rejection(state, "MODEL_RATIO:-inf"))
 
     def test_anderson_accelerates_stable_affine_fixed_point(self):
         base = np.zeros(3); fast = base.copy(); history = AndersonHistory(4)
@@ -153,6 +187,26 @@ class FiberV2ContactCoreTests(unittest.TestCase):
         self.assertLess(package.result.diagnostics.rejected_steps,
                         baseline.result.diagnostics.rejected_steps)
 
+    def test_diagnostic_trace_is_opt_in_and_geometry_neutral(self):
+        request = _box_request()
+        plain = solve_contact_core(request, use_planner=False, use_filter_sqp=True)
+        traced = solve_contact_core(request, use_planner=False, use_filter_sqp=True,
+                                    diagnostic_trace=True)
+        self.assertEqual(plain.result.points, traced.result.points)
+        self.assertEqual(plain.trace.iteration_trace, ())
+        self.assertGreater(len(traced.trace.iteration_trace), 3)
+        self.assertEqual(len(traced.trace.reference_points), request.settings.node_count)
+
+    def test_diagnostic_trace_records_solver_and_collision_evidence(self):
+        request = _box_request(); package = solve_contact_core(request, use_planner=False,
+            use_filter_sqp=True, diagnostic_trace=True)
+        rows = package.trace.iteration_trace; stages = {row["stage"] for row in rows}
+        self.assertTrue({"SEED", "PROPOSE", "FINISH"}.issubset(stages))
+        proposal = next(row for row in rows if row["stage"] == "PROPOSE")
+        self.assertEqual(len(proposal["turn_degrees"]), request.settings.node_count)
+        self.assertEqual(len(proposal["gradient"]["total_norms"]), request.settings.node_count)
+        self.assertIn("sqp", proposal); self.assertIn("feasibility", proposal)
+
     def test_subfiber_sqp_preserves_authored_hard_kink(self):
         anchors = _anchors(((0, 0, 0), (1, 1, 0), (2, 0, 0)))
         package = solve_subfiber_sqp(_request(anchors, count=33), use_planner=False)
@@ -169,6 +223,15 @@ class FiberV2ContactCoreTests(unittest.TestCase):
         self.assertEqual(len(package.result.points), 40)
         self.assertGreaterEqual(package.trace.outer_rounds,
                                 max(span.completed_round for span in package.trace.spans))
+
+    def test_subfiber_sqp_propagates_diagnostic_iterations(self):
+        anchors = _anchors(((0, 0, 0), (1, 1, 0), (2, 0, 0)))
+        package = solve_subfiber_sqp_fixed(_request(anchors, count=33), use_planner=False,
+                                           diagnostic_trace=True)
+        self.assertEqual(len(package.trace.spans), 2)
+        self.assertTrue(all(span.iterations for span in package.trace.spans))
+        self.assertTrue(all(span.iterations[-1]["stage"] == "FINISH"
+                            for span in package.trace.spans))
 
     def test_fixed_subfiber_preserves_global_structural_coefficients(self):
         request = _request(_anchors(((0, 0, 0), (1, 1, 0), (2, 0, 0))), count=64)

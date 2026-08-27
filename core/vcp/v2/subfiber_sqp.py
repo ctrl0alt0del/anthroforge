@@ -30,6 +30,9 @@ class V2SubfiberSpanTrace:
     condition: float
     contacts: tuple
     stationarity_profile: tuple
+    rejection_reasons: tuple
+    iterations: tuple
+    experiment_stats: tuple
     total_ms: float
 
 
@@ -41,19 +44,19 @@ class V2SubfiberTrace:
     spans: tuple = ()
 
 
-def solve_subfiber_sqp(request, snapshot=None, use_planner=True):
-    return _solve_subfibers(request, snapshot, use_planner, False)
+def solve_subfiber_sqp(request, snapshot=None, use_planner=True, diagnostic_trace=False, experiment=None):
+    return _solve_subfibers(request, snapshot, use_planner, False, diagnostic_trace, experiment)
 
 
-def solve_subfiber_sqp_fixed(request, snapshot=None, use_planner=True):
-    return _solve_subfibers(request, snapshot, use_planner, True)
+def solve_subfiber_sqp_fixed(request, snapshot=None, use_planner=True, diagnostic_trace=False, experiment=None):
+    return _solve_subfibers(request, snapshot, use_planner, True, diagnostic_trace, experiment)
 
 
-def _solve_subfibers(request, snapshot, use_planner, fixed):
+def _solve_subfibers(request, snapshot, use_planner, fixed, diagnostic, experiment):
     started = perf_counter(); q, indices = _direct_reference(request)
     snapshot, planner = _prepare_shared(request, snapshot, use_planner)
     seed = _initial_seed(request, q, indices, planner)
-    sessions = _sessions(request, snapshot, seed, indices, fixed)
+    sessions = _sessions(request, snapshot, seed, indices, fixed, diagnostic, experiment)
     drain = _drain_global if fixed else _drain_round_robin
     rounds, completed = drain(sessions, request, indices)
     version = V2_SUBFIBER_SQP_FIXED_VERSION if fixed else V2_SUBFIBER_SQP_VERSION
@@ -75,12 +78,12 @@ def _initial_seed(request, direct, indices, planner):
     return direct
 
 
-def _sessions(request, snapshot, seed, indices, fixed):
+def _sessions(request, snapshot, seed, indices, fixed, diagnostic, experiment):
     output = []
     for span, (first, last) in enumerate(zip(indices[:-1], indices[1:])):
         subrequest = _span_request(request, seed, span, first, last, fixed)
         output.append(begin_contact_core(subrequest, snapshot, use_planner=False,
-                                         use_filter_sqp=True))
+            use_filter_sqp=True, diagnostic_trace=diagnostic, experiment=experiment))
     return tuple(output)
 
 
@@ -240,4 +243,5 @@ def _span_trace(index, package, indices, completed):
         result.termination.value, diagnostics.accepted_steps, diagnostics.rejected_steps,
         diagnostics.fixed_point_residual, diagnostics.stationarity_residual,
         diagnostics.block_factor_condition, trace.final_contacts,
-        trace.stationarity_profile, trace.total_ms)
+        trace.stationarity_profile, trace.rejection_reasons,
+        trace.iteration_trace, trace.experiment_stats, trace.total_ms)
