@@ -17,6 +17,23 @@ Each value is the median of four fresh Blender processes. All 64 coordinates mat
 byte between scalar and four-worker execution. Prior phase profiling showed CCD remained the
 dominant serial phase, so further large gains must reduce CCD work or orchestration.
 
+## LLVM OpenMP production backend
+
+The Windows V3 backend now builds with Clang 19, precise floating-point semantics, and LLVM
+OpenMP. The backend capability signature distinguishes this build from the retired MSVC/vcomp
+binary, invalidating native-dependent caches when the backend changes.
+
+The promotion A/B used `skull_muscles.blend/FIBER_14` at the final 180-step budget. Four
+alternating fresh Blender processes measured 292.95 ms median for MSVC/vcomp and 287.32 ms for
+Clang/libomp, a 1.9% reduction. All 64 coordinates were bit-identical. Both runs reported the
+same safe `STALLED` state, 19 active contacts, zero penetration, and identical residuals.
+
+The compiler change is accepted primarily to unlock modern OpenMP task scheduling. It is not
+treated as a material solver optimization by itself. The locally installed Microsoft libomp
+binary is suitable for development; release redistribution requires a separately approved
+runtime provenance because Microsoft's `/openmp:llvm` documentation does not grant production
+redistribution of that supplied DLL.
+
 ## Production threading contract
 
 - Default to four native workers, capped by the available logical processor count.
@@ -30,55 +47,74 @@ dominant serial phase, so further large gains must reduce CCD work or orchestrat
 - Preserve scalar execution for small batches where thread-team overhead is not recoverable.
 - Missing OpenMP runtime makes V3 `BACKEND_UNAVAILABLE`; it never selects an unsafe fallback.
 
+## Persistent fused native V3 session
+
+`fiber-v3-production-2` now owns a persistent native session for each V3 span. It retains
+edge/owner data, immutable triangle snapshots, contact rows, structural matrices and factors,
+response workspaces, candidate-pair buffers, and CCD interval storage. Python still owns the
+request token, round-robin scheduling, contact-group policy, SQP merit/regularization decisions,
+cancellation, validation acceptance, and publication.
+
+The production call boundary now fuses contact acquisition with independent validation, reuses
+the native structural-response workspace, and constructs/filter/packs each feasible CCD job in
+native code. CCD safe-fraction reduction remains serial and retains its original 128-pair batch
+order, so the optimization trajectory is unchanged.
+
+Six fresh Blender processes per mode, alternated reference/fused at the final 180-step cap,
+measured:
+
+| Fixture | Reference boundary | Persistent session | Improvement | Output parity |
+| --- | ---: | ---: | ---: | --- |
+| `skull_muscles/FIBER_14` | 279.63 ms | 252.26 ms | 9.8% / 1.11× | Bit-identical |
+| `skeleton_comb_base/FIBER_1` | 1205.73 ms | 708.28 ms | 41.3% / 1.70× | Bit-identical |
+
+Every comparison returned the same 64 coordinates. Both source `.blend` SHA-256 hashes remained
+unchanged. `AF_FIBER_V3_NATIVE_SESSION=0` retains the old Python/native boundary as a temporary
+internal reference; production defaults to the persistent session.
+
 ## Proposed next improvements
 
-### 1. Persistent fused native V3 session
-
-Keep points, contacts, multipliers, factor buffers, candidate pairs, CCD certificates, and
-containment state in one native session. Expose bounded `begin`, `step`, and `finish` calls so
-Python retains scheduling and publication but stops repacking every numerical phase.
-
-### 2. Topology-shared worlds and batched transform refit
+### 1. Topology-shared worlds and batched transform refit
 
 Separate topology, deformation, and transform generations. Reuse triangle BVHs when only an SCP
 transform changes, submit all descendant transforms together, and refit the world BVH once.
 Rebuild only the geometry of an actually deformed collider.
 
-### 3. Allocation-free native workspaces
+### 2. Allocation-free native workspaces
 
 Reuse traversal stacks, candidate arrays, contact rows, block matrices, factors, RHS vectors,
 and CCD interval queues. Remove per-edge `vector`, per-point `priority_queue`, and per-solve
 factor allocations from hot paths.
 
-### 4. Better BVH construction and traversal
+### 3. Better BVH construction and traversal
 
 Use compact cache-line-sized nodes, binned SAH construction for stable geometry, iterative
 near-first traversal, deterministic per-edge emission, and refitting for unchanged topology.
 Avoid global contact sorting when deterministic traversal can already produce canonical order.
 
-### 5. Precomputed transformed geometry
+### 4. Precomputed transformed geometry
 
 On each collider transform, cache world vertices, triangle edges, normals, bounds, and inverse
 padding scale once. Reuse them across contact, nearest, CCD broad phase, and static validation.
 
-### 6. SIMD packet kernels
+### 5. SIMD packet kernels
 
 Add runtime-dispatched AVX2 packets for AABB and triangle tests with conservative double-precision
 semantics. Do not use approximate reciprocal/square-root operations or fast-math in safety tests.
 
-### 7. Compiler optimization
+### 6. Compiler optimization
 
 Benchmark `/GL`, `/LTCG`, and representative profile-guided optimization trained on the supplied
 sphere, skull, skull-skin, and skeleton captures. Keep PGO and SIMD contributions independently
 measurable.
 
-### 8. Reduce CCD work without changing its reduction
+### 7. Reduce CCD work without changing its reduction
 
 Retain certified fat swept bounds per Fiber edge, share broad-phase traversal with contact
-acquisition, reuse containment per state generation, and fuse Python's pair batches into one
-persistent native job while preserving the current sequential safe-fraction order.
+acquisition, and reuse containment per accepted-state generation. The persistent session already
+fuses Python's pair batches while preserving the sequential safe-fraction order.
 
-### 9. Versioned CCD replacement
+### 8. Versioned CCD replacement
 
 Only after exact-parity work is exhausted, evaluate independent absolute-TOI queries with a
 deterministic global minimum. This is a numerical algorithm change, not transparent threading;

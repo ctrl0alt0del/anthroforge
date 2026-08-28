@@ -17,7 +17,7 @@ from .shortcut import V3ShortcutTrace, apply_v3_shortcut
 from .spans import aggregate_spans, prepare_span_request, synchronize_owner_spans
 
 
-V3_SOLVER_VERSION = "fiber-v3-production-1"
+V3_SOLVER_VERSION = "fiber-v3-production-2"
 
 
 @dataclass
@@ -42,6 +42,7 @@ class V3SolveSession:
     checkpoint_ready: bool = False
     package: object = None
     done: bool = False
+    native_session: bool = True
 
     def step(self):
         _advance_v3(self)
@@ -57,16 +58,18 @@ class V3SolveSession:
 
 
 def begin_v3_session(request, snapshot=None, preview=False, checkpoint_steps=0,
-                     use_planner=True, policy=V3_PRODUCTION_POLICY):
+                     use_planner=True, policy=V3_PRODUCTION_POLICY, native_session=True):
     version = f"{V3_SOLVER_VERSION}:{policy.fingerprint()[:12]}"
     accepted = replace(accepted_v3_request(request, policy), engine_version=version)
-    return V3SolveSession(accepted, snapshot, preview, max(0, int(checkpoint_steps)),
-                          bool(use_planner), policy)
+    value = V3SolveSession(accepted, snapshot, preview, max(0, int(checkpoint_steps)),
+                           bool(use_planner), policy)
+    value.native_session = bool(native_session); return value
 
 
 def solve_v3_session(request, snapshot=None, preview=False, checkpoint_steps=0,
-                     use_planner=True, policy=V3_PRODUCTION_POLICY):
-    session = begin_v3_session(request, snapshot, preview, checkpoint_steps, use_planner, policy)
+                     use_planner=True, policy=V3_PRODUCTION_POLICY, native_session=True):
+    session = begin_v3_session(request, snapshot, preview, checkpoint_steps, use_planner,
+                               policy, native_session)
     while not session.done: session.step()
     return session.package
 
@@ -115,7 +118,8 @@ def _prepare_spans(session):
     for span, (first, last) in enumerate(zip(session.pins[:-1], session.pins[1:])):
         request = prepare_span_request(session.request, session.seed, span, first, last)
         rows.append(begin_contact_core(request, session.snapshot, session.preview, False,
-                    use_filter_sqp=True, policy=session.policy))
+                    use_filter_sqp=True, policy=session.policy,
+                    native_session=session.native_session))
     session.spans = tuple(rows); session.completed.update(_already_done(session.spans))
     session.phase = "SOLVE"
 

@@ -4,10 +4,10 @@ Date: 2026-08-27
 
 ## Purpose
 
-`fiber-v3-production-1` is an internal opt-in production boundary for the exact
+`fiber-v3-production-2` is the code-default production boundary for the exact
 solver configuration visually accepted as `REG_ADAPTIVE_SPACING`. It filters the
 accepted implementation out of the experimental V2 modules without changing its
-finite-work objective or stopping behavior. V2 remains the default engine.
+finite-work objective or stopping behavior. V1 and V2 remain internal overrides.
 
 ## Canonical policy
 
@@ -38,11 +38,17 @@ continues beyond that cap nor substitutes an earlier state using visual metrics.
 - Integrated unilateral contacts, infeasible-start filtering and limiting-pair injection.
 - Cached native loader, reusable contact buffers and vectorized swept segments.
 - Deterministic native parallelism for contacts, nearest-point queries and static validation.
+- Persistent native span sessions for fused contact/validation, structural responses and CCD.
 
 Native workers write only independent indexed rows. Reductions and output aggregation retain
 their original serial order, while CCD remains serial because changing its reduction can change
 the nonlinear solver trajectory. The selected worker count is recorded in backend provenance,
 diagnostics and cache identity.
+
+The persistent session is part of `fiber-v3-production-2` and ABI capability `65535`. It owns
+plain numeric workspaces only; Blender state, scheduling, cancellation, acceptance, and
+publication remain outside native code. `AF_FIBER_V3_NATIVE_SESSION=0` is a temporary internal
+parity switch. The code default and production behavior use the session.
 
 The machine-readable authority is `core/vcp/v3/manifest.py`; the immutable
 numeric authority is `core/vcp/v3/policy.py`.
@@ -70,8 +76,8 @@ Shortcut impact is qualified separately before any future default change.
 
 ## Runtime contract
 
-Set `AF_FIBER_ENGINE=V3` before a request to select V3. With no variable, V2
-remains selected. Open Fibers run V3; cyclic/symmetric loops record a V1
+With no `AF_FIBER_ENGINE`, open Fibers select V3. Exact `V1`, `V2`, and `V3`
+values remain request-time internal overrides. Cyclic/symmetric loops record a V1
 compatibility fallback. A missing ABI 3 backend fails closed.
 
 For live edits, `iterations_interactive` is a non-persistent validated preview

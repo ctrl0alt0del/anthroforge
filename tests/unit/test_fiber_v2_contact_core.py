@@ -53,6 +53,40 @@ def _dense_response(matrix, jacobian, pins):
 
 
 class FiberV2ContactCoreTests(unittest.TestCase):
+    def test_persistent_native_session_fuses_contacts_and_validation(self):
+        request = _box_request(); world = build_native_collision_world(request.colliders)
+        points = np.linspace((-1, .1, 0), (1, .1, 0), request.settings.node_count)
+        edges = tuple((index, index + 1) for index in range(len(points) - 1))
+        owners = tuple(("", "") for _edge in edges); session = world.begin_v3_session(owners)
+        contacts, validation = session.measure(points, 0.0, .2, .1)
+        expected = world.contact_pairs(points, edges, owners, 0.0, .2)
+        self.assertEqual(contacts.pairs, expected.pairs); self.assertEqual(validation.clear,
+                                                                         world.validate(points, edges, owners, 0.0, .1).clear)
+        self.assertEqual(session.stats()["measures"], 1)
+
+    def test_persistent_native_session_reuses_structural_workspace(self):
+        request = _box_request(); world = build_native_collision_world(request.colliders)
+        count = request.settings.node_count; owners = tuple(("", "") for _edge in range(count - 1))
+        session = world.begin_v3_session(owners); reference = np.linspace((-1, .2, 0), (1, .2, 0), count)
+        bands = _base_bands(count, _static_settings(request.settings)); rhs = request.settings.fidelity_weight * reference
+        rows = ((8, .2, (0, 1, 0)),); pins, targets = (0, count - 1), (reference[0], reference[-1])
+        expected = native_structural_contact_responses(bands, rhs, rows, pins, targets)
+        first = session.structural_responses(bands, rhs, rows, pins, targets)
+        second = session.structural_responses(bands, rhs, rows, pins, targets)
+        np.testing.assert_array_equal(first[0], expected[0]); np.testing.assert_array_equal(second[1], expected[1])
+        self.assertEqual(session.stats()["structural_solves"], 2)
+
+    def test_persistent_native_ccd_matches_reference_driver(self):
+        request = _box_request()
+        reference = solve_contact_core(request, use_planner=False, use_filter_sqp=True,
+                                       policy=V3_PRODUCTION_POLICY, native_session=False)
+        fused = solve_contact_core(request, use_planner=False, use_filter_sqp=True,
+                                   policy=V3_PRODUCTION_POLICY, native_session=True)
+        np.testing.assert_array_equal(fused.result.points, reference.result.points)
+        self.assertEqual(fused.result.termination, reference.result.termination)
+        stats = dict(fused.trace.native_session_stats)
+        self.assertGreater(stats["sweeps"], 0); self.assertGreater(stats["sweep_capacity"], 0)
+
     def test_unmatched_ccd_limiter_retires_immediately(self):
         limiter = V2Contact(8, .63, "C", 4, "LIMITING", (0, 1, 0), 0.0, multiplier=274.0)
         state = _contact_state(_box_request(), limiter)

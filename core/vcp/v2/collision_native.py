@@ -1,6 +1,6 @@
 """Private ctypes binding for the packaged Fiber V2 collision DLL."""
 
-from ctypes import CDLL, POINTER, Structure, byref, c_double, c_int, c_int64, c_void_p
+from ctypes import CDLL, POINTER, Structure, byref, c_double, c_int, c_int64, c_uint64, c_void_p
 from os import environ
 from pathlib import Path
 
@@ -8,8 +8,9 @@ import numpy as np
 
 
 V2_NATIVE_ABI = 3
-V2_NATIVE_CAPABILITIES = 16383
+V2_NATIVE_CAPABILITIES = 65535
 V2_NATIVE_BATCH_CAPABILITY = 1024
+V3_NATIVE_SESSION_CAPABILITY = 32768
 
 
 class _NativeMeshSweep(Structure):
@@ -43,6 +44,12 @@ class _NativeContactPair(Structure):
     _fields_ = [(name, c_int) for name in ("edge", "collider", "instance", "face", "contained")]
     _fields_ += [("factor", c_double), ("distance", c_double)]
     _fields_ += [(name, c_double * 3) for name in ("closest", "normal")]
+
+
+class _NativeV3SessionStats(Structure):
+    _fields_ = [(name, c_uint64) for name in ("measures", "contact_queries", "validations",
+                                               "structural_solves", "sweeps")]
+    _fields_ += [(name, c_int) for name in ("edge_capacity", "contact_capacity", "sweep_capacity")]
 
 
 _REASONS = ("CLEAR", "AABB_CLEAR", "INVALID_START", "POSSIBLE_COLLISION", "BUDGET_EXHAUSTED")
@@ -89,6 +96,52 @@ def _configure_v3_calls(library):
     _configure_contact_pair_call(library, double, integer, plain)
     _configure_contact_solve_call(library, double, integer)
     _configure_response_call(library, double, integer)
+    _configure_v3_session_calls(library, double, integer, plain)
+
+
+def _configure_v3_session_calls(library, double, integer, plain):
+    _configure_v3_session_lifecycle(library, plain)
+    _configure_v3_session_collision(library, double, plain)
+    _configure_v3_session_solver(library, double, integer)
+
+
+def _configure_v3_session_lifecycle(library, plain):
+    library.af_v3_session_create.argtypes = [c_void_p, plain, plain, c_int]
+    library.af_v3_session_create.restype = c_void_p
+    library.af_v3_session_destroy.argtypes = [c_void_p]
+    library.af_v3_session_attach_snapshot.argtypes = [c_void_p, c_void_p, plain, c_int]
+    library.af_v3_session_attach_snapshot.restype = c_int
+    library.af_v3_session_stats.argtypes = [c_void_p, POINTER(_NativeV3SessionStats)]
+    library.af_v3_session_stats.restype = c_int
+
+
+def _configure_v3_session_collision(library, double, plain):
+    pair = POINTER(_NativeContactPair); contacts = POINTER(_NativeWorldContacts)
+    library.af_v3_session_contacts.argtypes = [c_void_p, double, c_double, c_double, pair, c_int, contacts]
+    library.af_v3_session_contacts.restype = c_int
+    library.af_v3_session_copy_contacts.argtypes = [c_void_p, pair, c_int]
+    library.af_v3_session_copy_contacts.restype = c_int
+    _configure_v3_session_validation(library, double, plain, pair, contacts)
+    library.af_v3_session_safe_step.argtypes = [c_void_p, double, double, c_double, c_double,
+        c_int, POINTER(_NativeMeshSweep), plain, plain, plain, plain]
+    library.af_v3_session_safe_step.restype = c_int
+
+
+def _configure_v3_session_validation(library, double, plain, pair, contacts):
+    batch = POINTER(_NativeWorldBatch)
+    library.af_v3_session_validate.argtypes = [c_void_p, double, c_double, c_double,
+                                                plain, plain, double, batch]
+    library.af_v3_session_validate.restype = c_int
+    library.af_v3_session_measure.argtypes = [c_void_p, double, c_double, c_double, c_double,
+        pair, c_int, contacts, plain, plain, double, batch]
+    library.af_v3_session_measure.restype = c_int
+
+
+def _configure_v3_session_solver(library, double, integer):
+    library.af_v3_session_structural_responses.argtypes = [c_void_p, double, double, double,
+        double, integer, double, double, c_int, integer, double, c_int, c_int, double, double,
+        POINTER(_NativeBlockResult)]
+    library.af_v3_session_structural_responses.restype = c_int
 
 
 def _configure_block_calls(library, double):
@@ -365,6 +418,9 @@ class NativeCollisionWorld:
                 _plain(filters[0]), _plain(filters[1]), len(links), float(span), float(threshold))
         return self._contact_pair_rows(base)
 
+    def begin_v3_session(self, first, second):
+        return NativeV3Session(self, first, second)
+
     def _contact_pair_rows(self, base):
         capacity = max(1, self._contact_pair_capacity); result = _NativeWorldContacts()
         rows = (_NativeContactPair * capacity)()
@@ -398,6 +454,123 @@ class NativeCollisionWorld:
             self.close()
         except (AttributeError, OSError):
             pass
+
+
+class NativeV3Session:
+    def __init__(self, world, first, second):
+        self.world = world; self.library = world.library
+        owners = (_owner_array(first), _owner_array(second)); self.edge_count = len(owners[0])
+        if len(owners[1]) != self.edge_count: raise ValueError("V3 owner rows must match")
+        self.handle = self.library.af_v3_session_create(world.handle, _plain(owners[0]),
+                                                        _plain(owners[1]), self.edge_count)
+        self._contact_capacity = 256
+        if not self.handle: raise RuntimeError("native V3 session creation failed")
+
+    def contacts(self, points, span, threshold):
+        values = _v3_points(points, self.edge_count); result = _NativeWorldContacts()
+        rows, code = self._contact_call(self.library.af_v3_session_contacts, values,
+                                        (float(span), float(threshold)), result)
+        self._check_contact_code(code); return rows, result
+
+    def attach_snapshot(self, snapshot, face_owners):
+        owners = np.ascontiguousarray(face_owners, dtype=np.int32)
+        if self.library.af_v3_session_attach_snapshot(self.handle, snapshot.handle,
+                                                       _plain(owners), len(owners)):
+            raise ValueError("invalid native V3 triangle snapshot")
+
+    def safe_step(self, source, target, clearance, tolerance, budget):
+        first = _v3_points(source, self.edge_count); second = _v3_points(target, self.edge_count)
+        result = _NativeMeshSweep(); values = tuple(c_int() for _index in range(4))
+        args = (self.handle, _double(first), _double(second), float(clearance), float(tolerance),
+                int(budget), byref(result), *(byref(value) for value in values))
+        if self.library.af_v3_session_safe_step(*args): raise ValueError("invalid native V3 CCD")
+        return result, tuple(value.value for value in values)
+
+    def measure(self, points, span, activation, threshold):
+        values = _v3_points(points, self.edge_count); contacts = _NativeWorldContacts()
+        arrays = _validation_arrays(self.edge_count); validation = _NativeWorldBatch()
+        suffix = (float(span), float(activation), float(threshold))
+        rows, code = self._measure_call(values, suffix, contacts, arrays, validation)
+        self._check_contact_code(code); return rows, contacts, arrays, validation
+
+    def validate(self, points, span, threshold):
+        values = _v3_points(points, self.edge_count); arrays = _validation_arrays(self.edge_count)
+        result = _NativeWorldBatch(); args = (self.handle, _double(values), float(span),
+            float(threshold), _plain(arrays[0]), _plain(arrays[1]), _double(arrays[2]), byref(result))
+        if self.library.af_v3_session_validate(*args): raise ValueError("invalid native V3 validation")
+        return arrays, result
+
+    def structural_responses(self, base, rhs, contacts, pins, targets):
+        count = self.edge_count + 1; bands = tuple(_scalar_band(value, count) for value in base)
+        values = np.ascontiguousarray(rhs, dtype=np.float64); arrays = _response_arrays(contacts)
+        pin_rows = np.ascontiguousarray(pins, dtype=np.int64)
+        pin_values = np.ascontiguousarray(targets, dtype=np.float64)
+        return self._solve_responses(bands, values, arrays, pin_rows, pin_values, count)
+
+    def stats(self):
+        result = _NativeV3SessionStats()
+        if self.library.af_v3_session_stats(self.handle, byref(result)): raise RuntimeError("native V3 stats failed")
+        names = ("measures", "contact_queries", "validations", "structural_solves", "sweeps",
+                 "edge_capacity", "contact_capacity", "sweep_capacity")
+        return {name: int(getattr(result, name)) for name in names}
+
+    def close(self):
+        if self.handle: self.library.af_v3_session_destroy(self.handle); self.handle = None
+
+    def __del__(self):
+        try: self.close()
+        except (AttributeError, OSError): pass
+
+    def _contact_call(self, function, values, suffix, result):
+        capacity = max(1, self._contact_capacity); rows = (_NativeContactPair * capacity)()
+        code = function(self.handle, _double(values), *suffix, rows, capacity, byref(result))
+        return self._contact_rows(rows, code, result.active), code
+
+    def _measure_call(self, values, suffix, contacts, arrays, validation):
+        capacity = max(1, self._contact_capacity); rows = (_NativeContactPair * capacity)()
+        args = (self.handle, _double(values), *suffix, rows, capacity, byref(contacts),
+                _plain(arrays[0]), _plain(arrays[1]), _double(arrays[2]), byref(validation))
+        code = self.library.af_v3_session_measure(*args)
+        return self._contact_rows(rows, code, contacts.active), code
+
+    def _contact_rows(self, rows, code, required):
+        if code != -2:
+            if code >= 0: self._contact_capacity = max(self._contact_capacity, code)
+            return rows[:max(0, code)]
+        capacity = max(1, int(required)); output = (_NativeContactPair * capacity)()
+        copied = self.library.af_v3_session_copy_contacts(self.handle, output, capacity)
+        if copied < 0: raise ValueError("invalid native V3 contact copy")
+        self._contact_capacity = capacity; return output[:copied]
+
+    def _check_contact_code(self, code):
+        if code < 0 and code != -2: raise ValueError("invalid native V3 contact query")
+
+    def _solve_responses(self, bands, rhs, arrays, pins, targets, count):
+        output = np.empty_like(rhs); responses = np.empty((len(arrays[0]), count, 3))
+        result = _NativeBlockResult(); args = (self.handle, *(_double(row) for row in bands),
+            _double(rhs), _integer(arrays[0]), _double(arrays[1]), _double(arrays[2]), len(arrays[0]),
+            _integer(pins), _double(targets), len(pins), count, _double(output), _double(responses), byref(result))
+        if self.library.af_v3_session_structural_responses(*args) or not result.valid:
+            raise np.linalg.LinAlgError("native V3 structural responses failed")
+        return output, responses, _block_result(result)
+
+
+def _owner_array(values):
+    array = np.ascontiguousarray(values, dtype=np.int32)
+    if array.ndim != 1 or not len(array): raise ValueError("V3 owner rows must be nonempty")
+    return array
+
+
+def _v3_points(points, edge_count):
+    values = np.ascontiguousarray(points, dtype=np.float64)
+    if values.shape != (edge_count + 1, 3) or not np.isfinite(values).all():
+        raise ValueError("V3 session points must be finite N-by-3")
+    return values
+
+
+def _validation_arrays(edge_count):
+    clear = np.empty(edge_count, dtype=np.int32); blockers = np.empty(edge_count, dtype=np.int32)
+    minima = np.empty(edge_count, dtype=np.float64); return clear, blockers, minima
 
 
 def _world_mesh(vertices, triangles):

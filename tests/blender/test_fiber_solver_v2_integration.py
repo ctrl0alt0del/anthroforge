@@ -313,7 +313,7 @@ def _v3_package(count):
     package = _stalled_package(count); result = package.result
     package.result = V2Result(result.request_signature, result.termination, result.points,
         result.diagnostics, result.validated, result.route_branch, result.message,
-        "fiber-v3-production-1", result.backend_version)
+        "fiber-v3-production-2", result.backend_version)
     return package
 
 

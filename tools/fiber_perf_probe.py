@@ -42,7 +42,7 @@ def _base_parser():
 
 
 def _add_solve_args(parser):
-    parser.add_argument("--engine", choices=("V1", "V2", "V3"), default="V2")
+    parser.add_argument("--engine", choices=("V1", "V2", "V3"), default="V3")
     parser.add_argument("--nodes", type=int, default=0)
     parser.add_argument("--iterations", type=int, default=0)
     parser.add_argument("--variant", choices=("baseline", "same-owner", "hoist-zones", "explicit-empty", "hoist-empty"), default="baseline")

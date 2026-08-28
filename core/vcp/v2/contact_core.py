@@ -100,6 +100,7 @@ class V2ContactCoreTrace:
     pin_indices: tuple = ()
     policy_stats: tuple = ()
     regularization_history: tuple = ()
+    native_session_stats: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -131,6 +132,7 @@ class V2ContactCoreSession:
     seed_best: object = None
     diagnostic_trace: bool = False
     policy: object = None
+    native_session_enabled: bool = True
 
     def step(self):
         return _advance_contact_session(self)
@@ -215,24 +217,26 @@ class _ContactState:
     regularization_scale: float = 0.0
     regularization_increases: int = 0
     regularization_decreases: int = 0
+    native_session: object = None
 
 
 def solve_contact_core(request, snapshot=None, preview=False, use_planner=True,
                        use_filter_sqp=False, owner_span_override=0.0,
-                       diagnostic_trace=False, policy=None):
+                       diagnostic_trace=False, policy=None, native_session=True):
     session = begin_contact_core(request, snapshot, preview, use_planner,
-        use_filter_sqp, owner_span_override, diagnostic_trace, policy)
+        use_filter_sqp, owner_span_override, diagnostic_trace, policy, native_session)
     while not session.done: session.step()
     return session.package
 
 
 def begin_contact_core(request, snapshot=None, preview=False, use_planner=True,
                        use_filter_sqp=False, owner_span_override=0.0,
-                       diagnostic_trace=False, policy=None):
+                       diagnostic_trace=False, policy=None, native_session=True):
     session = V2ContactCoreSession(request, snapshot, preview, use_planner,
                                    use_filter_sqp, perf_counter())
     session.diagnostic_trace = bool(diagnostic_trace)
     session.policy = policy or V2ContactPolicy()
+    session.native_session_enabled = bool(native_session)
     _initialize_contact_session(session)
     if session.state is not None: session.state.owner_span_override = float(owner_span_override)
     return session
@@ -276,7 +280,14 @@ def _contact_budget_done(session):
 
 def _finish_contact_session(session, termination, message):
     session.package = _finish(session.state, termination, message, session.started)
+    _close_native_session(session.state)
     session.done = True
+
+
+def _close_native_session(state):
+    native = None if state is None else state.native_session
+    if native is None: return
+    native.close(); state.native_session = None
 
 
 def _fail_contact_session(session, termination, message):
@@ -307,13 +318,15 @@ def _prime_state(request, filter_sqp=False, diagnostic=False, policy=None):
 
 
 def _prepare_world(session):
-    session.state.world = cached_native_collision_world_batch(session.request.colliders)
+    state = session.state; state.world = cached_native_collision_world_batch(session.request.colliders)
+    if session.native_session_enabled: state.native_session = state.world.begin_v3_session(_edge_owners(state))
     session.phase = "SNAPSHOT"
 
 
 def _prepare_snapshot(session):
     state = session.state; state.snapshot = session.snapshot or build_triangle_snapshot_known(
         session.request.colliders, state.world.closed_flags)
+    if state.native_session is not None: state.native_session.attach_snapshot(state.snapshot)
     session.phase = "PLAN"
 
 
@@ -544,7 +557,8 @@ def _solve_sqp_candidate(state):
     arguments = (state.points, state.q, _effective_settings(state),
                   tuple(state.contacts.values()), state.pins, state.trust_radius)
     epsilon, spacing = _true_length_epsilon(state), _spacing_weight(state)
-    step = solve_trust_sqp(*arguments, epsilon, spacing, state.sqp_regularization)
+    step = solve_trust_sqp(*arguments, epsilon, spacing, state.sqp_regularization,
+                           state.native_session)
     state.pending_sqp = step; state.sqp_solve_ms += step.solve_ms
     state.condition = step.condition; state.condition_history.append(step.condition)
     state.normal_step_history.append(step.normal_norm)
@@ -605,10 +619,13 @@ def _structural_merit(state, points):
 def _begin_feasible_sweep(state, candidate):
     started = perf_counter()
     state.pending_candidate = _trusted_candidate(state, candidate)
-    contacts = _motion_contacts(state, state.points, state.pending_candidate)
-    state.pending_sweep = begin_collision_free_step(
-        state.points, state.pending_candidate, state.snapshot, _radius(state), contacts,
-        slack=_slack(state), assume_initial_valid=True)
+    if state.native_session is None:
+        contacts = _motion_contacts(state, state.points, state.pending_candidate)
+        state.pending_sweep = begin_collision_free_step(
+            state.points, state.pending_candidate, state.snapshot, _radius(state), contacts,
+            slack=_slack(state), assume_initial_valid=True)
+    else: state.pending_sweep = state.native_session.begin_sweep(
+        state.points, state.pending_candidate, _validation_threshold(state))
     state.pending_sweep._started = started
 
 
@@ -815,8 +832,7 @@ def _new_unrelated(before, after):
 
 
 def _measure(state, points):
-    fresh = _query_contacts(state, points)
-    validation = _validate_points(state, points)
+    fresh, validation = _measure_collision(state, points)
     violations = np.asarray([max(0.0, -row.gap) for row in fresh], dtype=np.float64)
     maximum = max(float(violations.max()) if len(violations) else 0.0,
                   max(0.0, _validation_threshold(state) - validation.minimum))
@@ -826,19 +842,37 @@ def _measure(state, points):
     return fresh, V2FeasibilityState(maximum, float(violations @ violations), 0, pin, feasible, groups)
 
 
+def _measure_collision(state, points):
+    if state.native_session is None: return _query_contacts(state, points), _validate_points(state, points)
+    started = perf_counter(); batch, validation = state.native_session.measure(
+        points, _owner_span(state, points), _activation(state), _validation_threshold(state))
+    fresh = _prepare_contacts(state, points, batch); state.contact_ms += _elapsed(started)
+    return fresh, validation
+
+
 def _validate_points(state, points):
-    started = perf_counter(); edges = _edges(len(points)); owners = _edge_owners(state, points)
-    result = state.world.validate(points, edges, owners, _owner_span(state, points), _validation_threshold(state))
+    started = perf_counter()
+    if state.native_session is None:
+        result = state.world.validate(points, _edges(len(points)), _edge_owners(state, points),
+                                      _owner_span(state, points), _validation_threshold(state))
+    else: result = state.native_session.validate(points, _owner_span(state, points), _validation_threshold(state))
     state.validation_ms += _elapsed(started); return result
 
 
 def _query_contacts(state, points):
-    started = perf_counter(); edges = _edges(len(points)); owners = _edge_owners(state, points)
-    batch = state.world.contact_pairs(points, edges, owners, _owner_span(state, points), _activation(state))
+    started = perf_counter()
+    if state.native_session is None:
+        batch = state.world.contact_pairs(points, _edges(len(points)), _edge_owners(state, points),
+                                          _owner_span(state, points), _activation(state))
+    else: batch = state.native_session.contacts(points, _owner_span(state, points), _activation(state))
+    fresh = _prepare_contacts(state, points, batch)
+    state.contact_ms += _elapsed(started); return fresh
+
+
+def _prepare_contacts(state, points, batch):
     fresh = tuple(_contact_from_pair(state, points, row) for row in batch.pairs)
     if state.filter_sqp_enabled: fresh = _collapse_contacts(state, fresh)
-    fresh = _coherent_contacts(state, points, fresh)
-    state.contact_ms += _elapsed(started); return fresh
+    return _coherent_contacts(state, points, fresh)
 
 
 def _collapse_contacts(state, contacts):
@@ -979,8 +1013,10 @@ def _escape_distances(state):
 
 
 def _query_raw(state, points):
-    edges = _edges(len(points)); owners = _edge_owners(state, points)
-    batch = state.world.contact_pairs(points, edges, owners, _owner_span(state, points), _activation(state))
+    if state.native_session is None:
+        batch = state.world.contact_pairs(points, _edges(len(points)), _edge_owners(state, points),
+                                          _owner_span(state, points), _activation(state))
+    else: batch = state.native_session.contacts(points, _owner_span(state, points), _activation(state))
     return tuple(_contact_from_pair(state, points, row) for row in batch.pairs)
 
 
@@ -1150,7 +1186,12 @@ def _core_trace(state, started):
         tuple(state.ccd_step_history), tuple(state.model_ratio_history),
         tuple(state.normal_step_history), tuple(state.tangent_step_history), state.sqp_solve_ms,
         tuple(state.diagnostic_events or ()), tuple(map(tuple, state.q)), tuple(state.pin_indices),
-        _policy_stats(state), tuple(state.regularization_history))
+        _policy_stats(state), tuple(state.regularization_history), _native_session_stats(state))
+
+
+def _native_session_stats(state):
+    if state.native_session is None: return ()
+    return tuple(sorted(state.native_session.stats().items()))
 
 
 def _policy_stats(state):

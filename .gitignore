@@ -34,7 +34,6 @@ Thumbs.db
 *.dll
 !native/fiber_ccd/af_fiber_ccd.dll
 !native/fiber_ccd/af_fiber_ccd_v3.dll
-!native/fiber_ccd/vcomp140.dll
 *.dylib
 
 # Distribution artifacts

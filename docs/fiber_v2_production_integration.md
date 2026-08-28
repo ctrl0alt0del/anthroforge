@@ -2,6 +2,9 @@
 
 Date: 2026-08-18
 
+Update 2026-08-28: this document preserves the historical V2 integration decision.
+The production code default is now V3; `AF_FIBER_ENGINE=V2` remains an exact override.
+
 Update 2026-08-20: the accepted facade is now
 `fiber-v2-production-3`, backed by native ABI 3 and the integrated augmented-
 Lagrangian collision core. See

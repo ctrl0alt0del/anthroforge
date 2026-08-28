@@ -20,6 +20,31 @@ def _bent_request(cap=24):
 
 
 class FiberV3ProductionTests(unittest.TestCase):
+    def test_native_session_matches_reference_driver(self):
+        request = _bent_request(20)
+        reference = solve_v3(request, use_planner=False, native_session=False)
+        fused = solve_v3(request, use_planner=False, native_session=True)
+        np.testing.assert_array_equal(fused.result.points, reference.result.points)
+        self.assertEqual(fused.result.termination, reference.result.termination)
+        self.assertEqual(fused.result.diagnostics.accepted_steps,
+                         reference.result.diagnostics.accepted_steps)
+
+    def test_completed_session_releases_native_handle(self):
+        session = begin_v3(_bent_request(8), use_planner=False, native_session=True)
+        while not session.done: session.step()
+        self.assertTrue(all(row.state.native_session is None for row in session.spans))
+
+    def test_parallel_native_sessions_do_not_share_state(self):
+        first = begin_v3(_bent_request(8), use_planner=False, native_session=True)
+        second = begin_v3(_bent_request(12), use_planner=False, native_session=True)
+        while not first.done or not second.done:
+            if not first.done: first.step()
+            if not second.done: second.step()
+        expected_first = solve_v3(_bent_request(8), use_planner=False, native_session=True)
+        expected_second = solve_v3(_bent_request(12), use_planner=False, native_session=True)
+        self.assertEqual(first.package.result.points, expected_first.result.points)
+        self.assertEqual(second.package.result.points, expected_second.result.points)
+
     def test_manifest_freezes_accepted_reference(self):
         self.assertEqual(V3_ACCEPTED_REFERENCE["name"], "REG_ADAPTIVE_SPACING")
         self.assertEqual(V3_ACCEPTED_REFERENCE["global_accepted_cap"], 180)

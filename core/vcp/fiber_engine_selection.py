@@ -14,6 +14,9 @@ class FiberEngineKind(str, Enum):
     V3 = "V3"
 
 
+DEFAULT_FIBER_ENGINE = FiberEngineKind.V3
+
+
 @dataclass(frozen=True)
 class FiberEngineSelection:
     requested: object
@@ -53,7 +56,7 @@ def _selection_value(explicit, environ):
     values = os.environ if environ is None else environ
     if FIBER_ENGINE_ENV in values:
         return "ENVIRONMENT", _normalized(values.get(FIBER_ENGINE_ENV))
-    return "DEFAULT", FiberEngineKind.V2.value
+    return "DEFAULT", DEFAULT_FIBER_ENGINE.value
 
 
 def _normalized(value):

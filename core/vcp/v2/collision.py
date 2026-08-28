@@ -126,6 +126,15 @@ class V2SweepSession:
         return self.result
 
 
+@dataclass
+class V2NativeSweepSession:
+    result: object
+    _started: float = 0.0
+
+    def step(self, pair_limit=PAIR_BATCH):
+        _ = pair_limit; return self.result
+
+
 @dataclass(frozen=True)
 class V2CollisionWorkload:
     candidate_pairs: int
@@ -325,6 +334,76 @@ class V2NativeCollisionWorld:
 
     def update_transform(self, index, matrix):
         self.native.update_transform(self.instance_indices[index], matrix)
+
+    def begin_v3_session(self, edge_owners):
+        first, second = self._owner_rows(edge_owners, len(edge_owners))
+        return V2NativeSolverSession(self, self.native.begin_v3_session(first, second))
+
+
+@dataclass
+class V2NativeSolverSession:
+    world: object
+    native: object
+    snapshot_attached: bool = False
+
+    def contacts(self, points, span, threshold):
+        rows, result = self.native.contacts(points, span, threshold)
+        return self._contacts(rows, result)
+
+    def measure(self, points, span, activation, threshold):
+        rows, contacts, arrays, validation = self.native.measure(points, span, activation, threshold)
+        return self._contacts(rows, contacts), self._validation(arrays, validation)
+
+    def validate(self, points, span, threshold):
+        arrays, result = self.native.validate(points, span, threshold)
+        return self._validation(arrays, result)
+
+    def structural_responses(self, base, rhs, contacts, pins, targets):
+        return self.native.structural_responses(base, rhs, contacts, pins, targets)
+
+    def attach_snapshot(self, snapshot):
+        if snapshot.native is None: return
+        owners = [self.world.owner_tokens.get(str(value or ""), 0) for value in snapshot.face_owners]
+        self.native.attach_snapshot(snapshot.native, owners)
+        self.snapshot_attached = True
+
+    def safe_step(self, source, target, clearance, tolerance=1.0e-5, budget=262143):
+        if not self.snapshot_attached: return self._clear_step()
+        result, values = self.native.safe_step(source, target, clearance, tolerance, budget)
+        candidates, pairs, edge, face = values; uncertain = result.reason == 4
+        reason = _native_session_reason(result, uncertain)
+        valid = bool(result.valid and not uncertain); limiting = () if edge < 0 else ((edge, face),)
+        return V2SafeStep(float(result.safe), valid, bool(result.valid), reason, candidates,
+            int(result.tested), int(result.intervals), min(EDGE_BATCH, self.native.edge_count),
+            min(PAIR_BATCH, pairs), self.world.backend_version, limiting)
+
+    def _clear_step(self):
+        return V2SafeStep(1.0, True, True, V2CollisionReason.CLEAR, 0, 0, 0,
+                          min(EDGE_BATCH, self.native.edge_count), 0, self.world.backend_version)
+
+    def begin_sweep(self, source, target, clearance, tolerance=1.0e-5, budget=262143):
+        return V2NativeSweepSession(self.safe_step(source, target, clearance, tolerance, budget))
+
+    def stats(self):
+        return self.native.stats()
+
+    def close(self):
+        self.native.close()
+
+    def _contacts(self, rows, result):
+        pairs = tuple(self.world._contact_pair(row) for row in rows)
+        return V2ContactPairBatch(pairs, result.candidates, result.tested, result.contained,
+                                  result.minimum, self.world.backend_version)
+
+    def _validation(self, arrays, result):
+        clear, blockers, minima = arrays
+        return self.world._batch_result(clear.astype(bool), blockers, minima, result)
+
+
+def _native_session_reason(result, uncertain):
+    if uncertain: return V2CollisionReason.CCD_UNCERTAIN
+    if not result.valid: return V2CollisionReason.INVALID_START
+    return V2CollisionReason.COLLISION if result.possible else V2CollisionReason.CLEAR
 
 
 class V2CollisionSnapshotCache:

@@ -26,10 +26,11 @@ class V2TrustSqpStep:
 
 
 def solve_trust_sqp(points, reference, settings, contacts, pins, trust_radius,
-                    true_length_epsilon=None, spacing_weight=0.0, regularization=0.0):
+                    true_length_epsilon=None, spacing_weight=0.0, regularization=0.0,
+                    native_session=None):
     started = perf_counter(); rows = _linear_contacts(points, contacts)
     problem = _native_problem(points, reference, settings, contacts, pins,
-                              true_length_epsilon, spacing_weight, regularization)
+                              true_length_epsilon, spacing_weight, regularization, native_session)
     solved = _active_set(problem[0], problem[1], rows, np.asarray(points).reshape(-1))
     candidate = solved[0].reshape((-1, 3))
     candidate = _trust_limited(points, candidate, pins, trust_radius)
@@ -66,13 +67,15 @@ def actual_reduction(before, after, energy_before, energy_after, feasible):
 
 
 def _native_problem(points, reference, settings, contacts, pins, epsilon=None,
-                    spacing_weight=0.0, regularization=0.0):
+                    spacing_weight=0.0, regularization=0.0, native_session=None):
     count = len(reference); bands = _objective_bands(points, settings, epsilon)
     rhs = settings.fidelity_weight * np.asarray(reference, dtype=np.float64)
     bands, rhs = _spacing_model(bands, rhs, points, spacing_weight)
     bands, rhs = _proximal_model(bands, rhs, points, regularization)
     rows = tuple((row.edge, row.factor, row.normal) for row in contacts)
     indices = tuple(sorted(pins)); targets = tuple(pins[index] for index in indices)
+    if native_session is not None:
+        return native_session.structural_responses(bands, rhs, rows, indices, targets)
     return native_structural_contact_responses(bands, rhs, rows, indices, targets)
 
 

@@ -56,6 +56,16 @@ static int af_parallel_capability() {
 #endif
 }
 
+static int af_llvm_openmp_capability() {
+#if defined(_OPENMP) && defined(__clang__)
+    return 16384;
+#else
+    return 0;
+#endif
+}
+
+static int af_v3_session_capability() { return 32768; }
+
 static double point_segment(Vec p, Vec a, Vec b) {
     Vec d = sub(b, a);
     double length = dot(d, d);
@@ -166,7 +176,9 @@ static Context context(const double* start, const double* end, const double* tri
 
 AF_EXPORT int af_fiber_ccd_version() { return 3; }
 
-AF_EXPORT int af_fiber_ccd_capabilities() { return 8191|af_parallel_capability(); }
+AF_EXPORT int af_fiber_ccd_capabilities() {
+    return 8191|af_parallel_capability()|af_llvm_openmp_capability()|af_v3_session_capability();
+}
 
 AF_EXPORT int af_fiber_worker_threads() { return af_requested_workers; }
 
@@ -437,3 +449,4 @@ AF_EXPORT int af_candidate_pairs(const double* start, const double* end, const i
 
 #include "af_fiber_planner43.hpp"
 #include "af_fiber_contact3.hpp"
+#include "af_fiber_v3_session.hpp"

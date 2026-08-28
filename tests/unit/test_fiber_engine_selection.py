@@ -5,10 +5,10 @@ from core.vcp.fiber_engine_selection import (FiberEngineKind, resolve_fiber_engi
 
 
 class FiberEngineSelectionTests(unittest.TestCase):
-    def test_default_requests_v2(self):
+    def test_default_requests_v3(self):
         value = resolve_fiber_engine(environ={})
         self.assertEqual((value.requested, value.actual, value.source),
-                         (FiberEngineKind.V2, FiberEngineKind.V2, "DEFAULT"))
+                         (FiberEngineKind.V3, FiberEngineKind.V3, "DEFAULT"))
 
     def test_environment_selects_exact_engines(self):
         for raw, expected in (("V1", FiberEngineKind.V1), ("V2", FiberEngineKind.V2),
@@ -34,8 +34,8 @@ class FiberEngineSelectionTests(unittest.TestCase):
     def test_loop_uses_explicit_compatibility_fallback(self):
         value = select_fiber_engine("CYCLIC", environ={})
         self.assertEqual((value.requested, value.actual, value.fallback_reason),
-                         (FiberEngineKind.V2, FiberEngineKind.V1,
-                          "V2_TOPOLOGY_COMPATIBILITY"))
+                         (FiberEngineKind.V3, FiberEngineKind.V1,
+                          "V3_TOPOLOGY_COMPATIBILITY"))
 
     def test_v1_override_is_global(self):
         value = select_fiber_engine("CYCLIC", environ={"AF_FIBER_ENGINE": "V1"})

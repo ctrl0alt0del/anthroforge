@@ -29,6 +29,7 @@ class V3SpanTrace:
     policy_stats: tuple
     regularization_history: tuple
     total_ms: float
+    native_session_stats: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -152,4 +153,4 @@ def _span_trace(index, package, indices, completed):
         diagnostics.block_factor_condition, trace.final_contacts,
         trace.stationarity_profile, trace.rejection_reasons,
         trace.iteration_trace, trace.policy_stats, trace.regularization_history,
-        trace.total_ms)
+        trace.total_ms, trace.native_session_stats)
