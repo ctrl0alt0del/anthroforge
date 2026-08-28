@@ -1,4 +1,5 @@
 from pathlib import Path
+import ast
 import importlib.util
 import sys
 import unittest
@@ -21,6 +22,20 @@ def _load_tool(name):
 SIZE = _load_tool("check_scp_function_size.py")
 CONTEXT = _load_tool("check_core_context_usage.py")
 CONTRACT_DOC = ADDON_ROOT / "docs" / "runtime_contract.md"
+AF6_TOUCHED = (
+    "__init__.py", "core/vcp/fiber_anchor_preflight.py",
+    "core/visualization/fiber_anchor_overlay.py", "core/visualization/fiber_cache_lifecycle.py",
+    "core/visualization/fiber_refinement.py", "properties/scp_properties.py",
+    "properties/vcp_properties.py", "ui/panels/fiber_edit_panel.py",
+)
+
+
+def _long_function_spans(relative_path):
+    source = (ADDON_ROOT / relative_path).read_text(encoding="utf-8-sig")
+    tree = ast.parse(source)
+    defs = (node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
+    return [(node.name, node.end_lineno - node.lineno + 1) for node in defs
+            if node.end_lineno - node.lineno + 1 > 15]
 
 
 class ArchitectureGuardrailTests(unittest.TestCase):
@@ -33,6 +48,11 @@ class ArchitectureGuardrailTests(unittest.TestCase):
         status = SIZE.ratchet_status()
         self.assertEqual(status["new"], [])
         self.assertEqual(status["grown"], [])
+
+    def test_af6_touched_function_spans_are_at_most_fifteen_lines(self):
+        offenders = {path: rows for path in AF6_TOUCHED
+                     if (rows := _long_function_spans(path))}
+        self.assertEqual(offenders, {})
 
     def test_core_context_boundary_has_no_new_usages(self):
         status = CONTEXT.ratchet_status()

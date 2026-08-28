@@ -23,6 +23,21 @@ def invalidate_fiber_caches(scene=None, root=None, fiber_ids=None):
     clear_scene_cache(scene)
     clear_collider_generations() if ids is None else None
     clear_geometry_generations() if ids is None else None
+    _invalidate_anchor_caches(scene, root, ids)
+
+
+def _invalidate_anchor_caches(scene, root, fiber_ids):
+    from ..vcp.fiber_anchor_preflight import (clear_transient_fiber_attachment_statuses,
+                                               invalidate_fiber_anchor_preflight)
+    invalidate_fiber_anchor_preflight(scene, root, fiber_ids)
+    clear_transient_fiber_attachment_statuses(root or _scene_root(scene), fiber_ids)
+
+
+def _scene_root(scene):
+    if scene is None:
+        return None
+    from ..utils import get_af_root
+    return get_af_root(scene)
 
 
 def _root_scene(root):
@@ -63,14 +78,36 @@ def _on_lifecycle_event(_dummy):
 
 
 @persistent
-def _on_depsgraph_update(_scene, depsgraph):
+def _on_depsgraph_update(scene, depsgraph):
     note_geometry_updates(depsgraph)
     note_collider_updates(depsgraph)
+    _invalidate_anchor_geometry(scene, depsgraph)
+
+
+def _invalidate_anchor_geometry(scene, depsgraph):
+    updates = tuple(getattr(depsgraph, "updates", ()) or ())
+    if any(_relevant_anchor_update(scene, update) for update in updates):
+        _invalidate_anchor_caches(scene, None, None)
+
+
+def _relevant_anchor_update(scene, update):
+    if not _geometry_update(update):
+        return False
+    item = getattr(update, "id", None)
+    if callable(getattr(item, "get", None)) and item.get("af_scp_geometry"):
+        return True
+    objects = tuple(getattr(scene, "objects", ()) or ())
+    return any(obj.get("af_scp_geometry") and getattr(obj, "data", None) is item for obj in objects)
+
+
+def _geometry_update(update):
+    return bool(getattr(update, "is_updated_geometry", False) or
+                getattr(update, "is_updated_transform", False))
 
 
 def _handler_lists():
     handlers = bpy.app.handlers
-    names = "load_pre", "undo_pre", "redo_pre", "undo_post", "redo_post"
+    names = "load_pre", "load_post", "undo_pre", "redo_pre", "undo_post", "redo_post"
     return tuple(getattr(handlers, name) for name in names if hasattr(handlers, name))
 
 

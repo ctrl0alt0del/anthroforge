@@ -9,6 +9,8 @@ from bpy.app.handlers import persistent
 from ..deps.dirty_hints import dirty_hints_for
 from ..deps.runtime_trace import activate_request_telemetry, restore_request_telemetry, telemetry_cache_snapshot
 from ..vcp.fiber_collision import _collider_stamp
+from ..vcp.fiber_anchor_preflight import (anchor_preflight_summary,
+                                           preflight_fiber_hard_anchors)
 from ..vcp.fiber_engine import FiberTermination
 from ..vcp.fiber_progressive import begin_fiber_solve, publish_fiber_cache
 from ..vcp.runtime_state import (
@@ -75,15 +77,41 @@ def request_fiber_refinement(root, scene, fiber, show_preview=False, quality="FI
     if root is None or scene is None or fiber is None:
         return RefinementRequest(False, "Fiber refinement context is unavailable.")
     key = _job_key(scene, root, fiber.id)
+    preflight = _hard_anchor_preflight(root, scene, fiber, quality)
+    if preflight is not None and not preflight.valid:
+        return _reject_anchor_preflight(key, root, scene, fiber, preflight)
     session = _prepared_session(root, scene, fiber, quality)
     if session.invalid_reason:
         _abort_request(key, root, scene, fiber, session)
         return RefinementRequest(False, session.invalid_reason)
+    return _launch_refinement(key, root, scene, fiber, session, show_preview)
+
+
+def _launch_refinement(key, root, scene, fiber, session, show_preview):
     _supersede_job(key)
     job = _new_job(key, scene, root, fiber, session)
     mark_fiber_output_stale(scene, root.name, fiber.id)
     proxy = _initial_proxy(job, show_preview)
     return _start_or_finish(job, proxy)
+
+
+def _hard_anchor_preflight(root, scene, fiber, quality):
+    sync = register_fiber_sync()
+    return preflight_fiber_hard_anchors(root, scene, fiber, sync._solver,
+                                        _depsgraph(scene), quality)
+
+
+def _reject_anchor_preflight(key, root, scene, fiber, result):
+    job = _JOBS.get(key)
+    if job is not None:
+        _terminate_job(job, FiberTermination.CANCELLED, mark_unknown=False, stale=False)
+    rollback_engine_migration(fiber)
+    mark_fiber_output_stale(scene, root.name, fiber.id)
+    summary = anchor_preflight_summary(result)
+    set_fiber_invalid_reason(fiber, summary)
+    set_fiber_recompute_status(fiber, FiberTermination.INVALID_ATTACHMENT.value)
+    set_fiber_not_converged(fiber, True)
+    return RefinementRequest(False, summary)
 
 
 def _prepared_session(root, scene, fiber, quality):
