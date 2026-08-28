@@ -20,13 +20,19 @@ from core.visualization.vcp_mirror_runtime import sync_vcp_mirrors
 
 
 def _open_fiber(root_obj, name, y):
-    origin = scp_with_object(root_obj, f"{name}O", mesh_object(f"{name}O", (0.0, y, 0.0)))
-    insertion = scp_with_object(root_obj, f"{name}I", mesh_object(f"{name}I", (2.0, y, 0.0)))
+    origin = scp_with_object(root_obj, f"{name}O", _fiber_anchor_object(f"{name}O", (0.0, y, 0.0)))
+    insertion = scp_with_object(root_obj, f"{name}I", _fiber_anchor_object(f"{name}I", (2.0, y, 0.0)))
     bpy.context.scene.af_new_fiber_origin_obj = origin.geometry_object_ref
     bpy.context.scene.af_new_fiber_insertion_obj = insertion.geometry_object_ref
     bpy.ops.af.add_fiber_vcp()
     fiber = root_obj.af_vcp_system.fibers[-1]
     return fiber, find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+
+
+def _fiber_anchor_object(name, location):
+    obj = mesh_object(name, location)
+    obj.scale = (0.25, 0.25, 0.25)
+    return obj
 
 
 def _loop_mesh(name):
