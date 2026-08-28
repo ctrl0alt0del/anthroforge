@@ -173,6 +173,10 @@ from .core.visualization.fiber_refinement import (
     register_fiber_refinement_runtime,
     unregister_fiber_refinement_runtime,
 )
+from .core.visualization.fiber_anchor_overlay import (
+    register_fiber_anchor_overlay,
+    unregister_fiber_anchor_overlay,
+)
 from .core.visualization.fiber_cache_lifecycle import (
     register_fiber_cache_lifecycle,
     unregister_fiber_cache_lifecycle,
@@ -379,6 +383,7 @@ def _register_runtime_hooks():
     register_sync()
     register_fiber_sync(context_provider=lambda: bpy.context)
     register_fiber_cache_lifecycle()
+    register_fiber_anchor_overlay(context_provider=lambda: bpy.context)
     register_fiber_surface_sync()
     register_fiber_refinement_runtime()
     register_muscle_sync()
@@ -394,6 +399,7 @@ def _unregister_runtime_hooks():
     _shutdown_background_jobs()
     _clear_transient_sessions()
     unregister_fiber_cache_lifecycle()
+    unregister_fiber_anchor_overlay()
     unregister_fiber_refinement_runtime()
     unregister_proxy_session_runtime()
     unregister_delete_reconcile()

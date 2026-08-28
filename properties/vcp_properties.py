@@ -151,9 +151,20 @@ def _queue_fiber_update(self, context, aspect):
     fiber_id = str(getattr(self, "id", "") or "")
     if vcp_prop_updates_suppressed() or not fiber_id:
         return
+    _invalidate_fiber_preflight(self, context)
     aspects = {"FIBER": {str(aspect)}}
     schedule_context(context, dirty_hints=dirty_hints_for("FIBER", {fiber_id}),
                      event_type="FIBER_UPDATE", dirty_aspects=aspects)
+
+
+def _invalidate_fiber_preflight(fiber, context):
+    from ..core.vcp.fiber_anchor_preflight import (clear_transient_fiber_attachment_statuses,
+                                                    invalidate_fiber_anchor_preflight)
+    root = getattr(fiber, "id_data", None)
+    scene = None if context is None else getattr(context, "scene", None)
+    ids = {str(getattr(fiber, "id", "") or "")}
+    invalidate_fiber_anchor_preflight(scene, root, ids)
+    clear_transient_fiber_attachment_statuses(root, ids)
 
 
 def _on_fiber_display_update(self, context):

@@ -13,7 +13,17 @@ def _sync_scene(context, scp_id=None, source="property", event_type="UPDATE"):
 def _on_scp_prop_update(self, context):
     if scp_prop_updates_suppressed():
         return
+    _invalidate_root_preflight(self, context)
     _sync_scene(context, getattr(self, "id", ""))
+
+
+def _invalidate_root_preflight(scp, context):
+    from ..core.vcp.fiber_anchor_preflight import (clear_transient_fiber_attachment_statuses,
+                                                    invalidate_fiber_anchor_preflight)
+    root = getattr(scp, "id_data", None)
+    scene = None if context is None else getattr(context, "scene", None)
+    invalidate_fiber_anchor_preflight(scene, root)
+    clear_transient_fiber_attachment_statuses(root)
 
 
 def _on_attachment_capture_update(self, context):

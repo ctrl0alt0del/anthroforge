@@ -3,6 +3,8 @@ from ...app.queries.root import root_for_context
 from ...app.queries.scp import scp_label
 from ...app.queries.vcp import active_fiber_from_context, has_active_entity
 from ...core.vcp.fiber_modes import is_loop_fiber, is_solved_loop
+from ...core.vcp.fiber_anchor_preflight import (anchor_preflight_summary,
+                                                current_fiber_anchor_preflight)
 from ...core.vcp.runtime_state import (
     fiber_active_colliders,
     fiber_eps_disp,
@@ -108,7 +110,11 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         row = layout.row(align=True)
         row.prop(touch, "normal_offset", text="Offset")
 
-    def _draw_invalid_status(self, status_box, fiber):
+    def _draw_invalid_status(self, status_box, scene, root, fiber):
+        preflight = current_fiber_anchor_preflight(scene, root, fiber)
+        if preflight is not None and not preflight.valid:
+            self._draw_anchor_preflight(status_box, preflight)
+            return True
         reason = fiber_invalid_reason(fiber)
         if not reason:
             return False
@@ -116,13 +122,35 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         status_box.label(text=reason)
         return True
 
-    def _draw_status(self, layout, fiber):
+    def _draw_anchor_preflight(self, box, result):
+        box.label(text="Status: Invalid Attachment", icon="ERROR")
+        box.label(text=anchor_preflight_summary(result))
+        for violation in result.violations:
+            self._draw_anchor_violation(box, violation)
+
+    def _draw_anchor_violation(self, layout, violation):
+        box = layout.box()
+        role = self._anchor_role_label(violation)
+        relation = str(violation.relation).replace("_", " ").title()
+        box.label(text=f"{role} | Owner {violation.owner_id} | {relation} blocker {violation.blocker_id}")
+        box.label(text=f"Clearance {violation.measured_clearance:.4f} m / required {violation.configured_clearance:.4f} m")
+        box.label(text=f"Action: {violation.action}")
+
+    def _anchor_role_label(self, violation):
+        role = violation.role.value
+        if role == "TOUCH":
+            return f"Touch {violation.authored_index}"
+        if role == "LOOP":
+            return f"Loop {violation.authored_index + 1}"
+        return "Endpoint A" if role == "ENDPOINT_A" else "Endpoint B"
+
+    def _draw_status(self, layout, scene, root, fiber):
         status_box = layout.box()
-        self._draw_status_header(status_box, fiber)
+        self._draw_status_header(status_box, scene, root, fiber)
         self._draw_status_metrics(status_box, fiber)
 
-    def _draw_status_header(self, status_box, fiber):
-        if self._draw_invalid_status(status_box, fiber):
+    def _draw_status_header(self, status_box, scene, root, fiber):
+        if self._draw_invalid_status(status_box, scene, root, fiber):
             return
         status = fiber_recompute_status(fiber)
         if self._draw_known_status(status_box, fiber, status):
@@ -162,23 +190,23 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         suffix = "Loop" if is_loop_fiber(fiber) else "Open"
         layout.label(text=f"{fiber.id} ({suffix})", icon="CURVE_DATA")
 
-    def _draw_mode_layout(self, layout, root, fiber):
+    def _draw_mode_layout(self, layout, scene, root, fiber):
         if is_solved_loop(fiber):
-            self._draw_solved_loop_mode(layout, root, fiber)
+            self._draw_solved_loop_mode(layout, scene, root, fiber)
             return
-        self._draw_open_mode(layout, root, fiber)
+        self._draw_open_mode(layout, scene, root, fiber)
 
-    def _draw_solved_loop_mode(self, layout, root, fiber):
+    def _draw_solved_loop_mode(self, layout, scene, root, fiber):
         self._draw_loop_anchors(layout, root, fiber)
         self._draw_solver(layout, fiber)
-        self._draw_status(layout, fiber)
+        self._draw_status(layout, scene, root, fiber)
         self._draw_display(layout, fiber)
 
-    def _draw_open_mode(self, layout, root, fiber):
+    def _draw_open_mode(self, layout, scene, root, fiber):
         self._draw_endpoints(layout, root, fiber)
         self._draw_solver(layout, fiber)
         self._draw_touch_points(layout, root, fiber)
-        self._draw_status(layout, fiber)
+        self._draw_status(layout, scene, root, fiber)
         self._draw_display(layout, fiber)
 
     def draw(self, context):
@@ -190,4 +218,4 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
             return
 
         self._draw_header(layout, fiber)
-        self._draw_mode_layout(layout, root, fiber)
+        self._draw_mode_layout(layout, context.scene, root, fiber)
