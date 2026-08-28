@@ -49,6 +49,21 @@ def pair(edge, cid, distance, contained=False):
     return SimpleNamespace(edge=edge, collider_id=cid, distance=distance, contained=contained)
 
 
+def loop_fiber():
+    specs = tuple(SimpleNamespace(parent_id=f"S{index}", attach_param=str(index)) for index in range(3))
+    return SimpleNamespace(id="F1", topology_mode="LOOP", loop_anchors=specs,
+                           symmetry_mode="MIRROR_SEAM_LOOP", symmetry_axis="X",
+                           symmetry_origin=(0.0, 0.0, 0.0), collision_radius=.002)
+
+
+def stable_probe(root, scene, fiber):
+    status = SimpleNamespace(version="test")
+    with patch.object(preflight, "_collider_probe_rows", return_value=()), \
+         patch.object(preflight, "_hierarchy_rows", return_value=()), \
+         patch.object(preflight, "collision_backend_status", return_value=status):
+        return preflight._probe_key(root, scene, fiber)
+
+
 class FiberAnchorPreflightTests(unittest.TestCase):
     def setUp(self):
         preflight._CACHE.clear()
@@ -98,6 +113,31 @@ class FiberAnchorPreflightTests(unittest.TestCase):
                          V2AnchorRole.TOUCH, V2AnchorRole.TOUCH, V2AnchorRole.ENDPOINT_B])
         self.assertEqual([row.authored_index for row in looped], [0, 1, 2, 3])
         self.assertTrue(all(row.role is V2AnchorRole.LOOP for row in looped))
+
+    def test_symmetric_loop_excludes_generated_mirror_pins(self):
+        fiber = loop_fiber()
+        authored = tuple(SimpleNamespace(point=(index, 0, 0), owner_id=f"S{index}") for index in range(3))
+        generated = (SimpleNamespace(point=(-1, 0, 0), owner_id=""),)
+        solver = SimpleNamespace(_loop_anchors=lambda *_args: (None, authored + generated, ""))
+        rows, issue = preflight._resolve_anchors(object(), object(), fiber, solver, object())
+        self.assertEqual(issue, "")
+        self.assertEqual([(row.authored_index, row.owner_id) for row in rows],
+                         [(0, "S0"), (1, "S1"), (2, "S2")])
+
+    def test_symmetry_changes_preserve_authored_only_cache_probe(self):
+        fiber = loop_fiber()
+        root, scene = object(), object()
+        before = stable_probe(root, scene, fiber)
+        fiber.symmetry_mode, fiber.symmetry_axis = "NONE", "Y"
+        fiber.symmetry_origin = (4.0, 5.0, 6.0)
+        self.assertEqual(stable_probe(root, scene, fiber), before)
+
+    def test_summary_counts_one_anchor_with_multiple_blockers_once(self):
+        rows = (SimpleNamespace(role=V2AnchorRole.TOUCH, authored_index=4, blocker_id="A"),
+                SimpleNamespace(role=V2AnchorRole.TOUCH, authored_index=4, blocker_id="B"))
+        result = SimpleNamespace(violations=rows)
+        self.assertEqual(preflight.anchor_preflight_summary(result),
+                         "Fiber has 1 invalid hard anchor; planning cannot start.")
 
     def test_cache_hit_skips_anchor_mesh_and_collision_work(self):
         probe = (("Scene", 1),)

@@ -20,7 +20,8 @@ from core.vcp.fiber_anchor_preflight import FiberAnchorPreflightResult
 
 
 def invalid_result():
-    return FiberAnchorPreflightResult(False, (object(),), ("key",), 2, 1)
+    violation = SimpleNamespace(role="TOUCH", authored_index=1)
+    return FiberAnchorPreflightResult(False, (violation,), ("key",), 2, 1)
 
 
 class FiberRefinementPreflightTests(unittest.TestCase):

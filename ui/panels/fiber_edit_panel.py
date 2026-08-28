@@ -133,8 +133,15 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         role = self._anchor_role_label(violation)
         relation = str(violation.relation).replace("_", " ").title()
         box.label(text=f"{role} | Owner {violation.owner_id} | {relation} blocker {violation.blocker_id}")
-        box.label(text=f"Clearance {violation.measured_clearance:.4f} m / required {violation.configured_clearance:.4f} m")
+        self._draw_anchor_clearance(box, violation)
         box.label(text=f"Action: {violation.action}")
+
+    def _draw_anchor_clearance(self, box, violation):
+        if violation.contained:
+            box.label(text="Inside blocker: containment invalidates this anchor.", icon="ERROR")
+            return
+        text = f"Clearance {violation.measured_clearance:.4f} m / required {violation.configured_clearance:.4f} m"
+        box.label(text=text)
 
     def _anchor_role_label(self, violation):
         role = violation.role.value

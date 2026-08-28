@@ -87,7 +87,8 @@ def fiber_anchor_scope(scene, root, fiber):
 
 
 def anchor_preflight_summary(result):
-    count = len(tuple(getattr(result, "violations", ()) or ()))
+    rows = tuple(getattr(result, "violations", ()) or ())
+    count = len({(row.role, row.authored_index) for row in rows})
     noun = "anchor" if count == 1 else "anchors"
     return f"Fiber has {count} invalid hard {noun}; planning cannot start."
 
@@ -132,7 +133,15 @@ def _resolve_anchors(root, scene, fiber, solver, depsgraph):
     _runtime, rows, issue = fn(root, scene, depsgraph, fiber)
     if issue or rows is None:
         return None, str(issue or "Invalid Fiber anchors.")
-    return _hard_anchors(fiber, rows), ""
+    return _hard_anchors(fiber, _authored_rows(fiber, rows)), ""
+
+
+def _authored_rows(fiber, rows):
+    values = tuple(rows or ())
+    if not is_loop_fiber(fiber):
+        return values
+    count = len(tuple(getattr(fiber, "loop_anchors", ()) or ()))
+    return values[:count]
 
 
 def _hard_anchors(fiber, rows):

@@ -398,9 +398,7 @@ def _register_runtime_hooks():
 def _unregister_runtime_hooks():
     _shutdown_background_jobs()
     _clear_transient_sessions()
-    unregister_fiber_cache_lifecycle()
-    unregister_fiber_anchor_overlay()
-    unregister_fiber_refinement_runtime()
+    _unregister_fiber_attachment_runtime()
     unregister_proxy_session_runtime()
     unregister_delete_reconcile()
     unregister_control_runtime()
@@ -411,6 +409,12 @@ def _unregister_runtime_hooks():
     unregister_fiber_surface_sync()
     unregister_fiber_sync()
     unregister_sync()
+
+
+def _unregister_fiber_attachment_runtime():
+    unregister_fiber_cache_lifecycle()
+    unregister_fiber_anchor_overlay()
+    unregister_fiber_refinement_runtime()
 
 
 def _shutdown_background_jobs():
