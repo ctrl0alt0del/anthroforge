@@ -17,7 +17,7 @@ from .shortcut import V3ShortcutTrace, apply_v3_shortcut
 from .spans import aggregate_spans, prepare_span_request, synchronize_owner_spans
 
 
-V3_SOLVER_VERSION = "fiber-v3-production-2"
+V3_SOLVER_VERSION = "fiber-v3-production-3"
 
 
 @dataclass

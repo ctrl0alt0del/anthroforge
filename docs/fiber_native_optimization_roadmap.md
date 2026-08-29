@@ -116,6 +116,178 @@ time waiting between progressive slices; per-job native timing now reports the t
 The next material cross-Fiber gain requires exposing contact/structural work as resumable native
 jobs or moving the accepted numeric iteration fully behind the persistent native-session API.
 
+## Full-session worker-pool experiment
+
+An isolated experiment tested whether the existing pure-data V3 sessions could be scheduled as
+whole resumable jobs before moving more policy into C++. Blender captured and primed every request
+on the main thread, then a short-lived `ThreadPoolExecutor` repeatedly assigned fixed quanta from
+independent sessions to any free worker. The pool was always joined before Blender resumed, no
+worker accessed RNA or the depsgraph, and one session was never advanced concurrently by two jobs.
+
+The experiment is intentionally unreachable from production. It lives in
+`core/vcp/v3/session_pool_experiment.py` and is driven read-only by
+`tools/fiber_v3_session_pool_benchmark.py`.
+
+Three fresh-process runs on `skull_muscles.blend/FIBER_1,FIBER_14` measured:
+
+| Configuration | Median solve | Median capture + setup + solve | Relative full time |
+| --- | ---: | ---: | ---: |
+| Serial sessions, four native workers | 1007.07 ms | 1215.81 ms | reference |
+| Two session workers, one native worker each | 1107.73 ms | 1326.46 ms | 9.1% slower |
+| Two session workers, two native workers each | 1083.50 ms | 1287.67 ms | 5.9% slower |
+| Two session workers, four native workers each | 1101.10 ms | 1330.02 ms | 9.4% slower |
+
+Every run produced bit-identical coordinates, terminations, accepted/rejected counts, and source
+file hashes. A four-Fiber qualification sample was also exact, but four session workers with four
+native workers increased solver time from 1894.55 ms to 2418.00 ms (27.6%).
+
+The result rejects Python-level full-session threading as a production optimization. The accepted
+solver still spends substantial work in Python contact grouping, objective construction, active-set
+policy, acceptance, and diagnostics, so the GIL serializes much of the supposedly parallel work.
+Nested per-session OpenMP teams also contend for cache and memory bandwidth, while unequal Fiber
+durations leave fixed per-session allocations underused. A useful option-B implementation therefore
+needs one native task graph and one OpenMP team, with Python limited to capture, cancellation,
+scheduling priorities, and publication. Merely placing existing `session.step()` calls on Python
+threads is not sufficient.
+
+## Heterogeneous native-operation executor experiment
+
+The follow-up isolated experiment replaced fixed Fiber-to-worker ownership with a native OpenMP
+executor accepting heterogeneous contact-measure, structural-response, and CCD jobs. Lightweight
+Python control drivers pause at the exact native call; the broker submits immutable descriptors;
+workers claim whichever job is ready. A worker therefore has no Fiber identity and can execute
+work for different Fibers in consecutive waves. The production DLL and V3 selector remain
+unchanged; the experiment uses `af_fiber_ccd_v3_ops_experiment.dll`.
+
+The allocator gives a single ready job the complete native team. It enables outer operation-level
+parallelism only when at least four independent jobs are ready for four workers, and bypasses the
+broker when one Fiber remains. This avoids deliberately idling cores merely to preserve the
+experiment.
+
+Three alternating fresh-process runs on `skull_muscles.blend` measured:
+
+| Workload | Direct V3 median | Operation executor median | Difference | Exact parity |
+| --- | ---: | ---: | ---: | --- |
+| `FIBER_1,FIBER_14`, solve only | 1007.39 ms | 1179.86 ms | 17.1% slower | Yes |
+| `FIBER_1,FIBER_14`, capture + setup + solve | 1206.28 ms | 1397.13 ms | 15.8% slower | Yes |
+| Four Fibers, solve only | 2186.34 ms | 2988.07 ms | 36.7% slower | Yes |
+
+Every Fiber retained its exact point hash, termination, accepted/rejected counts, validation state,
+and point count. The source hash stayed `a7c4033ab2eb7479eaec4a069cb1d7ddf9fecc5d5c43037863b02a9f9bb7ef06`.
+The four-Fiber set includes the pre-existing unsafe `FIBER_21`; both paths returned the same unsafe
+result, so it proves scheduler parity but is not a correctness qualification for that Fiber.
+
+The two-Fiber workload generated roughly 523 brokered jobs in 264 waves but never had four ready
+at once, so it correctly retained inner-kernel parallelism. The four-Fiber workload generated about
+2492 jobs in 1136 waves and did reach four workers, yet remained slower. The experiment therefore
+rejects whole contact/structural/CCD calls as the shared-pool job granularity:
+
+- each Python condition/event handoff adds overhead hundreds or thousands of times per solve;
+- four ready high-level jobs turn four internally parallel kernels into four single-worker kernels;
+- Fiber phases do not stay aligned, so the ready queue is commonly smaller than the worker count;
+- job costs differ sharply, and the long Fiber tail cannot overlap completed Fibers;
+- the block recurrence and Python acceptance/controller work remain serial.
+
+The useful next version must keep the coordinator and solver iteration wholly native and expose
+range jobs inside contact traversal and CCD, for example 16--64 Fiber edges or 64--128 candidate
+pairs. Indexed outputs and stable serial reductions can preserve exact results. Python should see
+only `begin`, bounded `step(deadline)`, cancellation, diagnostics, and final publication—not one
+round trip per numeric operation. The isolated executor is evidence and scaffolding, not a
+production optimization.
+
+## Persistent C++ task coordinator experiment
+
+The next isolated backend moves ownership of native operation streams and their cursors into C++.
+It exposes `create`, bounded `step(deadline)`, and `destroy`; a step opens one OpenMP team and lets
+workers claim range jobs without returning to Python between numerical operations. The production
+DLL remains unchanged. The experiment is capability-versioned separately and lives in
+`af_fiber_ccd_v3_ops_experiment.dll`.
+
+The implemented work graph uses:
+
+- 32-edge contact and validation jobs;
+- 32-edge CCD broad-phase jobs and 128-pair narrow-phase jobs;
+- serial block factorization and forward/backward structural recurrence;
+- per-edge/per-pair indexed writes followed by stable index-order reduction;
+- persistent per-span native sessions and C++-owned stream cursors across bounded steps.
+
+Trace replay removes Python from the measured numerical chain without claiming that the remaining
+SQP controller has already been ported. On `skull_muscles/FIBER_1,FIBER_14`, the three-run median
+for replaying about 522 recorded native operations was 58.46 ms with four workers. A paired
+one-worker/four-worker run measured 108.53/52.00 ms, a 2.09x kernel-graph speedup. The ordinary
+full V3 solve remained 1112.96 ms median; these boundaries are deliberately not conflated.
+
+The long-tail `skeleton_comb_base/FIBER_1` trace contained 1954 native operations, 992 contact
+jobs, 992 validation jobs, 729 serial structural jobs, 1458 CCD broad-phase jobs, and 4315 CCD
+pair jobs. One worker required 994.97 ms; four workers required 601.63 ms, a 39.5% reduction or
+1.65x speedup. All source file hashes remained unchanged.
+
+Contact/validation rows and structural outputs matched exactly in every unit and real-file trace.
+The indexed absolute-TOI CCD reduction intentionally differs from the old order-dependent product:
+on skull, four sweeps became at most `1.53e-5` more permissive; on skeleton, three became at most
+`3.37e-4` more permissive. Valid/invalid decisions did not change, and independent static-check
+failure counts were identical before and after replay. Raw CCD diagnostic hashes differ because
+the parallel implementation computes certificates for a whole range before stable reduction.
+
+A live-controller qualification proved the numerical consequence cannot be hidden. All final
+Fibers remained independently validated, but skull accepted/rejected counts and point hashes
+changed, and skeleton/FIBER_1 changed from 486/243 accepted/rejected trials to 407/168. Calling the
+coordinator once per old Python wave was also slower on skull (1492.76 ms versus the 1112.96 ms
+direct median), because it still launches hundreds of teams and retains Python control flow.
+
+Therefore the native task/resource architecture is accepted as a promising experiment, but the
+absolute-TOI reduction and live result are not production-approved. Production integration needs
+two explicit decisions: port the accepted SQP controller so one bounded native step covers several
+iterations, and either retain the legacy serial CCD trajectory or version and visually approve the
+order-independent CCD trajectory. Silent result drift is not acceptable.
+
+## Native SQP/controller experiment
+
+The next isolated backend ports the finite-work span loop behind one C++ call. It keeps one OpenMP
+team alive while C++ performs true-length IRLS assembly, active-set response solves, trust limiting,
+adaptive regularization, contact retention, limiting-pair injection, CCD, filter acceptance,
+multiplier updates, convergence checks, and round-robin shared-budget span scheduling. Python now
+performs capture, planner/seed initialization, independent stitched validation, and reporting only.
+The experiment DLL is `af_fiber_ccd_v3_sqp_experiment.dll`; production remains unchanged.
+
+Two CCD policies run under the same native controller:
+
+- `LEGACY` retains the serial 128-pair multiplicative safe-step trajectory;
+- `INDEXED` evaluates stable indexed edge/pair jobs and performs a deterministic absolute-minimum
+  reduction.
+
+One fresh-process qualification sample per real Fiber measured the native controller boundary:
+
+| Fixture | Legacy CCD | Indexed CCD | Indexed change | Max final-point delta | Decisions |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `fiber_sphere/FIBER_2` | 51.26 ms | 55.41 ms | 8.1% slower | `6.80e-6` | 288/288 identical |
+| `skeleton_comb_base/FIBER_1` | 762.46 ms | 612.07 ms | 19.7% faster / 1.25x | `1.73e-9` | 1053/1053 identical |
+| `skull_muscles/FIBER_1` | 75.81 ms | 83.06 ms | 9.6% slower | `1.70e-10` | 236/236 identical |
+| `skull_muscles/FIBER_14` | 37.58 ms | 38.53 ms | 2.5% slower | `2.69e-7` | 110/110 identical |
+
+Every legacy and indexed result passed independent stitched static validation. Accepted/rejected
+counts and every accept/reject/inject decision matched for all four Fibers. Safe fractions can
+differ because the reductions have different semantics, but contact retention and limiter
+migration prevent those differences from changing the measured controller trajectory. All source
+`.blend` hashes remained unchanged.
+
+The indexed policy is therefore useful only on a sufficiently large CCD workload. It loses on
+the three light Fibers because OpenMP task creation exceeds the saved pair work, while the long
+skeleton Fiber recovers that overhead. Any production form needs a per-sweep dynamic activation
+gate based on edge/pair job counts, not a global always-on switch.
+
+The native controller is not yet production-parity. Against current production V3, maximum final
+point differences were `1.3193`, `0.16224`, `0.00698`, and `0.02258` world units for sphere,
+skeleton, skull/FIBER_1, and skull/FIBER_14 respectively. Timing comparisons against production
+are therefore not speedup claims. The remaining semantic gap is in the higher-level collision
+manifold policy: coherent side selection for ambiguous contact groups, exact production limiter
+feature migration, and the production contact/stationarity termination details. Until those are
+ported and point/termination parity passes, this controller stays isolated and cannot replace V3.
+
+The benchmark JSON contains complete per-trial CCD fractions, model ratios, violations, limiter
+identities, and decisions. Matching Blender comparison copies and trajectory plots are stored in
+the task visualization output; they are generated from source files without saving the sources.
+
 ## Proposed next improvements
 
 ### 1. Topology-shared worlds and batched transform refit

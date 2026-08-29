@@ -120,8 +120,31 @@ class FiberV2CollisionTests(unittest.TestCase):
     def test_packaged_backend_is_available(self):
         status = collision_backend_status()
         self.assertTrue(status.available, status.message)
-        self.assertEqual(status.version, f"af_fiber_ccd-3.131071.t{status.worker_threads}")
+        self.assertEqual(status.version, f"af_fiber_ccd-3.1179647.t{status.worker_threads}")
         self.assertGreaterEqual(status.worker_threads, 1); self.assertLessEqual(status.worker_threads, 4)
+
+    def test_indexed_ccd_activation_requires_full_worker_width(self):
+        library = load_native(); workers = library.af_fiber_worker_threads()
+        threshold = library.af_fiber_indexed_ccd_threshold()
+        self.assertEqual(threshold, 128 * workers)
+        self.assertFalse(library.af_fiber_indexed_ccd_parallel(max(0, threshold - 1)))
+        self.assertEqual(bool(library.af_fiber_indexed_ccd_parallel(threshold)), workers > 1)
+
+    def test_indexed_ccd_parallel_matches_serial_bitwise(self):
+        collider = _collider(((-2,-2,0),(2,2,0),(2,-2,0)), ((0,1,2),) * 640)
+        world = build_native_collision_world((collider,)); snapshot = build_triangle_snapshot((collider,))
+        sessions = tuple(world.begin_v3_session((("", ""),)) for _index in range(2))
+        for session in sessions: session.attach_snapshot(snapshot)
+        source = np.asarray(((-1.5,1.5,.1),(-.5,1.5,.1)), dtype=float); target = source.copy(); target[:,2] = -.1
+        library = load_native(); previous = library.af_fiber_worker_threads()
+        try:
+            library.af_fiber_set_worker_threads(1); serial = sessions[0].safe_step(source, target, .01)
+            library.af_fiber_set_worker_threads(4)
+            for _index in range(4): sessions[1].safe_step(source, target, .01)
+            parallel = sessions[1].safe_step(source, target, .01)
+        finally: library.af_fiber_set_worker_threads(previous)
+        self.assertEqual(serial, parallel); self.assertEqual(serial.tested_pairs, 640)
+        self.assertEqual(sessions[1].stats()["indexed_clear"], 1)
 
     def test_native_parallel_batches_match_scalar_bitwise(self):
         points = np.column_stack((np.linspace(-1, 1, 65), np.zeros(65), np.full(65, .1)))

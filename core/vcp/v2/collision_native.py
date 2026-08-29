@@ -8,7 +8,7 @@ import numpy as np
 
 
 V2_NATIVE_ABI = 3
-V2_NATIVE_CAPABILITIES = 131071
+V2_NATIVE_CAPABILITIES = 1179647
 V2_NATIVE_BATCH_CAPABILITY = 1024
 V3_NATIVE_SESSION_CAPABILITY = 32768
 V3_NATIVE_MULTI_SESSION_CAPABILITY = 65536
@@ -53,6 +53,12 @@ class _NativeV3SessionStats(Structure):
     _fields_ += [(name, c_int) for name in ("edge_capacity", "contact_capacity", "sweep_capacity")]
 
 
+class _NativeV3CcdStats(Structure):
+    _fields_ = [(name, c_uint64) for name in ("serial_sweeps", "indexed_sweeps", "indexed_clear",
+        "indexed_fallbacks", "serial_clear", "candidate_pairs", "indexed_pairs", "serial_tests",
+        "serial_intervals")]
+
+
 class _NativeV3BatchSweepJob(Structure):
     _fields_ = [("session", c_void_p), ("source", POINTER(c_double)),
                 ("target", POINTER(c_double)), ("clearance", c_double),
@@ -90,6 +96,9 @@ def _configure(library):
 
 def _configure_thread_calls(library):
     library.af_fiber_worker_threads.restype = c_int
+    library.af_fiber_indexed_ccd_threshold.restype = c_int
+    library.af_fiber_indexed_ccd_parallel.argtypes = [c_int]
+    library.af_fiber_indexed_ccd_parallel.restype = c_int
     library.af_fiber_set_worker_threads.argtypes = [c_int]
     library.af_fiber_set_worker_threads.restype = c_int
     if library.af_fiber_set_worker_threads(_requested_native_threads()):
@@ -134,6 +143,8 @@ def _configure_v3_session_lifecycle(library, plain):
     library.af_v3_session_attach_snapshot.restype = c_int
     library.af_v3_session_stats.argtypes = [c_void_p, POINTER(_NativeV3SessionStats)]
     library.af_v3_session_stats.restype = c_int
+    library.af_v3_session_ccd_stats.argtypes = [c_void_p, POINTER(_NativeV3CcdStats)]
+    library.af_v3_session_ccd_stats.restype = c_int
 
 
 def _configure_v3_session_collision(library, double, plain):
@@ -533,11 +544,15 @@ class NativeV3Session:
         return self._solve_responses(bands, values, arrays, pin_rows, pin_values, count)
 
     def stats(self):
-        result = _NativeV3SessionStats()
+        result, ccd = _NativeV3SessionStats(), _NativeV3CcdStats()
         if self.library.af_v3_session_stats(self.handle, byref(result)): raise RuntimeError("native V3 stats failed")
+        if self.library.af_v3_session_ccd_stats(self.handle, byref(ccd)): raise RuntimeError("native V3 CCD stats failed")
         names = ("measures", "contact_queries", "validations", "structural_solves", "sweeps",
                  "edge_capacity", "contact_capacity", "sweep_capacity")
-        return {name: int(getattr(result, name)) for name in names}
+        ccd_names = ("serial_sweeps", "indexed_sweeps", "indexed_clear", "indexed_fallbacks",
+                     "serial_clear", "candidate_pairs", "indexed_pairs", "serial_tests", "serial_intervals")
+        output = {name: int(getattr(result, name)) for name in names}
+        output.update({name: int(getattr(ccd, name)) for name in ccd_names}); return output
 
     def close(self):
         if self.handle: self.library.af_v3_session_destroy(self.handle); self.handle = None

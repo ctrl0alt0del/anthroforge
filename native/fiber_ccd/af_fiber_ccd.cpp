@@ -15,6 +15,9 @@
 
 #define AF_EXPORT extern "C" __declspec(dllexport)
 
+constexpr int AF_V3_CCD_JOB_PAIRS=128;
+constexpr int AF_V3_INDEXED_CLEAR_STREAK=4;
+
 struct Vec { double x, y, z; };
 struct Sweep { double safe, upper, clearance, minimum; int possible, valid, intervals, reason; };
 struct MeshSweep { double safe; int possible, valid, tested, intervals, reason, limiting; };
@@ -45,9 +48,22 @@ static int af_parallel_limit() {
 }
 
 static int af_requested_workers=af_parallel_limit();
-static int af_parallel_workers(int count) { return count<16?1:af_requested_workers; }
+static int af_parallel_workers(int count) {
+#if defined(_OPENMP) && defined(AF_V3_OPERATION_EXPERIMENT)
+    if(omp_in_parallel())return 1;
+#endif
+    return count<16?1:af_requested_workers;
+}
 static bool af_parallel_batch(int count) { return af_parallel_workers(count)>1; }
 static int af_task_workers(int count) { return std::max(1,std::min(count,af_requested_workers)); }
+
+static int af_v3_ccd_workers(int pairs) {
+#ifdef _OPENMP
+    if(omp_in_parallel())return 1;
+#endif
+    if(af_requested_workers<2)return 1;
+    return pairs>=AF_V3_CCD_JOB_PAIRS*af_requested_workers?af_requested_workers:1;
+}
 
 static int af_parallel_capability() {
 #ifdef _OPENMP
@@ -67,6 +83,30 @@ static int af_llvm_openmp_capability() {
 
 static int af_v3_session_capability() { return 32768; }
 static int af_v3_batch_capability() { return 65536; }
+static int af_v3_indexed_ccd_capability() { return 1048576; }
+static int af_v3_operations_capability() {
+#ifdef AF_V3_OPERATION_EXPERIMENT
+    return 131072;
+#else
+    return 0;
+#endif
+}
+
+static int af_v3_coordinator_capability() {
+#ifdef AF_V3_OPERATION_EXPERIMENT
+    return 262144;
+#else
+    return 0;
+#endif
+}
+
+static int af_v3_native_sqp_capability() {
+#ifdef AF_V3_OPERATION_EXPERIMENT
+    return 524288;
+#else
+    return 0;
+#endif
+}
 
 static double point_segment(Vec p, Vec a, Vec b) {
     Vec d = sub(b, a);
@@ -180,10 +220,13 @@ AF_EXPORT int af_fiber_ccd_version() { return 3; }
 
 AF_EXPORT int af_fiber_ccd_capabilities() {
     return 8191|af_parallel_capability()|af_llvm_openmp_capability()|
-           af_v3_session_capability()|af_v3_batch_capability();
+           af_v3_session_capability()|af_v3_batch_capability()|af_v3_indexed_ccd_capability()|af_v3_operations_capability()|
+           af_v3_coordinator_capability()|af_v3_native_sqp_capability();
 }
 
 AF_EXPORT int af_fiber_worker_threads() { return af_requested_workers; }
+AF_EXPORT int af_fiber_indexed_ccd_threshold() { return AF_V3_CCD_JOB_PAIRS*af_requested_workers; }
+AF_EXPORT int af_fiber_indexed_ccd_parallel(int pairs) { return af_v3_ccd_workers(pairs)>1; }
 
 AF_EXPORT int af_fiber_set_worker_threads(int count) {
     if(count<1)return 1;af_requested_workers=std::min(count,af_parallel_limit());return 0;
@@ -454,3 +497,8 @@ AF_EXPORT int af_candidate_pairs(const double* start, const double* end, const i
 #include "af_fiber_contact3.hpp"
 #include "af_fiber_v3_session.hpp"
 #include "af_fiber_v3_batch.hpp"
+#ifdef AF_V3_OPERATION_EXPERIMENT
+#include "af_fiber_v3_operations.hpp"
+#include "af_fiber_v3_coordinator.hpp"
+#include "af_fiber_v3_native_sqp.hpp"
+#endif

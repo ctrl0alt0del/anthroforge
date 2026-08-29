@@ -11,7 +11,7 @@ from .policy import V3_PRODUCTION_POLICY, V3ProductionPolicy, V3ShortcutMode
 from .solver import begin_v3_session, solve_v3_session
 
 
-V3_PRODUCTION_VERSION = "fiber-v3-production-2"
+V3_PRODUCTION_VERSION = "fiber-v3-production-3"
 V3_NATIVE_SESSION_ENV = "AF_FIBER_V3_NATIVE_SESSION"
 
 

@@ -92,7 +92,7 @@ class FiberV2ContactCoreTests(unittest.TestCase):
         np.testing.assert_array_equal(first[0], expected[0]); np.testing.assert_array_equal(second[1], expected[1])
         self.assertEqual(session.stats()["structural_solves"], 2)
 
-    def test_persistent_native_ccd_matches_reference_driver(self):
+    def test_persistent_native_ccd_preserves_reference_trajectory(self):
         request = _box_request()
         reference = solve_contact_core(request, use_planner=False, use_filter_sqp=True,
                                        policy=V3_PRODUCTION_POLICY, native_session=False)

@@ -4,7 +4,7 @@ Date: 2026-08-27
 
 ## Purpose
 
-`fiber-v3-production-2` is the code-default production boundary for the exact
+`fiber-v3-production-3` is the code-default production boundary for the exact
 solver configuration visually accepted as `REG_ADAPTIVE_SPACING`. It filters the
 accepted implementation out of the experimental V2 modules without changing its
 finite-work objective or stopping behavior. V1 and V2 remain internal overrides.
@@ -39,13 +39,18 @@ continues beyond that cap nor substitutes an earlier state using visual metrics.
 - Cached native loader, reusable contact buffers and vectorized swept segments.
 - Deterministic native parallelism for contacts, nearest-point queries and static validation.
 - Persistent native span sessions for fused contact/validation, structural responses and CCD.
+- Indexed CCD with deterministic reduction and workload-gated OpenMP dispatch.
 
-Native workers write only independent indexed rows. Reductions and output aggregation retain
-their original serial order, while CCD remains serial because changing its reduction can change
-the nonlinear solver trajectory. The selected worker count is recorded in backend provenance,
-diagnostics and cache identity.
+Native workers write only independent indexed rows. Candidate sets below `128 × worker_count`
+use the accepted serial CCD directly. Larger sets speculatively use 128-pair OpenMP chunks and
+the stable indexed reduction only after four consecutive clear sweeps and the last observed
+sweep required at least `0.5` CCD intervals per candidate. A completely clear result
+is returned immediately, while any collision, invalidity or uncertainty is recomputed by serial
+CCD and disables speculation until another serial sweep is clear. This preserves the accepted
+solver trajectory and avoids repeated speculative work in collision-limited regions. Nested
+multi-Fiber batches keep inner CCD serial to avoid oversubscription.
 
-The persistent session is part of `fiber-v3-production-2` and ABI capability `65535`. It owns
+The persistent session is part of `fiber-v3-production-3` and ABI capability `1179647`. It owns
 plain numeric workspaces only; Blender state, scheduling, cancellation, acceptance, and
 publication remain outside native code. `AF_FIBER_V3_NATIVE_SESSION=0` is a temporary internal
 parity switch. The code default and production behavior use the session.
