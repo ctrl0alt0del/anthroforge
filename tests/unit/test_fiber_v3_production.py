@@ -34,6 +34,16 @@ class FiberV3ProductionTests(unittest.TestCase):
         while not session.done: session.step()
         self.assertTrue(all(row.state.native_session is None for row in session.spans))
 
+    def test_cancelled_session_releases_native_handle(self):
+        session = begin_v3(_bent_request(20), use_planner=False, native_session=True)
+        for _index in range(12):
+            session.step()
+            if any(row.state.native_session is not None for row in session.spans): break
+        self.assertTrue(any(row.state.native_session is not None for row in session.spans))
+        session.cancel()
+        self.assertTrue(session.done)
+        self.assertTrue(all(row.state.native_session is None for row in session.spans))
+
     def test_parallel_native_sessions_do_not_share_state(self):
         first = begin_v3(_bent_request(8), use_planner=False, native_session=True)
         second = begin_v3(_bent_request(12), use_planner=False, native_session=True)

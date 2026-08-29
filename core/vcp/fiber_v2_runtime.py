@@ -79,6 +79,17 @@ class V2RuntimeSession:
                                     validated=_preview_validated(self))
         return _solve_result(self, FiberSolveResult)
 
+    def cancel(self):
+        cancel = getattr(self.core_session, "cancel", None)
+        if callable(cancel): cancel()
+        self.done = True; self.source_colliders = (); self.colliders = []
+        self.oracle = self.depsgraph = None
+
+    @property
+    def pending_native_sweep(self):
+        core = self.core_session
+        return None if core is None else getattr(core, "pending_native_sweep", None)
+
 
 def begin_v2_runtime(solver, root, fiber, scene, depsgraph, quality, selection):
     session = V2RuntimeSession(solver, root, fiber, scene, depsgraph, _quality(quality))

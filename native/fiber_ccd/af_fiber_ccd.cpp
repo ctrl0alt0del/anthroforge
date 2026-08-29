@@ -47,6 +47,7 @@ static int af_parallel_limit() {
 static int af_requested_workers=af_parallel_limit();
 static int af_parallel_workers(int count) { return count<16?1:af_requested_workers; }
 static bool af_parallel_batch(int count) { return af_parallel_workers(count)>1; }
+static int af_task_workers(int count) { return std::max(1,std::min(count,af_requested_workers)); }
 
 static int af_parallel_capability() {
 #ifdef _OPENMP
@@ -65,6 +66,7 @@ static int af_llvm_openmp_capability() {
 }
 
 static int af_v3_session_capability() { return 32768; }
+static int af_v3_batch_capability() { return 65536; }
 
 static double point_segment(Vec p, Vec a, Vec b) {
     Vec d = sub(b, a);
@@ -177,7 +179,8 @@ static Context context(const double* start, const double* end, const double* tri
 AF_EXPORT int af_fiber_ccd_version() { return 3; }
 
 AF_EXPORT int af_fiber_ccd_capabilities() {
-    return 8191|af_parallel_capability()|af_llvm_openmp_capability()|af_v3_session_capability();
+    return 8191|af_parallel_capability()|af_llvm_openmp_capability()|
+           af_v3_session_capability()|af_v3_batch_capability();
 }
 
 AF_EXPORT int af_fiber_worker_threads() { return af_requested_workers; }
@@ -450,3 +453,4 @@ AF_EXPORT int af_candidate_pairs(const double* start, const double* end, const i
 #include "af_fiber_planner43.hpp"
 #include "af_fiber_contact3.hpp"
 #include "af_fiber_v3_session.hpp"
+#include "af_fiber_v3_batch.hpp"

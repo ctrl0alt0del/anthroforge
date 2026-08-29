@@ -8,9 +8,10 @@ import numpy as np
 
 
 V2_NATIVE_ABI = 3
-V2_NATIVE_CAPABILITIES = 65535
+V2_NATIVE_CAPABILITIES = 131071
 V2_NATIVE_BATCH_CAPABILITY = 1024
 V3_NATIVE_SESSION_CAPABILITY = 32768
+V3_NATIVE_MULTI_SESSION_CAPABILITY = 65536
 
 
 class _NativeMeshSweep(Structure):
@@ -50,6 +51,19 @@ class _NativeV3SessionStats(Structure):
     _fields_ = [(name, c_uint64) for name in ("measures", "contact_queries", "validations",
                                                "structural_solves", "sweeps")]
     _fields_ += [(name, c_int) for name in ("edge_capacity", "contact_capacity", "sweep_capacity")]
+
+
+class _NativeV3BatchSweepJob(Structure):
+    _fields_ = [("session", c_void_p), ("source", POINTER(c_double)),
+                ("target", POINTER(c_double)), ("clearance", c_double),
+                ("tolerance", c_double)]
+    _fields_ += [(name, c_int) for name in ("budget", "status", "candidates", "pairs", "edge", "face")]
+    _fields_ += [("elapsed_ms", c_double), ("result", _NativeMeshSweep)]
+
+
+class _NativeV3BatchStats(Structure):
+    _fields_ = [(name, c_int) for name in ("submitted", "completed", "workers")]
+    _fields_ += [("elapsed_ms", c_double)]
 
 
 _REASONS = ("CLEAR", "AABB_CLEAR", "INVALID_START", "POSSIBLE_COLLISION", "BUDGET_EXHAUSTED")
@@ -103,6 +117,13 @@ def _configure_v3_session_calls(library, double, integer, plain):
     _configure_v3_session_lifecycle(library, plain)
     _configure_v3_session_collision(library, double, plain)
     _configure_v3_session_solver(library, double, integer)
+    _configure_v3_batch_calls(library)
+
+
+def _configure_v3_batch_calls(library):
+    library.af_v3_batch_safe_steps.argtypes = [POINTER(_NativeV3BatchSweepJob), c_int,
+                                                POINTER(_NativeV3BatchStats)]
+    library.af_v3_batch_safe_steps.restype = c_int
 
 
 def _configure_v3_session_lifecycle(library, plain):
@@ -486,6 +507,10 @@ class NativeV3Session:
         if self.library.af_v3_session_safe_step(*args): raise ValueError("invalid native V3 CCD")
         return result, tuple(value.value for value in values)
 
+    def batch_sweep_input(self, source, target, clearance, tolerance, budget):
+        first = _v3_points(source, self.edge_count); second = _v3_points(target, self.edge_count)
+        return self, first, second, float(clearance), float(tolerance), int(budget)
+
     def measure(self, points, span, activation, threshold):
         values = _v3_points(points, self.edge_count); contacts = _NativeWorldContacts()
         arrays = _validation_arrays(self.edge_count); validation = _NativeWorldBatch()
@@ -559,6 +584,40 @@ def _owner_array(values):
     array = np.ascontiguousarray(values, dtype=np.int32)
     if array.ndim != 1 or not len(array): raise ValueError("V3 owner rows must be nonempty")
     return array
+
+
+def native_batch_safe_steps(jobs):
+    rows = tuple(jobs)
+    if not rows: return (), _empty_v3_batch_stats()
+    prepared = tuple(_v3_batch_row(row) for row in rows)
+    values = (_NativeV3BatchSweepJob * len(prepared))(*(row[0] for row in prepared))
+    stats = _NativeV3BatchStats(); library = prepared[0][1].library
+    if any(row[1].library is not library for row in prepared): raise ValueError("V3 batch libraries must match")
+    if library.af_v3_batch_safe_steps(values, len(values), byref(stats)):
+        raise ValueError("native V3 batch sweep failed")
+    return tuple(_v3_batch_output(row) for row in values), _v3_batch_stats(stats)
+
+
+def _v3_batch_row(job):
+    session, source, target, clearance, tolerance, budget = job
+    value = _NativeV3BatchSweepJob(session.handle, _double(source), _double(target),
+        clearance, tolerance, budget, 0, 0, 0, -1, -1, 0.0, _NativeMeshSweep())
+    value._arrays = source, target
+    return value, session
+
+
+def _v3_batch_output(row):
+    if row.status: raise ValueError("native V3 batch sweep item failed")
+    return row.result, (row.candidates, row.pairs, row.edge, row.face), float(row.elapsed_ms)
+
+
+def _v3_batch_stats(value):
+    return {"submitted": int(value.submitted), "completed": int(value.completed),
+            "workers": int(value.workers), "elapsed_ms": float(value.elapsed_ms)}
+
+
+def _empty_v3_batch_stats():
+    return {"submitted": 0, "completed": 0, "workers": 0, "elapsed_ms": 0.0}
 
 
 def _v3_points(points, edge_count):

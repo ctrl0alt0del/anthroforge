@@ -48,6 +48,12 @@ class V3SolveSession:
         _advance_v3(self)
         return self.package
 
+    def cancel(self):
+        for row in self.spans:
+            cancel = getattr(row, "cancel", None)
+            if callable(cancel): cancel()
+        self.done, self.phase = True, "DONE"
+
     @property
     def points(self):
         return _live_points(self)
@@ -55,6 +61,11 @@ class V3SolveSession:
     @property
     def infeasible(self):
         return any(row.state is not None and not row.state.metrics.feasible for row in self.spans)
+
+    @property
+    def pending_native_sweep(self):
+        return next((row.pending_native_sweep for row in self.spans
+                     if row.pending_native_sweep is not None), None)
 
 
 def begin_v3_session(request, snapshot=None, preview=False, checkpoint_steps=0,

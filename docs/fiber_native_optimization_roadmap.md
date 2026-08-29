@@ -72,6 +72,50 @@ Every comparison returned the same 64 coordinates. Both source `.blend` SHA-256 
 unchanged. `AF_FIBER_V3_NATIVE_SESSION=0` retains the old Python/native boundary as a temporary
 internal reference; production defaults to the persistent session.
 
+## Multi-Fiber resource coordinator
+
+Production V3 now has one cooperative coordinator over isolated per-Fiber sessions. Blender
+capture, validation of request identity, preview application, commit, and downstream dispatch
+remain on the main thread. Only immutable native CCD jobs from distinct sessions may enter the
+OpenMP executor; two jobs with the same session handle are rejected. Hard-midpoint spans within
+one Fiber remain sequential, preserving the accepted global-budget trajectory.
+
+The scheduling boundary uses injected policy and executor objects. Selected Fibers have priority
+over other visible Fibers, visible Fibers have priority over background work, and bounded aging
+prevents starvation. Cancellation unregisters the job and closes every retained native span
+session. Successful commits from one coordinator turn are combined into one
+`FIBER_SOLVE_READY` event per root. A batch exception fails closed and retains last-good output.
+
+Cross-session work is dynamically dispatched. A two-batch qualification measures whether the
+native jobs recover the OpenMP team cost. Jobs below 0.25 ms use the serial native call path;
+parallel execution remains available for qualified work. Automatic multi-session scheduling is
+enabled for four or more simultaneous small Fibers or a Fiber with at least 256 nodes. The
+internal `AF_FIBER_V3_BATCH=0/1` overrides exist for reference/qualification only; `AUTO` is the
+production default.
+
+The supplied skull fixture showed why the dynamic gate is required. `FIBER_1` and `FIBER_14`
+used only about 31 ms of actual CCD time across 366 sweeps. Three fresh-process runs measured
+1270.21 ms median for the serial dispatcher and 1270.56 ms for forced batching (0.03% difference),
+with identical point hashes, terminations, accepted/rejected counts, and source-file hashes.
+Accordingly, production `AUTO` does not batch that two-Fiber workload. A four-Fiber run also
+retained all four exact point hashes and measured 2290.03 ms serial versus 2291.63 ms coordinated
+in the qualification samples; the adaptive executor disabled parallel CCD after it measured the
+jobs below threshold.
+
+The coordinator integration also removed two unrelated runtime amplifiers exposed by profiling:
+V3 numeric iterations no longer masquerade as Blender display-level changes, and full collider
+stamp scans are limited to the 50 ms publication cadence while depsgraph invalidation remains
+immediate and final commit forces a full check. On `skull_muscles.blend/FIBER_1,FIBER_14`, three
+fresh-process legacy-runtime runs measured 1896.47 ms median versus 1270.21 ms after the fix, a
+33.0% full-cycle reduction. Outputs were bit-identical.
+
+This is a resource-coordinator foundation, not a claim that complete Fiber solves now run in
+parallel. Contact grouping, SQP policy, active-set decisions, and acceptance still execute in
+Python. Actual CCD is much smaller than the old diagnostic suggested because that timer included
+time waiting between progressive slices; per-job native timing now reports the true kernel cost.
+The next material cross-Fiber gain requires exposing contact/structural work as resumable native
+jobs or moving the accepted numeric iteration fully behind the persistent native-session API.
+
 ## Proposed next improvements
 
 ### 1. Topology-shared worlds and batched transform refit

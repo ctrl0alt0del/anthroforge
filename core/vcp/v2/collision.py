@@ -3,12 +3,14 @@
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
+from time import perf_counter
 
 import numpy as np
 
 from .collision_native import (
     NativeCollisionWorld,
-    native_batch_status, native_candidates, native_distances, native_inside, native_safe_step, native_snapshot,
+    native_batch_safe_steps, native_batch_status, native_candidates, native_distances, native_inside,
+    native_safe_step, native_snapshot,
     native_snapshot_distances, native_snapshot_inside, native_status, native_worker_threads,
 )
 from .contracts import V2ColliderSnapshot
@@ -128,11 +130,38 @@ class V2SweepSession:
 
 @dataclass
 class V2NativeSweepSession:
-    result: object
+    solver: object
+    source: object
+    target: object
+    clearance: float
+    tolerance: float
+    budget: int
+    result: object = None
     _started: float = 0.0
+    elapsed_ms: float = 0.0
+
+    @property
+    def done(self):
+        return self.result is not None
 
     def step(self, pair_limit=PAIR_BATCH):
-        _ = pair_limit; return self.result
+        _ = pair_limit
+        if not self.done: self._run()
+        return self.result
+
+    def _run(self):
+        started = perf_counter()
+        self.result = self.solver.safe_step(self.source, self.target, self.clearance,
+                                            self.tolerance, self.budget)
+        self.elapsed_ms = 1000.0 * (perf_counter() - started)
+
+    def batch_input(self):
+        return self.solver.native.batch_sweep_input(
+            self.source, self.target, self.clearance, self.tolerance, self.budget)
+
+    def accept(self, result, values, elapsed_ms=0.0):
+        self.result = self.solver._safe_step_result(result, values)
+        self.elapsed_ms = max(0.0, float(elapsed_ms))
 
 
 @dataclass(frozen=True)
@@ -370,6 +399,9 @@ class V2NativeSolverSession:
     def safe_step(self, source, target, clearance, tolerance=1.0e-5, budget=262143):
         if not self.snapshot_attached: return self._clear_step()
         result, values = self.native.safe_step(source, target, clearance, tolerance, budget)
+        return self._safe_step_result(result, values)
+
+    def _safe_step_result(self, result, values):
         candidates, pairs, edge, face = values; uncertain = result.reason == 4
         reason = _native_session_reason(result, uncertain)
         valid = bool(result.valid and not uncertain); limiting = () if edge < 0 else ((edge, face),)
@@ -382,7 +414,9 @@ class V2NativeSolverSession:
                           min(EDGE_BATCH, self.native.edge_count), 0, self.world.backend_version)
 
     def begin_sweep(self, source, target, clearance, tolerance=1.0e-5, budget=262143):
-        return V2NativeSweepSession(self.safe_step(source, target, clearance, tolerance, budget))
+        value = V2NativeSweepSession(self, source, target, clearance, tolerance, budget)
+        if not self.snapshot_attached: value.result = self._clear_step()
+        return value
 
     def stats(self):
         return self.native.stats()
@@ -404,6 +438,25 @@ def _native_session_reason(result, uncertain):
     if uncertain: return V2CollisionReason.CCD_UNCERTAIN
     if not result.valid: return V2CollisionReason.INVALID_START
     return V2CollisionReason.COLLISION if result.possible else V2CollisionReason.CLEAR
+
+
+def run_native_sweep_batch(sweeps):
+    pending = tuple(row for row in sweeps if row is not None and not row.done)
+    if not pending: return {"submitted": 0, "completed": 0, "workers": 0, "elapsed_ms": 0.0}
+    if len(pending) == 1:
+        pending[0].step(); return {"submitted": 1, "completed": 1, "workers": 1, "elapsed_ms": 0.0}
+    outputs, stats = native_batch_safe_steps(row.batch_input() for row in pending)
+    for row, output in zip(pending, outputs): row.accept(*output)
+    return stats
+
+
+def run_native_sweep_serial(sweeps):
+    pending = tuple(row for row in sweeps if row is not None and not row.done)
+    started = perf_counter()
+    for row in pending: row.step()
+    elapsed = 1000.0 * (perf_counter() - started)
+    return {"submitted": len(pending), "completed": len(pending),
+            "workers": min(1, len(pending)), "elapsed_ms": elapsed}
 
 
 class V2CollisionSnapshotCache:

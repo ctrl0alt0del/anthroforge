@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from core.vcp.v2.collision import build_native_collision_world
+from core.vcp.v2.collision import (build_native_collision_world, build_triangle_snapshot,
+                                   run_native_sweep_batch)
 from core.vcp.v2.collision_native import (native_contact_block_solve,
                                           native_structural_contact_responses)
 from core.vcp.v2.contact_core import (V2Contact, _collapse_contacts,
@@ -53,6 +54,21 @@ def _dense_response(matrix, jacobian, pins):
 
 
 class FiberV2ContactCoreTests(unittest.TestCase):
+    def test_native_batch_executes_independent_sweeps_in_parallel(self):
+        request = _box_request(); world = build_native_collision_world(request.colliders)
+        count = request.settings.node_count; owners = tuple(("", "") for _edge in range(count - 1))
+        sessions = tuple(world.begin_v3_session(owners) for _index in range(2))
+        snapshot = build_triangle_snapshot(request.colliders)
+        for session in sessions: session.attach_snapshot(snapshot)
+        source = np.linspace((-1, 0, 1), (1, 0, 1), count); target = source.copy(); target[:, 2] = -1
+        expected = sessions[0].safe_step(source, target, .01)
+        sweeps = tuple(session.begin_sweep(source, target, .01) for session in sessions)
+        stats = run_native_sweep_batch(sweeps)
+        self.assertEqual(tuple(row.step() for row in sweeps), (expected, expected))
+        self.assertEqual((stats["submitted"], stats["completed"]), (2, 2))
+        self.assertEqual(stats["workers"], min(2, sessions[0].native.library.af_fiber_worker_threads()))
+        self.assertTrue(all(row.elapsed_ms >= 0.0 for row in sweeps))
+
     def test_persistent_native_session_fuses_contacts_and_validation(self):
         request = _box_request(); world = build_native_collision_world(request.colliders)
         points = np.linspace((-1, .1, 0), (1, .1, 0), request.settings.node_count)

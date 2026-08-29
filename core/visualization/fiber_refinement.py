@@ -1,18 +1,22 @@
 from collections import deque
 from dataclasses import dataclass
 from math import isfinite
+import os
 from time import monotonic
 
 import bpy
 from bpy.app.handlers import persistent
 
 from ..deps.dirty_hints import dirty_hints_for
-from ..deps.runtime_trace import activate_request_telemetry, restore_request_telemetry, telemetry_cache_snapshot
+from ..deps.runtime_trace import (activate_request_telemetry, restore_request_telemetry,
+                                  telemetry_cache_snapshot, telemetry_count,
+                                  telemetry_timing)
 from ..vcp.fiber_collision import _collider_stamp
 from ..vcp.fiber_anchor_preflight import (anchor_preflight_summary,
                                            preflight_fiber_hard_anchors)
 from ..vcp.fiber_engine import FiberTermination
 from ..vcp.fiber_progressive import begin_fiber_solve, publish_fiber_cache
+from ..vcp.v3.batch import V3BatchCoordinator
 from ..vcp.runtime_state import (
     fiber_recompute_status,
     set_fiber_active_colliders,
@@ -39,6 +43,10 @@ _TIMER_INTERVAL = 0.01
 _DRAW_INTERVAL = 0.05
 _JOBS = {}
 _QUEUE = deque()
+_V3_BATCH = V3BatchCoordinator()
+_BATCH_COMMITS = None
+_LAST_V3_BATCH_REPORT = None
+_LAST_BATCH_PRIORITY_REFRESH = 0.0
 _TIMER_ARMED = False
 _PAUSED = []
 
@@ -71,6 +79,7 @@ class FiberRefinementJob:
     output_committed: bool = False
     previous_points: tuple = ()
     retain_preview: bool = False
+    last_geometry_check: float = 0.0
 
 
 def request_fiber_refinement(root, scene, fiber, show_preview=False, quality="FINAL"):
@@ -141,6 +150,7 @@ def shutdown_fiber_refinements(mark_unknown=False):
     global _TIMER_ARMED
     for key in tuple(_JOBS):
         _terminate_key(key, FiberTermination.CANCELLED, mark_unknown)
+    _V3_BATCH.clear()
     _QUEUE.clear()
     _drop_timer()
     _TIMER_ARMED = False
@@ -170,6 +180,7 @@ def _new_job(key, scene, root, fiber, session):
                              retain_preview=retain)
     claim_engine_migration(fiber, token)
     job.last_apply, job.last_generation = monotonic(), session.generation
+    job.last_geometry_check = job.last_apply
     return job
 
 
@@ -194,6 +205,7 @@ def _start_or_finish(job, proxy):
         return RefinementRequest(True, proxy=proxy)
     _mark_refining(job.session.fiber)
     _JOBS[job.key] = job
+    _register_batch_job(job)
     _QUEUE.append(job.key)
     _arm_timer()
     return RefinementRequest(True, proxy=proxy, job=job)
@@ -212,14 +224,58 @@ def _flush_one():
     if not _QUEUE:
         _TIMER_ARMED = False
         return None
-    key = _QUEUE.popleft()
+    key = _QUEUE[0]
     job = _JOBS.get(key)
-    if job is not None:
-        _advance_job(job)
-    if key in _JOBS:
-        _QUEUE.append(key)
+    _flush_v3_batch() if _batch_job_enabled(job) else _flush_serial_key(key)
     _TIMER_ARMED = bool(_QUEUE)
     return _TIMER_INTERVAL if _QUEUE else None
+
+
+def _flush_serial_key(key):
+    _QUEUE.popleft()
+    job = _JOBS.get(key)
+    if job is not None: _advance_job(job)
+    if key in _JOBS: _QUEUE.append(key)
+
+
+def _flush_v3_batch():
+    global _LAST_V3_BATCH_REPORT
+    report = None; _refresh_batch_priorities(); _begin_batch_publication()
+    try: report = _V3_BATCH.step(_SLICE_MS, _advance_batch_key)
+    except Exception as error: _fail_v3_batch(error)
+    finally: _end_batch_publication()
+    if report is None: return
+    _LAST_V3_BATCH_REPORT = report
+    _record_batch_report(report); _rotate_batch_keys(report.selected)
+
+
+def _fail_v3_batch(error):
+    for key in tuple(_V3_BATCH.entries):
+        job = _JOBS.get(key)
+        if job is None: continue
+        job.session.runtime_error = f"V3 batch executor failed: {error}"
+        _terminate_job(job, FiberTermination.UNSAFE_OUTPUT, mark_unknown=False, stale=True)
+
+
+def _advance_batch_key(key):
+    job = _JOBS.get(key)
+    if job is not None: _advance_job(job)
+
+
+def _rotate_batch_keys(keys):
+    for key in keys:
+        while key in _QUEUE: _QUEUE.remove(key)
+        if key in _JOBS: _QUEUE.append(key)
+
+
+def _record_batch_report(report):
+    count = max(1, len(report.selected))
+    for key in report.selected:
+        job = _JOBS.get(key)
+        if job is None: continue
+        telemetry_timing("v3_batch_wall_share", report.elapsed_ms / count, job.session.telemetry)
+        telemetry_timing("v3_batch_native_share", report.native_ms / count, job.session.telemetry)
+        telemetry_count("v3_batch_parallel_step", int(report.workers > 1), job.session.telemetry)
 
 
 def _advance_job(job):
@@ -236,16 +292,16 @@ def _advance_job(job):
 
 def _advance_active_job(job):
     result = job.session.step(_SLICE_MS)
-    _apply_progress(job, result)
+    _apply_progress(job, result, known_valid=True)
     if result.done:
         _finish_job(job, result)
 
 
-def _apply_progress(job, result):
-    if not _valid_job(job):
+def _apply_progress(job, result, known_valid=False):
+    if not known_valid and not _valid_job(job):
         return
     now = monotonic()
-    changed_level = job.last_generation != job.session.generation
+    changed_level = not _is_v3_job(job) and job.last_generation != job.session.generation
     if not (result.done or changed_level or now - job.last_apply >= _DRAW_INTERVAL):
         return
     root, scene, fiber = _resolved_job_data(job)
@@ -305,7 +361,7 @@ def _retain_safe_preview(job, commit, now):
 
 
 def _finish_job(job, result=None):
-    reason = _invalid_job_reason(job)
+    reason = _invalid_job_reason(job, force_geometry=True)
     if reason:
         _terminate_job(job, reason, mark_unknown=True, stale=True)
         return
@@ -396,7 +452,7 @@ def _planner_preview_result(result):
 
 
 def _commit_allowed(job, result):
-    if not (_valid_job(job) and result.done and not result.invalid_reason):
+    if not (_valid_job(job, force_geometry=True) and result.done and not result.invalid_reason):
         return False
     if not _termination_committable(result):
         return False
@@ -567,9 +623,37 @@ def _sync_final(job):
     root, scene, fiber = _owned_job_data(job)
     if root is None or scene is None or fiber is None:
         return
-    payload = {"solved_fiber_ids": [fiber.id]}
-    _sync_scene()(root=root, scene=scene, dirty_hints=dirty_hints_for("FIBER", {fiber.id}),
+    if _BATCH_COMMITS is not None:
+        _BATCH_COMMITS.append((root, scene, fiber.id))
+        return
+    _sync_fiber_group(root, scene, {fiber.id})
+
+
+def _sync_fiber_group(root, scene, fiber_ids):
+    ids = set(fiber_ids)
+    payload = {"solved_fiber_ids": sorted(ids)}
+    _sync_scene()(root=root, scene=scene, dirty_hints=dirty_hints_for("FIBER", ids),
                   source="fiber_refinement", event_type="FIBER_SOLVE_READY", payload=payload)
+
+
+def _begin_batch_publication():
+    global _BATCH_COMMITS
+    _BATCH_COMMITS = []
+
+
+def _end_batch_publication():
+    global _BATCH_COMMITS
+    rows, _BATCH_COMMITS = tuple(_BATCH_COMMITS or ()), None
+    for root, scene, ids in _group_batch_commits(rows):
+        _sync_fiber_group(root, scene, ids)
+
+
+def _group_batch_commits(rows):
+    groups = {}
+    for root, scene, fiber_id in rows:
+        key = (_id_uid(scene), _id_uid(root))
+        groups.setdefault(key, [root, scene, set()])[2].add(fiber_id)
+    return tuple(groups.values())
 
 
 def _abort_request(key, root, scene, fiber, session):
@@ -629,6 +713,8 @@ def _restore_job_status(job, fiber, mark_unknown):
 
 
 def _mark_terminated(job, reason):
+    cancel = getattr(job.session, "cancel", None)
+    if callable(cancel): cancel()
     job.session.termination_reason = FiberTermination(reason).value
     job.session.converged = False
     job.session.done = True
@@ -638,8 +724,60 @@ def _detach_job(job):
     if _JOBS.get(job.key) is not job:
         return
     _JOBS.pop(job.key, None)
+    _V3_BATCH.remove(job.key)
     while job.key in _QUEUE:
         _QUEUE.remove(job.key)
+
+
+def _register_batch_job(job):
+    if _batch_candidate(job): _V3_BATCH.add(job.key, job.session, _job_priority(job))
+
+
+def _refresh_batch_priorities():
+    global _LAST_BATCH_PRIORITY_REFRESH
+    now = monotonic()
+    if now - _LAST_BATCH_PRIORITY_REFRESH < _DRAW_INTERVAL: return
+    _LAST_BATCH_PRIORITY_REFRESH = now
+    for key in tuple(_V3_BATCH.entries):
+        job = _JOBS.get(key)
+        if job is not None: _V3_BATCH.set_priority(key, _job_priority(job))
+
+
+def _is_v3_job(job):
+    return job is not None and str(getattr(job.session, "engine", "")) == "V3"
+
+
+def _batch_job_enabled(job):
+    if not _batch_candidate(job): return False
+    mode = os.environ.get("AF_FIBER_V3_BATCH", "AUTO").upper()
+    count = int(getattr(job.session, "params", {}).get("node_count", 0))
+    return mode == "1" or count >= 256 or len(_V3_BATCH.entries) >= 4
+
+
+def _batch_candidate(job):
+    return _is_v3_job(job) and os.environ.get("AF_FIBER_V3_BATCH", "AUTO") != "0"
+
+
+def _job_priority(job):
+    root, scene, fiber = _resolved_job_data(job)
+    system = None if root is None else getattr(root, "af_vcp_system", None)
+    selected = system is not None and system.active_vcp_type == "FIBER"
+    if selected and system.active_vcp_id == job.fiber_id: return 8
+    proxy = None if scene is None or root is None else _find_proxy(scene, root.name, job.fiber_id)
+    return 4 if _proxy_visible(proxy) else 1
+
+
+def _proxy_visible(proxy):
+    if proxy is None: return False
+    hidden = getattr(proxy, "hide_get", None)
+    return not bool(hidden()) if callable(hidden) else not bool(getattr(proxy, "hide_viewport", False))
+
+
+def fiber_refinement_batch_stats():
+    stats = _V3_BATCH.stats()
+    report = _LAST_V3_BATCH_REPORT
+    stats["last"] = None if report is None else dict(report.__dict__)
+    return stats
 
 
 def _commit_provenance(job, result, fiber, proxy):
@@ -651,11 +789,11 @@ def _commit_provenance(job, result, fiber, proxy):
                             getattr(result, "backend_version", ""))
 
 
-def _valid_job(job):
-    return _invalid_job_reason(job) is None
+def _valid_job(job, force_geometry=False):
+    return _invalid_job_reason(job, force_geometry) is None
 
 
-def _invalid_job_reason(job):
+def _invalid_job_reason(job, force_geometry=False):
     root, scene, fiber = _owned_job_data(job)
     if root is None or scene is None or fiber is None:
         return FiberTermination.CANCELLED
@@ -663,9 +801,16 @@ def _invalid_job_reason(job):
         return FiberTermination.SUPERSEDED
     if _fiber_signature(fiber) != job.signature:
         return FiberTermination.CANCELLED
-    if _current_geometry_signature(job.session) != job.geometry_signature:
+    if not _job_geometry_current(job, force_geometry):
         return FiberTermination.CANCELLED
     return None
+
+
+def _job_geometry_current(job, force=False):
+    now = monotonic()
+    if not force and now - job.last_geometry_check < _DRAW_INTERVAL: return True
+    job.last_geometry_check = now
+    return _current_geometry_signature(job.session) == job.geometry_signature
 
 
 def _resolved_job_data(job):

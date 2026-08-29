@@ -137,6 +137,10 @@ class V2ContactCoreSession:
     def step(self):
         return _advance_contact_session(self)
 
+    def cancel(self):
+        _close_native_session(self.state)
+        self.done = True
+
     @property
     def points(self):
         return () if self.state is None else self.state.points
@@ -144,6 +148,12 @@ class V2ContactCoreSession:
     @property
     def infeasible(self):
         return bool(self.state is not None and not self.state.metrics.feasible)
+
+    @property
+    def pending_native_sweep(self):
+        sweep = None if self.state is None else self.state.pending_sweep
+        ready = callable(getattr(sweep, "batch_input", None)) and not getattr(sweep, "done", False)
+        return sweep if ready else None
 
 
 @dataclass
@@ -514,7 +524,7 @@ def _iteration(state):
     _adapt_quality(state)
     candidate = _solve_candidate(state)
     if state.metrics.feasible:
-        _begin_feasible_sweep(state, candidate); return _advance_feasible_sweep(state)
+        _begin_feasible_sweep(state, candidate); return False
     accepted = _accept_infeasible_candidate(state, candidate)
     return _complete_trial(state, accepted)
 
@@ -630,11 +640,11 @@ def _begin_feasible_sweep(state, candidate):
 
 
 def _advance_feasible_sweep(state):
-    step = state.pending_sweep.step()
+    sweep = state.pending_sweep; step = sweep.step()
     if step is None: return False
-    started = state.pending_sweep._started; candidate = state.pending_candidate
+    started = sweep._started; candidate = state.pending_candidate
     state.pending_sweep = None; state.pending_candidate = None
-    _record_ccd(state, step, started, candidate)
+    _record_ccd(state, step, started, candidate, getattr(sweep, "elapsed_ms", None))
     accepted = _accept_feasible_step(state, candidate, step)
     if isinstance(accepted, tuple): return accepted
     return _complete_trial(state, accepted)
@@ -749,8 +759,9 @@ def _at_trust_boundary(state):
     return maximum >= .8 * state.trust_radius
 
 
-def _record_ccd(state, step, started, candidate=None):
-    state.ccd_ms += _elapsed(started); state.limiting += len(step.limiting_pairs)
+def _record_ccd(state, step, started, candidate=None, elapsed_ms=None):
+    state.ccd_ms += _elapsed(started) if elapsed_ms is None else max(0.0, float(elapsed_ms))
+    state.limiting += len(step.limiting_pairs)
     state.ccd_candidates += step.candidate_pairs; state.ccd_tested += step.tested_pairs
     state.limiting_history.append(tuple(step.limiting_pairs))
     state.ccd_step_history.append((step.safe_step, step.reason.value, step.initially_valid))
