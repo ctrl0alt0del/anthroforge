@@ -1,6 +1,7 @@
 """Read-only Blender benchmark for the isolated native V3 SQP controller."""
 
 import argparse
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
@@ -16,6 +17,7 @@ def _args():
     parser.add_argument("--output", required=True); parser.add_argument("--no-planner", action="store_true")
     parser.add_argument("--threads", type=int, default=0)
     parser.add_argument("--production-only", action="store_true")
+    parser.add_argument("--cap", type=int, default=0)
     values = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     return parser.parse_args(values)
 
@@ -60,15 +62,29 @@ def _request(root, scene, fiber):
 
 def _production(request, planner):
     from anthroforge.core.vcp.v3.production import solve_v3
-    started = perf_counter(); package = solve_v3(request, use_planner=planner)
+    started = perf_counter(); package = solve_v3(request, use_planner=planner,
+                                                 native_controller=False)
     elapsed = 1000.0 * (perf_counter() - started); points = np.asarray(package.result.points)
     diagnostics = package.result.diagnostics
     return {"points": points, "elapsed_ms": elapsed, "validated": package.result.validated,
         "termination": package.result.termination.value, "accepted": diagnostics.accepted_steps,
+        "controller": diagnostics.controller,
         "rejected": diagnostics.rejected_steps, "ccd_ms": diagnostics.native_ccd_ms,
         "ccd_pairs": diagnostics.ccd_candidate_pairs, "ccd_tests": diagnostics.ccd_tested_pairs,
         "contact_ms": diagnostics.native_contact_ms, "validation_ms": diagnostics.native_validation_ms,
         "native_sessions": tuple(dict(row.native_session_stats) for row in package.trace.spans),
+        "trajectory": ()}
+
+
+def _controller(request, planner):
+    from anthroforge.core.vcp.v3.production import solve_v3_controller
+    started = perf_counter(); package = solve_v3_controller(request, use_planner=planner)
+    elapsed = 1000.0 * (perf_counter() - started); diagnostics = package.result.diagnostics
+    return {"points": np.asarray(package.result.points), "elapsed_ms": elapsed,
+        "validated": package.result.validated, "termination": package.result.termination.value,
+        "controller": diagnostics.controller,
+        "accepted": diagnostics.accepted_steps, "rejected": diagnostics.rejected_steps,
+        "ccd_pairs": diagnostics.ccd_candidate_pairs, "ccd_tests": diagnostics.ccd_tested_pairs,
         "trajectory": ()}
 
 
@@ -98,23 +114,29 @@ def _delta(first, second):
     return {"maximum": float(values.max(initial=0.0)), "rms": float(np.sqrt(np.mean(values * values)))}
 
 
-def _benchmark(root, scene, fiber, planner, experiments=True):
+def _benchmark(root, scene, fiber, planner, experiments=True, cap=0):
     started = perf_counter(); request = _request(root, scene, fiber)
+    if cap > 0: request = replace(request, settings=replace(request.settings, max_accepted_steps=cap))
     capture = 1000.0 * (perf_counter() - started); current = _production(request, planner)
-    if not experiments: return _current_row(fiber, capture, current)
+    controller = _controller(request, planner)
+    if not experiments: return _current_row(fiber, capture, current, controller)
     from anthroforge.core.vcp.v3.native_sqp_experiment import INDEXED_CCD, LEGACY_CCD
     legacy = _native(request, LEGACY_CCD, planner); indexed = _native(request, INDEXED_CCD, planner)
-    comparisons = {"current_to_legacy": _delta(current["points"], legacy["points"]),
+    comparisons = {"current_to_controller": _delta(current["points"], controller["points"]),
+        "current_to_legacy": _delta(current["points"], legacy["points"]),
         "current_to_indexed": _delta(current["points"], indexed["points"]),
         "legacy_to_indexed": _delta(legacy["points"], indexed["points"])}
     return {"fiber": fiber.name, "capture_ms": capture, "current": _summary(current),
+            "production_controller": _summary(controller),
             "native_legacy": _summary(legacy), "native_indexed": _summary(indexed),
             "comparisons": comparisons, "points": _point_payload(current, legacy, indexed)}
 
 
-def _current_row(fiber, capture, current):
+def _current_row(fiber, capture, current, controller):
     return {"fiber": fiber.name, "capture_ms": capture, "current": _summary(current),
-            "points": {"current": current["points"].tolist()}}
+            "production_controller": _summary(controller),
+            "points": {"current": current["points"].tolist(),
+                       "production_controller": controller["points"].tolist()}}
 
 
 def _point_payload(current, legacy, indexed):
@@ -127,7 +149,7 @@ def main():
     scene = bpy.context.scene; root = _root(scene); rows = _fibers(root, args.fibers)
     if not rows: raise RuntimeError("no requested Fibers found")
     reports = tuple(_benchmark(root, scene, row, not args.no_planner,
-                    not args.production_only) for row in rows)
+                    not args.production_only, args.cap) for row in rows)
     payload = {"source": str(source), "source_hash_before": before,
         "source_hash_after": _hash(source), "fibers": reports}
     Path(args.output).write_text(json.dumps(payload, indent=2, allow_nan=True), encoding="utf-8")

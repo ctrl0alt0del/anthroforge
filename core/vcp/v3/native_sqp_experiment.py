@@ -92,7 +92,7 @@ class _Invocation:
 
 def solve_native_sqp(request, ccd_mode=INDEXED_CCD, use_planner=True):
     previous = cn._DEFAULT_NATIVE_PATH; _set_backend(EXPERIMENT_DLL)
-    session = begin_v3(request, preview=False, use_planner=use_planner)
+    session = begin_v3(request, preview=False, use_planner=use_planner, native_controller=False)
     try: return _solve_session(session, ccd_mode)
     finally: session.cancel(); _set_backend(previous)
 

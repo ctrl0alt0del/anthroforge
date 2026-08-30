@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <queue>
 #include <unordered_map>
 #include <tuple>
@@ -87,7 +88,7 @@ static int af_v3_batch_capability() { return 65536; }
 static int af_v3_indexed_ccd_capability() { return 1048576; }
 static int af_v3_native_world_capability() { return 2097152; }
 static int af_v3_operations_capability() {
-#ifdef AF_V3_OPERATION_EXPERIMENT
+#if defined(AF_V3_OPERATION_EXPERIMENT) || defined(AF_V3_NATIVE_CONTROLLER)
     return 131072;
 #else
     return 0;
@@ -95,7 +96,7 @@ static int af_v3_operations_capability() {
 }
 
 static int af_v3_coordinator_capability() {
-#ifdef AF_V3_OPERATION_EXPERIMENT
+#if defined(AF_V3_OPERATION_EXPERIMENT) || defined(AF_V3_NATIVE_CONTROLLER)
     return 262144;
 #else
     return 0;
@@ -103,8 +104,16 @@ static int af_v3_coordinator_capability() {
 }
 
 static int af_v3_native_sqp_capability() {
-#ifdef AF_V3_OPERATION_EXPERIMENT
+#if defined(AF_V3_OPERATION_EXPERIMENT) || defined(AF_V3_NATIVE_CONTROLLER)
     return 524288;
+#else
+    return 0;
+#endif
+}
+
+static int af_v3_resumable_sqp_capability() {
+#if defined(AF_V3_OPERATION_EXPERIMENT) || defined(AF_V3_NATIVE_CONTROLLER)
+    return 4194304;
 #else
     return 0;
 #endif
@@ -223,7 +232,7 @@ AF_EXPORT int af_fiber_ccd_version() { return 3; }
 AF_EXPORT int af_fiber_ccd_capabilities() {
     return 8191|af_parallel_capability()|af_llvm_openmp_capability()|
            af_v3_session_capability()|af_v3_batch_capability()|af_v3_indexed_ccd_capability()|af_v3_native_world_capability()|af_v3_operations_capability()|
-           af_v3_coordinator_capability()|af_v3_native_sqp_capability();
+           af_v3_coordinator_capability()|af_v3_native_sqp_capability()|af_v3_resumable_sqp_capability();
 }
 
 AF_EXPORT int af_fiber_worker_threads() { return af_requested_workers; }
@@ -516,7 +525,7 @@ AF_EXPORT int af_candidate_pairs(const double* start, const double* end, const i
 #include "af_fiber_contact3.hpp"
 #include "af_fiber_v3_session.hpp"
 #include "af_fiber_v3_batch.hpp"
-#ifdef AF_V3_OPERATION_EXPERIMENT
+#if defined(AF_V3_OPERATION_EXPERIMENT) || defined(AF_V3_NATIVE_CONTROLLER)
 #include "af_fiber_v3_operations.hpp"
 #include "af_fiber_v3_coordinator.hpp"
 #include "af_fiber_v3_native_sqp.hpp"

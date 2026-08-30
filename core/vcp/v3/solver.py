@@ -17,7 +17,7 @@ from .shortcut import V3ShortcutTrace, apply_v3_shortcut
 from .spans import aggregate_spans, prepare_span_request, synchronize_owner_spans
 
 
-V3_SOLVER_VERSION = "fiber-v3-production-4"
+V3_SOLVER_VERSION = "fiber-v3-production-5"
 
 
 @dataclass
@@ -43,12 +43,18 @@ class V3SolveSession:
     package: object = None
     done: bool = False
     native_session: bool = True
+    native_controller: bool = False
+    native_run: object = None
+    native_accepted: int = 0
+    native_infeasible: object = None
+    native_trial_batch: int = 1
 
     def step(self):
         _advance_v3(self)
         return self.package
 
     def cancel(self):
+        if self.native_run is not None: self.native_run.cancel(); self.native_run = None
         for row in self.spans:
             cancel = getattr(row, "cancel", None)
             if callable(cancel): cancel()
@@ -60,6 +66,7 @@ class V3SolveSession:
 
     @property
     def infeasible(self):
+        if self.native_infeasible is not None: return bool(self.native_infeasible)
         return any(row.state is not None and not row.state.metrics.feasible for row in self.spans)
 
     @property
@@ -69,25 +76,30 @@ class V3SolveSession:
 
 
 def begin_v3_session(request, snapshot=None, preview=False, checkpoint_steps=0,
-                     use_planner=True, policy=V3_PRODUCTION_POLICY, native_session=True):
+                     use_planner=True, policy=V3_PRODUCTION_POLICY, native_session=True,
+                     native_controller=False):
     version = f"{V3_SOLVER_VERSION}:{policy.fingerprint()[:12]}"
     accepted = replace(accepted_v3_request(request, policy), engine_version=version)
     value = V3SolveSession(accepted, snapshot, preview, max(0, int(checkpoint_steps)),
                            bool(use_planner), policy)
-    value.native_session = bool(native_session); return value
+    value.native_session = bool(native_session); value.native_controller = bool(native_controller)
+    return value
 
 
 def solve_v3_session(request, snapshot=None, preview=False, checkpoint_steps=0,
-                     use_planner=True, policy=V3_PRODUCTION_POLICY, native_session=True):
+                     use_planner=True, policy=V3_PRODUCTION_POLICY, native_session=True,
+                     native_controller=False):
     session = begin_v3_session(request, snapshot, preview, checkpoint_steps, use_planner,
-                               policy, native_session)
+                               policy, native_session, native_controller)
+    if native_controller: session.native_trial_batch = 64
     while not session.done: session.step()
     return session.package
 
 
 def _advance_v3(session):
     actions = {"WORLD": _prepare_world, "PLAN": _prepare_plan,
-               "SEED": _prepare_seed, "SPANS": _prepare_spans, "SOLVE": _advance_spans}
+               "SEED": _prepare_seed, "SPANS": _prepare_spans, "SOLVE": _advance_spans,
+               "NATIVE_INIT": _advance_native_init, "NATIVE_SOLVE": _advance_native_solve}
     action = actions.get(session.phase)
     if action is None: _fail_phase(session)
     else: action(session)
@@ -132,7 +144,46 @@ def _prepare_spans(session):
                     use_filter_sqp=True, policy=session.policy,
                     native_session=session.native_session))
     session.spans = tuple(rows); session.completed.update(_already_done(session.spans))
-    session.phase = "SOLVE"
+    session.phase = "NATIVE_INIT" if session.native_controller else "SOLVE"
+
+
+def _advance_native_init(session):
+    pending = next((row for row in session.spans if not row.done and row.phase != "SOLVE"), None)
+    if pending is not None: pending.step(); return
+    if any(row.done for row in session.spans): _finish_native_init_failure(session); return
+    synchronize_owner_spans(session.spans, session.request, session.pins)
+    _start_native_controller(session)
+
+
+def _start_native_controller(session):
+    from .native_controller import begin_native_controller
+    try: session.native_run = begin_native_controller(session)
+    except RuntimeError as error: _finish_native_backend_failure(session, str(error)); return
+    session.phase = "NATIVE_SOLVE"
+
+
+def _finish_native_backend_failure(session, message):
+    for row in session.spans:
+        if not row.done: _finish_contact_session(row, FiberNumericTermination.BACKEND_UNAVAILABLE, message)
+    _finalize(session)
+
+
+def _finish_native_init_failure(session):
+    source = next(row for row in session.spans if row.done)
+    termination, message = source.package.result.termination, source.package.result.message
+    for row in session.spans:
+        if not row.done: _finish_contact_session(row, termination, message)
+    _finalize(session)
+
+
+def _advance_native_solve(session):
+    done = session.native_run.step(session.native_trial_batch)
+    session.native_accepted = session.native_run.accepted
+    session.native_infeasible = session.native_run.infeasible; _try_checkpoint(session)
+    if not done: return
+    from .native_controller import finish_native_controller
+    finish_native_controller(session, session.native_run); session.native_run = None
+    _finalize(session)
 
 
 def _already_done(spans):
@@ -168,6 +219,7 @@ def _record_completion(session, index):
 
 
 def _accepted(session):
+    if session.native_controller: return int(session.native_accepted)
     return sum(row.state.accepted for row in session.spans if row.state is not None)
 
 
@@ -240,9 +292,10 @@ def _complete_records(session):
 
 def _validated_package(session, package):
     points = np.asarray(package.result.points)
-    valid = bool(len(points) and _validate_live(session, points))
-    termination = package.result.termination if valid else FiberNumericTermination.UNSAFE_OUTPUT
-    message = package.result.message if valid else "stitched Fiber failed independent validation"
+    backend_failure = package.result.termination is FiberNumericTermination.BACKEND_UNAVAILABLE
+    valid = bool(not backend_failure and len(points) and _validate_live(session, points))
+    termination = package.result.termination if valid or backend_failure else FiberNumericTermination.UNSAFE_OUTPUT
+    message = package.result.message if valid or backend_failure else "stitched Fiber failed independent validation"
     diagnostics = _v3_diagnostics(session, package)
     result = replace(package.result, termination=termination, validated=valid,
                      message=message, diagnostics=diagnostics, engine_version=V3_SOLVER_VERSION)
@@ -258,7 +311,8 @@ def _v3_diagnostics(session, package):
         regularization_increases=increases, regularization_decreases=decreases,
         span_terminations=tuple(row.package.result.termination.value for row in session.spans),
         shortcut_mode=session.shortcut.mode, shortcut_attempts=session.shortcut.attempts,
-        shortcut_accepted=session.shortcut.accepted, interactive_checkpoint=session.checkpoint_ready)
+        shortcut_accepted=session.shortcut.accepted, interactive_checkpoint=session.checkpoint_ready,
+        controller="NATIVE" if session.native_controller else "PYTHON")
 
 
 def _regularization(session):

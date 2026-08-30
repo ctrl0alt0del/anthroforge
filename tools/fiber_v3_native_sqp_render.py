@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -13,7 +14,8 @@ import numpy as np
 def _args():
     parser = argparse.ArgumentParser(); parser.add_argument("--input", required=True)
     parser.add_argument("--fiber", required=True); parser.add_argument("--output", required=True)
-    parser.add_argument("--baseline", default="")
+    parser.add_argument("--baseline", default=""); parser.add_argument("--controller", action="store_true")
+    parser.add_argument("--view", choices=("plane", "depth"), default="plane")
     values = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     return parser.parse_args(values)
 
@@ -54,6 +56,13 @@ def _production_comparison(record, baseline):
     output["labels"] = ("OLD PRODUCTION", "INDEXED PRODUCTION"); return output
 
 
+def _controller_comparison(record):
+    output = dict(record); output["points"] = dict(record["points"])
+    output["points"]["native_legacy"] = record["points"]["current"]
+    output["points"]["native_indexed"] = record["points"]["production_controller"]
+    output["labels"] = ("PYTHON SQP", "NATIVE C++"); return output
+
+
 def _basis(record):
     routes = np.vstack((record["points"]["native_legacy"], record["points"]["native_indexed"]))
     center = routes.mean(axis=0); _u, _s, axes = np.linalg.svd(routes - center, full_matrices=False)
@@ -87,6 +96,13 @@ def _material(name, color, alpha=1.0, emission=0.0):
     return material
 
 
+def _world(scene):
+    world = bpy.data.worlds.new("AF_COMPARE_WORLD"); world.use_nodes = True; scene.world = world
+    shader = world.node_tree.nodes.get("Background")
+    shader.inputs["Color"].default_value = (.018, .022, .032, 1.0)
+    shader.inputs["Strength"].default_value = .35
+
+
 def _transform(points, center, axes, shift):
     values = (np.asarray(points, dtype=np.float64) - center) @ axes.T; values[:, 0] += shift
     return values
@@ -107,34 +123,41 @@ def _curve(name, points, center, axes, shift, radius, material):
     bpy.context.collection.objects.link(obj); return obj
 
 
-def _label(text, location, scale):
+def _label(text, location, scale, view):
     data = bpy.data.curves.new(text, "FONT"); data.body = text; data.align_x = "CENTER"; data.size = scale
     obj = bpy.data.objects.new(text, data); bpy.context.collection.objects.link(obj); obj.location = location
-    data.materials.append(_material(text, (.9, .92, 1.0), emission=.15)); return obj
+    if view == "depth": obj.rotation_euler[0] = math.pi / 2.0
+    data.materials.append(_material(text, (.9, .92, 1.0), emission=2.0)); return obj
 
 
-def _build(record, request, center, axes, routes):
+def _build(record, request, center, axes, routes, view):
     local = (routes - center) @ axes.T; width = max(float(np.ptp(local[:, 0])), 1.0e-3)
-    height = max(float(np.ptp(local[:, 1])), 1.0e-3); shift = 1.35 * width; radius = .006 * max(width, height)
-    mesh_material = _material("COLLIDERS", (.12, .16, .22), .48); legacy = _material("LEGACY", (0.0, .85, 1.0), emission=.25)
-    indexed = _material("INDEXED", (1.0, .05, .72), emission=.25)
+    height = max(float(np.ptp(local[:, 1])), 1.0e-3); depth = max(float(np.ptp(local[:, 2])), 1.0e-3)
+    shift = 1.45 * width; radius = .006 * max(width, height, depth)
+    mesh_material = _material("COLLIDERS", (.3, .35, .45), .16, .22)
+    legacy = _material("LEGACY", (0.0, .85, 1.0), emission=3.0); indexed = _material("INDEXED", (1.0, .05, .72), emission=3.0)
     for side in (-1, 1):
         for index, collider in enumerate(_colliders(request, routes)): _mesh(f"C_{side}_{index}", collider, center, axes, side * shift / 2, mesh_material)
     _curve("LEGACY_CCD", record["points"]["native_legacy"], center, axes, -shift / 2, radius, legacy)
     _curve("INDEXED_CCD", record["points"]["native_indexed"], center, axes, shift / 2, radius, indexed)
     labels = record.get("labels", ("LEGACY CCD", "INDEXED CCD"))
-    _label(labels[0], (-shift / 2, .65 * height, .55 * height), .07 * height)
-    _label(labels[1], (shift / 2, .65 * height, .55 * height), .07 * height)
-    return width, height, shift
+    label_z = .65 * depth if view == "depth" else .55 * height
+    label_y = -.55 * height if view == "depth" else .65 * height
+    _label(labels[0], (-shift / 2, label_y, label_z), .07 * max(height, depth), view)
+    _label(labels[1], (shift / 2, label_y, label_z), .07 * max(height, depth), view)
+    return width, height, depth, shift
 
 
-def _render(output, dimensions):
-    width, height, shift = dimensions; data = bpy.data.cameras.new("CAMERA"); data.type = "ORTHO"
-    data.ortho_scale = 1.5 * max(height, (width + shift) / 2.0); camera = bpy.data.objects.new("CAMERA", data)
-    bpy.context.collection.objects.link(camera); camera.location = (0, 0, 4.0 * max(width, height)); bpy.context.scene.camera = camera
+def _render(output, dimensions, view):
+    width, height, depth, shift = dimensions; data = bpy.data.cameras.new("CAMERA"); data.type = "ORTHO"
+    vertical = depth if view == "depth" else height; data.ortho_scale = 1.7 * max(vertical, (width + shift) / 2.0)
+    camera = bpy.data.objects.new("CAMERA", data); bpy.context.collection.objects.link(camera)
+    distance = 5.0 * max(width, height, depth); camera.location = (0, -distance, 0) if view == "depth" else (0, 0, distance)
+    camera.rotation_euler = (Vector((0, 0, 0)) - camera.location).to_track_quat("-Z", "Y").to_euler()
+    bpy.context.scene.camera = camera
     scene = bpy.context.scene; scene.render.engine = "BLENDER_EEVEE"; scene.render.resolution_x, scene.render.resolution_y = 1800, 900
     scene.render.resolution_percentage = 100; scene.render.image_settings.file_format = "PNG"; scene.render.filepath = str(output)
-    scene.world.color = (.008, .012, .02); scene.view_settings.look = "AgX - Medium High Contrast"; bpy.ops.render.render(write_still=True)
+    _world(scene); scene.view_settings.look = "AgX - Medium High Contrast"; bpy.ops.render.render(write_still=True)
 
 
 def main():
@@ -142,8 +165,9 @@ def main():
     request = _request(root, scene, _fiber(root, args.fiber)); record = _record(args.input, args.fiber)
     baseline = _record(args.baseline, args.fiber) if args.baseline else None
     record = _production_comparison(record, baseline)
+    if args.controller: record = _controller_comparison(record)
     center, axes, routes = _basis(record); output = Path(args.output).resolve(); output.parent.mkdir(parents=True, exist_ok=True)
-    _reset(); dimensions = _build(record, request, center, axes, routes); _render(output, dimensions)
+    _reset(); dimensions = _build(record, request, center, axes, routes, args.view); _render(output, dimensions, args.view)
     bpy.ops.wm.save_as_mainfile(filepath=str(output.with_suffix(".blend"))); print("AF_V3_SQP_RENDER=" + str(output))
 
 

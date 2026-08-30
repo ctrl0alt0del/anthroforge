@@ -4,7 +4,7 @@ Date: 2026-08-27
 
 ## Purpose
 
-`fiber-v3-production-4` is the code-default production boundary for the exact
+`fiber-v3-production-5` is the code-default production boundary for the exact
 solver configuration visually accepted as `REG_ADAPTIVE_SPACING`. It filters the
 accepted implementation out of the experimental V2 modules without changing its
 finite-work objective or stopping behavior. V1 and V2 remain internal overrides.
@@ -51,10 +51,14 @@ CCD and disables speculation until another serial sweep is clear. This preserves
 solver trajectory and avoids repeated speculative work in collision-limited regions. Nested
 multi-Fiber batches keep inner CCD serial to avoid oversubscription.
 
-The persistent session is part of `fiber-v3-production-4` and ABI capability `3276799`. It owns
-plain numeric workspaces only; Blender state, scheduling, cancellation, acceptance, and
-publication remain outside native code. `AF_FIBER_V3_NATIVE_SESSION=0` is a temporary internal
-parity switch. The code default and production behavior use the session.
+The persistent controller is part of `fiber-v3-production-5`; the packaged backend advertises
+ABI capability `8388607`, including resumable native `begin/step/finish/cancel` entry points.
+It owns numeric SQP/contact/CCD state while Blender capture, request scheduling, publication, and
+independent stitched validation remain outside native code. One native trial is the progressive
+cancellation boundary. `AF_FIBER_V3_NATIVE_CONTROLLER=0` retains the Python controller as an
+internal diagnostic reference; production defaults to the native controller.
+Every V3 result records `diagnostics.controller` as `NATIVE` or `PYTHON`, so
+benchmarks and saved diagnostic payloads cannot silently mix controller paths.
 
 The machine-readable authority is `core/vcp/v3/manifest.py`; the immutable
 numeric authority is `core/vcp/v3/policy.py`.
@@ -90,6 +94,10 @@ For live edits, `iterations_interactive` is a non-persistent validated preview
 checkpoint. The same session continues to `iterations_bake`, then commits a safe
 `CONVERGED`, `STALLED`, or `BUDGET_EXHAUSTED` result. Only a successful commit
 sets `solver_version=3` and V3 provenance.
+
+Planner selection, warm starts, shortcut modes, hard-midpoint span creation, shared global budget,
+checkpoint publication, cancellation, final validation, migration and provenance keep the same
+Python-owned interfaces. Only the span SQP/controller loop is native.
 
 ## Regression authority
 

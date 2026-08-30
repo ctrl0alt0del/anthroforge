@@ -12,6 +12,7 @@ V2_NATIVE_CAPABILITIES = 3276799
 V2_NATIVE_BATCH_CAPABILITY = 1024
 V3_NATIVE_SESSION_CAPABILITY = 32768
 V3_NATIVE_MULTI_SESSION_CAPABILITY = 65536
+V3_NATIVE_CONTROLLER_CAPABILITIES = 5111808
 
 
 class _NativeMeshSweep(Structure):
@@ -330,6 +331,15 @@ def native_batch_status(path=None):
     try:
         library = load_native(path); capabilities = library.af_fiber_ccd_capabilities()
         return native_status(path)[0] and bool(capabilities & V2_NATIVE_BATCH_CAPABILITY)
+    except (OSError, AttributeError):
+        return False
+
+
+def native_controller_status(path=None):
+    try:
+        library = load_native(path); capabilities = library.af_fiber_ccd_capabilities()
+        required = V3_NATIVE_CONTROLLER_CAPABILITIES
+        return native_status(path)[0] and capabilities & required == required
     except (OSError, AttributeError):
         return False
 

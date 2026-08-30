@@ -12,6 +12,8 @@ struct AfV3SqpConfig {
 
 struct AfV3SqpResult {
     int termination,accepted,rejected,trials,contacts,ccd_pairs,ccd_tests,spacing_enabled,validated,trace_count;
+    int feasibility_iterations,multiplier_updates,regularization_increases,regularization_decreases;
+    int injected_contacts,limiting_contacts,contact_groups;
     double energy,fixed_residual,stationarity,regularization,trust_radius,maximum_violation,elapsed_ms;
 };
 
@@ -23,8 +25,8 @@ struct AfV3SqpJob {
 };
 
 struct AfV3SqpContact {
-    int edge,collider,face,contained,limiting,age,clear_streak;
-    double factor,gap,multiplier;Vec normal,surface;
+    int edge,collider,face,feature,contained,limiting,age,clear_streak;
+    double factor,gap,model_gap,multiplier;Vec normal,surface;
 };
 
 struct AfV3SqpMetrics { double maximum=INFINITY,squared=INFINITY,minimum=-INFINITY;bool feasible=false; };
@@ -34,8 +36,11 @@ struct AfV3SqpState {
     std::vector<Vec> points,reference,candidate;std::vector<AfV3SqpContact> contacts;
     AfV3SqpMetrics metrics;int accepted=0,rejected=0,trials=0,stalled=0,energy_streak=0;
     int ccd_pairs=0,ccd_tests=0,termination=0;bool spacing=false,done=false,trust_boundary=false;
-    int last_decision=0,last_edge=-1,last_face=-1;double fixed=INFINITY,stationarity=INFINITY;
+    int feasibility_iterations=0,multiplier_updates=0,regularization_increases=0,regularization_decreases=0;
+    int injected_contacts=0,limiting_contacts=0;
+    int last_decision=0,last_edge=-1,last_face=-1,injection_streak=0;double fixed=INFINITY,stationarity=INFINITY;
     double last_safe=1.0,last_ratio=NAN;
+    std::vector<std::pair<int,Vec>> group_sides;
 };
 
 static double af_v3_sqp_length(Vec value) { return norm(value); }
@@ -54,6 +59,14 @@ static double af_v3_sqp_spacing_weight(const AfV3SqpState& state) {
     return .5*state.job->config.length_weight/std::max(mean,state.job->config.numeric_floor);
 }
 
+static double af_v3_sqp_objective(const AfV3SqpState& state,const std::vector<Vec>& points) {
+    double out=0.0,spacing=af_v3_sqp_spacing_weight(state),mean=af_v3_sqp_mean_length(points,0.0);
+    for(int i=0;i<int(points.size());++i){Vec d=sub(points[i],state.reference[i]);out+=state.job->config.fidelity_weight*dot(d,d);}
+    for(int e=0;e+1<int(points.size());++e){double length=norm(sub(points[e+1],points[e]));
+        out+=state.job->config.length_weight*std::sqrt(length*length+state.job->config.epsilon*state.job->config.epsilon);
+        out+=spacing*(length-mean)*(length-mean);}return out;
+}
+
 static double af_v3_sqp_segment_cv(const std::vector<Vec>& points) {
     if(points.size()<2)return 0.0;std::vector<double> rows(points.size()-1);double mean=0.0;
     for(int i=0;i<int(rows.size());++i){rows[i]=norm(sub(points[i+1],points[i]));mean+=rows[i];}mean/=rows.size();
@@ -61,14 +74,14 @@ static double af_v3_sqp_segment_cv(const std::vector<Vec>& points) {
 }
 
 static bool af_v3_sqp_same(const AfV3SqpContact& a,const AfV3SqpContact& b,double slack) {
-    if(a.edge!=b.edge||a.collider!=b.collider||a.contained!=b.contained||a.limiting!=b.limiting)return false;
+    if(a.edge!=b.edge||a.collider!=b.collider||a.feature!=b.feature)return false;
     if(std::abs(a.factor-b.factor)>1.0e-6||std::abs(a.gap-b.gap)>slack)return false;
     return dot(a.normal,b.normal)>=1.0-1.0e-6;
 }
 
 static bool af_v3_sqp_key(const AfV3SqpContact& a,const AfV3SqpContact& b) {
     return a.edge==b.edge&&a.collider==b.collider&&a.face==b.face&&
-           a.contained==b.contained&&a.limiting==b.limiting;
+           a.feature==b.feature;
 }
 
 static double af_v3_sqp_prior_multiplier(const AfV3SqpState& state,const AfV3SqpContact& row) {
@@ -83,15 +96,10 @@ static int af_v3_sqp_prior_age(const AfV3SqpState& state,const AfV3SqpContact& r
 
 static AfV3SqpContact af_v3_sqp_contact(const AfV3SqpState& state,const AfContactPair& pair) {
     double gap=pair.contained?-(pair.distance+state.job->config.radius):pair.distance-state.job->config.radius;
-    AfV3SqpContact row{pair.edge,pair.collider,pair.face,pair.contained,0,0,0,pair.factor,gap,0.0,
+    int feature=pair.contained?2:pair.distance<=state.job->config.slack?1:0;
+    AfV3SqpContact row{pair.edge,pair.collider,pair.face,feature,pair.contained,0,0,0,pair.factor,gap,NAN,0.0,
         load3(pair.normal),load3(pair.closest)};
     row.multiplier=af_v3_sqp_prior_multiplier(state,row);row.age=af_v3_sqp_prior_age(state,row);return row;
-}
-
-static AfV3SqpContact af_v3_sqp_refresh_limiter(const AfV3SqpState& state,const AfV3SqpContact& row,
-                                                const std::vector<Vec>& points) {
-    AfV3SqpContact out=row;Vec sample=add(points[row.edge],mul(sub(points[row.edge+1],points[row.edge]),row.factor));
-    out.gap=dot(sub(sample,row.surface),row.normal)-state.job->config.radius;return out;
 }
 
 static bool af_v3_sqp_migrate_limiter(const AfV3SqpContact& prior,std::vector<AfV3SqpContact>& output) {
@@ -103,10 +111,8 @@ static bool af_v3_sqp_migrate_limiter(const AfV3SqpContact& prior,std::vector<Af
 
 static void af_v3_sqp_retain_limiters(const AfV3SqpState& state,const std::vector<Vec>& points,
                                       std::vector<AfV3SqpContact>& output) {
-    double clear=std::max(4.0*state.job->config.slack,.25*state.job->config.radius);
-    for(const auto& prior:state.contacts)if(prior.limiting&&!af_v3_sqp_migrate_limiter(prior,output)){
-        auto row=af_v3_sqp_refresh_limiter(state,prior,points);
-        if(row.gap<=clear)output.push_back(row);}
+    (void)points;
+    for(const auto& prior:state.contacts)if(prior.limiting)af_v3_sqp_migrate_limiter(prior,output);
 }
 
 static bool af_v3_sqp_has_key(const std::vector<AfV3SqpContact>& rows,const AfV3SqpContact& value) {
@@ -117,15 +123,24 @@ static void af_v3_sqp_retain_contacts(const AfV3SqpState& state,std::vector<AfV3
     double clear=std::max(4.0*state.job->config.slack,.25*state.job->config.radius);
     for(const auto& prior:state.contacts)if(!prior.limiting&&!af_v3_sqp_has_key(output,prior)){auto row=prior;
         row.gap=clear;row.multiplier=std::max(0.0,row.multiplier-state.job->config.penalty*clear);++row.clear_streak;
+        row.model_gap=NAN;
         if(row.clear_streak<2||row.multiplier>state.job->config.penalty*state.job->config.slack)output.push_back(row);}
 }
 
 static std::vector<AfV3SqpContact> af_v3_sqp_contacts(const AfV3SqpState& state) {
-    std::vector<AfV3SqpContact> output;
-    for(const auto& pair:state.native->contacts){auto row=af_v3_sqp_contact(state,pair);bool duplicate=false;
-        for(const auto& prior:output)if(af_v3_sqp_same(prior,row,state.job->config.slack)){duplicate=true;break;}
-        if(!duplicate)output.push_back(row);}return output;
+    std::vector<AfV3SqpContact> rows,output;for(const auto& pair:state.native->contacts)rows.push_back(af_v3_sqp_contact(state,pair));
+    std::stable_sort(rows.begin(),rows.end(),[](const auto& a,const auto& b){return std::tie(a.edge,a.collider,a.face,a.feature)<std::tie(b.edge,b.collider,b.face,b.feature);});
+    for(auto row:rows){auto found=std::find_if(output.begin(),output.end(),[&](const auto& prior){return af_v3_sqp_same(prior,row,state.job->config.slack);});
+        if(found==output.end())output.push_back(row);else found->multiplier=std::max(found->multiplier,row.multiplier);}return output;
 }
+
+static void af_v3_sqp_unique_keys(std::vector<AfV3SqpContact>& rows) {
+    std::vector<AfV3SqpContact> output;for(auto row:rows){auto found=std::find_if(output.begin(),output.end(),[&](const auto& prior){return af_v3_sqp_key(prior,row);});
+        if(found==output.end())output.push_back(row);else *found=row;}rows.swap(output);
+}
+
+static void af_v3_sqp_coherent(AfV3SqpState& state,const std::vector<Vec>& points,
+                               std::vector<AfV3SqpContact>& contacts);
 
 static AfV3SqpMetrics af_v3_sqp_metrics(const AfV3SqpState& state,const AfV3MeasureOperation& row,
                                         const std::vector<AfV3SqpContact>& contacts) {
@@ -142,7 +157,9 @@ static AfV3SqpMetrics af_v3_sqp_measure(AfV3SqpState& state,const std::vector<Ve
     AfV3MeasureOperation row{state.native,reinterpret_cast<const double*>(points.data()),state.job->config.owner_span,
         activation,std::max(0.0,state.job->config.radius-state.job->config.slack),nullptr,0,0,{},clear.data(),blockers.data(),minima.data(),{}};
     AfV3CoordinatorWork work;af_v3_coordinator_measure(row,work);contacts=af_v3_sqp_contacts(state);
-    af_v3_sqp_retain_contacts(state,contacts);af_v3_sqp_retain_limiters(state,points,contacts);
+    af_v3_sqp_coherent(state,points,contacts);af_v3_sqp_unique_keys(contacts);
+    af_v3_sqp_retain_contacts(state,contacts);
+    af_v3_sqp_retain_limiters(state,points,contacts);
     return af_v3_sqp_metrics(state,row,contacts);
 }
 
@@ -150,6 +167,120 @@ static void af_v3_sqp_spacing_gradient(const std::vector<Vec>& points,double wei
     if(weight<=0.0||points.size()<2)return;double mean=af_v3_sqp_mean_length(points,0.0);
     for(int edge=0;edge+1<int(points.size());++edge){Vec delta=sub(points[edge+1],points[edge]);double length=norm(delta);
         Vec row=length>1.0e-15?mul(delta,weight*(length-mean)/length):Vec{0,0,0};gradient[edge]=sub(gradient[edge],row);gradient[edge+1]=add(gradient[edge+1],row);}
+}
+
+struct AfV3EscapeScore { bool valid=false;double maximum=0.0,squared=0.0,energy=0.0,distance=0.0;int order=0;Vec side{}; };
+
+static Vec af_v3_sqp_unit(Vec value) {
+    double length=norm(value);return length>1.0e-15?mul(value,1.0/length):Vec{0,0,0};
+}
+
+static bool af_v3_sqp_is_pinned(const AfV3SqpState& state,int node) {
+    for(int i=0;i<state.job->pin_count;++i)if(state.job->pins[i]==node)return true;return false;
+}
+
+static Vec* af_v3_sqp_group_side(AfV3SqpState& state,int collider) {
+    for(auto& row:state.group_sides)if(row.first==collider)return &row.second;return nullptr;
+}
+
+static void af_v3_sqp_set_group_side(AfV3SqpState& state,int collider,Vec side) {
+    if(auto* row=af_v3_sqp_group_side(state,collider)){*row=side;return;}state.group_sides.push_back({collider,side});
+}
+
+static std::pair<double,double> af_v3_sqp_violation(const std::vector<AfV3SqpContact>& contacts) {
+    double maximum=0.0,squared=0.0;for(const auto& row:contacts){double value=std::max(0.0,-row.gap);
+        maximum=std::max(maximum,value);squared+=value*value;}return {maximum,squared};
+}
+
+static std::vector<AfV3SqpContact> af_v3_sqp_raw_contacts(AfV3SqpState& state,
+                                                          const std::vector<Vec>& points) {
+    double activation=state.job->config.radius+std::max(4.0*state.job->config.slack,.25*state.job->config.radius);
+    AfV3MeasureOperation row{state.native,reinterpret_cast<const double*>(points.data()),state.job->config.owner_span,
+        activation,0.0,nullptr,0,0,{}};AfV3CoordinatorWork work;state.native->contacts.clear();
+    af_v3_contact_jobs(*state.native,row,work);af_v3_merge_contacts(*state.native,row.contacts);
+    return af_v3_sqp_contacts(state);
+}
+
+static bool af_v3_sqp_better_escape(const AfV3EscapeScore& row,const AfV3EscapeScore& best) {
+    if(!best.valid)return true;if(row.maximum!=best.maximum)return row.maximum<best.maximum;
+    if(row.squared!=best.squared)return row.squared<best.squared;if(row.energy!=best.energy)return row.energy<best.energy;
+    if(row.order!=best.order)return row.order<best.order;return row.distance<best.distance;
+}
+
+static AfV3EscapeScore af_v3_sqp_escape_trial(AfV3SqpState& state,const std::vector<Vec>& points,
+                                              int first,int last,Vec side,int order,
+                                              std::pair<double,double> base) {
+    double start=std::max(state.job->config.radius+std::max(4.0*state.job->config.slack,.25*state.job->config.radius),state.job->config.numeric_floor);
+    double limit=std::max(start,.25*state.job->config.length_scale);AfV3EscapeScore best;
+    for(int power=0;power<12;++power){double distance=std::min(limit,start*std::pow(2.0,power));auto trial=points;
+        for(int node=first;node<=last+1;++node)if(!af_v3_sqp_is_pinned(state,node))trial[node]=add(trial[node],mul(side,distance));
+        auto score=af_v3_sqp_violation(af_v3_sqp_raw_contacts(state,trial));AfV3EscapeScore row{true,score.first,score.second,af_v3_sqp_objective(state,trial),distance,order,side};
+        if(score<base&&af_v3_sqp_better_escape(row,best))best=row;if(score.first<=state.job->config.slack)break;}return best;
+}
+
+static void af_v3_sqp_covariance(const std::vector<AfV3SqpContact>& rows,double matrix[3][3]) {
+    std::fill(&matrix[0][0],&matrix[0][0]+9,0.0);for(const auto& row:rows){double n[3]{row.normal.x,row.normal.y,row.normal.z};
+        for(int i=0;i<3;++i)for(int j=0;j<3;++j)matrix[i][j]+=n[i]*n[j];}
+}
+
+static void af_v3_sqp_jacobi(double a[3][3],double v[3][3]) {
+    std::fill(&v[0][0],&v[0][0]+9,0.0);for(int i=0;i<3;++i)v[i][i]=1.0;
+    for(int it=0;it<16;++it){int p=0,q=1;if(std::abs(a[0][2])>std::abs(a[p][q]))p=0,q=2;if(std::abs(a[1][2])>std::abs(a[p][q]))p=1,q=2;
+        if(std::abs(a[p][q])<1.0e-15)break;double phi=.5*std::atan2(2*a[p][q],a[q][q]-a[p][p]),c=std::cos(phi),s=std::sin(phi);
+        for(int k=0;k<3;++k){double ap=a[k][p],aq=a[k][q];a[k][p]=c*ap-s*aq;a[k][q]=s*ap+c*aq;}
+        for(int k=0;k<3;++k){double ap=a[p][k],aq=a[q][k];a[p][k]=c*ap-s*aq;a[q][k]=s*ap+c*aq;}
+        for(int k=0;k<3;++k){double vp=v[k][p],vq=v[k][q];v[k][p]=c*vp-s*vq;v[k][q]=s*vp+c*vq;}}
+}
+
+static std::vector<Vec> af_v3_sqp_eigenvectors(const std::vector<AfV3SqpContact>& rows) {
+    double matrix[3][3],vectors[3][3];af_v3_sqp_covariance(rows,matrix);af_v3_sqp_jacobi(matrix,vectors);
+    std::vector<std::pair<double,Vec>> order;for(int i=0;i<3;++i)order.push_back({matrix[i][i],{vectors[0][i],vectors[1][i],vectors[2][i]}});
+    std::sort(order.begin(),order.end(),[](const auto& a,const auto& b){return a.first<b.first;});std::vector<Vec> out;
+    for(const auto& row:order)out.push_back(af_v3_sqp_unit(row.second));return out;
+}
+
+static void af_v3_sqp_add_direction(std::vector<Vec>& rows,Vec value) {
+    value=af_v3_sqp_unit(value);if(norm(value)<=0.0)return;
+    for(Vec old:rows)if(dot(value,old)>1.0-1.0e-8)return;if(rows.size()<6)rows.push_back(value);
+}
+
+static std::vector<Vec> af_v3_sqp_escape_candidates(const AfV3SqpState& state,
+                                                     const std::vector<Vec>& points,
+                                                     const std::vector<AfV3SqpContact>& rows,int first,int last) {
+    Vec hint{0,0,0};for(int i=first;i<=last+1;++i)hint=add(hint,sub(points[i],state.reference[i]));
+    hint=mul(hint,1.0/double(last-first+2));std::vector<Vec> out;af_v3_sqp_add_direction(out,hint);
+    auto deepest=std::min_element(rows.begin(),rows.end(),[](const auto& a,const auto& b){return a.gap<b.gap;});
+    if(deepest!=rows.end())af_v3_sqp_add_direction(out,deepest->normal);for(Vec row:af_v3_sqp_eigenvectors(rows)){
+        af_v3_sqp_add_direction(out,row);af_v3_sqp_add_direction(out,mul(row,-1.0));}return out;
+}
+
+static AfV3EscapeScore af_v3_sqp_select_escape(AfV3SqpState& state,const std::vector<Vec>& points,
+                                                const std::vector<AfV3SqpContact>& rows,int first,int last) {
+    auto base=af_v3_sqp_violation(rows);if(auto* side=af_v3_sqp_group_side(state,rows[0].collider)){
+        auto old=af_v3_sqp_escape_trial(state,points,first,last,*side,0,base);if(old.valid)return old;
+        return {true,base.first,base.second,af_v3_sqp_objective(state,points),
+            state.job->config.radius+std::max(4.0*state.job->config.slack,.25*state.job->config.radius),0,*side};}
+    AfV3EscapeScore best;auto candidates=af_v3_sqp_escape_candidates(state,points,rows,first,last);
+    for(int i=0;i<int(candidates.size());++i){auto row=af_v3_sqp_escape_trial(state,points,first,last,candidates[i],i,base);
+        if(row.valid&&af_v3_sqp_better_escape(row,best))best=row;}return best;
+}
+
+static std::vector<std::vector<int>> af_v3_sqp_groups(const std::vector<AfV3SqpContact>& contacts) {
+    std::vector<int> order(contacts.size());std::iota(order.begin(),order.end(),0);std::sort(order.begin(),order.end(),[&](int a,int b){
+        return std::tie(contacts[a].collider,contacts[a].edge)<std::tie(contacts[b].collider,contacts[b].edge);});
+    std::vector<std::vector<int>> groups;for(int index:order){const auto& row=contacts[index];
+        if(groups.empty()||contacts[groups.back().back()].collider!=row.collider||row.edge>contacts[groups.back().back()].edge+1)groups.push_back({});
+        groups.back().push_back(index);}return groups;
+}
+
+static void af_v3_sqp_coherent(AfV3SqpState& state,const std::vector<Vec>& points,
+                               std::vector<AfV3SqpContact>& contacts) {
+    for(const auto& indices:af_v3_sqp_groups(contacts)){std::vector<AfV3SqpContact> rows;bool ambiguous=false;
+        for(int index:indices){rows.push_back(contacts[index]);ambiguous|=contacts[index].feature!=0;}if(!ambiguous)continue;
+        int first=rows.front().edge,last=rows.front().edge;for(const auto& row:rows){first=std::min(first,row.edge);last=std::max(last,row.edge);}
+        auto selected=af_v3_sqp_select_escape(state,points,rows,first,last);if(!selected.valid)continue;
+        af_v3_sqp_set_group_side(state,rows[0].collider,selected.side);for(int index:indices)if(contacts[index].gap<0.0){
+            contacts[index].normal=selected.side;contacts[index].model_gap=std::min(contacts[index].gap,-selected.distance);}}
 }
 
 static void af_v3_sqp_bands(AfV3SqpState& state,std::vector<double>& diagonal,
@@ -170,6 +301,10 @@ static Vec af_v3_sqp_jacobian(const AfV3SqpContact& row,int node) {
 static double af_v3_sqp_apply(const AfV3SqpContact& row,const std::vector<Vec>& values) {
     return dot(af_v3_sqp_jacobian(row,row.edge),values[row.edge])+
            dot(af_v3_sqp_jacobian(row,row.edge+1),values[row.edge+1]);
+}
+
+static double af_v3_sqp_linear_gap(const AfV3SqpContact& row) {
+    return std::isfinite(row.model_gap)?row.model_gap:row.gap;
 }
 
 static std::vector<std::vector<Vec>> af_v3_sqp_responses(AfV3SqpState& state) {
@@ -200,13 +335,13 @@ static void af_v3_sqp_dense_solve(std::vector<double>& matrix,std::vector<double
 
 static std::vector<int> af_v3_sqp_initial_active(const AfV3SqpState& state) {
     std::vector<int> output;for(int i=0;i<int(state.contacts.size());++i)
-        if(state.contacts[i].gap<=0.0||state.contacts[i].multiplier>0.0)output.push_back(i);return output;
+        if(af_v3_sqp_linear_gap(state.contacts[i])<=0.0||state.contacts[i].multiplier>0.0)output.push_back(i);return output;
 }
 
 static std::vector<double> af_v3_sqp_equalities(const AfV3SqpState& state,const std::vector<std::vector<Vec>>& responses,
                                                 const std::vector<int>& active,std::vector<Vec>& solved) {
     int count=int(active.size());std::vector<double> matrix(count*count),rhs(count);solved=state.native->base;
-    for(int i=0;i<count;++i){const auto& row=state.contacts[active[i]];rhs[i]=af_v3_sqp_apply(row,state.points)-row.gap-af_v3_sqp_apply(row,solved);
+    for(int i=0;i<count;++i){const auto& row=state.contacts[active[i]];rhs[i]=af_v3_sqp_apply(row,state.points)-af_v3_sqp_linear_gap(row)-af_v3_sqp_apply(row,solved);
         for(int j=0;j<count;++j)matrix[count*i+j]=af_v3_sqp_apply(row,responses[active[j]]);}af_v3_sqp_dense_solve(matrix,rhs,count);
     for(int j=0;j<count;++j)for(int node=0;node<int(solved.size());++node)solved[node]=add(solved[node],mul(responses[active[j]][node],rhs[j]));return rhs;
 }
@@ -215,7 +350,7 @@ static int af_v3_sqp_active_change(const AfV3SqpState& state,const std::vector<i
                                    const std::vector<double>& multipliers,const std::vector<Vec>& solved) {
     double best=0.0;int change=0;for(int i=0;i<int(active.size());++i)if(multipliers[i]<best-1.0e-10){best=multipliers[i];change=-(active[i]+1);}
     if(change)return change;for(int i=0;i<int(state.contacts.size());++i)if(std::find(active.begin(),active.end(),i)==active.end()){
-        const auto& row=state.contacts[i];double gap=row.gap+af_v3_sqp_apply(row,solved)-af_v3_sqp_apply(row,state.points);
+        const auto& row=state.contacts[i];double gap=af_v3_sqp_linear_gap(row)+af_v3_sqp_apply(row,solved)-af_v3_sqp_apply(row,state.points);
         if(gap<best-1.0e-10){best=gap;change=i+1;}}return change;
 }
 
@@ -285,9 +420,13 @@ static bool af_v3_sqp_filter(const AfV3SqpMetrics& before,const AfV3SqpMetrics& 
 }
 
 static void af_v3_sqp_controller(AfV3SqpState& state,double ratio,bool accepted,bool contact_changed=false) {
+    double prior=state.job->config.regularization;
     double factor=!accepted?(contact_changed?2.0:4.0):std::isfinite(ratio)&&ratio>.75?.5:!std::isfinite(ratio)||ratio<.25?2.0:1.0;
     double low=1.0e-10*state.job->config.regularization_scale,high=1.0e2*state.job->config.regularization_scale;
     state.job->config.regularization=std::clamp(factor*state.job->config.regularization,low,high);
+    state.regularization_increases+=int(state.job->config.regularization>prior);
+    state.regularization_decreases+=int(state.job->config.regularization<prior);
+    if(contact_changed)return;
     if(!accepted||!std::isfinite(ratio)||ratio<.1)state.job->config.trust_radius=std::max(state.job->config.min_trust,.25*state.job->config.trust_radius);
     else if(ratio<.25)state.job->config.trust_radius=std::max(state.job->config.min_trust,.5*state.job->config.trust_radius);
     else if(ratio>.75&&state.trust_boundary)state.job->config.trust_radius=std::min(state.job->config.max_trust,2.0*state.job->config.trust_radius);
@@ -318,20 +457,20 @@ static std::pair<int,int> af_v3_sqp_face_identity(const AfV3SqpState& state,int 
 }
 
 static AfV3SqpContact af_v3_sqp_limiter(AfV3SqpState& state,const MeshSweep& hit,int edge,int face) {
-    const auto* sweep=af_v3_sqp_sweep_row(state,edge,face);if(!sweep)return {-1,0,0,0,0,0,0,0,0,0,{},{}};
+    const auto* sweep=af_v3_sqp_sweep_row(state,edge,face);if(!sweep)return {-1,0,0,0,0,0,0,0,0,0,0,0,{},{}};
     Vec a=add(sweep->start[0],mul(sub(sweep->end[0],sweep->start[0]),hit.safe));
     Vec b=add(sweep->start[1],mul(sub(sweep->end[1],sweep->start[1]),hit.safe));
     auto pair=af_closest_segment_face(a,b,sweep->face,-1);Vec sample=add(sweep->start[0],mul(sub(sweep->start[1],sweep->start[0]),pair.factor));
     Vec normal=af_v3_sqp_limiter_normal(pair,*sweep,sample);double gap=dot(sub(sample,pair.surface),normal)-state.job->config.radius;
     auto identity=af_v3_sqp_face_identity(state,face);
-    return {edge,identity.first,identity.second,0,1,0,0,pair.factor,gap,0.0,normal,pair.surface};
+    return {edge,identity.first,identity.second,3,0,1,0,0,pair.factor,gap,gap,0.0,normal,pair.surface};
 }
 
 static bool af_v3_sqp_inject(AfV3SqpState& state,const MeshSweep& hit,int edge,int face) {
     if(hit.safe>=1.0||edge<0||face<0)return false;auto row=af_v3_sqp_limiter(state,hit,edge,face);
     if(row.edge<0)return false;for(auto& prior:state.contacts)if(prior.limiting&&af_v3_sqp_key(prior,row)){
         bool changed=!af_v3_sqp_same(prior,row,state.job->config.slack);prior=row;return changed;}
-    state.contacts.push_back(row);return true;
+    state.contacts.push_back(row);++state.injected_contacts;return true;
 }
 
 static std::vector<Vec> af_v3_sqp_safe_candidate(AfV3SqpState& state,const MeshSweep& sweep) {
@@ -373,7 +512,7 @@ static void af_v3_sqp_adopt(AfV3SqpState& state,std::vector<Vec>& points,std::ve
                             const AfV3SqpMetrics& metrics,const std::vector<int>& active,const std::vector<double>& multipliers) {
     double old=af_v3_sqp_energy(state,state.points),movement=0.0;for(int i=0;i<int(points.size());++i)movement=std::max(movement,norm(sub(points[i],state.points[i])));
     auto duals=af_v3_sqp_duals(state,active,multipliers);state.points.swap(points);state.contacts.swap(contacts);
-    af_v3_sqp_apply_multipliers(state,duals);state.metrics=metrics;++state.accepted;
+    af_v3_sqp_apply_multipliers(state,duals);++state.multiplier_updates;state.metrics=metrics;++state.accepted;state.injection_streak=0;
     state.fixed=movement/state.job->config.length_scale;state.stationarity=af_v3_sqp_stationarity(state);double energy=af_v3_sqp_energy(state,state.points);
     double relative=std::abs(energy-old)/std::max(1.0,std::abs(old));state.energy_streak=relative<=state.job->config.relative_energy_tolerance?state.energy_streak+1:0;
 }
@@ -383,11 +522,22 @@ static bool af_v3_sqp_converged(const AfV3SqpState& state) {
            state.stationarity<=state.job->config.stationarity_tolerance&&state.energy_streak>=3;
 }
 
+static bool af_v3_sqp_has_limiter(const AfV3SqpState& state) {
+    return std::any_of(state.contacts.begin(),state.contacts.end(),[](const auto& row){return row.limiting!=0;});
+}
+
+static void af_v3_sqp_status(AfV3SqpState& state) {
+    if(af_v3_sqp_converged(state))state.done=true,state.termination=AF_V3_SQP_CONVERGED;
+    else if(state.stalled>=8)state.done=true,state.termination=state.metrics.feasible?AF_V3_SQP_STALLED:AF_V3_SQP_UNSAFE;
+}
+
 static bool af_v3_sqp_feasible_candidate(AfV3SqpState& state,std::vector<Vec>& proposed) {
     int edge=-1,face=-1;auto sweep=af_v3_sqp_sweep(state,state.candidate,edge,face);
+    state.limiting_contacts+=int(sweep.safe<1.0&&edge>=0&&face>=0);
     state.last_safe=sweep.safe;state.last_edge=edge;state.last_face=face;
-    if(af_v3_sqp_inject(state,sweep,edge,face)){++state.rejected;state.stalled=0;state.last_decision=3;
-        af_v3_sqp_controller(state,-INFINITY,false,true);return false;}
+    if(af_v3_sqp_inject(state,sweep,edge,face)){++state.rejected;bool repeated=++state.injection_streak>=3;
+        if(repeated)state.injection_streak=0,++state.stalled;else state.stalled=0;state.last_decision=3;
+        af_v3_sqp_controller(state,-INFINITY,false,!repeated);return false;}
     if(!sweep.valid||sweep.safe<=state.job->config.numeric_floor){++state.rejected;++state.stalled;
         state.last_decision=4;af_v3_sqp_controller(state,-INFINITY,false);return false;}
     proposed=af_v3_sqp_safe_candidate(state,sweep);return true;
@@ -395,17 +545,21 @@ static bool af_v3_sqp_feasible_candidate(AfV3SqpState& state,std::vector<Vec>& p
 
 static bool af_v3_sqp_trial(AfV3SqpState& state) {
     state.last_safe=1.0;state.last_ratio=NAN;state.last_decision=0;state.last_edge=state.last_face=-1;
+    if(!state.metrics.feasible)++state.feasibility_iterations;
     if(!state.spacing&&state.accepted>=4&&af_v3_sqp_segment_cv(state.points)>.75)state.spacing=true;
     std::vector<int> active;std::vector<double> multipliers;if(!af_v3_sqp_candidate(state,active,multipliers)){
         state.done=true;state.termination=AF_V3_SQP_UNSAFE;state.last_decision=5;return false;}
-    std::vector<Vec> proposed=state.candidate;if(state.metrics.feasible&&!af_v3_sqp_feasible_candidate(state,proposed))return false;
+    std::vector<Vec> proposed=state.candidate;if(state.metrics.feasible&&!af_v3_sqp_feasible_candidate(state,proposed)){
+        af_v3_sqp_status(state);return false;}
     std::vector<AfV3SqpContact> contacts;auto metrics=af_v3_sqp_measure(state,proposed,contacts);double ratio=af_v3_sqp_ratio(state,proposed,metrics);
     state.last_ratio=ratio;
+    if(state.metrics.feasible&&metrics.feasible&&ratio<.1&&state.stalled>=2&&!af_v3_sqp_has_limiter(state)&&
+       state.fixed<=state.job->config.fixed_tolerance&&state.stationarity<=state.job->config.stationarity_tolerance){
+        state.done=true;state.termination=AF_V3_SQP_CONVERGED;state.last_decision=2;return false;}
     bool accepted=state.metrics.feasible?metrics.feasible&&ratio>=.1:af_v3_sqp_filter(state.metrics,metrics);af_v3_sqp_controller(state,ratio,accepted);
     if(accepted){af_v3_sqp_adopt(state,proposed,contacts,metrics,active,multipliers);state.stalled=0;}else{++state.rejected;++state.stalled;}
     state.last_decision=accepted?1:2;
-    if(af_v3_sqp_converged(state))state.done=true,state.termination=AF_V3_SQP_CONVERGED;
-    else if(state.stalled>=8)state.done=true,state.termination=state.metrics.feasible?AF_V3_SQP_STALLED:AF_V3_SQP_UNSAFE;
+    af_v3_sqp_status(state);
     return accepted;
 }
 
@@ -434,6 +588,10 @@ static bool af_v3_sqp_all_done(const std::vector<AfV3SqpState>& states) {
     return std::all_of(states.begin(),states.end(),[](const auto& state){return state.done;});
 }
 
+static bool af_v3_sqp_any_infeasible(const std::vector<AfV3SqpState>& states) {
+    return std::any_of(states.begin(),states.end(),[](const auto& state){return !state.metrics.feasible;});
+}
+
 static void af_v3_sqp_sync_owner_span(std::vector<AfV3SqpState>& states) {
     double value=1.0e-9;for(const auto& state:states){const auto& config=state.job->config;
         value=std::max({value,4.0*config.slack,2.5*config.radius});
@@ -449,24 +607,71 @@ static void af_v3_sqp_finish(AfV3SqpState& state,bool budget,double elapsed) {
     out.accepted=state.accepted;out.rejected=state.rejected;out.trials=state.trials;out.contacts=int(state.contacts.size());
     out.ccd_pairs=state.ccd_pairs;out.ccd_tests=state.ccd_tests;out.spacing_enabled=state.spacing;out.validated=state.metrics.feasible;
     out.trace_count=state.trials;
+    out.feasibility_iterations=state.feasibility_iterations;out.multiplier_updates=state.multiplier_updates;
+    out.regularization_increases=state.regularization_increases;out.regularization_decreases=state.regularization_decreases;
+    out.injected_contacts=state.injected_contacts;out.limiting_contacts=state.limiting_contacts;
+    out.contact_groups=int(af_v3_sqp_groups(state.contacts).size());
     out.energy=af_v3_sqp_energy(state,state.points);out.fixed_residual=state.fixed;out.stationarity=state.stationarity;
     out.regularization=state.job->config.regularization;out.trust_radius=state.job->config.trust_radius;out.maximum_violation=state.metrics.maximum;out.elapsed_ms=elapsed;
 }
 
-static void af_v3_sqp_loop(std::vector<AfV3SqpState>& states,int accepted_cap,int trial_cap) {
-    int cursor=0,trials=0;while(af_v3_sqp_accepted(states)<accepted_cap&&trials<trial_cap&&!af_v3_sqp_all_done(states)){
-        if(cursor==0)af_v3_sqp_sync_owner_span(states);
-        int checked=0;while(states[cursor].done&&checked++<int(states.size()))cursor=(cursor+1)%states.size();
-        if(states[cursor].done)break;++states[cursor].trials;af_v3_sqp_trial(states[cursor]);af_v3_sqp_trace(states[cursor]);
-        cursor=(cursor+1)%states.size();++trials;}
+struct AfV3SqpCoordinator {
+    std::vector<AfV3SqpState> states;int accepted_cap=0,trial_cap=0,cursor=0,trials=0;
+    bool finished=false,cancelled=false;std::chrono::steady_clock::time_point started;
+};
+
+static bool af_v3_sqp_stop(const AfV3SqpCoordinator& value) {
+    return af_v3_sqp_accepted(value.states)>=value.accepted_cap||value.trials>=value.trial_cap||
+           af_v3_sqp_all_done(value.states);
+}
+
+static bool af_v3_sqp_step_one(AfV3SqpCoordinator& value) {
+    if(af_v3_sqp_stop(value))return false;if(value.cursor==0)af_v3_sqp_sync_owner_span(value.states);
+    int checked=0;while(value.states[value.cursor].done&&checked++<int(value.states.size()))value.cursor=(value.cursor+1)%value.states.size();
+    if(value.states[value.cursor].done)return false;auto& state=value.states[value.cursor];++state.trials;
+    af_v3_sqp_trial(state);af_v3_sqp_trace(state);value.cursor=(value.cursor+1)%value.states.size();++value.trials;return true;
+}
+
+static void af_v3_sqp_copy_current(AfV3SqpCoordinator& value) {
+    for(auto& state:value.states)af_write_vectors(state.points,state.job->output);
+}
+
+static void af_v3_sqp_finalize(AfV3SqpCoordinator& value) {
+    if(value.finished)return;double elapsed=std::chrono::duration<double,std::milli>(
+        std::chrono::steady_clock::now()-value.started).count();
+    bool budget=af_v3_sqp_accepted(value.states)>=value.accepted_cap;
+    for(auto& state:value.states)af_v3_sqp_finish(state,budget,elapsed);value.finished=true;
+}
+
+AF_EXPORT void* af_v3_native_sqp_begin(AfV3SqpJob* jobs,int count,int accepted_cap,int trial_cap) {
+    if(!jobs||count<1||accepted_cap<1||trial_cap<1)return nullptr;auto* value=new AfV3SqpCoordinator();
+    value->accepted_cap=accepted_cap;value->trial_cap=trial_cap;value->started=std::chrono::steady_clock::now();
+    value->states.reserve(count);for(int i=0;i<count;++i)value->states.push_back(af_v3_sqp_state(jobs[i]));
+    af_v3_sqp_copy_current(*value);return value;
+}
+
+AF_EXPORT int af_v3_native_sqp_step(void* handle,int trial_count,int* done,int* accepted,int* infeasible) {
+    if(!handle||trial_count<1||!done||!accepted||!infeasible)return 1;auto& value=*static_cast<AfV3SqpCoordinator*>(handle);
+    if(value.cancelled)return 2;for(int trial=0;trial<trial_count&&!af_v3_sqp_stop(value);++trial)af_v3_sqp_step_one(value);
+    if(af_v3_sqp_stop(value))af_v3_sqp_finalize(value);else af_v3_sqp_copy_current(value);
+    *done=int(value.finished);*accepted=af_v3_sqp_accepted(value.states);*infeasible=int(af_v3_sqp_any_infeasible(value.states));return 0;
+}
+
+AF_EXPORT int af_v3_native_sqp_cancel(void* handle) {
+    if(!handle)return 1;static_cast<AfV3SqpCoordinator*>(handle)->cancelled=true;return 0;
+}
+
+AF_EXPORT int af_v3_native_sqp_finish(void* handle) {
+    if(!handle)return 1;auto& value=*static_cast<AfV3SqpCoordinator*>(handle);
+    if(value.cancelled)return 2;af_v3_sqp_finalize(value);return 0;
+}
+
+AF_EXPORT void af_v3_native_sqp_destroy(void* handle) {
+    delete static_cast<AfV3SqpCoordinator*>(handle);
 }
 
 AF_EXPORT int af_v3_native_sqp_solve(AfV3SqpJob* jobs,int count,int accepted_cap,int trial_cap) {
-    if(!jobs||count<1||accepted_cap<1||trial_cap<1)return 1;auto started=std::chrono::steady_clock::now();
-    std::vector<AfV3SqpState> states;states.reserve(count);
-#pragma omp parallel num_threads(af_requested_workers)
-#pragma omp single
-    {for(int i=0;i<count;++i)states.push_back(af_v3_sqp_state(jobs[i]));af_v3_sqp_loop(states,accepted_cap,trial_cap);}
-    double elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
-    bool budget=af_v3_sqp_accepted(states)>=accepted_cap;for(auto& state:states)af_v3_sqp_finish(state,budget,elapsed);return 0;
+    void* handle=af_v3_native_sqp_begin(jobs,count,accepted_cap,trial_cap);if(!handle)return 1;
+    int done=0,accepted=0,infeasible=0;int code=af_v3_native_sqp_step(handle,trial_cap,&done,&accepted,&infeasible);
+    if(!code&&!done)code=af_v3_native_sqp_finish(handle);af_v3_native_sqp_destroy(handle);return code;
 }

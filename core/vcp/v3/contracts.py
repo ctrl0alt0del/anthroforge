@@ -22,6 +22,7 @@ class V3Diagnostics(FiberNumericDiagnostics):
     shortcut_attempts: int = 0
     shortcut_accepted: int = 0
     interactive_checkpoint: bool = False
+    controller: str = "PYTHON"
 
     def __post_init__(self):
         super().__post_init__()
@@ -40,3 +41,5 @@ def _validate_v3_diagnostics(value):
         raise ValueError("V3 diagnostics must be finite")
     if value.effective_curvature_weight != 0.0:
         raise ValueError("V3 curvature must remain zero")
+    if value.controller not in ("PYTHON", "NATIVE"):
+        raise ValueError("V3 controller must be PYTHON or NATIVE")

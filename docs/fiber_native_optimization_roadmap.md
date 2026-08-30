@@ -1,5 +1,10 @@
 # Fiber native optimization roadmap
 
+> Production update: the persistent native controller is the V3 default. Human visual review
+> accepted its qualified FIBER_14 and skeleton/FIBER_1 paths. Set
+> `AF_FIBER_V3_NATIVE_CONTROLLER=0` only for the retained Python diagnostic reference.
+> See `fiber_v3_persistent_controller_production_trial.md`.
+
 ## Baseline
 
 The accepted exact-parity OpenMP experiment used four worker threads for independent native
@@ -276,13 +281,14 @@ the three light Fibers because OpenMP task creation exceeds the saved pair work,
 skeleton Fiber recovers that overhead. Any production form needs a per-sweep dynamic activation
 gate based on edge/pair job counts, not a global always-on switch.
 
-The native controller is not yet production-parity. Against current production V3, maximum final
+The native controller is not bitwise Python-parity. Against the Python reference, maximum final
 point differences were `1.3193`, `0.16224`, `0.00698`, and `0.02258` world units for sphere,
 skeleton, skull/FIBER_1, and skull/FIBER_14 respectively. Timing comparisons against production
-are therefore not speedup claims. The remaining semantic gap is in the higher-level collision
+were originally not treated as speedup claims. The remaining semantic difference is in the higher-level collision
 manifold policy: coherent side selection for ambiguous contact groups, exact production limiter
 feature migration, and the production contact/stationarity termination details. Until those are
-ported and point/termination parity passes, this controller stays isolated and cannot replace V3.
+ported and numerical parity passes. Human visual qualification subsequently accepted the safe
+native paths, so production-5 versions this behavior rather than claiming bitwise equivalence.
 
 The benchmark JSON contains complete per-trial CCD fractions, model ratios, violations, limiter
 identities, and decisions. Matching Blender comparison copies and trajectory plots are stored in

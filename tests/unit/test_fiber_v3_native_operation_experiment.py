@@ -19,19 +19,20 @@ def _clear():
 
 
 def _direct(request):
-    session = begin_v3(request, use_planner=False, native_session=True)
+    session = begin_v3(request, use_planner=False, native_session=True, native_controller=False)
     while not session.done: session.step()
     return session
 
 
 def _coordinated(requests):
-    sessions = tuple(begin_v3(row, use_planner=False, native_session=True) for row in requests)
+    sessions = tuple(begin_v3(row, use_planner=False, native_session=True,
+                             native_controller=False) for row in requests)
     report = V3NativeOperationExperiment().run(sessions)
     return sessions, report
 
 
 def _native_state(request):
-    session = begin_v3(request, use_planner=False, native_session=True)
+    session = begin_v3(request, use_planner=False, native_session=True, native_controller=False)
     while not session.done:
         session.step()
         state = next((row.state for row in session.spans if row.state is not None), None)
@@ -110,7 +111,8 @@ class FiberV3NativeOperationExperimentTests(unittest.TestCase):
     def test_cpp_coordinator_replays_real_solver_trace_without_python_operations(self):
         requests = (_bent_request(8), _box_request())
         with experimental_backend():
-            sessions = tuple(begin_v3(row, use_planner=False, native_session=True) for row in requests)
+            sessions = tuple(begin_v3(row, use_planner=False, native_session=True,
+                                     native_controller=False) for row in requests)
             experiment = V3NativeOperationExperiment(retain_trace=True)
             experiment.run(sessions)
             try: replay = experiment.replay()
@@ -124,7 +126,8 @@ class FiberV3NativeOperationExperimentTests(unittest.TestCase):
         requests = (_bent_request(12), _box_request())
         with experimental_backend():
             expected = tuple(_direct(row).package.result for row in requests); _clear()
-            sessions = tuple(begin_v3(row, use_planner=False, native_session=True) for row in requests)
+            sessions = tuple(begin_v3(row, use_planner=False, native_session=True,
+                                     native_controller=False) for row in requests)
             V3NativeCoordinatorLiveExperiment().run(sessions)
         for result, session in zip(expected, sessions):
             self.assertTrue(session.package.result.validated)

@@ -13,7 +13,7 @@ $Stem = [IO.Path]::GetFileNameWithoutExtension($OutputName)
 $Staged = Join-Path $Here "$Stem.next.dll"
 $Object = Join-Path $Here "$Stem.next.obj"
 $Export = Join-Path $Here "$Stem.next.exp"
-$Define = if ($OutputName -eq "af_fiber_ccd_v3.dll") { "" } else { "/DAF_V3_OPERATION_EXPERIMENT=1" }
+$Define = if ($OutputName -eq "af_fiber_ccd_v3.dll") { "/DAF_V3_NATIVE_CONTROLLER=1" } else { "/DAF_V3_OPERATION_EXPERIMENT=1 /DAF_V3_NATIVE_CONTROLLER=1" }
 if (-not (Test-Path $Clang)) { throw "C++ Clang Compiler for Windows is unavailable" }
 if (-not (Test-Path $VcVars)) { throw "Visual C++ x64 build tools are unavailable" }
 if (-not (Test-Path $Runtime)) { throw "LLVM OpenMP runtime is unavailable" }

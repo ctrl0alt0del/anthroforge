@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 from dataclasses import replace
 from importlib.util import find_spec
 
@@ -9,7 +10,8 @@ import numpy as np
 from core.vcp.v2.collision import collision_backend_status
 from core.vcp.v3.manifest import V3_ACCEPTED_REFERENCE, V3_REJECTED_MODULES
 from core.vcp.v3.policy import V3_PRODUCTION_POLICY, V3ShortcutMode, accepted_v3_request
-from core.vcp.v3.production import V3_PRODUCTION_VERSION, begin_v3, solve_v3
+from core.vcp.v3.production import (V3_PRODUCTION_VERSION, begin_v3, solve_v3,
+                                    solve_v3_controller)
 from tests.unit.test_fiber_v2_planner import _anchors, _request
 
 
@@ -22,12 +24,41 @@ def _bent_request(cap=24):
 class FiberV3ProductionTests(unittest.TestCase):
     def test_native_session_matches_reference_driver(self):
         request = _bent_request(20)
-        reference = solve_v3(request, use_planner=False, native_session=False)
-        fused = solve_v3(request, use_planner=False, native_session=True)
+        reference = solve_v3(request, use_planner=False, native_session=False, native_controller=False)
+        fused = solve_v3(request, use_planner=False, native_session=True, native_controller=False)
         np.testing.assert_array_equal(fused.result.points, reference.result.points)
         self.assertEqual(fused.result.termination, reference.result.termination)
         self.assertEqual(fused.result.diagnostics.accepted_steps,
                          reference.result.diagnostics.accepted_steps)
+
+    def test_native_controller_matches_clear_reference(self):
+        request = _bent_request(20)
+        expected = solve_v3(request, use_planner=False, native_controller=False)
+        actual = solve_v3_controller(request, use_planner=False)
+        np.testing.assert_allclose(actual.result.points, expected.result.points, atol=3e-14, rtol=0)
+        self.assertEqual(actual.result.termination, expected.result.termination)
+
+    def test_native_controller_is_default(self):
+        request = _bent_request(8)
+        package = solve_v3(request, use_planner=False)
+        self.assertEqual(package.result.diagnostics.controller, "NATIVE")
+
+    def test_python_controller_environment_fallback_is_explicit(self):
+        request = _bent_request(8)
+        with patch.dict("os.environ", {"AF_FIBER_V3_NATIVE_CONTROLLER": "0"}):
+            package = solve_v3(request, use_planner=False)
+        self.assertEqual(package.result.diagnostics.controller, "PYTHON")
+
+    def test_explicit_native_controller_choice_overrides_environment(self):
+        request = _bent_request(8)
+        with patch.dict("os.environ", {"AF_FIBER_V3_NATIVE_CONTROLLER": "1"}):
+            session = begin_v3(request, use_planner=False, native_controller=False)
+        self.assertFalse(session.native_controller)
+
+    def test_invalid_native_controller_environment_fails_configuration(self):
+        with patch.dict("os.environ", {"AF_FIBER_V3_NATIVE_CONTROLLER": "AUTO"}):
+            with self.assertRaisesRegex(ValueError, "must be 0 or 1"):
+                begin_v3(_bent_request(8), use_planner=False)
 
     def test_completed_session_releases_native_handle(self):
         session = begin_v3(_bent_request(8), use_planner=False, native_session=True)
@@ -44,16 +75,37 @@ class FiberV3ProductionTests(unittest.TestCase):
         self.assertTrue(session.done)
         self.assertTrue(all(row.state.native_session is None for row in session.spans))
 
+    def test_native_controller_cancellation_releases_coordinator(self):
+        session = begin_v3(_bent_request(20), use_planner=False)
+        while session.phase != "NATIVE_SOLVE": session.step()
+        self.assertIsNotNone(session.native_run.handle); session.cancel()
+        self.assertIsNone(session.native_run)
+        self.assertTrue(all(row.state.native_session is None for row in session.spans))
+
     def test_parallel_native_sessions_do_not_share_state(self):
         first = begin_v3(_bent_request(8), use_planner=False, native_session=True)
         second = begin_v3(_bent_request(12), use_planner=False, native_session=True)
         while not first.done or not second.done:
             if not first.done: first.step()
             if not second.done: second.step()
-        expected_first = solve_v3(_bent_request(8), use_planner=False, native_session=True)
-        expected_second = solve_v3(_bent_request(12), use_planner=False, native_session=True)
+        expected_first = solve_v3(_bent_request(8), use_planner=False)
+        expected_second = solve_v3(_bent_request(12), use_planner=False)
         self.assertEqual(first.package.result.points, expected_first.result.points)
         self.assertEqual(second.package.result.points, expected_second.result.points)
+
+    def test_native_controller_keeps_python_warm_seed_selection(self):
+        request = _bent_request(8)
+        warm = tuple((index / 32.0 * 2.0, 0.2, 0.0) for index in range(33))
+        session = begin_v3(replace(request, warm_seed=warm), use_planner=False)
+        while session.phase != "SPANS": session.step()
+        np.testing.assert_array_equal(session.seed, np.asarray(warm))
+
+    def test_native_controller_keeps_hard_midpoint_spans(self):
+        session = begin_v3(_bent_request(8), use_planner=False)
+        while session.phase != "NATIVE_SOLVE": session.step()
+        self.assertEqual(len(session.spans), 2)
+        self.assertEqual(tuple(session.pins), (0, 16, 32))
+        session.cancel()
 
     def test_manifest_freezes_accepted_reference(self):
         self.assertEqual(V3_ACCEPTED_REFERENCE["name"], "REG_ADAPTIVE_SPACING")
@@ -83,6 +135,20 @@ class FiberV3ProductionTests(unittest.TestCase):
         while not session.done: session.step()
         self.assertTrue(session.package.result.validated)
         self.assertLessEqual(session.package.result.diagnostics.accepted_steps, 12)
+
+    def test_resumable_and_synchronous_native_results_match(self):
+        request = _bent_request(20); session = begin_v3(request, use_planner=False)
+        while not session.done: session.step()
+        synchronous = solve_v3(request, use_planner=False)
+        self.assertEqual(session.package.result.points, synchronous.result.points)
+        self.assertEqual(session.package.result.termination, synchronous.result.termination)
+
+    def test_missing_native_controller_never_falls_back_to_python(self):
+        session = begin_v3(_bent_request(8), use_planner=False)
+        with patch("core.vcp.v3.native_controller.cn.native_controller_status", return_value=False):
+            while not session.done: session.step()
+        self.assertEqual(session.package.result.termination.value, "BACKEND_UNAVAILABLE")
+        self.assertFalse(session.package.result.validated)
 
     def test_shadow_and_off_have_identical_solver_output(self):
         request = _bent_request(12)
