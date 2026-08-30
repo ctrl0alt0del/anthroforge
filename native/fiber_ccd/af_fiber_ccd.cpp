@@ -28,6 +28,7 @@ struct BvhNode { Bounds bounds; int left, right, begin, end; };
 struct TriangleSnapshot {
     std::vector<Vec> vertices; std::vector<int64_t> triangles;
     std::vector<Bounds> faces; std::vector<BvhNode> nodes;
+    std::vector<Bounds> indexed_faces;
 };
 
 static Vec add(Vec a, Vec b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
@@ -390,7 +391,8 @@ static bool update_snapshot(TriangleSnapshot& snapshot,const double* vertices,in
     if(!vertices||count!=int(snapshot.vertices.size()))return false;
     for(int i=0;i<3*count;++i)if(!std::isfinite(vertices[i]))return false;
     for(int i=0;i<count;++i)snapshot.vertices[i]=load3(vertices+3*i);
-    for(auto& face:snapshot.faces)face=face_bounds(vertices,snapshot.triangles.data()+3*face.index,face.index);
+    for(auto& face:snapshot.faces){face=face_bounds(vertices,snapshot.triangles.data()+3*face.index,face.index);
+        snapshot.indexed_faces[size_t(face.index)]=face;}
     if(!snapshot.nodes.empty())refit_bvh(snapshot,0);return true;
 }
 
@@ -413,6 +415,7 @@ static TriangleSnapshot* create_snapshot(const double* vertices, const int64_t* 
     for (int i=0; i<3*count; ++i) maximum=std::max(maximum,int(triangles[i]));
     snapshot->vertices.reserve(maximum+1); for (int i=0; i<=maximum; ++i) snapshot->vertices.push_back(load3(vertices+3*i));
     snapshot->faces.reserve(count); for (int i=0; i<count; ++i) snapshot->faces.push_back(face_bounds(vertices,triangles+3*i,i));
+    snapshot->indexed_faces=snapshot->faces;
     if (count) build_bvh(*snapshot,0,count); return snapshot;
 }
 

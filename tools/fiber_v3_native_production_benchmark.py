@@ -61,7 +61,9 @@ def _solve(request):
     return {"elapsed_ms": elapsed, "point_hash": hashlib.sha256(points.tobytes()).hexdigest(),
             "termination": package.result.termination.value, "validated": package.result.validated,
             "accepted": diagnostics.accepted_steps, "rejected": diagnostics.rejected_steps,
-            "contact_ms": diagnostics.native_contact_ms, "ccd_ms": diagnostics.native_ccd_ms}
+            "contact_ms": diagnostics.native_contact_ms, "ccd_ms": diagnostics.native_ccd_ms,
+            "ccd_candidates": diagnostics.ccd_candidate_pairs,
+            "ccd_tested": diagnostics.ccd_tested_pairs}
 
 
 def _moved(collider, delta):

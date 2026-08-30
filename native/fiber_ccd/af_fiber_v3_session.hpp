@@ -10,6 +10,10 @@ struct AfV3CcdStats {
     uint64_t serial_clear,candidate_pairs,indexed_pairs,serial_tests,serial_intervals;
 };
 
+struct AfV3BroadCache { Bounds fat{};std::vector<int> faces;int valid=0; };
+static constexpr int AF_V3_BROAD_CACHE_MARGIN=2;
+static constexpr int AF_V3_BROAD_CACHE_MIN_PAIRS=512;
+
 struct AfV3SweepRow { Vec start[2],end[2],face[3]; int edge,triangle; };
 
 struct AfV3NativeSession {
@@ -26,6 +30,7 @@ struct AfV3NativeSession {
     const TriangleSnapshot* snapshot=nullptr;
     std::vector<int> face_owners;
     std::vector<AfV3SweepRow> sweep_rows;
+    std::vector<AfV3BroadCache> broad_cache;
     int clear_sweep_streak=0;
     uint64_t last_pairs=0,last_intervals=0;
     AfV3CcdStats ccd_stats{};
@@ -39,6 +44,7 @@ static bool af_v3_owner_inputs(const int* first,const int* second,int count) {
 static void af_v3_init_edges(AfV3NativeSession& value,const int* first,const int* second,int count) {
     value.edges.resize(2*count);value.first.assign(first,first+count);value.second.assign(second,second+count);
     value.only.assign(count,0);value.skip.assign(count,0);value.pair_batches.resize(count);
+    value.broad_cache.resize(count);
     for(int edge=0;edge<count;++edge)value.edges[2*edge]=edge,value.edges[2*edge+1]=edge+1;
     value.stats.edge_capacity=count;
 }
@@ -56,7 +62,8 @@ AF_EXPORT void af_v3_session_destroy(void* handle) {
 AF_EXPORT int af_v3_session_attach_snapshot(void* handle,void* snapshot,const int* owners,int count) {
     if(!handle||!snapshot||!owners||count<0)return 1;auto& value=*static_cast<AfV3NativeSession*>(handle);
     auto* mesh=static_cast<const TriangleSnapshot*>(snapshot);
-    if(count!=int(mesh->triangles.size()/3))return 1;value.snapshot=mesh;value.face_owners.assign(owners,owners+count);return 0;
+    if(count!=int(mesh->triangles.size()/3))return 1;value.snapshot=mesh;value.face_owners.assign(owners,owners+count);
+    for(auto& cache:value.broad_cache){cache.faces.clear();cache.valid=0;}value.last_pairs=value.last_intervals=0;return 0;
 }
 
 static void af_v3_fill_pair(AfV3NativeSession& value,int edge,const double* points,double span,double threshold) {
@@ -188,12 +195,33 @@ static AfV3SweepRow af_v3_sweep_row(const AfV3NativeSession& value,const double*
     snapshot_face(*value.snapshot,face,row.face);return row;
 }
 
+static Bounds af_v3_fat_bounds(Bounds value,double padding) {
+    double margin=AF_V3_BROAD_CACHE_MARGIN*padding;
+    for(int axis=0;axis<3;++axis)value.lo[axis]-=margin,value.hi[axis]+=margin;
+    return value;
+}
+
+static bool af_v3_contains(const Bounds& outer,const Bounds& inner) {
+    for(int axis=0;axis<3;++axis)if(inner.lo[axis]<outer.lo[axis]||inner.hi[axis]>outer.hi[axis])return false;
+    return true;
+}
+
+static void af_v3_sweep_faces(AfV3NativeSession& value,int edge,const Bounds& exact,
+                              double padding,std::vector<int>& output) {
+    if(value.last_pairs<AF_V3_BROAD_CACHE_MIN_PAIRS){collect_candidates(*value.snapshot,0,exact,output);
+        std::sort(output.begin(),output.end());return;}
+    auto& cache=value.broad_cache[edge];if(!cache.valid||!af_v3_contains(cache.fat,exact)){
+        cache.fat=af_v3_fat_bounds(exact,padding);cache.faces.clear();
+        collect_candidates(*value.snapshot,0,cache.fat,cache.faces);std::sort(cache.faces.begin(),cache.faces.end());cache.valid=1;}
+    for(int face:cache.faces)if(bounds_overlap(exact,value.snapshot->indexed_faces[size_t(face)]))output.push_back(face);
+}
+
 static void af_v3_build_sweep(AfV3NativeSession& value,const double* source,const double* target,
                               double padding,int& candidates) {
     value.sweep_rows.clear();candidates=0;
     for(int edge=0;edge<int(value.first.size());++edge){std::vector<int> faces;
-        if(!value.snapshot->nodes.empty())collect_candidates(*value.snapshot,0,moving_bounds(source,target,value.edges.data()+2*edge,padding),faces);
-        std::sort(faces.begin(),faces.end());
+        Bounds exact=moving_bounds(source,target,value.edges.data()+2*edge,padding);
+        if(!value.snapshot->nodes.empty())af_v3_sweep_faces(value,edge,exact,padding,faces);
         candidates+=int(faces.size());for(int face:faces)if(!af_v3_sweep_exempt(value,edge,face))
             value.sweep_rows.push_back(af_v3_sweep_row(value,source,target,edge,face));}
     value.stats.sweep_capacity=std::max(value.stats.sweep_capacity,int(value.sweep_rows.capacity()));

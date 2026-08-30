@@ -313,10 +313,18 @@ Avoid global contact sorting when deterministic traversal can already produce ca
 On each collider transform, cache world vertices, triangle edges, normals, bounds, and inverse
 padding scale once. Reuse them across contact, nearest, CCD broad phase, and static validation.
 
+**Partial implementation tested 2026-08-30 — rejected, concept still open.** Contiguous triangle
+vertices/normals inside each native snapshot preserved exact results but made skull `FIBER_1`
+11.9% slower. The native world persisted, but V3 rebuilt its flattened CCD snapshot for every new
+solve session, so this did not test a fully persistent cross-recompute triangle cache.
+
 ### 5. SIMD packet kernels
 
 Add runtime-dispatched AVX2 packets for AABB and triangle tests with conservative double-precision
 semantics. Do not use approximate reciprocal/square-root operations or fast-math in safety tests.
+
+**Tested 2026-08-30 — rejected.** Global AVX2 changed the numerical trajectory. Function-local
+`avx2,no-fma` preserved exact results but was neutral on skull and 5.6% slower on skeleton.
 
 ### 6. Compiler optimization
 
@@ -324,11 +332,18 @@ Benchmark `/GL`, `/LTCG`, and representative profile-guided optimization trained
 sphere, skull, skull-skin, and skeleton captures. Keep PGO and SIMD contributions independently
 measurable.
 
+**Tested 2026-08-30 — rejected.** LTO regressed the heavy skeleton fixture. PGO preserved exact
+results but its fresh-process full-cycle gain was inconsistent and remained within run variance.
+
 ### 7. Reduce CCD work without changing its reduction
 
 Retain certified fat swept bounds per Fiber edge, share broad-phase traversal with contact
 acquisition, and reuse containment per accepted-state generation. The persistent session already
 fuses Python's pair batches while preserving the sequential safe-fraction order.
+
+**Tested 2026-08-30 — accepted narrowly.** Production retains exact fat-bound reuse only after a
+previous sweep contains at least 512 pairs. It reduced dense skeleton CCD time by 8.8% and full
+solve time by about 1%; sparse skull sweeps stay on the original BVH path.
 
 ### 8. Versioned CCD replacement
 
