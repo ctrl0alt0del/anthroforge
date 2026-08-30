@@ -197,6 +197,15 @@ AF_EXPORT int af_world_update_transform(void* handle, int index, const double* m
     item.bounds=af_transform_bounds(item.matrix,item.mesh->nodes[0].bounds,index); if (!world.nodes.empty()) af_refit_world(world,0); return 0;
 }
 
+AF_EXPORT int af_world_update_vertices(void* handle,const int* indices,int count,
+                                        const double* const* vertices,const int* vertex_counts) {
+    if(!handle||!indices||!vertices||!vertex_counts||count<0)return 1;auto& world=*static_cast<AfWorld*>(handle);
+    for(int row=0;row<count;++row){int index=indices[row];if(index<0||index>=int(world.items.size()))return 1;
+        auto& item=world.items[index];if(!update_snapshot(*item.mesh,vertices[row],vertex_counts[row]))return 1;
+        item.bounds=af_transform_bounds(item.matrix,item.mesh->nodes[0].bounds,index);}
+    if(!world.nodes.empty())af_refit_world(world,0);return 0;
+}
+
 static uint64_t af_edge_key(int64_t first, int64_t second) {
     uint32_t low=uint32_t(std::min(first,second)),high=uint32_t(std::max(first,second));
     return (uint64_t(low)<<32)|uint64_t(high);

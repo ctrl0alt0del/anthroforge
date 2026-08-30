@@ -84,6 +84,7 @@ static int af_llvm_openmp_capability() {
 static int af_v3_session_capability() { return 32768; }
 static int af_v3_batch_capability() { return 65536; }
 static int af_v3_indexed_ccd_capability() { return 1048576; }
+static int af_v3_native_world_capability() { return 2097152; }
 static int af_v3_operations_capability() {
 #ifdef AF_V3_OPERATION_EXPERIMENT
     return 131072;
@@ -220,7 +221,7 @@ AF_EXPORT int af_fiber_ccd_version() { return 3; }
 
 AF_EXPORT int af_fiber_ccd_capabilities() {
     return 8191|af_parallel_capability()|af_llvm_openmp_capability()|
-           af_v3_session_capability()|af_v3_batch_capability()|af_v3_indexed_ccd_capability()|af_v3_operations_capability()|
+           af_v3_session_capability()|af_v3_batch_capability()|af_v3_indexed_ccd_capability()|af_v3_native_world_capability()|af_v3_operations_capability()|
            af_v3_coordinator_capability()|af_v3_native_sqp_capability();
 }
 
@@ -376,6 +377,21 @@ static int build_bvh(TriangleSnapshot& snapshot, int begin, int end) {
         double ca=a.lo[axis]+a.hi[axis],cb=b.lo[axis]+b.hi[axis]; return ca==cb ? a.index<b.index : ca<cb; });
     snapshot.nodes[node].left=build_bvh(snapshot,begin,middle); snapshot.nodes[node].right=build_bvh(snapshot,middle,end);
     return node;
+}
+
+static Bounds refit_bvh(TriangleSnapshot& snapshot,int index) {
+    auto& node=snapshot.nodes[index];Bounds value=empty_bounds();
+    if(node.left>=0)value=merge_bounds(refit_bvh(snapshot,node.left),refit_bvh(snapshot,node.right));
+    else for(int row=node.begin;row<node.end;++row)value=merge_bounds(value,snapshot.faces[row]);
+    node.bounds=value;return value;
+}
+
+static bool update_snapshot(TriangleSnapshot& snapshot,const double* vertices,int count) {
+    if(!vertices||count!=int(snapshot.vertices.size()))return false;
+    for(int i=0;i<3*count;++i)if(!std::isfinite(vertices[i]))return false;
+    for(int i=0;i<count;++i)snapshot.vertices[i]=load3(vertices+3*i);
+    for(auto& face:snapshot.faces)face=face_bounds(vertices,snapshot.triangles.data()+3*face.index,face.index);
+    if(!snapshot.nodes.empty())refit_bvh(snapshot,0);return true;
 }
 
 static void collect_candidates(const TriangleSnapshot& snapshot, int node, const Bounds& moving, std::vector<int>& hits) {

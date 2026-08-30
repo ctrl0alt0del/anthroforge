@@ -2,13 +2,15 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from hashlib import blake2b
 from time import perf_counter
 
 import numpy as np
 from mathutils import Vector
 
 from ..deps.runtime_trace import current_request_telemetry, telemetry_slice, telemetry_timing
-from .fiber_collision import CollisionOracle, _collider_surface
+from ..scp_runtime.surface import build_mesh_collision_data
+from .fiber_collision import CollisionOracle
 from .fiber_engine import FiberPhase, FiberTermination
 from .v2.collision import collision_backend_status
 from .v2.contracts import (V2Anchor, V2AnchorRole, V2ArrayColliderSnapshot,
@@ -167,15 +169,39 @@ def _capture_collider(source, index):
     key = _capture_key(source, index); cached = _CAPTURE_CACHE.get(key)
     if cached is not None:
         _CAPTURE_CACHE.move_to_end(key); return cached
-    surface = _collider_surface(source)
-    if not surface or not surface.get("triangles"):
-        return None
-    vertices = np.asarray([tuple(row) for row in surface["verts_world"]], dtype=np.float64)
-    triangles = np.asarray(surface["triangles"], dtype=np.int64)
-    owner = str(source.get("sid", "") or "")
-    generation = tuple(map(str, source.get("stamp", ())))
-    value = V2ArrayColliderSnapshot(f"{owner}:{index}", owner, vertices, triangles, generation)
+    surface = build_mesh_collision_data(source["obj"], source["depsgraph"])
+    if not surface or not surface.get("triangles"): return None
+    value = _captured_snapshot(source, surface, index)
     return _store_capture(key, value)
+
+
+def _captured_snapshot(source, surface, index):
+    local = np.asarray(surface["verts_local"], dtype=np.float64)
+    triangles = np.asarray(surface["triangles"], dtype=np.int64); matrix = _capture_matrix(source)
+    vertices = _world_vertices(source, local)
+    owner = str(source.get("sid", "") or ""); generation = tuple(map(str, source.get("stamp", ())))
+    topology = (owner, str(len(local)), str(len(triangles)), _topology_digest(triangles))
+    geometry = (str(len(local)), _geometry_digest(local))
+    return V2ArrayColliderSnapshot(f"{owner}:{index}", owner, vertices, triangles, generation,
+        matrix, topology, geometry)
+
+
+def _world_vertices(source, local):
+    obj = source["obj"].evaluated_get(source["depsgraph"]);matrix = obj.matrix_world
+    return np.asarray(tuple(tuple(matrix @ Vector(row)) for row in local), dtype=np.float64)
+
+
+def _capture_matrix(source):
+    obj = source["obj"].evaluated_get(source["depsgraph"])
+    return np.asarray([[float(value) for value in row] for row in obj.matrix_world], dtype=np.float64)
+
+
+def _topology_digest(triangles):
+    return blake2b(np.ascontiguousarray(triangles).tobytes(), digest_size=12).hexdigest()
+
+
+def _geometry_digest(vertices):
+    return blake2b(np.ascontiguousarray(vertices).tobytes(), digest_size=12).hexdigest()
 
 
 def _capture_key(source, index):

@@ -12,6 +12,8 @@ import numpy as np
 V2_CONTRACT_VERSION = 2
 V2_ENGINE_VERSION = "fiber-v2-contract-2"
 V2_DECODE_VERSIONS = (1, V2_CONTRACT_VERSION)
+_IDENTITY4 = ((1.0, 0.0, 0.0, 0.0), (0.0, 1.0, 0.0, 0.0),
+              (0.0, 0.0, 1.0, 0.0), (0.0, 0.0, 0.0, 1.0))
 
 
 class V2Quality(str, Enum):
@@ -105,6 +107,13 @@ def _array_triangles(value):
 
 def _tokens(value):
     return tuple(str(item) for item in tuple(value or ()))
+
+
+def _matrix4(value):
+    rows = np.asarray(_IDENTITY4 if value is None else value, dtype=np.float64)
+    if rows.shape != (4, 4) or not np.isfinite(rows).all():
+        raise ValueError("collider transform must be a finite 4x4 matrix")
+    return tuple(map(tuple, rows.tolist()))
 
 
 def _plain(value):
@@ -241,6 +250,9 @@ class V2ColliderSnapshot:
     vertices: tuple
     triangles: tuple
     generation: tuple = ()
+    transform: tuple = _IDENTITY4
+    topology_generation: tuple = ()
+    geometry_generation: tuple = ()
 
     def __post_init__(self):
         object.__setattr__(self, "collider_id", str(self.collider_id or ""))
@@ -248,6 +260,9 @@ class V2ColliderSnapshot:
         object.__setattr__(self, "vertices", _points(self.vertices, "collider vertex"))
         object.__setattr__(self, "triangles", _triangles(self.triangles))
         object.__setattr__(self, "generation", _tokens(self.generation))
+        object.__setattr__(self, "transform", _matrix4(self.transform))
+        object.__setattr__(self, "topology_generation", _tokens(self.topology_generation))
+        object.__setattr__(self, "geometry_generation", _tokens(self.geometry_generation))
         _validate_triangle_bounds(self)
 
     @classmethod
@@ -263,7 +278,14 @@ class V2ArrayColliderSnapshot(V2ColliderSnapshot):
         object.__setattr__(self, "vertices", _readonly_array(self.vertices, np.float64, "vertices"))
         object.__setattr__(self, "triangles", _readonly_array(self.triangles, np.int64, "triangles"))
         object.__setattr__(self, "generation", _tokens(self.generation))
+        object.__setattr__(self, "transform", _readonly_matrix4(self.transform))
+        object.__setattr__(self, "topology_generation", _tokens(self.topology_generation))
+        object.__setattr__(self, "geometry_generation", _tokens(self.geometry_generation))
         _validate_array_collider(self)
+
+
+def _readonly_matrix4(value):
+    rows = np.ascontiguousarray(_matrix4(value), dtype=np.float64); rows.setflags(write=False); return rows
 
 
 def _readonly_array(value, dtype, name):

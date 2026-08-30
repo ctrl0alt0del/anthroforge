@@ -8,6 +8,7 @@ from .units import declare_si_unit_contract
 _SCENE_CACHE = {}
 _BOUNDED_SCENE_CACHE = {}
 _GEOMETRY_GENERATIONS = {}
+_DEFORMATION_GENERATIONS = {}
 DEFAULT_BOUNDED_CACHE_ENTRIES = 128
 DEFAULT_BOUNDED_CACHE_BYTES = 256 * 1024 * 1024
 
@@ -24,11 +25,21 @@ def geometry_generation(value):
     return int(_GEOMETRY_GENERATIONS.get(_pointer_id(value), 0))
 
 
+def deformation_generation(value):
+    return int(_DEFORMATION_GENERATIONS.get(_pointer_id(value), 0))
+
+
 def note_geometry_updates(depsgraph):
     for update in tuple(getattr(depsgraph, "updates", ()) or ()):
-        if _is_geometry_update(update):
-            key = _pointer_id(getattr(update, "id", None))
-            _GEOMETRY_GENERATIONS[key] = _GEOMETRY_GENERATIONS.get(key, 0) + 1
+        _note_geometry_update(update)
+
+
+def _note_geometry_update(update):
+    key = _pointer_id(getattr(update, "id", None))
+    if _is_geometry_update(update):
+        _GEOMETRY_GENERATIONS[key] = _GEOMETRY_GENERATIONS.get(key, 0) + 1
+    if getattr(update, "is_updated_geometry", False):
+        _DEFORMATION_GENERATIONS[key] = _DEFORMATION_GENERATIONS.get(key, 0) + 1
 
 
 def _is_geometry_update(update):
@@ -37,7 +48,7 @@ def _is_geometry_update(update):
 
 
 def clear_geometry_generations():
-    _GEOMETRY_GENERATIONS.clear()
+    _GEOMETRY_GENERATIONS.clear(); _DEFORMATION_GENERATIONS.clear()
 
 
 def _scene_bucket(scene):

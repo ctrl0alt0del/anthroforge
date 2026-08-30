@@ -9,7 +9,7 @@ import numpy as np
 import core.vcp.v2.collision as v2_collision
 from core.vcp.fiber_ccd_reference import segment_triangle_distance
 from core.vcp.v2 import (
-    EDGE_BATCH, PAIR_BATCH, V2ColliderSnapshot, V2CollisionReason,
+    EDGE_BATCH, PAIR_BATCH, V2ArrayColliderSnapshot, V2ColliderSnapshot, V2CollisionReason,
     V2DistanceCertificateCache, V2OwnerContact, build_triangle_snapshot, cached_triangle_snapshot,
     build_native_collision_world,
     clear_triangle_snapshot_cache, collision_backend_status,
@@ -30,6 +30,13 @@ def _collider(vertices, triangles=((0, 1, 2),), owner="BODY", collider_id="C"):
 def _plane(z=0.0, owner="BODY", collider_id="C"):
     vertices = ((-2, -2, z), (2, -2, z), (0, 2, z))
     return _collider(vertices, owner=owner, collider_id=collider_id)
+
+
+def _refit_collider(z, collider_id="C"):
+    local = np.asarray(((-2, -2, 0), (2, -2, 0), (0, 2, 0)), dtype=np.float64)
+    matrix = np.eye(4); matrix[2, 3] = z; world = local.copy(); world[:, 2] += z
+    return V2ArrayColliderSnapshot(collider_id, "BODY", world, ((0, 1, 2),),
+        ("transform", str(z)), matrix, (collider_id, "topology"), (collider_id, "geometry"))
 
 
 def _transform(points, matrix, offset):
@@ -120,7 +127,7 @@ class FiberV2CollisionTests(unittest.TestCase):
     def test_packaged_backend_is_available(self):
         status = collision_backend_status()
         self.assertTrue(status.available, status.message)
-        self.assertEqual(status.version, f"af_fiber_ccd-3.1179647.t{status.worker_threads}")
+        self.assertEqual(status.version, f"af_fiber_ccd-3.3276799.t{status.worker_threads}")
         self.assertGreaterEqual(status.worker_threads, 1); self.assertLessEqual(status.worker_threads, 4)
 
     def test_indexed_ccd_activation_requires_full_worker_width(self):
@@ -240,6 +247,24 @@ class FiberV2CollisionTests(unittest.TestCase):
         first = refit.validate(points, edges, (("", ""),), 0.1, 0.01)
         second = clean.validate(points, edges, (("", ""),), 0.1, 0.01)
         self.assertEqual((first.clear, first.blockers), (second.clear, second.blockers))
+
+    def test_production_world_vertex_refit_matches_clean_world(self):
+        v2_collision.clear_triangle_snapshot_cache(); original = _refit_collider(0.0)
+        world = v2_collision.cached_native_collision_world_batch((original,))
+        moved = _refit_collider(1.0); refit = v2_collision.cached_native_collision_world_batch((moved,))
+        points, edges, owners = np.asarray(((-1, 0, 1), (1, 0, 1))), ((0, 1),), (("", ""),)
+        actual = refit.validate(points, edges, owners, 0.1, 0.01)
+        v2_collision.clear_triangle_snapshot_cache()
+        expected = v2_collision.build_native_collision_world_batch((moved,)).validate(points, edges, owners, 0.1, 0.01)
+        self.assertIs(world, refit); self.assertEqual(actual.clear, expected.clear)
+
+    def test_production_world_refits_once_for_transform_batch(self):
+        v2_collision.clear_triangle_snapshot_cache()
+        rows = (_refit_collider(0.0, "A"), _refit_collider(0.0, "B"))
+        v2_collision.cached_native_collision_world_batch(rows)
+        moved = (_refit_collider(1.0, "A"), _refit_collider(2.0, "B"))
+        v2_collision.cached_native_collision_world_batch(moved)
+        self.assertEqual(v2_collision.native_collision_cache_stats()["world_refits"], 1)
 
     def test_package43_fused_containment_matches_reference(self):
         vertices = ((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1))

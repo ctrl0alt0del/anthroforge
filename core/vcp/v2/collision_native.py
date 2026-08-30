@@ -8,7 +8,7 @@ import numpy as np
 
 
 V2_NATIVE_ABI = 3
-V2_NATIVE_CAPABILITIES = 1179647
+V2_NATIVE_CAPABILITIES = 3276799
 V2_NATIVE_BATCH_CAPABILITY = 1024
 V3_NATIVE_SESSION_CAPABILITY = 32768
 V3_NATIVE_MULTI_SESSION_CAPABILITY = 65536
@@ -244,10 +244,16 @@ def _configure_world_calls(library):
                                                c_int, double, double]
     library.af_world_add_collider.restype = c_int
     library.af_world_commit.argtypes = [c_void_p]; library.af_world_commit.restype = c_int
-    library.af_world_update_transform.argtypes = [c_void_p, c_int, double, double]
-    library.af_world_update_transform.restype = c_int
+    _configure_world_updates(library, double, plain)
     _configure_batch_call(library, double, integer, plain)
     _configure_world_queries(library, double, integer, plain)
+
+
+def _configure_world_updates(library, double, plain):
+    library.af_world_update_transform.argtypes = [c_void_p, c_int, double, double]
+    library.af_world_update_transform.restype = c_int
+    library.af_world_update_vertices.argtypes = [c_void_p, plain, c_int, POINTER(double), plain]
+    library.af_world_update_vertices.restype = c_int
 
 
 def _configure_batch_call(library, double, integer, plain):
@@ -358,7 +364,7 @@ class NativeTriangleSnapshot:
 class NativeCollisionWorld:
     def __init__(self, path=None):
         self.library = load_native(path); self.handle = self.library.af_world_create()
-        self._contact_pair_capacity = 256
+        self._contact_pair_capacity = 256; self._sessions = 0
         if not self.handle:
             raise RuntimeError("native collision world creation failed")
 
@@ -367,7 +373,7 @@ class NativeCollisionWorld:
         value = cls.__new__(cls); value.library = load_native(path)
         value.handle, closed = _create_batch_world(value.library, vertices, triangles,
                                                     owners, matrices)
-        value._contact_pair_capacity = 256
+        value._contact_pair_capacity = 256; value._sessions = 0
         return value, closed
 
     def add(self, vertices, triangles, owner, collider, closed, matrix=None):
@@ -389,6 +395,13 @@ class NativeCollisionWorld:
                                                        _double(transform), _double(inverse))
         if code:
             raise ValueError("invalid native collision-world transform")
+
+    def update_vertices(self, indices, vertices):
+        rows = tuple(np.ascontiguousarray(value, dtype=np.float64) for value in vertices)
+        index = np.ascontiguousarray(indices, dtype=np.int32); counts = _counts(rows)
+        if self.library.af_world_update_vertices(self.handle, _plain(index), len(index),
+                                                  _double_rows(rows), _plain(counts)):
+            raise ValueError("invalid native collision-world vertex batch")
 
     def validate(self, points, edges, first, second, span, threshold):
         values, links, owners = _world_validation_inputs(points, edges, first, second)
@@ -497,6 +510,7 @@ class NativeV3Session:
                                                         _plain(owners[1]), self.edge_count)
         self._contact_capacity = 256
         if not self.handle: raise RuntimeError("native V3 session creation failed")
+        self.world._sessions += 1
 
     def contacts(self, points, span, threshold):
         values = _v3_points(points, self.edge_count); result = _NativeWorldContacts()
@@ -555,7 +569,9 @@ class NativeV3Session:
         output.update({name: int(getattr(ccd, name)) for name in ccd_names}); return output
 
     def close(self):
-        if self.handle: self.library.af_v3_session_destroy(self.handle); self.handle = None
+        if self.handle:
+            self.library.af_v3_session_destroy(self.handle); self.handle = None
+            self.world._sessions = max(0, self.world._sessions - 1)
 
     def __del__(self):
         try: self.close()

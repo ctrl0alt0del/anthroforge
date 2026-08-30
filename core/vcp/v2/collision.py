@@ -493,6 +493,7 @@ class V2CollisionSnapshotCache:
 
 _SNAPSHOT_CACHE = V2CollisionSnapshotCache()
 _WORLD_CACHE = OrderedDict()
+_NATIVE_CACHE_STATS = {"world_hits": 0, "world_refits": 0}
 
 
 def cached_triangle_snapshot(colliders, generation, topology=None):
@@ -505,6 +506,7 @@ def cached_known_triangle_snapshot(colliders, generation, closed):
 
 def clear_triangle_snapshot_cache():
     _SNAPSHOT_CACHE.clear(); _WORLD_CACHE.clear()
+    for name in _NATIVE_CACHE_STATS: _NATIVE_CACHE_STATS[name] = 0
 
 
 def triangle_snapshot_cache_stats():
@@ -536,6 +538,23 @@ def build_native_collision_world_batch(colliders, transforms=None):
                                   indices, version, closed)
 
 
+def _native_vertices(item):
+    return item.vertices
+
+
+def _native_mesh_key(item):
+    base = (collision_backend_status().version, item.collider_id, item.topology_generation,
+            item.geometry_generation, len(item.vertices), len(item.triangles))
+    if item.geometry_generation: return base
+    return base + (_geometry_hash(_native_vertices(item)), _geometry_hash(item.triangles))
+
+
+def _native_position_key(item):
+    if item.topology_generation or item.geometry_generation:
+        return tuple(np.asarray(item.transform).reshape(-1))
+    return _geometry_hash(item.vertices)
+
+
 def _add_native_collider(native, item, matrix, tokens, indices, topology):
     vertices = np.asarray(item.vertices, dtype=np.float64)
     triangles = np.asarray(item.triangles, dtype=np.int64)
@@ -554,13 +573,40 @@ def cached_native_collision_world(colliders, generation=(), topology=None):
 
 
 def cached_native_collision_world_batch(colliders, generation=()):
-    items = tuple(colliders or ()); key = ("batch",) + _native_world_key(items, generation)
+    items = tuple(colliders or ()); key = ("batch-refit",) + _native_world_geometry_key(items)
     if key in _WORLD_CACHE:
-        _WORLD_CACHE.move_to_end(key); return _WORLD_CACHE[key]
-    _WORLD_CACHE[key] = build_native_collision_world_batch(items)
+        world, position = _WORLD_CACHE[key]; current = _native_world_position_key(items)
+        if position == current:
+            _NATIVE_CACHE_STATS["world_hits"] += 1; _WORLD_CACHE.move_to_end(key); return world
+        if not world.native._sessions:
+            _refit_native_world(world, items, current, key); return world
+        return _transient_native_world(items)
+    world = build_native_collision_world_batch(items)
+    _WORLD_CACHE[key] = (world, _native_world_position_key(items))
     while len(_WORLD_CACHE) > 8:
         _WORLD_CACHE.popitem(last=False)
-    return _WORLD_CACHE[key]
+    return world
+
+
+def _native_world_geometry_key(items):
+    return tuple(_native_mesh_key(item) for item in items)
+
+
+def _native_world_position_key(items):
+    return tuple(_native_position_key(item) for item in items)
+
+
+def _refit_native_world(world, items, current, key):
+    world.native.update_vertices(world.instance_indices, tuple(item.vertices for item in items))
+    _NATIVE_CACHE_STATS["world_refits"] += 1; _WORLD_CACHE[key] = (world, current)
+
+
+def _transient_native_world(items):
+    return build_native_collision_world_batch(items)
+
+
+def native_collision_cache_stats():
+    return {**_NATIVE_CACHE_STATS, "worlds": len(_WORLD_CACHE)}
 
 
 def clear_native_collision_world_cache():

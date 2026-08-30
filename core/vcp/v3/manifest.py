@@ -11,7 +11,7 @@ V3_ACCEPTED_FEATURES = (
     "weak-reference-fidelity-0.01", "adaptive-node-spacing", "adaptive-proximal-sqp",
     "cached-native-loader", "reusable-contact-buffer", "vectorized-swept-segments",
     "deterministic-parallel-native-queries", "persistent-fused-native-session",
-    "dynamic-indexed-ccd",
+    "dynamic-indexed-ccd", "topology-shared-world-space-bvh-refit",
 )
 
 

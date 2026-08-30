@@ -4,14 +4,14 @@ from os import environ
 
 from ..v2.collision import (clear_native_collision_world_cache,
                             clear_triangle_snapshot_cache, collision_backend_status,
-                            triangle_snapshot_cache_stats)
+                            native_collision_cache_stats, triangle_snapshot_cache_stats)
 from ..v2.structural import clear_structural_cache, structural_cache_stats
 from .manifest import V3_ACCEPTED_FEATURES, V3_ACCEPTED_REFERENCE
 from .policy import V3_PRODUCTION_POLICY, V3ProductionPolicy, V3ShortcutMode
 from .solver import begin_v3_session, solve_v3_session
 
 
-V3_PRODUCTION_VERSION = "fiber-v3-production-3"
+V3_PRODUCTION_VERSION = "fiber-v3-production-4"
 V3_NATIVE_SESSION_ENV = "AF_FIBER_V3_NATIVE_SESSION"
 
 
@@ -45,6 +45,7 @@ def clear_v3_caches():
 def v3_cache_stats():
     return {"structural": structural_cache_stats(),
             "triangles": triangle_snapshot_cache_stats(),
+            "native_collision": native_collision_cache_stats(),
             "policy": V3_PRODUCTION_POLICY.fingerprint()}
 
 

@@ -6,7 +6,8 @@ from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
 from ..perf_trace import perf_count, perf_time, perf_timer
-from ..utils import depsgraph_for_scene, geometry_generation, scene_cache_get, scene_cache_set, scene_for_id
+from ..utils import (deformation_generation, depsgraph_for_scene, geometry_generation,
+                     scene_cache_get, scene_cache_set, scene_for_id)
 from .common import _EPS, matrix_flat16
 
 _AXIS_VECTORS = {
@@ -155,6 +156,11 @@ def _pending_geometry_ids(depsgraph):
             if getattr(update, "is_updated_geometry", False) or getattr(update, "is_updated_transform", False)}
 
 
+def _pending_deformation_ids(depsgraph):
+    return {getattr(update, "id", None) for update in tuple(getattr(depsgraph, "updates", ()) or ())
+            if getattr(update, "is_updated_geometry", False)}
+
+
 def _surface_stamp(mesh_obj, obj_eval, depsgraph):
     data = getattr(obj_eval, "data", None)
     source = getattr(mesh_obj, "data", None)
@@ -165,6 +171,16 @@ def _surface_stamp(mesh_obj, obj_eval, depsgraph):
     coordinates = coordinates, _coordinate_fingerprint(data, obj_eval in pending or data in pending)
     return (identities, _data_id(data), _mesh_counts(data),
             tuple(matrix_flat16(obj_eval.matrix_world)), generations, coordinates)
+
+
+def _collision_stamp(mesh_obj, obj_eval, depsgraph):
+    data, source = getattr(obj_eval, "data", None), getattr(mesh_obj, "data", None)
+    identities = _runtime_id(mesh_obj), _runtime_id(source)
+    generations = deformation_generation(mesh_obj), deformation_generation(source)
+    pending = _pending_deformation_ids(depsgraph)
+    coordinates = (_coordinate_fingerprint(source, mesh_obj in pending or source in pending),
+                   _coordinate_fingerprint(data, obj_eval in pending or data in pending))
+    return identities, _data_id(data), _mesh_counts(data), generations, coordinates
 
 
 def _remember_payload(cache, key, stamp, name, payload):
@@ -202,6 +218,18 @@ def build_mesh_surface_data(mesh_obj, depsgraph, cache=None):
     surface = _build_surface(mesh_obj, depsgraph)
     _store_payload(scene, mesh_obj, stamp, "full", "surface", surface)
     return _remember_payload(cache, key, stamp, "surface", surface)
+
+
+def build_mesh_collision_data(mesh_obj, depsgraph, cache=None):
+    key = _typed_cache_key("collision", mesh_obj);obj_eval = mesh_obj.evaluated_get(depsgraph)
+    scene, stamp = scene_for_id(mesh_obj), _collision_stamp(mesh_obj, obj_eval, depsgraph)
+    local = _local_payload(cache, key, stamp, "collision")
+    if local is not None: return local
+    entry = scene_cache_get(scene, _surface_entry_key(mesh_obj, "collision"))
+    if entry and entry.get("stamp") == stamp:
+        return _remember_payload(cache, key, stamp, "collision", entry["collision"])
+    value = _build_collision(obj_eval);_store_payload(scene, mesh_obj, stamp, "collision", "collision", value)
+    return _remember_payload(cache, key, stamp, "collision", value)
 
 
 def build_mesh_surface_bounds(mesh_obj, depsgraph, cache=None):
@@ -247,6 +275,19 @@ def _build_surface_uncached(mesh_obj, depsgraph, scene):
         return _surface_payload(obj_eval, mesh_eval, scene)
     finally:
         obj_eval.to_mesh_clear()
+
+
+def _build_collision(obj_eval):
+    mesh_eval = obj_eval.to_mesh()
+    if mesh_eval is None or len(mesh_eval.vertices) <= 0: return None
+    try: return _collision_payload(mesh_eval)
+    finally: obj_eval.to_mesh_clear()
+
+
+def _collision_payload(mesh_eval):
+    mesh_eval.calc_loop_triangles();vertices = tuple(tuple(vertex.co) for vertex in mesh_eval.vertices)
+    triangles = tuple(tuple(triangle.vertices) for triangle in mesh_eval.loop_triangles)
+    return {"verts_local": vertices, "triangles": triangles}
 
 
 def _build_bounds(mesh_obj, depsgraph):
