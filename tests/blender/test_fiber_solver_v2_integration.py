@@ -22,6 +22,7 @@ from anthroforge.core.vcp.fiber_solver import FiberSolver
 from anthroforge.core.vcp.v2 import (V2Diagnostics, V2PlannerDiagnostics, V2PlannerMode,
                                      V2PlannerResult, V2Result, V2Termination)
 from anthroforge.core.vcp.v2.collision import V2BackendStatus
+from anthroforge.core.vcp.v3.warm import clear_v3_warm_states
 from anthroforge.core.vcp.fiber_solver_v2 import (
     CYCLIC,
     OPEN,
@@ -292,6 +293,21 @@ class FiberSolverV2WorkflowTests(BlenderTestCase):
         self.assertEqual(captured["request"].settings.max_accepted_steps, fiber.iterations_bake)
         self.assertEqual(captured["values"]["checkpoint_steps"], fiber.iterations_interactive)
 
+    def test_v3_second_request_continues_from_session_warm_state(self):
+        clear_v3_warm_states(); self.addCleanup(clear_v3_warm_states)
+        root_obj, fiber = _legacy_fiber_setup(); package = _v3_package(fiber.node_count); captured, launched = [], []
+        def factory(request, **_values): captured.append(request); return _PackageSession(package)
+        with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V3"}):
+            with patch("anthroforge.core.vcp.v3.production.begin_v3", side_effect=factory):
+                for _index in range(2):
+                    launched.append(request_fiber_refinement(root_obj, bpy.context.scene, fiber, True))
+                    self.assertTrue(launched[-1].ok)
+                    self.assertTrue(drain_fiber_refinements())
+        self.assertFalse(captured[0].warm_seed)
+        self.assertEqual(captured[1].warm_seed, package.result.points)
+        preview = tuple(map(tuple, launched[1].job.session.preview))
+        self.assertLess(max(abs(a - b) for p, q in zip(preview, package.result.points) for a, b in zip(p, q)), 1e-7)
+
 
 def _direct_session(solver):
     anchor = lambda x: SimpleNamespace(point=Vector((x, 0, 0)), owner_id="")
@@ -313,7 +329,7 @@ def _v3_package(count):
     package = _stalled_package(count); result = package.result
     package.result = V2Result(result.request_signature, result.termination, result.points,
         result.diagnostics, result.validated, result.route_branch, result.message,
-        "fiber-v3-production-5", result.backend_version)
+        "fiber-v3-production-6", result.backend_version)
     return package
 
 

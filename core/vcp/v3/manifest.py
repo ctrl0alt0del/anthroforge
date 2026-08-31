@@ -13,6 +13,7 @@ V3_ACCEPTED_FEATURES = (
     "deterministic-parallel-native-queries", "persistent-fused-native-session",
     "resumable-native-sqp-default", "explicit-python-controller-fallback",
     "dynamic-indexed-ccd", "topology-shared-world-space-bvh-refit",
+    "session-local-warm-continuation",
 )
 
 

@@ -257,10 +257,12 @@ class VcpUseCaseTests(unittest.TestCase):
         root_obj = root(fibers=[fiber], active_type="FIBER", active_id="F1")
         calls = []
         ctx = context(scene(root_obj))
-        with patch("app.use_cases.fiber_tools._fiber_sync", return_value=SimpleNamespace(clear_solver_cache=calls.append)):
+        with patch("app.use_cases.fiber_tools._fiber_sync", return_value=SimpleNamespace(clear_solver_cache=calls.append)), \
+             patch("app.use_cases.fiber_tools._clear_v3_warm") as clear_v3:
             result = clear_fiber_warm_start(ctx)
         self.assertTrue(result.ok)
         self.assertEqual(calls, ["F1"])
+        clear_v3.assert_called_once_with(ctx, root_obj, fiber)
         self.assertEqual((fiber_recompute_status(fiber), fiber_recompute_ms(fiber)), ("UNKNOWN", 0.0))
         self.assertEqual((fiber_eps_disp(fiber), fiber_eps_pen(fiber)), (0.0, 0.0))
 

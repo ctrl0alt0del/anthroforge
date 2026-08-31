@@ -98,7 +98,17 @@ class FiberV3ProductionTests(unittest.TestCase):
         warm = tuple((index / 32.0 * 2.0, 0.2, 0.0) for index in range(33))
         session = begin_v3(replace(request, warm_seed=warm), use_planner=False)
         while session.phase != "SPANS": session.step()
-        np.testing.assert_array_equal(session.seed, np.asarray(warm))
+        expected = np.asarray(warm); expected[[0, 16, 32]] = [row.point for row in request.anchors]
+        np.testing.assert_array_equal(session.seed, expected)
+
+    def test_warm_seed_skips_planner_and_takes_precedence(self):
+        request = _bent_request(8)
+        warm = tuple((index / 16.0, 0.2, 0.0) for index in range(33))
+        with patch("core.vcp.v3.solver.plan_reference_v43") as planner:
+            session = begin_v3(replace(request, warm_seed=warm), use_planner=True)
+            while session.phase != "SPANS": session.step()
+        planner.assert_not_called()
+        np.testing.assert_allclose(session.seed[1], warm[1])
 
     def test_native_controller_keeps_hard_midpoint_spans(self):
         session = begin_v3(_bent_request(8), use_planner=False)

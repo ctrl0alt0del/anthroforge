@@ -5,7 +5,8 @@ from ..deps.runtime_context_build import clear_runtime_context_cache
 from ..utils import clear_geometry_generations, clear_scene_cache, note_geometry_updates, scene_for_id
 from ..vcp.fiber_collision import clear_collider_generations, note_collider_updates
 from ..vcp.fiber_solver_v2 import clear_factor_cache
-from ..vcp.fiber_v2_runtime import clear_v2_runtime_capture_cache
+from ..vcp.fiber_v2_runtime import (clear_v2_runtime_capture_cache,
+                                    clear_v3_runtime_warm_cache)
 from ..vcp.v2.production import clear_v2_production_caches
 from ..vcp.v3.production import clear_v3_caches
 
@@ -19,6 +20,7 @@ def invalidate_fiber_caches(scene=None, root=None, fiber_ids=None):
     clear_v2_runtime_capture_cache() if ids is None else None
     clear_v2_production_caches() if ids is None else None
     clear_v3_caches() if ids is None else None
+    clear_v3_runtime_warm_cache(scene, root, ids) if ids is not None else None
     clear_runtime_context_cache(root)
     clear_scene_cache(scene)
     clear_collider_generations() if ids is None else None

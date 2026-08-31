@@ -60,8 +60,17 @@ def clear_fiber_warm_start(context, fiber_id=""):
     if fiber is None:
         return failure(error)
     _fiber_sync().clear_solver_cache(fiber.id)
+    _clear_v3_warm(context, root, fiber)
     _reset_fiber_stats(fiber)
     return success(f"Warm-start cache cleared for {fiber.id}", value=fiber)
+
+
+def _clear_v3_warm(context, root, fiber):
+    try:
+        from ...core.vcp.fiber_v2_runtime import clear_v3_runtime_warm_cache
+    except ImportError:
+        from core.vcp.fiber_v2_runtime import clear_v3_runtime_warm_cache
+    clear_v3_runtime_warm_cache(context.scene, root, {fiber.id})
 
 
 def recompute_fiber(context, fiber_id="", max_passes=12):
@@ -83,6 +92,7 @@ def restore_legacy_fiber(context, fiber_id=""):
     if fiber is None or not points:
         return failure(error or "No legacy Fiber shape is available.")
     _restore_legacy_state(fiber)
+    _clear_v3_warm(context, root, fiber)
     proxy = _fiber_sync().apply_points(root, context.scene, fiber, points, commit=True)
     _write_legacy_provenance(proxy)
     return success("Legacy Fiber shape restored.", value=proxy)
@@ -219,6 +229,7 @@ def remove_fiber_touch_point(context, fiber_id="", touch_index=-1):
     fiber.mid_touches.remove(index)
     _set_prefer_bake(fiber, False)
     _fiber_sync().clear_solver_cache(fiber.id)
+    _clear_v3_warm(context, root, fiber)
     _sync_entity(root, context.scene, "FIBER", {fiber.id}, bake=False)
     return success(value=fiber)
 
@@ -292,6 +303,7 @@ def _append_touch_result(context, root, fiber, touch_specs):
 def _touch_order_changed(context, root, fiber):
     _set_prefer_bake(fiber, False)
     _fiber_sync().clear_solver_cache(fiber.id)
+    _clear_v3_warm(context, root, fiber)
     _sync_entity(root, context.scene, "FIBER", {fiber.id}, bake=False)
     return success(value=fiber)
 

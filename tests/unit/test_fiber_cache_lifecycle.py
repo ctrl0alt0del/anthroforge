@@ -77,6 +77,14 @@ class FiberCacheLifecycleTests(unittest.TestCase):
         self.assertNotIn(root.as_pointer(), runtime_context_build._GRAPH_CACHE)
         self.assertEqual(factor_cache_stats()["entries"], 0)
 
+    def test_target_invalidation_clears_matching_v3_warm_state(self):
+        scene, root, ids = object(), object(), {"F1"}
+        with patch.object(lifecycle, "_cancel_refinements"), \
+             patch.object(lifecycle, "_clear_solver_cache"), \
+             patch.object(lifecycle, "clear_v3_runtime_warm_cache") as clear:
+            lifecycle.invalidate_fiber_caches(scene, root, ids)
+        clear.assert_called_once_with(scene, root, ("F1",))
+
     def test_lifecycle_registration_is_idempotent_and_unregistered(self):
         lifecycle.register_fiber_cache_lifecycle()
         lifecycle.register_fiber_cache_lifecycle()

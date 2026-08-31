@@ -17,7 +17,7 @@ from .shortcut import V3ShortcutTrace, apply_v3_shortcut
 from .spans import aggregate_spans, prepare_span_request, synchronize_owner_spans
 
 
-V3_SOLVER_VERSION = "fiber-v3-production-5"
+V3_SOLVER_VERSION = "fiber-v3-production-6"
 
 
 @dataclass
@@ -113,19 +113,35 @@ def _prepare_world(session):
 
 
 def _prepare_plan(session):
+    if _prepare_warm_plan(session): session.phase = "SEED"; return
     if session.use_planner:
         session.planner = plan_reference_v43(session.request, session.snapshot, native_world=session.world)
     session.seed, session.pins = _initial_seed(session)
     session.phase = "SEED"
 
 
+def _prepare_warm_plan(session):
+    direct, pins = _direct_reference(session.request)
+    warm = _warm_seed(session.request, direct, pins)
+    if warm is None: return False
+    session.seed, session.pins = warm, pins
+    return True
+
+
 def _initial_seed(session):
     direct, pins = _direct_reference(session.request)
+    warm = _warm_seed(session.request, direct, pins)
+    if warm is not None: return warm, pins
     if session.planner is not None and session.planner.succeeded:
         return _planner_seed(session.planner, pins, len(direct)), pins
-    if len(session.request.warm_seed) == len(direct):
-        return np.asarray(session.request.warm_seed, dtype=np.float64), pins
     return direct, pins
+
+
+def _warm_seed(request, direct, pins):
+    if len(request.warm_seed) != len(direct): return None
+    warm = np.asarray(request.warm_seed, dtype=np.float64).copy()
+    for index, anchor in zip(pins, request.anchors): warm[index] = anchor.point
+    return warm
 
 
 def _prepare_seed(session):

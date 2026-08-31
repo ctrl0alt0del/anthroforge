@@ -47,6 +47,9 @@ class V2RuntimeSession:
     capture_index: int = 0
     package: object = None
     core_session: object = None
+    request: object = None
+    warm_key: tuple = ()
+    warm_seed: tuple = ()
     invalid_reason: str = ""
     runtime_error: str = ""
     termination_reason: str = ""
@@ -106,6 +109,7 @@ def begin_v3_runtime(solver, root, fiber, scene, depsgraph, quality, selection):
     from .v3.production import V3_PRODUCTION_VERSION, begin_v3
     session = V2RuntimeSession(solver, root, fiber, scene, depsgraph, _quality(quality))
     session.engine, session.engine_version, session.solver_version = "V3", V3_PRODUCTION_VERSION, 3
+    session.warm_key = _v3_warm_key(scene, root, fiber)
     session.core_factory = begin_v3; session.selection = selection
     session.checkpoint_steps = max(0, int(getattr(fiber, "iterations_interactive", 0) or 0))
     session.telemetry = current_request_telemetry(); _initialize(session)
@@ -113,21 +117,42 @@ def begin_v3_runtime(solver, root, fiber, scene, depsgraph, quality, selection):
 
 
 def _initialize(session):
-    if not _backend_ready(session):
-        return
+    if not _backend_ready(session): return
     _runtime, anchors, issue = session.solver._open_anchors(
         session.root, session.scene, session.depsgraph, session.fiber)
-    if issue or not anchors:
-        session.invalid_reason, session.done = str(issue or "Invalid Fiber anchors."), True
-        session.termination_reason = FiberTermination.INVALID_ATTACHMENT.value
-        return
-    session.anchors, session.preview = anchors, [row.point.copy() for row in anchors]
+    if issue or not anchors: return _fail_anchors(session, issue)
+    session.anchors = anchors; _initialize_params(session); _initialize_oracle(session)
+
+
+def _fail_anchors(session, issue):
+    session.invalid_reason, session.done = str(issue or "Invalid Fiber anchors."), True
+    session.termination_reason = FiberTermination.INVALID_ATTACHMENT.value
+
+
+def _initialize_params(session):
     final_budget = session.quality == "FINAL" or session.engine == "V3"
     session.params = session.solver._runtime_params(session.fiber, final_budget)
     session.params["solver_version"], session.params["segment_collisions"] = session.solver_version, True
+    _initialize_warm(session)
+
+
+def _initialize_warm(session):
+    session.warm_seed = _prepared_v3_warm_seed(session) if session.engine == "V3" else ()
+    source = session.warm_seed or tuple(tuple(row.point) for row in session.anchors)
+    session.preview = [Vector(row) for row in source]
+
+
+def _initialize_oracle(session):
     session.oracle = CollisionOracle(session.root, session.scene, session.depsgraph,
                                      session.params["margin"], session.solver.surface_offset)
     _attach_sources(session)
+
+
+def _prepared_v3_warm_seed(session):
+    from .v3.warm import prepare_v3_warm_seed
+    status = collision_backend_status()
+    return prepare_v3_warm_seed(session.warm_key, bool(session.fiber.use_warm_start),
+        session.params["node_count"], session.anchors, session.engine_version, status.version)
 
 
 def _backend_ready(session):
@@ -257,7 +282,8 @@ def _start_core(session):
     factory = session.core_factory or begin_v2
     values = dict(preview=session.quality != "FINAL")
     if session.engine == "V3": values["checkpoint_steps"] = session.checkpoint_steps
-    return factory(_request(session), **values)
+    session.request = _request(session)
+    return factory(session.request, **values)
 
 
 def _update_core_runtime(session):
@@ -305,6 +331,7 @@ def _request_value(session, settings, policy, anchors):
     return V2Request(token, _runtime_id(session.scene), _runtime_id(session.root), revision,
                      settings, tolerances, policy, anchors, tuple(session.colliders),
                      str(session.fiber.symmetry_mode), axis, origin,
+                     warm_seed=session.warm_seed,
                      engine_version=session.engine_version)
 
 
@@ -388,6 +415,41 @@ def _result_error(result):
     failures = {V2Termination.INVALID_ATTACHMENT, V2Termination.INVALID_CONFIGURATION,
                 V2Termination.UNSAFE_OUTPUT, V2Termination.BACKEND_UNAVAILABLE}
     return str(result.message or result.termination.value) if result.termination in failures else ""
+
+
+def retain_v3_warm_state(session, result=None):
+    if getattr(session, "engine", "") != "V3": return False
+    if session.request is None or not session.warm_key: return False
+    if result is not None and not bool(getattr(result, "validated", False)): return False
+    points = _v3_warm_points(session, result)
+    if not points: return False
+    from .v2.contact_core import _direct_reference
+    from .v3.warm import store_v3_warm_state
+    pins = tuple(getattr(session.core_session, "pins", ()) or _direct_reference(session.request)[1])
+    return store_v3_warm_state(session.warm_key, points, pins, session.request.anchors,
+                               session.engine_version, collision_backend_status().version)
+
+
+def clear_v3_runtime_warm_cache(scene=None, root=None, fiber_ids=None):
+    from .v3.warm import clear_v3_warm_states
+    scene_id = None if scene is None else _runtime_id(scene)
+    root_id = None if root is None else _runtime_id(root)
+    clear_v3_warm_states(scene_id, root_id, fiber_ids)
+
+
+def _v3_warm_points(session, result):
+    if result is not None:
+        numeric = getattr(getattr(session, "package", None), "result", None)
+        points = tuple(getattr(numeric, "points", ()) or ())
+        return points or tuple(getattr(result, "points", ()) or ())
+    core = session.core_session
+    if core is None or not tuple(getattr(core, "spans", ()) or ()): return ()
+    if bool(getattr(core, "infeasible", True)): return ()
+    return tuple(tuple(row) for row in getattr(core, "points", ()))
+
+
+def _v3_warm_key(scene, root, fiber):
+    return _runtime_id(scene), _runtime_id(root), _runtime_id(fiber), str(fiber.id or "")
 
 
 def _axis_vector(value):

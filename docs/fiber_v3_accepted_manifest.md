@@ -1,10 +1,10 @@
 # Fiber V3 accepted-logic manifest
 
-Date: 2026-08-27
+Date: 2026-08-30
 
 ## Purpose
 
-`fiber-v3-production-5` is the code-default production boundary for the exact
+`fiber-v3-production-6` is the code-default production boundary for the exact
 solver configuration visually accepted as `REG_ADAPTIVE_SPACING`. It filters the
 accepted implementation out of the experimental V2 modules without changing its
 finite-work objective or stopping behavior. V1 and V2 remain internal overrides.
@@ -41,6 +41,7 @@ continues beyond that cap nor substitutes an earlier state using visual metrics.
 - Persistent native span sessions for fused contact/validation, structural responses and CCD.
 - Indexed CCD with deterministic reduction and workload-gated OpenMP dispatch.
 - Exact world-space topology sharing with batched BLAS/TLAS refit for transform-only SCP changes.
+- Session-local warm continuation from the latest safe V3 working state.
 
 Native workers write only independent indexed rows. Candidate sets below `128 × worker_count`
 use the accepted serial CCD directly. Larger sets speculatively use 128-pair OpenMP chunks and
@@ -51,7 +52,7 @@ CCD and disables speculation until another serial sweep is clear. This preserves
 solver trajectory and avoids repeated speculative work in collision-limited regions. Nested
 multi-Fiber batches keep inner CCD serial to avoid oversubscription.
 
-The persistent controller is part of `fiber-v3-production-5`; the packaged backend advertises
+The persistent controller is part of `fiber-v3-production-6`; the packaged backend advertises
 ABI capability `8388607`, including resumable native `begin/step/finish/cancel` entry points.
 It owns numeric SQP/contact/CCD state while Blender capture, request scheduling, publication, and
 independent stitched validation remain outside native code. One native trial is the progressive
@@ -98,6 +99,11 @@ sets `solver_version=3` and V3 provenance.
 Planner selection, warm starts, shortcut modes, hard-midpoint span creation, shared global budget,
 checkpoint publication, cancellation, final validation, migration and provenance keep the same
 Python-owned interfaces. Only the span SQP/controller loop is native.
+
+V3 warm continuation is memory-only. It restores changed hard pins, precedes planner execution,
+and is retained across handle, solver-property and SCP updates. It never reads persisted point JSON.
+Clear Warm Start, topology changes, deletion, load, undo/redo, engine changes and backend-version
+changes invalidate it. Superseded live sessions may contribute only their current feasible state.
 
 ## Regression authority
 

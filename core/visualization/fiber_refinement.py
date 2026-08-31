@@ -16,6 +16,8 @@ from ..vcp.fiber_anchor_preflight import (anchor_preflight_summary,
                                            preflight_fiber_hard_anchors)
 from ..vcp.fiber_engine import FiberTermination
 from ..vcp.fiber_progressive import begin_fiber_solve, publish_fiber_cache
+from ..vcp.fiber_v2_runtime import (clear_v3_runtime_warm_cache,
+                                    retain_v3_warm_state)
 from ..vcp.v3.batch import V3BatchCoordinator
 from ..vcp.runtime_state import (
     fiber_recompute_status,
@@ -125,10 +127,16 @@ def _reject_anchor_preflight(key, root, scene, fiber, result):
 
 def _prepared_session(root, scene, fiber, quality):
     from ..vcp.fiber_engine_registry import selection_for_fiber
+    _retain_previous_v3_warm(root, scene, fiber)
     selection = selection_for_fiber(fiber)
     prepare_engine_migration(root, scene, fiber, selection)
     return begin_fiber_solve(register_fiber_sync()._solver, root, fiber, scene,
                              _depsgraph(scene), quality, selection=selection)
+
+
+def _retain_previous_v3_warm(root, scene, fiber):
+    job = _JOBS.get(_job_key(scene, root, fiber.id))
+    if job is not None: retain_v3_warm_state(job.session)
 
 
 def cancel_fiber_refinement(scene, fiber_id, mark_unknown=True):
@@ -171,7 +179,8 @@ def _new_job(key, scene, root, fiber, session):
     token = _next_token(fiber)
     previous = _displayed_points(scene, root.name, fiber.id)
     retain = bool(previous and fiber.use_surface_routing and
-                  not _planner_preview_visible(scene, root.name, fiber.id))
+                  not _planner_preview_visible(scene, root.name, fiber.id) and
+                  not tuple(getattr(session, "warm_seed", ()) or ()))
     job = FiberRefinementJob(key, scene.name, root.name, _id_uid(scene), _id_uid(root),
                              _id_pointer(fiber), fiber.id, _fiber_signature(fiber),
                              _geometry_signature(session), session, token=token,
@@ -392,8 +401,16 @@ def _publish_commit_identity(job, result):
 
 
 def _publish_result_cache(job, result):
-    if str(getattr(result, "engine", "V1")) == "V1":
-        publish_fiber_cache(job.session, result)
+    engine = str(getattr(result, "engine", "V1"))
+    if engine == "V1": publish_fiber_cache(job.session, result)
+    if engine == "V3": retain_v3_warm_state(job.session, result)
+    if engine != "V3": _clear_job_v3_warm(job)
+
+
+def _clear_job_v3_warm(job):
+    root, scene, fiber = _owned_job_data(job)
+    if root is not None and scene is not None and fiber is not None:
+        clear_v3_runtime_warm_cache(scene, root, {fiber.id})
 
 
 def _keep_failed_preview(job, result):
