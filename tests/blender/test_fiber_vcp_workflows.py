@@ -1345,6 +1345,28 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(proxy.get("af_fiber_engine_fallback_reason"),
                          "V2_TOPOLOGY_COMPATIBILITY")
 
+    def test_v3_loop_commits_native_cyclic_output(self):
+        with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V3"}):
+            _root_obj, fiber, _loop = _loop_setup(); fiber.node_count = 48
+            _recompute_and_drain(fiber.id)
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        self.assertEqual((fiber.solver_version, proxy.get("af_fiber_output_engine")), (3, "V3"))
+        self.assertEqual((len(_fiber_points_world(fiber)), proxy.data.splines[0].use_cyclic_u),
+                         (48, True))
+        self.assertFalse(proxy.get("af_fiber_engine_fallback_reason"))
+
+    def test_v3_symmetric_loop_uses_global_cyclic_solver(self):
+        with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V3"}):
+            root_obj, fiber, _loop = _symmetric_loop_setup(); _recompute_and_drain(fiber.id)
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        self.assertEqual((fiber.solver_version, proxy.get("af_fiber_output_engine")), (3, "V3"))
+        self.assertTrue(proxy.data.splines[0].use_cyclic_u)
+        self.assertFalse(proxy.get("af_fiber_engine_fallback_reason"))
+        solver = register_fiber_sync()._solver
+        _runtime, anchors, issue = solver._loop_anchors(
+            root_obj, bpy.context.scene, bpy.context.evaluated_depsgraph_get(), fiber)
+        self.assertFalse(issue); self.assertTrue(all(anchor.owner_id for anchor in anchors))
+
     def test_selected_loop_fiber_shows_anchor_handles(self):
         root_obj, fiber, _loop = _loop_setup()
         _sync_active_fiber(root_obj, fiber)

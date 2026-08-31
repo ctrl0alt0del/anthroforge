@@ -595,8 +595,9 @@ static bool af_v3_sqp_any_infeasible(const std::vector<AfV3SqpState>& states) {
 static void af_v3_sqp_sync_owner_span(std::vector<AfV3SqpState>& states) {
     double value=1.0e-9;for(const auto& state:states){const auto& config=state.job->config;
         value=std::max({value,4.0*config.slack,2.5*config.radius});
-        if(state.points.size()>1){value=std::max(value,norm(sub(state.points[1],state.points[0])));
-            value=std::max(value,norm(sub(state.points.back(),state.points[state.points.size()-2])));}}
+        for(int index=0;index<state.job->pin_count;++index){int pin=int(state.job->pins[index]);
+            if(pin>0)value=std::max(value,norm(sub(state.points[pin],state.points[pin-1])));
+            if(pin+1<int(state.points.size()))value=std::max(value,norm(sub(state.points[pin+1],state.points[pin])));}}
     for(auto& state:states)state.job->config.owner_span=value;
 }
 

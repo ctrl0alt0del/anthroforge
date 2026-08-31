@@ -12,7 +12,7 @@ from .solver import begin_v3_session, solve_v3_session
 from .warm import clear_v3_warm_states, v3_warm_cache_stats
 
 
-V3_PRODUCTION_VERSION = "fiber-v3-production-6"
+V3_PRODUCTION_VERSION = "fiber-v3-production-7"
 V3_NATIVE_SESSION_ENV = "AF_FIBER_V3_NATIVE_SESSION"
 V3_NATIVE_CONTROLLER_ENV = "AF_FIBER_V3_NATIVE_CONTROLLER"
 

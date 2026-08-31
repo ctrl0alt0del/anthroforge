@@ -8,11 +8,12 @@ from importlib.util import find_spec
 import numpy as np
 
 from core.vcp.v2.collision import collision_backend_status
+from core.vcp.v2.contracts import V2Topology
 from core.vcp.v3.manifest import V3_ACCEPTED_REFERENCE, V3_REJECTED_MODULES
 from core.vcp.v3.policy import V3_PRODUCTION_POLICY, V3ShortcutMode, accepted_v3_request
 from core.vcp.v3.production import (V3_PRODUCTION_VERSION, begin_v3, solve_v3,
                                     solve_v3_controller)
-from tests.unit.test_fiber_v2_planner import _anchors, _request
+from tests.unit.test_fiber_v2_planner import _anchors, _angle_points, _box, _request, _sphere
 
 
 def _bent_request(cap=24):
@@ -21,7 +22,61 @@ def _bent_request(cap=24):
     return replace(request, settings=settings)
 
 
+def _cyclic_request(cap=24, count=32):
+    points = ((1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0))
+    request = _request(_anchors(points), count=count, topology=V2Topology.CYCLIC)
+    return replace(request, settings=replace(request.settings, max_accepted_steps=cap))
+
+
 class FiberV3ProductionTests(unittest.TestCase):
+    def test_cyclic_controller_is_one_global_state(self):
+        session = begin_v3(_cyclic_request(8), use_planner=False)
+        while session.phase != "NATIVE_SOLVE": session.step()
+        self.assertTrue(session.cyclic); self.assertEqual(len(session.spans), 1)
+        state = session.spans[0].state
+        self.assertEqual((len(state.points), len(state.pin_indices)), (33, 5))
+        np.testing.assert_array_equal(state.points[0], state.points[-1]); session.cancel()
+
+    def test_cyclic_result_has_exact_count_and_closing_edge(self):
+        package = solve_v3(_cyclic_request(12), use_planner=False)
+        points = np.asarray(package.result.points)
+        self.assertEqual((len(points), package.result.validated), (32, True))
+        self.assertFalse(np.array_equal(points[0], points[-1]))
+        lengths = np.linalg.norm(np.roll(points, -1, axis=0) - points, axis=1)
+        self.assertAlmostEqual(package.result.diagnostics.true_length, float(lengths.sum()))
+
+    def test_cyclic_native_and_python_controllers_match(self):
+        request = _cyclic_request(12)
+        python = solve_v3(request, use_planner=False, native_controller=False)
+        native = solve_v3(request, use_planner=False, native_controller=True)
+        np.testing.assert_allclose(native.result.points, python.result.points, atol=3e-14, rtol=0)
+        self.assertEqual(native.result.termination, python.result.termination)
+
+    def test_cyclic_warm_seed_stays_closed_internally(self):
+        request = _cyclic_request(8); warm = np.asarray(solve_v3(request).result.points)
+        session = begin_v3(replace(request, warm_seed=tuple(map(tuple, warm))))
+        while session.phase != "NATIVE_SOLVE": session.step()
+        np.testing.assert_array_equal(session.spans[0].state.points[0],
+                                      session.spans[0].state.points[-1])
+        session.cancel()
+
+    def test_cyclic_native_owner_contacts_cover_every_hard_anchor(self):
+        anchors = _anchors(_angle_points((0, np.pi / 2, np.pi, 3 * np.pi / 2)), "SPHERE")
+        request = _request(anchors, (_sphere(),), 32, .02, V2Topology.CYCLIC)
+        request = replace(request, settings=replace(request.settings, max_accepted_steps=40))
+        package = solve_v3(request, native_controller=True)
+        self.assertTrue(package.result.validated)
+        points = np.asarray(package.result.points)
+        for anchor in anchors:
+            self.assertLess(float(np.min(np.linalg.norm(points - anchor.point, axis=1))), 1.0e-12)
+
+    def test_cyclic_unrelated_blocked_pin_keeps_precise_termination(self):
+        anchors = _anchors(((0, 0, 0), (1, 0, 0), (0, 1, 0)))
+        request = _request(anchors, (_box(),), 24, .02, V2Topology.CYCLIC)
+        package = solve_v3(request, use_planner=False)
+        self.assertEqual(package.result.termination.value, "INVALID_CONFIGURATION")
+        self.assertFalse(package.result.validated)
+
     def test_native_session_matches_reference_driver(self):
         request = _bent_request(20)
         reference = solve_v3(request, use_planner=False, native_session=False, native_controller=False)

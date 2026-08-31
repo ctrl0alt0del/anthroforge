@@ -307,7 +307,17 @@ class FiberSolver:
         if not is_mirror_seam_loop(fiber_prop):
             return anchors
         points = expand_fiber_loop_points(fiber_prop, [anchor.point for anchor in anchors])
-        return list(anchors) + [PlannerAnchor(point.copy()) for point in points[len(anchors):]]
+        mirrored = self._mirrored_loop_anchors(fiber_prop, anchors, points[len(anchors):])
+        return list(anchors) + mirrored
+
+    def _mirrored_loop_anchors(self, fiber, anchors, points):
+        from .fiber_symmetry import signed_distance, mirror_axis, mirror_origin
+        axis, origin = mirror_axis(fiber), mirror_origin(fiber)
+        seam = len(anchors) > 1 and all(abs(signed_distance(row.point, axis, origin)) <= 1.0e-5
+                                      for row in (anchors[0], anchors[-1]))
+        sources = anchors[1:-1] if seam else anchors
+        return [PlannerAnchor(point.copy(), source.owner_id)
+                for point, source in zip(points, reversed(sources))]
 
     def _loop_seed_route(self, oracle, anchors, bake):
         _ = bake

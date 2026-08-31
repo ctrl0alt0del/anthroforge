@@ -10,8 +10,7 @@ from ..v2 import collision_native as cn
 from ..v2.contact_core import (_finish_contact_session, _owner_span,
                                _refresh_state, _true_length_epsilon)
 from ..v2.contracts import V2Termination
-from .solver import _validate_live
-from .spans import synchronize_owner_spans
+from .solver import _synchronize_spans, _validate_live
 
 
 LEGACY_CCD, INDEXED_CCD = 0, 1
@@ -160,7 +159,7 @@ def _prime(session):
     for span in session.spans:
         while not span.done and span.phase != "SOLVE": span.step()
         if span.done: raise RuntimeError("V3 span failed during initialization")
-    synchronize_owner_spans(session.spans, session.request, session.pins)
+    _synchronize_spans(session)
 
 
 def _arrays(state):
@@ -209,7 +208,8 @@ def _publish_working(session, invocation):
 
 
 def _invocation_report(invocation, mode):
-    points = invocation.points(); session = invocation.session
+    values = invocation.points(); session = invocation.session
+    points = values[:-1] if session.cyclic else values
     valid = bool(len(points) and _validate_live(session, points))
     spans = tuple(_span_report(row.result, reference[5:], reference[4])
                   for row, reference in zip(invocation.jobs, invocation.refs))

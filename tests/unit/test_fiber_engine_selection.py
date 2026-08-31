@@ -31,17 +31,21 @@ class FiberEngineSelectionTests(unittest.TestCase):
         for raw in ("v2", " V2", "V2 "):
             self.assertFalse(resolve_fiber_engine(environ={"AF_FIBER_ENGINE": raw}).valid)
 
-    def test_loop_uses_explicit_compatibility_fallback(self):
+    def test_default_loop_uses_v3(self):
         value = select_fiber_engine("CYCLIC", environ={})
         self.assertEqual((value.requested, value.actual, value.fallback_reason),
-                         (FiberEngineKind.V3, FiberEngineKind.V1,
-                          "V3_TOPOLOGY_COMPATIBILITY"))
+                         (FiberEngineKind.V3, FiberEngineKind.V3, ""))
 
     def test_v1_override_is_global(self):
         value = select_fiber_engine("CYCLIC", environ={"AF_FIBER_ENGINE": "V1"})
         self.assertEqual((value.actual, value.fallback_reason), (FiberEngineKind.V1, ""))
 
-    def test_v3_loop_uses_explicit_compatibility_fallback(self):
+    def test_v3_loop_uses_v3(self):
         value = select_fiber_engine("CYCLIC", environ={"AF_FIBER_ENGINE": "V3"})
         self.assertEqual((value.actual, value.fallback_reason),
-                         (FiberEngineKind.V1, "V3_TOPOLOGY_COMPATIBILITY"))
+                         (FiberEngineKind.V3, ""))
+
+    def test_v2_loop_keeps_explicit_compatibility_fallback(self):
+        value = select_fiber_engine("CYCLIC", environ={"AF_FIBER_ENGINE": "V2"})
+        self.assertEqual((value.actual, value.fallback_reason),
+                         (FiberEngineKind.V1, "V2_TOPOLOGY_COMPATIBILITY"))

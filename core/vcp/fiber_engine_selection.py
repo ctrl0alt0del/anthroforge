@@ -43,11 +43,16 @@ def select_fiber_engine(topology, explicit=None, environ=None):
     selection = resolve_fiber_engine(explicit, environ)
     if not selection.valid or selection.requested is FiberEngineKind.V1:
         return selection
-    if str(topology or "OPEN").upper() == "OPEN":
+    if _supported_topology(selection.requested, topology):
         return selection
     reason = f"{selection.requested.value}_TOPOLOGY_COMPATIBILITY"
     return FiberEngineSelection(selection.requested, FiberEngineKind.V1,
                                 selection.source, reason)
+
+
+def _supported_topology(engine, topology):
+    if str(topology or "OPEN").upper() == "OPEN": return True
+    return engine is FiberEngineKind.V3
 
 
 def _selection_value(explicit, environ):

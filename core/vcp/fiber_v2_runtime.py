@@ -12,6 +12,7 @@ from ..deps.runtime_trace import current_request_telemetry, telemetry_slice, tel
 from ..scp_runtime.surface import build_mesh_collision_data
 from .fiber_collision import CollisionOracle
 from .fiber_engine import FiberPhase, FiberTermination
+from .fiber_modes import is_loop_fiber
 from .v2.collision import collision_backend_status
 from .v2.contracts import (V2Anchor, V2AnchorRole, V2ArrayColliderSnapshot,
                            V2CollisionPolicy, V2Quality, V2Request,
@@ -59,6 +60,7 @@ class V2RuntimeSession:
     elapsed_ms: float = 0.0
     telemetry: object = None
     selection: object = None
+    loop: bool = False
 
     def step(self, time_budget_ms=12.0):
         started = perf_counter()
@@ -118,10 +120,15 @@ def begin_v3_runtime(solver, root, fiber, scene, depsgraph, quality, selection):
 
 def _initialize(session):
     if not _backend_ready(session): return
-    _runtime, anchors, issue = session.solver._open_anchors(
-        session.root, session.scene, session.depsgraph, session.fiber)
+    session.loop = is_loop_fiber(session.fiber)
+    _runtime, anchors, issue = _capture_anchors(session)
     if issue or not anchors: return _fail_anchors(session, issue)
     session.anchors = anchors; _initialize_params(session); _initialize_oracle(session)
+
+
+def _capture_anchors(session):
+    method = session.solver._loop_anchors if session.loop else session.solver._open_anchors
+    return method(session.root, session.scene, session.depsgraph, session.fiber)
 
 
 def _fail_anchors(session, issue):
@@ -152,7 +159,8 @@ def _prepared_v3_warm_seed(session):
     from .v3.warm import prepare_v3_warm_seed
     status = collision_backend_status()
     return prepare_v3_warm_seed(session.warm_key, bool(session.fiber.use_warm_start),
-        session.params["node_count"], session.anchors, session.engine_version, status.version)
+        session.params["node_count"], session.anchors, session.engine_version, status.version,
+        cyclic=session.loop)
 
 
 def _backend_ready(session):
@@ -168,7 +176,7 @@ def _backend_ready(session):
 def _attach_sources(session):
     session.solver._attach_cache_signature(
         session.root, session.scene, session.fiber, session.anchors, session.params,
-        session.oracle, session.quality, False)
+        session.oracle, session.quality, session.loop)
     session.source_colliders = tuple(session.oracle.colliders())
 
 
@@ -313,8 +321,10 @@ def _preview_validated(session):
 
 def _request(session):
     quality = V2Quality.FINAL if session.quality == "FINAL" else V2Quality.INTERACTIVE
-    anchors = tuple(_anchor(row, index, len(session.anchors)) for index, row in enumerate(session.anchors))
-    settings = V2Settings(V2Topology.OPEN, quality, session.params["node_count"],
+    anchors = tuple(_anchor(row, index, len(session.anchors), session.loop)
+                    for index, row in enumerate(session.anchors))
+    topology = V2Topology.CYCLIC if session.loop else V2Topology.OPEN
+    settings = V2Settings(topology, quality, session.params["node_count"],
                           session.params["iterations"], session.params["shorten_strength"],
                           session.params["bend_strength"], 1.0)
     status = collision_backend_status()
@@ -335,7 +345,9 @@ def _request_value(session, settings, policy, anchors):
                      engine_version=session.engine_version)
 
 
-def _anchor(anchor, index, count):
+def _anchor(anchor, index, count, cyclic=False):
+    if cyclic: return V2Anchor(tuple(anchor.point), str(anchor.owner_id or ""),
+                               V2AnchorRole.LOOP, index)
     role = V2AnchorRole.TOUCH
     role = V2AnchorRole.ENDPOINT_A if index == 0 else role
     role = V2AnchorRole.ENDPOINT_B if index + 1 == count else role
@@ -423,11 +435,11 @@ def retain_v3_warm_state(session, result=None):
     if result is not None and not bool(getattr(result, "validated", False)): return False
     points = _v3_warm_points(session, result)
     if not points: return False
-    from .v2.contact_core import _direct_reference
+    from .v3.cyclic import v3_reference
     from .v3.warm import store_v3_warm_state
-    pins = tuple(getattr(session.core_session, "pins", ()) or _direct_reference(session.request)[1])
+    pins = tuple(getattr(session.core_session, "pins", ()) or v3_reference(session.request)[1])
     return store_v3_warm_state(session.warm_key, points, pins, session.request.anchors,
-                               session.engine_version, collision_backend_status().version)
+        session.engine_version, collision_backend_status().version, cyclic=session.loop)
 
 
 def clear_v3_runtime_warm_cache(scene=None, root=None, fiber_ids=None):

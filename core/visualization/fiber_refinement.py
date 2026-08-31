@@ -176,8 +176,7 @@ def drain_fiber_refinements(max_slices=100000):
 
 
 def _new_job(key, scene, root, fiber, session):
-    token = _next_token(fiber)
-    previous = _displayed_points(scene, root.name, fiber.id)
+    token = _next_token(fiber); previous = _displayed_points(scene, root.name, fiber.id)
     retain = bool(previous and fiber.use_surface_routing and
                   not _planner_preview_visible(scene, root.name, fiber.id) and
                   not tuple(getattr(session, "warm_seed", ()) or ()))

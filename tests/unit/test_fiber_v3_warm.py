@@ -16,6 +16,10 @@ def _points():
     return ((0, 0, 0), (.5, 1, 0), (1, 0, 0), (1.5, -1, 0), (2, 0, 0))
 
 
+def _loop_points():
+    return ((0, 0, 0), (.5, 1, 0), (1, 0, 0), (1, -1, 0), (0, -1, 0), (-.5, 0, 0))
+
+
 class FiberV3WarmTests(unittest.TestCase):
     def setUp(self):
         clear_v3_warm_states()
@@ -50,6 +54,21 @@ class FiberV3WarmTests(unittest.TestCase):
         clear_v3_warm_states("scene", "root", {"A"})
         self.assertFalse(prepare_v3_warm_seed(keys[0], True, 5, _anchors(), "v3", "abi"))
         self.assertTrue(prepare_v3_warm_seed(keys[1], True, 5, _anchors(), "v3", "abi"))
+
+    def test_cyclic_state_preserves_closing_span_and_exact_count(self):
+        key = ("scene", "root", "loop", "L"); points = _loop_points()
+        self.assertTrue(store_v3_warm_state(key, points, (0, 2, 4), _anchors(),
+                                           "v3", "abi", cyclic=True))
+        seed = prepare_v3_warm_seed(key, True, 12, _anchors(.25), "v3", "abi", cyclic=True)
+        self.assertEqual(len(seed), 12)
+        self.assertEqual(tuple(seed[index][1] for index in (0, 3, 6)), (.25, .25, .25))
+        self.assertFalse(np.array_equal(seed[0], seed[-1]))
+
+    def test_open_and_cyclic_warm_states_are_incompatible(self):
+        key = ("scene", "root", "loop", "L")
+        store_v3_warm_state(key, _loop_points(), (0, 2, 4), _anchors(),
+                            "v3", "abi", cyclic=True)
+        self.assertFalse(prepare_v3_warm_seed(key, True, 6, _anchors(), "v3", "abi"))
 
 
 if __name__ == "__main__":

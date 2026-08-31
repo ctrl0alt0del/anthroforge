@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .cyclic import is_cyclic_request
 from .policy import V3ShortcutMode
 
 
@@ -28,16 +29,24 @@ def apply_v3_shortcut(request, planner, seed, pins, world, mode):
 
 def _shortcut_spans(request, planner, seed, pins, world):
     stats = [0, 0, 0, 0, 0, 0]; rows = []
-    for span, (first, last) in enumerate(zip(pins[:-1], pins[1:])):
-        block = np.asarray(seed[first:last + 1]); stats[4] += len(block)
+    values, markers = _shortcut_geometry(request, seed, pins)
+    for span, (first, last) in enumerate(zip(markers[:-1], markers[1:])):
+        block = np.asarray(values[first:last + 1]); stats[4] += len(block)
         fixed = _shortcut_block(request, planner, span, block, world, stats)
         stats[5] += _control_count(fixed); rows.extend(fixed if not rows else fixed[1:])
+    if is_cyclic_request(request): rows.pop()
     return np.asarray(rows, dtype=np.float64), tuple(stats)
+
+
+def _shortcut_geometry(request, seed, pins):
+    if not is_cyclic_request(request): return np.asarray(seed), pins
+    values = np.vstack((np.asarray(seed), seed[0]))
+    return values, tuple(pins) + (len(seed),)
 
 
 def _shortcut_block(request, planner, span, points, world, stats):
     if planner.spans[span].branch.value != "ROADMAP": return points.copy()
-    owners = request.anchors[span].owner_id, request.anchors[span + 1].owner_id
+    owners = request.anchors[span].owner_id, request.anchors[(span + 1) % len(request.anchors)].owner_id
     output, index = points.copy(), 0
     while index < len(points) - 1:
         candidate, chord = _furthest_clear(request, points, index, owners, world, stats)
