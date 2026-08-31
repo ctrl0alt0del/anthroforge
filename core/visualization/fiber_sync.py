@@ -114,11 +114,14 @@ class FiberSceneSync:
         return nearest_param(parent_scp, parent_proxy, moved_world)
 
     def _capture_attachment_from_world(self, parent_proxy, moved_world, runtime=None):
-        context = None if self._context_provider is None else self._context_provider()
-        ray = fiber_view_capture.view_ray_for_world_point(moved_world, context)
+        ray = self._view_ray_for_world_point(moved_world)
         if ray is fiber_view_capture.NO_VIEW_RAY:
             return capture_attachment_from_object(parent_proxy, moved_world, runtime)
         return None if ray is None else capture_attachment_from_object_ray(parent_proxy, *ray, runtime=runtime)
+
+    def _view_ray_for_world_point(self, moved_world):
+        context = None if self._context_provider is None else self._context_provider()
+        return fiber_view_capture.view_ray_for_world_point(moved_world, context)
 
     def _world_units_per_pixel(self, world_loc, window_manager=None):
         return world_units_per_pixel(world_loc, window_manager)

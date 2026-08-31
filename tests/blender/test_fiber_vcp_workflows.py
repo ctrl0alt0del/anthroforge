@@ -1197,6 +1197,66 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(parse_fiber_attach_param(fiber.mid_touches[0].attach_param)[0], "surface_param_v2")
         self.assertLess((actual - target).length, 1.0e-6)
 
+    def test_endpoint_handle_transfers_to_another_scp_surface(self):
+        root_obj, fiber, _origin, insert = _fiber_setup()
+        _sync_active_fiber(root_obj, fiber)
+        handle = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_endpoint") == "A")
+        target = insert.geometry_object_ref.matrix_world @ insert.geometry_object_ref.data.vertices[1].co
+        handle.location = target
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY):
+            changed = fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        actual = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
+        self.assertEqual((changed, fiber.a_parent_id), (fiber.id, insert.id))
+        self.assertLess((actual - target).length, 1.0e-6)
+
+    def test_endpoint_transfer_uses_frontmost_visible_scp(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        front = scp_with_object(root_obj, "Front", mesh_object("Front", (0.0, 0.0, 1.0)))
+        _sync_active_fiber(root_obj, fiber)
+        handle = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_endpoint") == "A")
+        handle.location = Vector((0.2, 0.2, 1.0)); ray = (Vector((0.2, 0.2, 3.0)), Vector((0, 0, -1)))
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=ray):
+            fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        actual = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
+        self.assertEqual(fiber.a_parent_id, front.id)
+        self.assertAlmostEqual(actual.z, 1.0)
+
+    def test_touch_handle_transfers_owner_and_preserves_offset(self):
+        root_obj, fiber, origin, insert = _fiber_setup()
+        _edit_select_vertex(origin.geometry_object_ref, 1); bpy.ops.af.add_fiber_touch_point(fiber_id=fiber.id)
+        touch = fiber.mid_touches[0]; touch.normal_offset = 0.2; _sync_active_fiber(root_obj, fiber)
+        handle = _touch_handle(fiber.id)
+        target = insert.geometry_object_ref.matrix_world @ insert.geometry_object_ref.data.vertices[2].co
+        handle.location = target
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY):
+            fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        actual = endpoint_world(root_obj, bpy.context.scene, {}, touch.parent_id, touch.attach_param)
+        self.assertEqual(touch.parent_id, insert.id)
+        self.assertAlmostEqual(touch.normal_offset, 0.2)
+        self.assertLess((actual - target).length, 1.0e-6)
+
+    def test_ambiguous_equal_surface_keeps_current_owner(self):
+        root_obj, fiber, origin, _insert = _fiber_setup()
+        duplicate = scp_with_object(root_obj, "Duplicate", mesh_object("Duplicate"))
+        _sync_active_fiber(root_obj, fiber)
+        handle = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_endpoint") == "A")
+        handle.location = origin.geometry_object_ref.matrix_world @ origin.geometry_object_ref.data.vertices[1].co
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY):
+            fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        self.assertNotEqual(origin.id, duplicate.id)
+        self.assertEqual(fiber.a_parent_id, origin.id)
+
+    def test_rejected_owner_transfer_keeps_attachment_atomic(self):
+        root_obj, fiber, origin, insert = _fiber_setup(); before = fiber.a_attach_param
+        _sync_active_fiber(root_obj, fiber)
+        handle = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_endpoint") == "A")
+        handle.location = insert.geometry_object_ref.matrix_world @ insert.geometry_object_ref.data.vertices[1].co
+        policy = lambda **row: row["current"] if row["aspect"].endswith(".owner") else row["incoming"]
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY), patch.object(fiber_runtime, "resolve_conflict", side_effect=policy):
+            changed = fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        self.assertIsNone(changed)
+        self.assertEqual((fiber.a_parent_id, fiber.a_attach_param), (origin.id, before))
+
     def test_fiber_update_projects_endpoint_handle_to_surface(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
         handle = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_endpoint_handle") and obj.get("af_fiber_endpoint") == "A")
@@ -1390,6 +1450,19 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(parse_fiber_attach_param(anchor.attach_param)[0], "surface_param_v2")
         self.assertFalse(_cache_has_point(sync, fiber.id, Vector((9.0, 9.0, 9.0))))
         self.assertLess(min((point - target).length for point in _fiber_world_vectors(fiber)), 1.0e-6)
+        self.assertLess((actual - target).length, 1.0e-6)
+
+    def test_loop_anchor_handle_transfers_to_another_scp(self):
+        root_obj, fiber, _loop = _loop_setup()
+        target_scp = scp_with_object(root_obj, "LoopTarget", mesh_object("LoopTarget", (3.0, 0.0, 0.0)))
+        _sync_active_fiber(root_obj, fiber); handle = _loop_anchor_handle(fiber.id, 0)
+        target = target_scp.geometry_object_ref.matrix_world @ target_scp.geometry_object_ref.data.vertices[1].co
+        handle.location = target
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY):
+            fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        anchor = fiber.loop_anchors[0]
+        actual = endpoint_world(root_obj, bpy.context.scene, {}, anchor.parent_id, anchor.attach_param)
+        self.assertEqual(anchor.parent_id, target_scp.id)
         self.assertLess((actual - target).length, 1.0e-6)
 
     def test_recompute_loop_fiber_preserves_node_count_and_hides_handles(self):

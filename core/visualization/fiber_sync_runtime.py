@@ -9,6 +9,7 @@ from ..vcp.prop_update_guard import suppress_vcp_prop_updates
 from ..vcp.runtime_state import fiber_eps_pen, fiber_invalid_reason, fiber_not_converged, fiber_route_mode
 from ..utils import depsgraph_for_scene, get_af_root, scene_for_id
 from .control_runtime import active_entity_id
+from .fiber_attachment_transfer import capture_attachment_target, with_attachment_raw
 from .fiber_sync_helpers import mark_fiber_output_stale, show_curve_preview
 from .vcp_object_index import build_vcp_object_index
 
@@ -315,36 +316,33 @@ def _find_fiber(root, fiber_id):
     return next((f for f in root.af_vcp_system.fibers if f.id == fiber_id), None)
 
 
-def _compute_attach_raw(sync, parent_obj, moved_world):
-    return sync._capture_attachment_from_world(parent_obj, moved_world)
-
-
-def _compute_touch_attach_raw(sync, parent_obj, moved_world):
-    return _compute_attach_raw(sync, parent_obj, moved_world)
-
-
-def _resolved_parent_obj(sync, scene, root, parent_id):
-    return None if not parent_id else sync._get_scp_proxy(scene, root.name, parent_id)
-
-
 def _resolved_conflict(fiber, aspect, current, incoming, payload):
     return str(resolve_conflict(entity_type="FIBER", entity_id=str(fiber.id or ""), aspect=aspect, source="blender_control", current=current, incoming=incoming, payload=payload) or "")
 
 
-def _apply_attach_update(sync, fiber, changed_ids, setter, current, resolved):
-    if current == resolved:
-        return False
+def _resolved_attachment(fiber, aspect, owner, raw, target, payload):
+    incoming_owner = str(target.owner_id or ""); owner = str(owner or "")
+    owner_aspect = aspect.rsplit(".", 1)[0] + ".owner"
+    resolved_owner = owner if incoming_owner == owner else _resolved_conflict(
+        fiber, owner_aspect, owner, incoming_owner, payload)
+    if resolved_owner != incoming_owner: return None
+    resolved_raw = _resolved_conflict(fiber, aspect, raw, target.raw, payload)
+    return with_attachment_raw(target, resolved_raw)
+
+
+def _apply_attachment_target(sync, fiber, changed_ids, setters, owner, raw, target):
+    if target is None: return False
+    if (str(owner or ""), str(raw or "")) == (target.owner_id, target.raw): return False
     sync.clear_solver_cache(fiber.id)
     with suppress_vcp_prop_updates():
-        setter(resolved)
+        setters[0](target.owner_id); setters[1](target.raw)
     sync._set_fiber_prefer_bake(fiber, False)
     changed_ids.add(fiber.id)
     return True
 
 
-def _changed_handle_raw(sync, root, scene, parent_id, location):
-    parent = _resolved_parent_obj(sync, scene, root, parent_id)
-    return _compute_touch_attach_raw(sync, parent, location)
+def _changed_attachment(sync, root, scene, parent_id, location, depsgraph):
+    return capture_attachment_target(sync, root, scene, parent_id, location, depsgraph)
 
 
 def _endpoint_parts(fiber, endpoint):
@@ -353,18 +351,20 @@ def _endpoint_parts(fiber, endpoint):
     return parent_id, str(getattr(fiber, slot) or ""), slot
 
 
-def _update_endpoint_handle(sync, root, scene, obj, changed_ids):
+def _update_endpoint_handle(sync, root, scene, obj, changed_ids, depsgraph=None):
     fiber = _find_fiber(root, obj.get("af_fiber_id"))
     endpoint = obj.get("af_fiber_endpoint")
     if fiber is None:
         return False
     parent_id, current, slot = _endpoint_parts(fiber, endpoint)
-    raw = _changed_handle_raw(sync, root, scene, parent_id, obj.location.copy())
-    if raw is None:
-        return False
+    target = _changed_attachment(sync, root, scene, parent_id, obj.location.copy(), depsgraph)
+    if target is None: return False
     aspect = f"attachment.{str(endpoint).lower()}.param"
-    resolved = _resolved_conflict(fiber, aspect, current, str(raw or ""), {"endpoint": str(endpoint or "")})
-    return _apply_attach_update(sync, fiber, changed_ids, lambda value: setattr(fiber, slot, value), current, resolved)
+    payload = {"endpoint": str(endpoint or "")}
+    target = _resolved_attachment(fiber, aspect, parent_id, current, target, payload)
+    setters = (lambda value: setattr(fiber, f"{str(endpoint).lower()}_parent_id", value),
+               lambda value: setattr(fiber, slot, value))
+    return _apply_attachment_target(sync, fiber, changed_ids, setters, parent_id, current, target)
 
 
 def _touch_at(fiber, touch_index):
@@ -373,39 +373,42 @@ def _touch_at(fiber, touch_index):
     return fiber.mid_touches[touch_index]
 
 
-def _update_touch_handle(sync, root, scene, obj, changed_ids):
+def _update_touch_handle(sync, root, scene, obj, changed_ids, depsgraph=None):
     fiber = _find_fiber(root, obj.get("af_fiber_id"))
     touch_index = int(obj.get("af_fiber_touch_index", -1))
     tp = _touch_at(fiber, touch_index)
     if tp is None:
         return False
     current = str(tp.attach_param or "")
-    raw = _changed_handle_raw(sync, root, scene, tp.parent_id, obj.location.copy())
-    if raw is None:
-        return False
+    target = _changed_attachment(sync, root, scene, tp.parent_id, obj.location.copy(), depsgraph)
+    if target is None: return False
     aspect = f"attachment.touch[{int(touch_index)}].param"
-    resolved = _resolved_conflict(fiber, aspect, current, str(raw or ""), {"touch_index": int(touch_index)})
-    return _apply_attach_update(sync, fiber, changed_ids, lambda value: setattr(tp, "attach_param", value), current, resolved)
+    target = _resolved_attachment(fiber, aspect, tp.parent_id, current, target,
+                                  {"touch_index": int(touch_index)})
+    setters = (lambda value: setattr(tp, "parent_id", value),
+               lambda value: setattr(tp, "attach_param", value))
+    return _apply_attachment_target(sync, fiber, changed_ids, setters, tp.parent_id, current, target)
 
 
-def _update_loop_anchor_handle(sync, root, scene, obj, changed_ids):
+def _update_loop_anchor_handle(sync, root, scene, obj, changed_ids, depsgraph=None):
     fiber = _find_fiber(root, obj.get("af_fiber_id"))
     anchor_index = int(obj.get("af_fiber_loop_anchor_index", -1))
     if fiber is None or anchor_index < 0 or anchor_index >= len(fiber.loop_anchors):
         return False
     anchor = fiber.loop_anchors[anchor_index]
-    parent = _resolved_parent_obj(sync, scene, root, anchor.parent_id)
-    raw = _compute_touch_attach_raw(sync, parent, obj.location.copy())
-    return _apply_loop_anchor_raw(sync, fiber, anchor, anchor_index, raw, changed_ids)
+    target = _changed_attachment(sync, root, scene, anchor.parent_id, obj.location.copy(), depsgraph)
+    return _apply_loop_anchor_target(sync, fiber, anchor, anchor_index, target, changed_ids)
 
 
-def _apply_loop_anchor_raw(sync, fiber, anchor, index, raw, changed_ids):
-    if raw is None:
-        return False
-    current, incoming = str(anchor.attach_param or ""), str(raw or "")
-    payload = {"loop_anchor_index": int(index)}
-    resolved = _resolved_conflict(fiber, f"attachment.loop_anchor[{int(index)}].param", current, incoming, payload)
-    return _apply_attach_update(sync, fiber, changed_ids, lambda value: setattr(anchor, "attach_param", value), current, resolved)
+def _apply_loop_anchor_target(sync, fiber, anchor, index, target, changed_ids):
+    if target is None: return False
+    current = str(anchor.attach_param or ""); payload = {"loop_anchor_index": int(index)}
+    aspect = f"attachment.loop_anchor[{int(index)}].param"
+    target = _resolved_attachment(fiber, aspect, anchor.parent_id, current, target, payload)
+    setters = (lambda value: setattr(anchor, "parent_id", value),
+               lambda value: setattr(anchor, "attach_param", value))
+    return _apply_attachment_target(sync, fiber, changed_ids, setters,
+                                    anchor.parent_id, current, target)
 
 
 def _is_relevant_update_obj(sync, root, vis_col, obj):
@@ -424,23 +427,22 @@ def _collect_changed_fiber_ids(sync, root, scene, depsgraph, vis_col, runtime):
         if not _is_relevant_update_obj(sync, root, vis_col, obj):
             continue
         if obj.get("af_fiber_endpoint_handle"):
-            _update_endpoint_handle(sync, root, scene, obj, changed_fiber_ids)
+            _update_endpoint_handle(sync, root, scene, obj, changed_fiber_ids, depsgraph)
         elif obj.get("af_fiber_touch_handle"):
-            _update_touch_handle(sync, root, scene, obj, changed_fiber_ids)
+            _update_touch_handle(sync, root, scene, obj, changed_fiber_ids, depsgraph)
         elif obj.get("af_fiber_loop_anchor_handle"):
-            _update_loop_anchor_handle(sync, root, scene, obj, changed_fiber_ids)
+            _update_loop_anchor_handle(sync, root, scene, obj, changed_fiber_ids, depsgraph)
     return changed_fiber_ids
 
 
 def apply_fiber_control_update(sync, root, scene, obj, depsgraph):
-    _ = depsgraph
     changed = set()
     if obj.get("af_fiber_endpoint_handle"):
-        _update_endpoint_handle(sync, root, scene, obj, changed)
+        _update_endpoint_handle(sync, root, scene, obj, changed, depsgraph)
     elif obj.get("af_fiber_touch_handle"):
-        _update_touch_handle(sync, root, scene, obj, changed)
+        _update_touch_handle(sync, root, scene, obj, changed, depsgraph)
     elif obj.get("af_fiber_loop_anchor_handle"):
-        _update_loop_anchor_handle(sync, root, scene, obj, changed)
+        _update_loop_anchor_handle(sync, root, scene, obj, changed, depsgraph)
     return next(iter(changed), None)
 
 
