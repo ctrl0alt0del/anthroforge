@@ -57,6 +57,7 @@ from .operators.fiber_tools import (
     AF_OT_RemoveFiberTouchPoint,
     AF_OT_MoveFiberTouchPoint,
 )
+from .operators.fiber_repair import AF_OT_ConfirmFiberRepairs, AF_OT_RepairFibers
 from .operators.muscle_tools import (
     AF_OT_FlipMuscleNormals,
     AF_OT_SelectMuscleInflationCtrl,
@@ -173,6 +174,10 @@ from .core.visualization.fiber_refinement import (
     register_fiber_refinement_runtime,
     unregister_fiber_refinement_runtime,
 )
+from .core.visualization.fiber_repair_runtime import (
+    register_fiber_repair_runtime,
+    unregister_fiber_repair_runtime,
+)
 from .core.visualization.fiber_anchor_overlay import (
     register_fiber_anchor_overlay,
     unregister_fiber_anchor_overlay,
@@ -251,6 +256,8 @@ classes = (
     AF_OT_AddFiberTouchPoint,
     AF_OT_RemoveFiberTouchPoint,
     AF_OT_MoveFiberTouchPoint,
+    AF_OT_RepairFibers,
+    AF_OT_ConfirmFiberRepairs,
 
     AF_PT_FiberEditPanel,
     AF_PT_FiberSurfaceEditPanel,
@@ -386,6 +393,7 @@ def _register_runtime_hooks():
     register_fiber_anchor_overlay(context_provider=lambda: bpy.context)
     register_fiber_surface_sync()
     register_fiber_refinement_runtime()
+    register_fiber_repair_runtime()
     register_muscle_sync()
     register_blob_sync()
     register_soft_tissue_sync()
@@ -412,6 +420,7 @@ def _unregister_runtime_hooks():
 
 
 def _unregister_fiber_attachment_runtime():
+    unregister_fiber_repair_runtime()
     unregister_fiber_cache_lifecycle()
     unregister_fiber_anchor_overlay()
     unregister_fiber_refinement_runtime()

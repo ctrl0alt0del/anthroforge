@@ -1,5 +1,5 @@
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isfinite
 import os
 from time import monotonic
@@ -51,6 +51,9 @@ _LAST_V3_BATCH_REPORT = None
 _LAST_BATCH_PRIORITY_REFRESH = 0.0
 _TIMER_ARMED = False
 _PAUSED = []
+_GROUPS = {}
+_GROUP_COUNTER = 0
+_GROUP_LIMIT = 32
 
 
 @dataclass
@@ -82,9 +85,24 @@ class FiberRefinementJob:
     previous_points: tuple = ()
     retain_preview: bool = False
     last_geometry_check: float = 0.0
+    group_token: str = ""
 
 
-def request_fiber_refinement(root, scene, fiber, show_preview=False, quality="FINAL"):
+@dataclass
+class FiberRefinementGroup:
+    token: str
+    scene_uid: int
+    root_uid: int
+    root_name: str
+    scene_name: str
+    targets: tuple
+    pending: set = field(default_factory=set)
+    committed: set = field(default_factory=set)
+    failures: dict = field(default_factory=dict)
+    done: bool = False
+
+
+def request_fiber_refinement(root, scene, fiber, show_preview=False, quality="FINAL", group_token=""):
     if root is None or scene is None or fiber is None:
         return RefinementRequest(False, "Fiber refinement context is unavailable.")
     key = _job_key(scene, root, fiber.id)
@@ -95,12 +113,54 @@ def request_fiber_refinement(root, scene, fiber, show_preview=False, quality="FI
     if session.invalid_reason:
         _abort_request(key, root, scene, fiber, session)
         return RefinementRequest(False, session.invalid_reason)
-    return _launch_refinement(key, root, scene, fiber, session, show_preview)
+    return _launch_refinement(key, root, scene, fiber, session, show_preview, group_token)
 
 
-def _launch_refinement(key, root, scene, fiber, session, show_preview):
+def request_fiber_refinement_group(root, scene, fiber_ids, quality="FINAL"):
+    group = _new_refinement_group(root, scene, fiber_ids)
+    fibers = {str(row.id): row for row in root.af_vcp_system.fibers}
+    for fiber_id in group.targets:
+        fiber = fibers.get(fiber_id)
+        request = None if fiber is None else request_fiber_refinement(
+            root, scene, fiber, show_preview=False, quality=quality, group_token=group.token)
+        if request is None or not request.ok: _group_member_done(group.token, fiber_id, False, _request_error(request))
+    _finish_group_if_ready(group)
+    return group.token
+
+
+def fiber_refinement_group_state(token):
+    group = _GROUPS.get(str(token or ""))
+    if group is None: return None
+    return {"token": group.token, "targets": group.targets, "pending": tuple(sorted(group.pending)),
+            "committed": tuple(sorted(group.committed)), "failures": dict(group.failures),
+            "done": bool(group.done)}
+
+
+def cancel_fiber_refinement_group(token):
+    group = _GROUPS.get(str(token or ""))
+    if group is None or group.done: return False
+    for key, job in tuple(_JOBS.items()):
+        if _job_group_token(job) == group.token: _terminate_job(job, FiberTermination.CANCELLED, True, stale=True)
+    for fiber_id in tuple(group.pending): _group_member_done(group.token, fiber_id, False, "CANCELLED")
+    return True
+
+
+def _new_refinement_group(root, scene, fiber_ids):
+    global _GROUP_COUNTER
+    _GROUP_COUNTER += 1; token = f"fiber-group-{_GROUP_COUNTER}"
+    targets = tuple(sorted({str(value) for value in fiber_ids if str(value or "")}))
+    group = FiberRefinementGroup(token, _id_uid(scene), _id_uid(root), root.name, scene.name,
+                                 targets, pending=set(targets))
+    _GROUPS[token] = group; _trim_groups(); return group
+
+
+def _request_error(request):
+    return "MISSING_FIBER" if request is None else str(request.error or "REQUEST_FAILED")
+
+
+def _launch_refinement(key, root, scene, fiber, session, show_preview, group_token=""):
     _supersede_job(key)
-    job = _new_job(key, scene, root, fiber, session)
+    job = _new_job(key, scene, root, fiber, session, group_token)
     mark_fiber_output_stale(scene, root.name, fiber.id)
     proxy = _initial_proxy(job, show_preview)
     return _start_or_finish(job, proxy)
@@ -160,6 +220,7 @@ def shutdown_fiber_refinements(mark_unknown=False):
         _terminate_key(key, FiberTermination.CANCELLED, mark_unknown)
     _V3_BATCH.clear()
     _QUEUE.clear()
+    _GROUPS.clear()
     _drop_timer()
     _TIMER_ARMED = False
 
@@ -175,7 +236,7 @@ def drain_fiber_refinements(max_slices=100000):
     return not _QUEUE
 
 
-def _new_job(key, scene, root, fiber, session):
+def _new_job(key, scene, root, fiber, session, group_token=""):
     token = _next_token(fiber); previous = _displayed_points(scene, root.name, fiber.id)
     retain = bool(previous and fiber.use_surface_routing and
                   not _planner_preview_visible(scene, root.name, fiber.id) and
@@ -185,7 +246,7 @@ def _new_job(key, scene, root, fiber, session):
                              _geometry_signature(session), session, token=token,
                              previous_status=fiber_recompute_status(fiber),
                              previous_points=previous,
-                             retain_preview=retain)
+                             retain_preview=retain, group_token=str(group_token or ""))
     claim_engine_migration(fiber, token)
     job.last_apply, job.last_generation = monotonic(), session.generation
     job.last_geometry_check = job.last_apply
@@ -390,7 +451,8 @@ def _finish_refined_job(job, result):
     _publish_result_cache(job, result) if committed else None
     telemetry_cache_snapshot(getattr(job.session, "telemetry", None))
     _detach_job(job)
-    _sync_final(job) if committed else None
+    _finish_group_member(job, committed, result)
+    _sync_final(job) if committed and not _job_group_token(job) else None
 
 
 def _publish_commit_identity(job, result):
@@ -461,6 +523,7 @@ def _finish_planner_preview_job(job):
     _finish_pending_version(job, False)
     telemetry_cache_snapshot(getattr(job.session, "telemetry", None))
     _detach_job(job)
+    _group_member_done(_job_group_token(job), job.fiber_id, False, "PLANNER_PREVIEW")
 
 
 def _planner_preview_result(result):
@@ -652,6 +715,46 @@ def _sync_fiber_group(root, scene, fiber_ids):
                   source="fiber_refinement", event_type="FIBER_SOLVE_READY", payload=payload)
 
 
+def _finish_group_member(job, committed, result):
+    token = _job_group_token(job)
+    if not token: return
+    reason = str(getattr(result, "termination_reason", "") or "FAILED")
+    _group_member_done(token, job.fiber_id, committed, reason)
+
+
+def _job_group_token(job):
+    return str(getattr(job, "group_token", "") or "")
+
+
+def _group_member_done(token, fiber_id, committed, reason):
+    group = _GROUPS.get(str(token or ""))
+    if group is None or group.done: return
+    fiber_id = str(fiber_id); group.pending.discard(fiber_id)
+    if committed: group.committed.add(fiber_id)
+    else: group.failures[fiber_id] = str(reason or "FAILED")
+    _finish_group_if_ready(group)
+
+
+def _finish_group_if_ready(group):
+    if group is None or group.done or group.pending: return
+    group.done = True; root, scene = _group_data(group)
+    if root is not None and scene is not None and group.committed:
+        _sync_fiber_group(root, scene, group.committed)
+
+
+def _group_data(group):
+    scene = bpy.data.scenes.get(group.scene_name)
+    root = None if scene is None else scene.objects.get(group.root_name)
+    if scene is None or root is None: return None, None
+    if _id_uid(scene) != group.scene_uid or _id_uid(root) != group.root_uid: return None, None
+    return root, scene
+
+
+def _trim_groups():
+    completed = [key for key, group in _GROUPS.items() if group.done]
+    while len(_GROUPS) > _GROUP_LIMIT and completed: _GROUPS.pop(completed.pop(0), None)
+
+
 def _begin_batch_publication():
     global _BATCH_COMMITS
     _BATCH_COMMITS = []
@@ -701,6 +804,7 @@ def _supersede_job(key):
         return None
     _mark_terminated(job, FiberTermination.SUPERSEDED)
     _detach_job(job)
+    _group_member_done(_job_group_token(job), job.fiber_id, False, FiberTermination.SUPERSEDED.value)
     return job
 
 
@@ -721,6 +825,7 @@ def _terminate_job(job, reason, mark_unknown, stale=False):
     _restore_job_status(job, fiber, mark_unknown)
     _mark_terminated(job, reason)
     _detach_job(job)
+    _group_member_done(_job_group_token(job), job.fiber_id, False, FiberTermination(reason).value)
 
 
 def _restore_job_status(job, fiber, mark_unknown):

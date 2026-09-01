@@ -14,6 +14,10 @@ from _helpers import BlenderTestCase
 
 
 class FiberV3BatchRuntimeTests(BlenderTestCase):
+    def tearDown(self):
+        fiber_refinement._GROUPS.clear()
+        super().tearDown()
+
     def test_two_commits_publish_one_grouped_event(self):
         root = SimpleNamespace(session_uid=11); scene = SimpleNamespace(session_uid=12)
         rows = [(root, scene, SimpleNamespace(id="FIBER_2")),
@@ -51,6 +55,28 @@ class FiberV3BatchRuntimeTests(BlenderTestCase):
             session.params["node_count"] = 256
             self.assertTrue(fiber_refinement._batch_job_enabled(job))
         fiber_refinement._V3_BATCH.clear()
+
+    def test_recompute_group_publishes_once_after_every_terminal_member(self):
+        root = SimpleNamespace(session_uid=21, name="Root")
+        scene = SimpleNamespace(session_uid=22, name="Scene")
+        group = fiber_refinement._new_refinement_group(root, scene, ("FIBER_1", "FIBER_2"))
+        with patch.object(fiber_refinement, "_group_data", return_value=(root, scene)), \
+             patch.object(fiber_refinement, "_sync_fiber_group") as publish:
+            fiber_refinement._group_member_done(group.token, "FIBER_1", True, "CONVERGED")
+            publish.assert_not_called()
+            fiber_refinement._group_member_done(group.token, "FIBER_2", False, "INVALID_ATTACHMENT")
+        publish.assert_called_once_with(root, scene, {"FIBER_1"})
+
+    def test_recompute_group_reports_success_and_failure_counts(self):
+        root = SimpleNamespace(session_uid=31, name="Root")
+        scene = SimpleNamespace(session_uid=32, name="Scene")
+        group = fiber_refinement._new_refinement_group(root, scene, ("A", "B"))
+        with patch.object(fiber_refinement, "_group_data", return_value=(None, None)):
+            fiber_refinement._group_member_done(group.token, "A", True, "CONVERGED")
+            fiber_refinement._group_member_done(group.token, "B", False, "BLOCKED")
+        state = fiber_refinement.fiber_refinement_group_state(group.token)
+        self.assertEqual((state["done"], state["committed"], state["failures"]),
+                         (True, ("A",), {"B": "BLOCKED"}))
 
 
 if __name__ == "__main__":

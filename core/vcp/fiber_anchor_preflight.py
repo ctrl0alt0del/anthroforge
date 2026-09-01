@@ -67,6 +67,18 @@ def preflight_fiber_hard_anchors(root, scene, fiber, solver, depsgraph, quality=
     return _compute_preflight(root, scene, fiber, depsgraph, quality, probe, anchors)
 
 
+def preflight_fiber_hard_anchors_in_world(root, scene, fiber, solver, depsgraph,
+                                          colliders, world, cache_key, quality="FINAL"):
+    anchors, issue = _resolve_anchors(root, scene, fiber, solver, depsgraph)
+    if issue or anchors is None: return None
+    slack = _clearance_slack(colliders, fiber.collision_radius, quality)
+    key = ("shared-hard-anchor", tuple(cache_key), str(fiber.id), _raw_anchor_specs(fiber))
+    result = evaluate_anchor_preflight(anchors, colliders, _hierarchy(root),
+                                       fiber.collision_radius, slack, key, world)
+    _publish(root, scene, fiber, result)
+    return result
+
+
 def evaluate_anchor_preflight(anchors, colliders, hierarchy, configured, slack, cache_key=(), world=None):
     rows = tuple(anchors or ())
     effective = max(0.0, float(configured) - float(slack))
