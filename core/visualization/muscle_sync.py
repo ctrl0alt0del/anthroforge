@@ -34,6 +34,22 @@ from .control_runtime import active_entity_id
 from .vcp_object_index import build_vcp_object_index
 
 
+def _fiber_stale(scene, root_name, fiber_id):
+    objects = () if scene is None else tuple(scene.objects)
+    return any(obj.get("af_fiber_proxy") and not obj.get("af_fiber_mirror_proxy")
+               and obj.get("af_root_name") == root_name
+               and obj.get("af_fiber_id") == fiber_id
+               and obj.get("af_fiber_output_state") == "STALE" for obj in objects)
+
+
+def _fiber_surface_stale(scene, root_name, surface_id):
+    objects = () if scene is None else tuple(scene.objects)
+    return any(obj.get("af_fiber_surface_proxy")
+               and obj.get("af_root_name") == root_name
+               and obj.get("af_fiber_surface_id") == surface_id
+               and obj.get("af_fiber_surface_output_state") == "STALE" for obj in objects)
+
+
 class MuscleSceneSync:
     def __init__(self, collection_name="AF_VCP_VIS"):
         self.collection_name = collection_name
@@ -129,7 +145,16 @@ class MuscleSceneSync:
     def _clear_muscle_meshes(self, vcp, muscle_id, base_obj, infl_obj):
         self._update_mesh(base_obj, [], [])
         self._update_mesh(infl_obj, [], [])
+        self._set_output_state((base_obj, infl_obj), "INVALID")
         self._set_muscle_active_materials(vcp, muscle_id, base_obj, infl_obj)
+
+    def _set_output_state(self, objects, state):
+        for obj in tuple(objects or ()):
+            if obj is not None:
+                obj["af_muscle_output_state"] = str(state)
+
+    def _retain_stale_muscle(self, base_obj, infl_obj):
+        self._set_output_state((base_obj, infl_obj), "STALE")
 
     def _collect_points_with_fallback(self, root, scene, muscle, ordered_fibers):
         ordered_points = collect_muscle_rows(root, scene, muscle, ordered_fibers)
@@ -197,10 +222,28 @@ class MuscleSceneSync:
         base_obj, infl_obj = self._ensure_muscle_meshes(vis_col, root, muscle.id)
         surface_input = self._muscle_surface_input(root, scene, muscle)
         if surface_input is None:
+            if self._source_output_stale(root, scene, muscle):
+                self._retain_stale_muscle(base_obj, infl_obj)
+                return
             self._clear_muscle_meshes(vcp, muscle.id, base_obj, infl_obj)
             return
         base_points, closed_u, config = surface_input
         self._apply_synced_surface(vis_col, root, scene, vcp, muscle, base_obj, infl_obj, base_points, closed_u, config)
+
+    def _source_output_stale(self, root, scene, muscle):
+        mode = str(getattr(muscle, "surface_source_mode", "LEGACY_FIBERS"))
+        if mode == "FIBER_SURFACE":
+            if _fiber_surface_stale(scene, root.name, muscle.fiber_surface_id):
+                return True
+            return self._surface_fibers_stale(root, scene, muscle.fiber_surface_id)
+        ids = tuple(ref.fiber_id for ref in muscle.fiber_refs if ref.fiber_id)
+        return any(_fiber_stale(scene, root.name, fiber_id) for fiber_id in ids)
+
+    def _surface_fibers_stale(self, root, scene, surface_id):
+        surfaces = getattr(root.af_vcp_system, "fiber_surfaces", ())
+        surface = next((row for row in surfaces if row.id == surface_id), None)
+        refs = () if surface is None else tuple(surface.fiber_refs)
+        return any(_fiber_stale(scene, root.name, ref.fiber_id) for ref in refs)
 
     def _muscle_surface_input(self, root, scene, muscle):
         if str(getattr(muscle, "surface_source_mode", "LEGACY_FIBERS")) == "FIBER_SURFACE":
@@ -234,6 +277,7 @@ class MuscleSceneSync:
         self._sync_inflation_control(vis_col, root, muscle, base_obj, base_points, ensure_control)
         infl_verts = self._inflated_surface_verts(base_points, muscle, config, closed_u)
         self._update_mesh(infl_obj, list(base_verts) if infl_verts is None else infl_verts, faces_final)
+        self._set_output_state((base_obj, infl_obj), "CURRENT")
         self._set_muscle_active_materials(vcp, muscle.id, base_obj, infl_obj)
 
     def _active_muscle_id(self, root, scene=None, active_object=None):

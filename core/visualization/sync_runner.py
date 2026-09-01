@@ -25,7 +25,7 @@ _TIMER_ARMED = False
 _TIMER_DUE_AT = 0.0
 _ID_PAYLOAD_KEYS = ("scp_recapture_ids", "scp_apply_parent_ids", "scp_apply_target_ids",
                     "soft_tissue_recapture_ids", "soft_tissue_base_recapture_ids",
-                    "soft_tissue_region_recapture_ids")
+                    "soft_tissue_region_recapture_ids", "solved_fiber_ids")
 _FALSE_VALUES = {"0", "false", "no", "off"}
 _DEFER_ENV = "AF_DEPS_DEFER"
 _DEFER_MS_ENV = "AF_DEPS_DEFER_MS"
@@ -166,7 +166,7 @@ def _env_seconds(name, default_ms):
 
 
 def _defer_seconds(request=None):
-    if request is not None and str(request.event_type) == "FIBER_UPDATE":
+    if request is not None and str(request.event_type) in {"FIBER_UPDATE", "FIBER_SOLVE_READY"}:
         return _env_seconds(_FIBER_DEFER_MS_ENV, _DEFAULT_FIBER_DEFER_MS)
     return _env_seconds(_DEFER_MS_ENV, _DEFAULT_DEFER_MS)
 
@@ -184,6 +184,8 @@ def _deferable(request):
         return source == "depsgraph"
     if event == "FIBER_UPDATE":
         return source in {"depsgraph", "property"}
+    if event == "FIBER_SOLVE_READY":
+        return source == "fiber_refinement"
     return event == "SOFT_TISSUE_UPDATE" and source in {"depsgraph", "property"}
 
 

@@ -195,7 +195,7 @@ class FiberSyncDriver(DependencyDriver):
         ids -= solved
         if solved:
             register_fiber_sync().refresh_selection(root=root, scene=scene)
-        _sync_unsolved_fibers(root, scene, is_full, ids, solved, bake)
+        _sync_unsolved_fibers(root, scene, is_full, ids, solved, bake, not _deferred_fiber_event(gate_meta))
 
 
 def _sync_fiber_update(root, scene, ids, quality):
@@ -213,15 +213,20 @@ def _request_fiber_refinements(root, scene, ids, quality):
             request_fiber_refinement(root, scene, fiber, show_preview=True, quality=quality)
 
 
-def _sync_unsolved_fibers(root, scene, is_full, ids, solved, bake):
+def _sync_unsolved_fibers(root, scene, is_full, ids, solved, bake, drain=True):
     sync = register_fiber_sync()
     if is_full and not solved:
-        sync.sync_root_to_scene(root=root, scene=scene, bake=bake)
+        sync.sync_root_to_scene(root=root, scene=scene, bake=bake, drain=drain)
         return
     if is_full:
         ids |= {fiber.id for fiber in root.af_vcp_system.fibers} - solved
     if ids:
-        sync.sync_root_to_scene(root=root, scene=scene, bake=bake, target_fiber_ids=ids)
+        sync.sync_root_to_scene(root=root, scene=scene, bake=bake,
+                                target_fiber_ids=ids, drain=drain)
+
+
+def _deferred_fiber_event(meta):
+    return str(dict(meta or {}).get("source", "") or "").lower() == "shortcut"
 
 
 def _solved_fiber_ids(gate_meta):

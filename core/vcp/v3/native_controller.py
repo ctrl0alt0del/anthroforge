@@ -36,6 +36,12 @@ class _SqpResult(Structure):
         "regularization", "trust_radius", "maximum_violation", "elapsed_ms")]
 
 
+class _SqpBatchStats(Structure):
+    _fields_ = [(name, c_int) for name in
+                ("sessions", "active", "stepped", "completed", "workers", "trials")]
+    _fields_ += [("elapsed_ms", c_double)]
+
+
 class _SqpJob(Structure):
     _fields_ = [("session", c_void_p), ("points", POINTER(c_double)),
                 ("reference", POINTER(c_double)), ("count", c_int)]
@@ -105,6 +111,7 @@ class NativeControllerRun:
         self.session, self.mode = session, int(ccd_mode); self.invocation = _Invocation(session, ccd_mode)
         self.library = session.spans[0].state.native_session.native.library
         self.handle = self.invocation.begin(); self.done = False; self.accepted = 0; self.infeasible = True
+        self.externally_advanced = False
 
     def step(self, trials=1):
         done, accepted, infeasible = c_int(), c_int(), c_int()
@@ -147,6 +154,17 @@ def _solve_session(session, ccd_mode):
 def begin_native_controller(session, ccd_mode=INDEXED_CCD):
     if not cn.native_controller_status(): raise RuntimeError("native V3 controller is unavailable")
     return NativeControllerRun(session, ccd_mode)
+
+
+def step_native_controllers(runs, trials=1):
+    active = tuple(run for run in runs if run.handle and not run.done)
+    if not active: return _empty_batch_report()
+    library = active[0].library; _configure_many(library)
+    handles = (c_void_p * len(active))(*(run.handle for run in active))
+    results = np.empty(3 * len(active), dtype=np.int32); stats = _SqpBatchStats()
+    code = library.af_v3_native_sqp_step_many(handles, len(active), max(1, int(trials)), cn._plain(results), byref(stats))
+    if code: raise RuntimeError(f"native V3 multi-session step failed: {code}")
+    _install_batch_rows(active, results); return _batch_report(stats)
 
 
 def finish_native_controller(session, run):
@@ -201,6 +219,28 @@ def _configure_resumable(library):
     library.af_v3_native_sqp_cancel.argtypes = [c_void_p]; library.af_v3_native_sqp_cancel.restype = c_int
     library.af_v3_native_sqp_finish.argtypes = [c_void_p]; library.af_v3_native_sqp_finish.restype = c_int
     library.af_v3_native_sqp_destroy.argtypes = [c_void_p]
+
+
+def _configure_many(library):
+    function = library.af_v3_native_sqp_step_many
+    function.argtypes = [POINTER(c_void_p), c_int, c_int, POINTER(c_int), POINTER(_SqpBatchStats)]
+    function.restype = c_int
+
+
+def _install_batch_rows(runs, values):
+    for index, run in enumerate(runs):
+        row = values[3 * index:3 * index + 3]
+        run.done, run.accepted, run.infeasible = bool(row[0]), int(row[1]), bool(row[2])
+        run.externally_advanced = True; _publish_working(run.session, run.invocation)
+
+
+def _batch_report(stats):
+    return {name: getattr(stats, name) for name, _kind in stats._fields_}
+
+
+def _empty_batch_report():
+    return {"sessions": 0, "active": 0, "stepped": 0, "completed": 0,
+            "workers": 0, "trials": 0, "elapsed_ms": 0.0}
 
 
 def _publish_working(session, invocation):

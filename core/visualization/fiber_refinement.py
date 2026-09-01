@@ -655,11 +655,13 @@ def _sync_fiber_group(root, scene, fiber_ids):
 def _begin_batch_publication():
     global _BATCH_COMMITS
     _BATCH_COMMITS = []
+    register_fiber_sync().begin_point_batch()
 
 
 def _end_batch_publication():
     global _BATCH_COMMITS
     rows, _BATCH_COMMITS = tuple(_BATCH_COMMITS or ()), None
+    register_fiber_sync().end_point_batch()
     for root, scene, ids in _group_batch_commits(rows):
         _sync_fiber_group(root, scene, ids)
 
@@ -970,10 +972,10 @@ def _depsgraph(scene):
 
 def _sync_scene():
     try:
-        from ...app.runtime_api import sync_scene
+        from .sync_runner import schedule_sync_from_dirty_hints
     except ImportError:
-        from app.runtime_api import sync_scene
-    return sync_scene
+        from core.visualization.sync_runner import schedule_sync_from_dirty_hints
+    return schedule_sync_from_dirty_hints
 
 
 def _drop_timer():

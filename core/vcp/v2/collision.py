@@ -290,6 +290,7 @@ class V2NativeCollisionWorld:
     instance_indices: tuple
     backend_version: str
     closed_flags: tuple = ()
+    snapshot_owner_cache: dict = field(default_factory=dict)
 
     def validate(self, points, edges, edge_owners, span, threshold):
         first, second = self._owner_rows(edge_owners, len(edges))
@@ -368,6 +369,13 @@ class V2NativeCollisionWorld:
         first, second = self._owner_rows(edge_owners, len(edge_owners))
         return V2NativeSolverSession(self, self.native.begin_v3_session(first, second))
 
+    def snapshot_owners(self, snapshot):
+        key = id(snapshot)
+        if key not in self.snapshot_owner_cache:
+            values = (self.owner_tokens.get(str(value or ""), 0) for value in snapshot.face_owners)
+            self.snapshot_owner_cache[key] = np.fromiter(values, dtype=np.int32)
+        return self.snapshot_owner_cache[key]
+
 
 @dataclass
 class V2NativeSolverSession:
@@ -392,8 +400,7 @@ class V2NativeSolverSession:
 
     def attach_snapshot(self, snapshot):
         if snapshot.native is None: return
-        owners = [self.world.owner_tokens.get(str(value or ""), 0) for value in snapshot.face_owners]
-        self.native.attach_snapshot(snapshot.native, owners)
+        self.native.attach_snapshot(snapshot.native, self.world.snapshot_owners(snapshot))
         self.snapshot_attached = True
 
     def safe_step(self, source, target, clearance, tolerance=1.0e-5, budget=262143):

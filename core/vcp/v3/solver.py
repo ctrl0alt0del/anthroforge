@@ -209,7 +209,8 @@ def _finish_native_init_failure(session):
 
 
 def _advance_native_solve(session):
-    done = session.native_run.step(session.native_trial_batch)
+    if not session.native_run.externally_advanced: session.native_run.step(session.native_trial_batch)
+    done = session.native_run.done; session.native_run.externally_advanced = False
     session.native_accepted = session.native_run.accepted
     session.native_infeasible = session.native_run.infeasible; _try_checkpoint(session)
     if not done: return

@@ -146,6 +146,15 @@ class RecorderDriver(DependencyDriver):
 
 
 class RuntimeContractTests(BlenderTestCase):
+    def test_solve_ready_payloads_union_completed_fiber_ids(self):
+        old = runtime_request({"FIBER": {"F1"}}, source="fiber_refinement",
+                              event_type="FIBER_SOLVE_READY", payload={"solved_fiber_ids": ["F1"]})
+        new = runtime_request({"FIBER": {"F2"}}, source="fiber_refinement",
+                              event_type="FIBER_SOLVE_READY", payload={"solved_fiber_ids": ["F2"]})
+        merged = sync_runner._merge_request(old, new)
+        self.assertEqual((merged.dirty_hints["FIBER"], merged.payload["solved_fiber_ids"]),
+                         ({"F1", "F2"}, ["F1", "F2"]))
+
     def test_register_cycle_restores_properties_and_handlers(self):
         import anthroforge
         from anthroforge.core.visualization import control_runtime as package_control_runtime

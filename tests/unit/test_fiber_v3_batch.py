@@ -21,6 +21,22 @@ class FakeExecutor:
                 "elapsed_ms": float(count)}
 
 
+class FakeControllerExecutor:
+    def __init__(self): self.calls = []
+
+    def execute(self, runs, budget_ms):
+        self.calls.append((tuple(runs), budget_ms)); count = len(runs)
+        return {"sessions": count, "completed": 0, "workers": min(4, count),
+                "elapsed_ms": 2.0, "trials": count}
+
+
+class FakeControllerSession:
+    def __init__(self, run):
+        self.done = False
+        value = type("Run", (), {"done": False, "name": run})()
+        self.core_session = type("Core", (), {"phase": "NATIVE_SOLVE", "native_run": value})()
+
+
 class FiberV3BatchTests(unittest.TestCase):
     def test_coordinator_batches_independent_sessions(self):
         executor = FakeExecutor(); coordinator = V3BatchCoordinator(executor=executor,
@@ -79,6 +95,24 @@ class FiberV3BatchTests(unittest.TestCase):
              patch("core.vcp.v3.batch.run_native_sweep_serial", return_value=serial) as fallback:
             executor.execute((1, 2)); executor.execute((1, 2)); executor.execute((1, 2))
         self.assertEqual((parallel.call_count, fallback.call_count), (2, 1))
+
+    def test_multi_session_advances_controllers_in_one_native_call(self):
+        executor = FakeControllerExecutor(); coordinator = V3BatchCoordinator(
+            controller_executor=executor, worker_count=lambda: 4)
+        sessions = {key: FakeControllerSession(key) for key in ("a", "b", "c")}
+        for key, session in sessions.items(): coordinator.add(key, session)
+        calls = []
+        with patch.dict("os.environ", {"AF_FIBER_V3_MULTI_SESSION": "1"}):
+            report = coordinator.step(12.0, calls.append)
+        names = tuple(run.name for run in executor.calls[0][0])
+        self.assertEqual((names, executor.calls[0][1]), (("a", "b", "c"), 12.0))
+        self.assertEqual((report.submitted, report.workers, calls), (3, 3, ['a', 'b', 'c']))
+
+    def test_invalid_multi_session_environment_fails_configuration(self):
+        coordinator = V3BatchCoordinator(executor=FakeExecutor())
+        with patch.dict("os.environ", {"AF_FIBER_V3_MULTI_SESSION": "AUTO"}):
+            with self.assertRaisesRegex(ValueError, "must be 0 or 1"):
+                coordinator.step(12.0, lambda _key: None)
 
 
 if __name__ == "__main__":

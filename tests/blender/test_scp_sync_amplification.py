@@ -29,10 +29,12 @@ class ScpSyncAmplificationTests(BlenderTestCase):
         sync, payload = register_fiber_sync(), {"scp_apply_target_ids": [source.id]}
         sync_runner.clear_pending_runtime(keep_timer=False)
         set_request_telemetry(True); clear_request_telemetry()
-        with patch("core.visualization.fiber_refinement.request_fiber_refinement") as request:
+        with patch("core.visualization.fiber_refinement.request_fiber_refinement") as request, \
+                patch("core.visualization.fiber_refinement.drain_fiber_refinements") as drain:
             sync_runner.sync_from_dirty_hints(root_obj, bpy.context.scene, {"SCP": {source.id}},
-                                              source="depsgraph", event_type="SCP_UPDATE", payload=payload, full=False)
+                                              source="shortcut", event_type="UPDATE", payload=payload, full=False)
         requested = [call.args[2].id for call in request.call_args_list]
         sources = [record["source"] for record in request_telemetry()]
+        drain.assert_not_called()
         self.assertEqual((requested, sources, len(sync_runner._TAIL_PENDING)),
-                         ([item.id for item in fibers], ["depsgraph"], 0))
+                         ([item.id for item in fibers], ["shortcut"], 0))

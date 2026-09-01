@@ -658,6 +658,44 @@ AF_EXPORT int af_v3_native_sqp_step(void* handle,int trial_count,int* done,int* 
     *done=int(value.finished);*accepted=af_v3_sqp_accepted(value.states);*infeasible=int(af_v3_sqp_any_infeasible(value.states));return 0;
 }
 
+struct AfV3SqpBatchStats {
+    int sessions=0,active=0,stepped=0,completed=0,workers=0,trials=0;double elapsed_ms=0.0;
+};
+
+static int af_v3_sqp_step_handle(void* handle,int trials,int* output,int& worker) {
+    int done=0,accepted=0,infeasible=0;
+    int code=af_v3_native_sqp_step(handle,trials,&done,&accepted,&infeasible);
+    output[0]=done;output[1]=accepted;output[2]=infeasible;worker=af_v3_worker();return code;
+}
+
+static int af_v3_sqp_used_workers(const std::vector<int>& values) {
+    std::vector<int> workers;for(int value:values)if(value>=0)workers.push_back(value);
+    std::sort(workers.begin(),workers.end());return int(std::unique(workers.begin(),workers.end())-workers.begin());
+}
+
+static void af_v3_sqp_batch_stats(AfV3SqpBatchStats& stats,const int* rows,const std::vector<int>& workers,
+                                  const std::vector<int>& codes,int count,int trials,double elapsed) {
+    stats.sessions=count;stats.active=count;stats.trials=count*trials;stats.elapsed_ms=elapsed;
+    for(int index=0;index<count;++index){stats.stepped+=codes[index]==0;stats.completed+=rows[3*index]!=0;}
+    stats.workers=af_v3_sqp_used_workers(workers);
+}
+
+static int af_v3_sqp_batch_code(const std::vector<int>& codes) {
+    auto found=std::find_if(codes.begin(),codes.end(),[](int value){return value!=0;});
+    return found==codes.end()?0:*found;
+}
+
+AF_EXPORT int af_v3_native_sqp_step_many(void** handles,int count,int trials,int* results,
+                                         AfV3SqpBatchStats* stats) {
+    if(!handles||count<1||trials<1||!results||!stats)return 1;
+    auto started=std::chrono::steady_clock::now();std::vector<int> codes(count),used(count,-1);int workers=af_task_workers(count);
+#pragma omp parallel for schedule(dynamic,1) if(workers>1) num_threads(workers)
+    for(int index=0;index<count;++index)codes[index]=af_v3_sqp_step_handle(handles[index],trials,results+3*index,used[index]);
+    double elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+    af_v3_sqp_batch_stats(*stats,results,used,codes,count,trials,elapsed);
+    return af_v3_sqp_batch_code(codes);
+}
+
 AF_EXPORT int af_v3_native_sqp_cancel(void* handle) {
     if(!handle)return 1;static_cast<AfV3SqpCoordinator*>(handle)->cancelled=true;return 0;
 }

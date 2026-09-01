@@ -9,6 +9,7 @@ from pathlib import Path
 import pstats
 import sys
 from time import perf_counter
+from types import SimpleNamespace
 
 import bpy
 
@@ -19,6 +20,11 @@ def _args():
     parser.add_argument("--mode", choices=("serial", "auto", "batch"), default="auto")
     parser.add_argument("--profile", action="store_true")
     parser.add_argument("--legacy-runtime", action="store_true")
+    parser.add_argument("--multi-session", choices=("0", "1"), default="0")
+    parser.add_argument("--native-path")
+    parser.add_argument("--shortcut")
+    parser.add_argument("--factor", type=float, default=1.01)
+    parser.add_argument("--output")
     values = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     return parser.parse_args(values)
 
@@ -69,13 +75,16 @@ def _result(scene, root, fiber, request):
 
 
 def _diagnostics(request):
-    value = request.job.session.result().diagnostics
+    job = getattr(request, "job", None)
+    if job is None: return {}
+    value = job.session.result().diagnostics
     names = ("accepted_steps", "rejected_steps", "native_contact_ms", "native_solve_ms",
              "native_ccd_ms", "native_validation_ms", "ccd_candidate_pairs", "ccd_tested_pairs")
     return {name: getattr(value, name, None) for name in names}
 
 
 def _run(args):
+    if args.shortcut: return _run_shortcut(args)
     from anthroforge.core.visualization import fiber_refinement
     if args.legacy_runtime: _enable_legacy_runtime(fiber_refinement)
     scene = bpy.context.scene; root = _root(scene)
@@ -86,6 +95,24 @@ def _run(args):
     drained = fiber_refinement.drain_fiber_refinements()
     elapsed = 1000.0 * (perf_counter() - started)
     return _report(args, scene, root, fibers, requests, drained, elapsed, fiber_refinement)
+
+
+def _run_shortcut(args):
+    from anthroforge.core.visualization import fiber_refinement
+    scene = bpy.context.scene; root = _root(scene); started = perf_counter()
+    before, after = _edit_shortcut(root, args.shortcut, args.factor)
+    jobs = {job.fiber_id: job for job in tuple(fiber_refinement._JOBS.values())}
+    fibers = tuple(row for row in root.af_vcp_system.fibers if row.id in jobs)
+    requests = [SimpleNamespace(ok=row.id in jobs, job=jobs.get(row.id)) for row in fibers]
+    drained = fiber_refinement.drain_fiber_refinements(); elapsed = 1000.0 * (perf_counter() - started)
+    report = _report(args, scene, root, fibers, requests, drained, elapsed, fiber_refinement)
+    report["shortcut"] = {"name": args.shortcut, "before": before, "after": after}; return report
+
+
+def _edit_shortcut(root, name, factor):
+    row = next(item for item in root.af_shortcut_system.shortcuts if item.name == name)
+    before = float(row.proxy_float); row.proxy_float = before * factor if before else factor - 1.0
+    return before, float(row.proxy_float)
 
 
 def _enable_legacy_runtime(refinement):
@@ -108,8 +135,18 @@ def main():
     args = _args(); os.environ["AF_FIBER_ENGINE"] = "V3"
     modes = {"serial": "0", "auto": "AUTO", "batch": "1"}
     os.environ["AF_FIBER_V3_BATCH"] = modes[args.mode]
-    _ensure_addon(); result = _profiled_run(args) if args.profile else _run(args)
+    os.environ["AF_FIBER_V3_MULTI_SESSION"] = args.multi_session
+    _ensure_addon(); _configure_native(args.native_path)
+    result = _profiled_run(args) if args.profile else _run(args)
+    if args.output: Path(args.output).write_text(json.dumps(result, indent=2), encoding="utf-8")
     print("AF_V3_BATCH_BENCHMARK=" + json.dumps(result, sort_keys=True), flush=True)
+
+
+def _configure_native(path):
+    if not path: return
+    from anthroforge.core.vcp.v2 import collision_native
+    collision_native._DEFAULT_NATIVE_PATH = Path(path).resolve()
+    collision_native.clear_native_libraries()
 
 
 def _profiled_run(args):

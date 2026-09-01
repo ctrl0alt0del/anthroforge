@@ -43,9 +43,19 @@ class FiberSceneSync:
         self._solver = FiberSolver(surface_offset=0.002)
         self._syncing = False
         self._object_index = None
+        self._object_index_key = None
+        self._point_batch_depth = 0
         self._context_provider = context_provider
         self.default_fiber_color = DEFAULT_FIBER_COLOR
         self.selected_fiber_color = SELECTED_FIBER_COLOR
+
+    def begin_point_batch(self):
+        self._point_batch_depth += 1
+
+    def end_point_batch(self):
+        self._point_batch_depth = max(0, self._point_batch_depth - 1)
+        if not self._point_batch_depth:
+            self._object_index = None; self._object_index_key = None
 
     def clear_solver_cache(self, fiber_id=None):
         self._solver.clear_cache(fiber_id)
@@ -145,9 +155,10 @@ class FiberSceneSync:
     def refresh_display(self, root=None, scene=None, target_fiber_ids=None):
         return _refresh_display_runtime(self, root=root, scene=scene, target_fiber_ids=target_fiber_ids)
 
-    def sync_root_to_scene(self, root=None, scene=None, bake=False, target_fiber_ids=None, window_manager=None):
+    def sync_root_to_scene(self, root=None, scene=None, bake=False, target_fiber_ids=None, window_manager=None, drain=True):
         return _sync_root_to_scene_runtime(
-            self, root=root, scene=scene, bake=bake, target_fiber_ids=target_fiber_ids, window_manager=window_manager
+            self, root=root, scene=scene, bake=bake, target_fiber_ids=target_fiber_ids,
+            window_manager=window_manager, drain=drain,
         )
 
     def apply_points(self, root, scene, fiber, points, bake=False, commit=True):

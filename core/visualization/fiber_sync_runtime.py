@@ -205,7 +205,7 @@ def apply_fiber_points(sync, root, scene, fiber, points, bake=False, commit=True
     vis_col = sync._get_vis_collection(scene)
     if vis_col is None or fiber is None or len(tuple(points or ())) < 2:
         return None
-    sync._object_index = build_vcp_object_index(vis_col, root.name)
+    owned = _prepare_point_index(sync, vis_col, root.name)
     try:
         obj = sync._find_fiber_proxy(vis_col, root.name, fiber.id)
         obj = obj or sync._create_fiber_proxy(vis_col, root, fiber.id)
@@ -213,7 +213,14 @@ def apply_fiber_points(sync, root, scene, fiber, points, bake=False, commit=True
                                   cyclic=sync._fiber_cyclic(fiber), commit=commit)
         return obj
     finally:
-        sync._object_index = None
+        if owned: sync._object_index = None; sync._object_index_key = None
+
+
+def _prepare_point_index(sync, vis_col, root_name):
+    key = (vis_col.name, root_name); batched = bool(getattr(sync, "_point_batch_depth", 0))
+    if sync._object_index is not None and (not batched or sync._object_index_key == key): return False
+    sync._object_index = build_vcp_object_index(vis_col, root_name)
+    sync._object_index_key = key; return not batched
 
 
 def _cleanup_stale_fiber_proxies(vis_col, root_name, live_ids):
@@ -229,13 +236,13 @@ def _sync_inputs(root, scene):
     return root, scene, depsgraph
 
 
-def sync_root_to_scene(sync, root=None, scene=None, bake=False, target_fiber_ids=None, window_manager=None):
+def sync_root_to_scene(sync, root=None, scene=None, bake=False, target_fiber_ids=None, window_manager=None, drain=True):
     if sync._syncing:
         return
     state = _scene_sync_state(root, scene)
     if state is None:
         return
-    _run_scene_sync(sync, *state, bake, target_fiber_ids, window_manager)
+    _run_scene_sync(sync, *state, bake, target_fiber_ids, window_manager, drain)
 
 
 def refresh_selection(sync, root=None, scene=None, window_manager=None, fiber_ids=None, sync_handles=False):
@@ -270,12 +277,12 @@ def _scene_sync_state(root, scene):
     return None if root is None or depsgraph is None or not hasattr(root, "af_vcp_system") else (root, scene, depsgraph)
 
 
-def _run_scene_sync(sync, root, scene, depsgraph, bake, target_fiber_ids, window_manager=None):
+def _run_scene_sync(sync, root, scene, depsgraph, bake, target_fiber_ids, window_manager=None, drain=True):
     sync._syncing = True
     try:
         vis_col = sync._get_vis_collection(scene)
         sync._object_index = build_vcp_object_index(vis_col, root.name)
-        _sync_target_fibers(sync, vis_col, root, scene, depsgraph, bake, target_fiber_ids)
+        _sync_target_fibers(sync, vis_col, root, scene, depsgraph, bake, target_fiber_ids, drain)
         _cleanup_stale_fiber_proxies(vis_col, root.name, {f.id for f in root.af_vcp_system.fibers})
         sync._sync_handles(root, scene, vis_col, {}, window_manager=window_manager)
         sync._apply_selection_highlight(root, scene)
@@ -305,11 +312,12 @@ def _selection_objects(index, fiber_ids):
     return [obj for key in ("fiber", "fiber_mirror") for fid, obj in index[key].items() if fid in ids]
 
 
-def _sync_target_fibers(sync, vis_col, root, scene, depsgraph, bake, target_fiber_ids):
+def _sync_target_fibers(sync, vis_col, root, scene, depsgraph, bake, target_fiber_ids, drain=True):
     for fiber in _fibers_to_sync(root, target_fiber_ids):
         _sync_single_fiber(sync, vis_col, root, scene, depsgraph, fiber, bake)
-    from .fiber_refinement import drain_fiber_refinements
-    drain_fiber_refinements()
+    if drain:
+        from .fiber_refinement import drain_fiber_refinements
+        drain_fiber_refinements()
 
 
 def _find_fiber(root, fiber_id):

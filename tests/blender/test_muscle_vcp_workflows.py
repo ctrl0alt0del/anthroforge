@@ -192,6 +192,22 @@ def _two_loop_setup():
 
 
 class MuscleVcpWorkflowTests(BlenderTestCase):
+    def test_stale_fiber_retains_last_good_muscle_surface(self):
+        root_obj, first, second = _muscle_setup()
+        ids = [item.id for item in root_obj.af_vcp_system.fibers]
+        muscle = _new_muscle(root_obj, ids); sync = register_muscle_sync()
+        vis = sync._get_vis_collection(bpy.context.scene)
+        base, infl = sync._ensure_muscle_meshes(vis, root_obj, muscle.id)
+        sync._update_mesh(base, [(0, 0, 0), (1, 0, 0), (0, 1, 0)], [(0, 1, 2)])
+        sync._update_mesh(infl, [(0, 0, 0), (1, 0, 0), (0, 1, 0)], [(0, 1, 2)])
+        before = len(base.data.vertices)
+        first["af_fiber_output_state"] = "STALE"
+        with patch.object(sync, "_runtime_request_active", return_value=True):
+            sync.sync_root_to_scene(root_obj, bpy.context.scene)
+        self.assertGreater(before, 0)
+        self.assertEqual((len(base.data.vertices), base["af_muscle_output_state"]),
+                         (before, "STALE"))
+
     def test_muscle_proxy_object_color_matches_material(self):
         root_obj, first, second = _muscle_setup()
         select_only(first)
