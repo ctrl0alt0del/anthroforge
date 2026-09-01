@@ -41,7 +41,8 @@ from .fiber_sync_helpers import mark_fiber_output_current, mark_fiber_output_sta
 
 
 _SLICE_MS = 12.0
-_TIMER_INTERVAL = 0.01
+_TIMER_INTERVAL = 0.001
+_ASYNC_POLL_INTERVAL = 0.005
 _DRAW_INTERVAL = 0.05
 _JOBS = {}
 _QUEUE = deque()
@@ -107,8 +108,10 @@ def request_fiber_refinement(root, scene, fiber, show_preview=False, quality="FI
         return RefinementRequest(False, "Fiber refinement context is unavailable.")
     key = _job_key(scene, root, fiber.id)
     preflight = _hard_anchor_preflight(root, scene, fiber, quality)
+    if show_preview and preflight is not None and not preflight.valid:
+        preflight = _repair_current_preflight(root, scene, fiber, preflight)
     if preflight is not None and not preflight.valid:
-        return _reject_anchor_preflight(key, root, scene, fiber, preflight)
+        return _reject_anchor_preflight(key, root, scene, fiber, preflight, show_preview)
     session = _prepared_session(root, scene, fiber, quality)
     if session.invalid_reason:
         _abort_request(key, root, scene, fiber, session)
@@ -172,17 +175,54 @@ def _hard_anchor_preflight(root, scene, fiber, quality):
                                         _depsgraph(scene), quality)
 
 
-def _reject_anchor_preflight(key, root, scene, fiber, result):
+def _repair_current_preflight(root, scene, fiber, result):
+    from ..vcp.fiber_pin_repair import repair_current_preflight_pins
+    sync = register_fiber_sync(); depsgraph = _depsgraph(scene)
+    return repair_current_preflight_pins(root, scene, fiber, result, sync._solver, depsgraph)
+
+
+def _reject_anchor_preflight(key, root, scene, fiber, result, show_preview=False):
     job = _JOBS.get(key)
     if job is not None:
         _terminate_job(job, FiberTermination.CANCELLED, mark_unknown=False, stale=False)
     rollback_engine_migration(fiber)
+    if show_preview: _show_invalid_anchor_preview(root, scene, fiber, result)
     mark_fiber_output_stale(scene, root.name, fiber.id)
     summary = anchor_preflight_summary(result)
     set_fiber_invalid_reason(fiber, summary)
     set_fiber_recompute_status(fiber, FiberTermination.INVALID_ATTACHMENT.value)
     set_fiber_not_converged(fiber, True)
     return RefinementRequest(False, summary)
+
+
+def _show_invalid_anchor_preview(root, scene, fiber, result):
+    source = persisted_fiber_points(scene, root.name, fiber.id) or ()
+    points = _warped_anchor_preview(source, getattr(result, "anchors", ()), fiber)
+    if not points: return None
+    proxy = register_fiber_sync().apply_points(root, scene, fiber, points, commit=False)
+    if proxy is not None: proxy["af_fiber_display_mode"] = "FAILED_PREVIEW"
+    return proxy
+
+
+def _warped_anchor_preview(source, anchors, fiber):
+    if str(getattr(fiber, "topology_mode", "OPEN")) != "OPEN": return ()
+    if len(source) < 2 or len(anchors) < 2: return ()
+    from mathutils import Vector
+    from ..vcp.v3.warm import _pin_indices
+    rows = [point.copy() for point in source]
+    pins = _pin_indices(anchors, len(rows))
+    deltas = [Vector(anchor.point) - rows[index] for index, anchor in zip(pins, anchors)]
+    for span in range(len(pins) - 1): _warp_anchor_span(rows, pins, deltas, span)
+    for index, anchor in zip(pins, anchors): rows[index] = Vector(anchor.point)
+    return rows
+
+
+def _warp_anchor_span(points, pins, deltas, span):
+    first, second = int(pins[span]), int(pins[span + 1])
+    count = max(1, second - first); low, high = deltas[span], deltas[span + 1]
+    for index in range(first, second + 1):
+        factor = (index - first) / count
+        points[index] += (1.0 - factor) * low + factor * high
 
 
 def _prepared_session(root, scene, fiber, quality):
@@ -297,7 +337,12 @@ def _flush_one():
     job = _JOBS.get(key)
     _flush_v3_batch() if _batch_job_enabled(job) else _flush_serial_key(key)
     _TIMER_ARMED = bool(_QUEUE)
-    return _TIMER_INTERVAL if _QUEUE else None
+    return _refinement_interval()
+
+
+def _refinement_interval():
+    if not _QUEUE: return None
+    return _ASYNC_POLL_INTERVAL if _V3_BATCH.async_pending else _TIMER_INTERVAL
 
 
 def _flush_serial_key(key):
@@ -369,6 +414,7 @@ def _advance_active_job(job):
 def _apply_progress(job, result, known_valid=False):
     if not known_valid and not _valid_job(job):
         return
+    if _async_native_pending(job, result): return
     now = monotonic()
     changed_level = not _is_v3_job(job) and job.last_generation != job.session.generation
     if not (result.done or changed_level or now - job.last_apply >= _DRAW_INTERVAL):
@@ -378,6 +424,13 @@ def _apply_progress(job, result, known_valid=False):
         _apply_planner_result(job, result, root, scene, fiber, now)
         return
     _apply_refined_geometry(job, result, root, scene, fiber, now)
+
+
+def _async_native_pending(job, result):
+    if result.done or not _is_v3_job(job): return False
+    core = getattr(job.session, "core_session", None)
+    run = getattr(core, "native_run", None)
+    return bool(run is not None and getattr(run, "async_task", 0))
 
 
 def _apply_refined_geometry(job, result, root, scene, fiber, now):
@@ -1138,6 +1191,8 @@ def register_fiber_refinement_runtime():
 
 def unregister_fiber_refinement_runtime():
     shutdown_fiber_refinements(mark_unknown=False)
+    from ..vcp.v3.native_controller import shutdown_native_async_controllers
+    shutdown_native_async_controllers()
     _remove_handler(bpy.app.handlers.load_pre, _on_load_pre)
     _remove_handler(bpy.app.handlers.depsgraph_update_post, _on_depsgraph_update)
     for seq in (bpy.app.handlers.undo_pre, bpy.app.handlers.redo_pre):

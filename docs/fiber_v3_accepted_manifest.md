@@ -52,11 +52,11 @@ CCD and disables speculation until another serial sweep is clear. This preserves
 solver trajectory and avoids repeated speculative work in collision-limited regions. Nested
 multi-Fiber batches keep inner CCD serial to avoid oversubscription.
 
-The persistent controller is part of `fiber-v3-production-6`; the packaged backend advertises
-ABI capability `8388607`, including resumable native `begin/step/finish/cancel` entry points.
-It owns numeric SQP/contact/CCD state while Blender capture, request scheduling, publication, and
-independent stitched validation remain outside native code. One native trial is the progressive
-cancellation boundary. `AF_FIBER_V3_NATIVE_CONTROLLER=0` retains the Python controller as an
+The asynchronous persistent controller is part of `fiber-v3-production-9`; the packaged backend
+advertises capability mask `33554431`, including asynchronous `create/submit/poll/cancel/remove`
+entry points. It owns numeric SQP/contact/CCD state while Blender capture, request scheduling,
+publication, and independent stitched validation remain outside native code. One bounded native
+quantum is the cancellation boundary. `AF_FIBER_V3_NATIVE_CONTROLLER=0` retains the Python controller as an
 internal diagnostic reference; production defaults to the native controller.
 Every V3 result records `diagnostics.controller` as `NATIVE` or `PYTHON`, so
 benchmarks and saved diagnostic payloads cannot silently mix controller paths.

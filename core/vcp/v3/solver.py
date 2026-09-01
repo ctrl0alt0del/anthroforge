@@ -19,7 +19,7 @@ from .shortcut import V3ShortcutTrace, apply_v3_shortcut
 from .spans import aggregate_spans, prepare_span_request, synchronize_owner_spans
 
 
-V3_SOLVER_VERSION = "fiber-v3-production-7"
+V3_SOLVER_VERSION = "fiber-v3-production-9"
 
 
 @dataclass
@@ -212,7 +212,8 @@ def _advance_native_solve(session):
     if not session.native_run.externally_advanced: session.native_run.step(session.native_trial_batch)
     done = session.native_run.done; session.native_run.externally_advanced = False
     session.native_accepted = session.native_run.accepted
-    session.native_infeasible = session.native_run.infeasible; _try_checkpoint(session)
+    session.native_infeasible = session.native_run.infeasible
+    if done or session.native_run.async_owner is None: _try_checkpoint(session)
     if not done: return
     from .native_controller import finish_native_controller
     finish_native_controller(session, session.native_run); session.native_run = None

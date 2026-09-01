@@ -13,6 +13,7 @@ V2_NATIVE_BATCH_CAPABILITY = 1024
 V3_NATIVE_SESSION_CAPABILITY = 32768
 V3_NATIVE_MULTI_SESSION_CAPABILITY = 65536
 V3_NATIVE_CONTROLLER_CAPABILITIES = 5111808
+V3_NATIVE_ASYNC_CAPABILITY = 16777216
 
 
 class _NativeMeshSweep(Structure):
@@ -75,7 +76,7 @@ class _NativeV3BatchStats(Structure):
 
 _REASONS = ("CLEAR", "AABB_CLEAR", "INVALID_START", "POSSIBLE_COLLISION", "BUDGET_EXHAUSTED")
 _LIBRARIES = {}
-_DEFAULT_NATIVE_PATH = Path(__file__).resolve().parents[3] / "native" / "fiber_ccd" / "af_fiber_ccd_v3.dll"
+_DEFAULT_NATIVE_PATH = Path(__file__).resolve().parents[3] / "native" / "fiber_ccd" / "af_fiber_ccd_v3_9.dll"
 
 
 def native_path():
@@ -340,6 +341,14 @@ def native_controller_status(path=None):
         library = load_native(path); capabilities = library.af_fiber_ccd_capabilities()
         required = V3_NATIVE_CONTROLLER_CAPABILITIES
         return native_status(path)[0] and capabilities & required == required
+    except (OSError, AttributeError):
+        return False
+
+
+def native_async_controller_status(path=None):
+    try:
+        library = load_native(path); capabilities = library.af_fiber_ccd_capabilities()
+        return native_controller_status(path) and bool(capabilities & V3_NATIVE_ASYNC_CAPABILITY)
     except (OSError, AttributeError):
         return False
 

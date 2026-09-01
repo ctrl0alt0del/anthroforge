@@ -1,6 +1,8 @@
 import subprocess
 import sys
 import unittest
+from time import sleep
+from types import SimpleNamespace
 from unittest.mock import patch
 from dataclasses import replace
 from importlib.util import find_spec
@@ -13,6 +15,8 @@ from core.vcp.v3.manifest import V3_ACCEPTED_REFERENCE, V3_REJECTED_MODULES
 from core.vcp.v3.policy import V3_PRODUCTION_POLICY, V3ShortcutMode, accepted_v3_request
 from core.vcp.v3.production import (V3_PRODUCTION_VERSION, begin_v3, solve_v3,
                                     solve_v3_controller)
+from core.vcp.v3.native_controller import (_prepare_report_install, poll_native_controllers,
+                                            shutdown_native_async_controllers)
 from tests.unit.test_fiber_v2_planner import _anchors, _angle_points, _box, _request, _sphere
 
 
@@ -28,7 +32,46 @@ def _cyclic_request(cap=24, count=32):
     return replace(request, settings=replace(request.settings, max_accepted_steps=cap))
 
 
+class _SpanFixture:
+    def __init__(self, points):
+        self.state = SimpleNamespace(points=points, owner_span_override=.01)
+
+    @property
+    def points(self):
+        return self.state.points
+
+
+def _owner_span_fixture():
+    collision = SimpleNamespace(collision_radius=.01)
+    tolerances = SimpleNamespace(clearance_slack=.001)
+    request = SimpleNamespace(collision_policy=collision, tolerances=tolerances)
+    points = (np.asarray(((0, 0, 0), (.2, 0, 0), (.3, 0, 0))),
+              np.asarray(((.3, 0, 0), (1, 0, 0))))
+    spans = tuple(_SpanFixture(row * .1) for row in points)
+    report = SimpleNamespace(spans=tuple(SimpleNamespace(points=row) for row in points))
+    return SimpleNamespace(spans=spans, request=request, pins=(0, 2, 3), cyclic=False), report
+
+
+def _native_ready(request):
+    session = begin_v3(request, use_planner=False)
+    while session.phase != "NATIVE_SOLVE": session.step()
+    return session
+
+
+def _wait_async(sessions):
+    for _index in range(2000):
+        runs = tuple(row.native_run for row in sessions if row.native_run is not None)
+        poll_native_controllers(runs)
+        if all(run.done for run in runs): return
+        sleep(.001)
+    raise AssertionError("asynchronous native controllers did not finish")
+
+
 class FiberV3ProductionTests(unittest.TestCase):
+    def test_final_native_points_refresh_shared_owner_span(self):
+        session, report = _owner_span_fixture(); _prepare_report_install(session, report)
+        self.assertEqual([row.state.owner_span_override for row in session.spans], [.7, .7])
+
     def test_cyclic_controller_is_one_global_state(self):
         session = begin_v3(_cyclic_request(8), use_planner=False)
         while session.phase != "NATIVE_SOLVE": session.step()
@@ -147,6 +190,26 @@ class FiberV3ProductionTests(unittest.TestCase):
         expected_second = solve_v3(_bent_request(12), use_planner=False)
         self.assertEqual(first.package.result.points, expected_first.result.points)
         self.assertEqual(second.package.result.points, expected_second.result.points)
+
+    def test_async_native_coordinator_finishes_independent_sessions(self):
+        sessions = (_native_ready(_bent_request(8)), _native_ready(_bent_request(12)))
+        try:
+            _wait_async(sessions)
+            for session in sessions: session.step()
+            self.assertTrue(all(session.done and session.package.result.validated for session in sessions))
+        finally:
+            for session in sessions:
+                if not session.done: session.cancel()
+            shutdown_native_async_controllers()
+
+    def test_async_native_coordinator_cancels_before_buffer_release(self):
+        session = _native_ready(_bent_request(180))
+        try:
+            poll_native_controllers((session.native_run,)); session.cancel()
+            self.assertTrue(session.done); self.assertIsNone(session.native_run)
+        finally:
+            if not session.done: session.cancel()
+            shutdown_native_async_controllers()
 
     def test_native_controller_keeps_python_warm_seed_selection(self):
         request = _bent_request(8)

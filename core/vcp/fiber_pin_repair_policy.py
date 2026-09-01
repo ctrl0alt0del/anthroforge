@@ -65,6 +65,10 @@ def serialization_guard(radius):
     return max(1.0e-6, 1.0e-3 * float(radius))
 
 
+def auto_repair_search_distance(radius):
+    return max(5.0 * float(radius), 8.0 * serialization_guard(radius), 1.0e-5)
+
+
 def use_owner_transfer(pin, current, alternate):
     if pin.relation != "UNRELATED" or not alternate: return False
     if current.displacement <= 5.0 * pin.radius: return False

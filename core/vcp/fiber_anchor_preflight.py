@@ -51,6 +51,7 @@ class FiberAnchorPreflightResult:
     cache_key: tuple
     candidate_pairs: int
     tested_pairs: int
+    anchors: tuple = ()
 
 
 def preflight_fiber_hard_anchors(root, scene, fiber, solver, depsgraph, quality="FINAL"):
@@ -86,7 +87,7 @@ def evaluate_anchor_preflight(anchors, colliders, hierarchy, configured, slack, 
     batch = _contact_pairs(world, rows, effective)
     violations = _violations(rows, colliders, hierarchy, configured, effective, batch.pairs)
     return FiberAnchorPreflightResult(not violations, violations, tuple(cache_key),
-                                      int(batch.candidate_pairs), int(batch.tested_pairs))
+                                      int(batch.candidate_pairs), int(batch.tested_pairs), rows)
 
 
 def current_fiber_anchor_preflight(scene, root, fiber):

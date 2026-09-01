@@ -37,13 +37,18 @@ class FakeControllerSession:
         self.core_session = type("Core", (), {"phase": "NATIVE_SOLVE", "native_run": value})()
 
 
+def _legacy_step(coordinator, budget, advance):
+    with patch.dict("os.environ", {"AF_FIBER_V3_MULTI_SESSION": "0"}):
+        return coordinator.step(budget, advance)
+
+
 class FiberV3BatchTests(unittest.TestCase):
     def test_coordinator_batches_independent_sessions(self):
         executor = FakeExecutor(); coordinator = V3BatchCoordinator(executor=executor,
             worker_count=lambda: 4)
         coordinator.add("a", FakeSession("sweep-a"), 8)
         coordinator.add("b", FakeSession("sweep-b"), 4)
-        report = coordinator.step(12.0, lambda _key: None)
+        report = _legacy_step(coordinator, 12.0, lambda _key: None)
         self.assertEqual((report.selected, executor.calls), (("a", "b"), [("sweep-a", "sweep-b")]))
         self.assertEqual((report.submitted, report.completed, report.workers), (2, 2, 2))
 
@@ -54,30 +59,30 @@ class FiberV3BatchTests(unittest.TestCase):
         calls = []
         def advance(key):
             calls.append(key); sessions[key].pending_native_sweep = f"sweep-{key}"
-        coordinator.step(12.0, advance)
+        _legacy_step(coordinator, 12.0, advance)
         self.assertEqual((calls, executor.calls), (["a", "b"], [("sweep-a", "sweep-b")]))
 
     def test_priority_aging_prevents_starvation(self):
         coordinator = V3BatchCoordinator(executor=FakeExecutor(), worker_count=lambda: 1)
         coordinator.add("selected", FakeSession("high"), 8)
         coordinator.add("background", FakeSession("low"), 1)
-        chosen = [coordinator.step(12.0, lambda _key: None).selected[0] for _ in range(9)]
+        chosen = [_legacy_step(coordinator, 12.0, lambda _key: None).selected[0] for _ in range(9)]
         self.assertIn("background", chosen)
 
     def test_remove_cancels_future_scheduling(self):
         executor = FakeExecutor(); coordinator = V3BatchCoordinator(executor=executor,
             worker_count=lambda: 2)
         coordinator.add("removed", FakeSession("old")); coordinator.remove("removed")
-        report = coordinator.step(12.0, lambda _key: None)
+        report = _legacy_step(coordinator, 12.0, lambda _key: None)
         self.assertEqual((report.selected, executor.calls), ((), [()]))
 
     def test_single_sweep_waits_one_tick_for_batch_peer(self):
         executor = FakeExecutor(); coordinator = V3BatchCoordinator(executor=executor,
             worker_count=lambda: 2); first, second = FakeSession("a"), FakeSession()
         coordinator.add("first", first); coordinator.add("second", second)
-        initial = coordinator.step(0.0, lambda _key: None)
+        initial = _legacy_step(coordinator, 0.0, lambda _key: None)
         second.pending_native_sweep = "b"
-        batched = coordinator.step(12.0, lambda _key: None)
+        batched = _legacy_step(coordinator, 12.0, lambda _key: None)
         self.assertEqual((initial.submitted, batched.submitted), (0, 2))
         self.assertEqual(set(executor.calls[0]), {"a", "b"})
 
@@ -85,7 +90,7 @@ class FiberV3BatchTests(unittest.TestCase):
         coordinator = V3BatchCoordinator(policy=V3WeightedSchedulingPolicy(),
             executor=FakeExecutor(), worker_count=lambda: 1)
         coordinator.add("first", FakeSession("a")); coordinator.add("second", FakeSession("b"))
-        self.assertEqual(coordinator.step(12.0, lambda _key: None).selected, ("first",))
+        self.assertEqual(_legacy_step(coordinator, 12.0, lambda _key: None).selected, ("first",))
 
     def test_executor_disables_parallelism_for_tiny_jobs(self):
         tiny = {"submitted": 2, "completed": 2, "workers": 2, "elapsed_ms": 0.01}
@@ -107,6 +112,13 @@ class FiberV3BatchTests(unittest.TestCase):
         names = tuple(run.name for run in executor.calls[0][0])
         self.assertEqual((names, executor.calls[0][1]), (("a", "b", "c"), 12.0))
         self.assertEqual((report.submitted, report.workers, calls), (3, 3, ['a', 'b', 'c']))
+
+    def test_multi_session_is_enabled_by_default(self):
+        executor = FakeControllerExecutor(); coordinator = V3BatchCoordinator(
+            controller_executor=executor, worker_count=lambda: 4)
+        for key in ("a", "b"): coordinator.add(key, FakeControllerSession(key))
+        with patch.dict("os.environ", {}, clear=True): report = coordinator.step(12.0, lambda _key: None)
+        self.assertEqual((report.submitted, report.workers), (2, 2))
 
     def test_invalid_multi_session_environment_fails_configuration(self):
         coordinator = V3BatchCoordinator(executor=FakeExecutor())

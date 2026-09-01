@@ -73,9 +73,14 @@ class V3NativeControllerExecutor:
         self.trials = 1; self.batches = self.sessions = self.workers = 0; self.elapsed_ms = 0.0
 
     def execute(self, runs, budget_ms):
-        from .native_controller import step_native_controllers
-        report = step_native_controllers(runs, self.trials)
+        from .native_controller import poll_native_controllers, step_native_controllers
+        report = poll_native_controllers(runs) if _async_session_enabled() else step_native_controllers(runs, self.trials)
         self._record(report); self._adapt(report, budget_ms); return report
+
+    @property
+    def active(self):
+        from .native_controller import native_async_controllers_active
+        return _async_session_enabled() and native_async_controllers_active()
 
     def _record(self, report):
         self.batches += int(report["sessions"] > 0); self.sessions += report["sessions"]
@@ -142,7 +147,8 @@ class V3BatchCoordinator:
         chosen = self._prepare_controllers(selected, advance, started, budget_ms)
         ready = tuple((row, _controller_run(row.session)) for row in chosen)
         ready = tuple((row, run) for row, run in ready if run is not None and not run.done)
-        stats = self._execute_controllers(ready, advance, budget_ms)
+        dispatch = self._controller_dispatch_ready(entries)
+        stats = self._execute_controllers(ready, advance, budget_ms, dispatch)
         self.policy.note(entries, chosen); elapsed = 1000.0 * (perf_counter() - started)
         report = _controller_report(chosen, stats, elapsed); self._record(report); return report
 
@@ -154,13 +160,19 @@ class V3BatchCoordinator:
             if _controller_run(row.session) is None and not row.session.done: advance(row.key)
         return tuple(chosen)
 
-    def _execute_controllers(self, ready, advance, budget_ms):
-        if len(ready) < 2:
-            for row, _run in ready: advance(row.key)
-            return _empty_controller_stats()
+    def _execute_controllers(self, ready, advance, budget_ms, dispatch=True):
+        if not ready or not dispatch: return _empty_controller_stats()
         stats = self.controller_executor.execute(tuple(run for _row, run in ready), budget_ms)
         for row, _run in ready: advance(row.key)
         return stats
+
+    def _controller_dispatch_ready(self, entries):
+        if not _async_session_enabled() or self.async_pending: return True
+        return all(row.session.done or _controller_run(row.session) is not None for row in entries)
+
+    @property
+    def async_pending(self):
+        return bool(getattr(self.controller_executor, "active", False))
 
     def _prepare(self, entry, advance):
         sweep = getattr(entry.session, "pending_native_sweep", None)
@@ -207,10 +219,17 @@ def _controller_run(session):
 
 
 def _multi_session_enabled():
-    raw = os.environ.get("AF_FIBER_V3_MULTI_SESSION", "0").strip().upper()
+    raw = os.environ.get("AF_FIBER_V3_MULTI_SESSION", "1").strip().upper()
     if raw in {"0", "OFF", "FALSE"}: return False
     if raw in {"1", "ON", "TRUE"}: return True
     raise ValueError("AF_FIBER_V3_MULTI_SESSION must be 0 or 1")
+
+
+def _async_session_enabled():
+    raw = os.environ.get("AF_FIBER_V3_ASYNC_SESSION", "1").strip().upper()
+    if raw in {"0", "OFF", "FALSE"}: return False
+    if raw in {"1", "ON", "TRUE"}: return True
+    raise ValueError("AF_FIBER_V3_ASYNC_SESSION must be 0 or 1")
 
 
 def _empty_controller_stats():

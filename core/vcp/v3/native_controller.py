@@ -1,6 +1,7 @@
-"""Production bridge for the persistent native V3 controller."""
+"""Production bridge for persistent synchronous and asynchronous native V3 controllers."""
 
-from ctypes import POINTER, Structure, byref, c_double, c_int, c_int64, c_void_p
+import atexit
+from ctypes import POINTER, Structure, byref, c_double, c_int, c_int64, c_uint64, c_void_p
 from dataclasses import dataclass
 from time import perf_counter
 
@@ -14,6 +15,7 @@ from .solver import _synchronize_spans, _validate_live
 
 
 LEGACY_CCD, INDEXED_CCD = 0, 1
+_ASYNC_COORDINATORS = {}
 _TERMINATIONS = {1: "CONVERGED", 2: "STALLED", 3: "BUDGET_EXHAUSTED", 4: "UNSAFE_OUTPUT"}
 _DECISIONS = {0: "NONE", 1: "ACCEPT", 2: "REJECT", 3: "INJECT", 4: "CCD_REJECT", 5: "SOLVE_FAIL"}
 
@@ -39,6 +41,13 @@ class _SqpResult(Structure):
 class _SqpBatchStats(Structure):
     _fields_ = [(name, c_int) for name in
                 ("sessions", "active", "stepped", "completed", "workers", "trials")]
+    _fields_ += [("elapsed_ms", c_double)]
+
+
+class _SqpAsyncStatus(Structure):
+    _fields_ = [("revision", c_uint64)]
+    _fields_ += [(name, c_int) for name in
+                 ("state", "code", "done", "accepted", "infeasible", "workers", "trials")]
     _fields_ += [("elapsed_ms", c_double)]
 
 
@@ -111,7 +120,8 @@ class NativeControllerRun:
         self.session, self.mode = session, int(ccd_mode); self.invocation = _Invocation(session, ccd_mode)
         self.library = session.spans[0].state.native_session.native.library
         self.handle = self.invocation.begin(); self.done = False; self.accepted = 0; self.infeasible = True
-        self.externally_advanced = False
+        self.externally_advanced = False; self.async_owner = None; self.async_task = 0
+        self.async_trials = 0; self.async_elapsed = 0.0
 
     def step(self, trials=1):
         done, accepted, infeasible = c_int(), c_int(), c_int()
@@ -122,20 +132,67 @@ class NativeControllerRun:
         _publish_working(self.session, self.invocation); return self.done
 
     def finish(self):
+        if self.async_owner is not None: self.async_owner.detach(self, cancel=False)
         if not self.done and self.library.af_v3_native_sqp_finish(self.handle):
             raise RuntimeError("native V3 SQP coordinator finish failed")
         report = _invocation_report(self.invocation, self.mode); self.close(); return report
 
     def cancel(self):
+        if self.async_owner is not None: self.async_owner.detach(self, cancel=True)
         if self.handle: self.library.af_v3_native_sqp_cancel(self.handle)
         self.close()
 
     def close(self):
+        if self.async_owner is not None: self.async_owner.detach(self, cancel=not self.done)
         if self.handle: self.library.af_v3_native_sqp_destroy(self.handle); self.handle = None
 
     def __del__(self):
         try: self.close()
-        except (AttributeError, OSError): pass
+        except Exception: pass
+
+
+class NativeAsyncCoordinator:
+    def __init__(self, library, trials=4):
+        self.library = library; _configure_async(library)
+        self.handle = library.af_v3_async_sqp_create(max(1, int(trials)))
+        if not self.handle: raise RuntimeError("native asynchronous V3 coordinator creation failed")
+        self.runs = {}
+
+    def submit(self, run):
+        if run.async_task: return
+        task = c_uint64(); code = self.library.af_v3_async_sqp_submit(self.handle, run.handle, byref(task))
+        if code: raise RuntimeError(f"native asynchronous V3 submission failed: {code}")
+        run.async_task, run.async_owner = int(task.value), self; self.runs[run.async_task] = run
+
+    def poll(self, runs):
+        active = tuple(run for run in runs if run.handle and not run.done)
+        for run in active: self.submit(run)
+        if not active: return _empty_batch_report()
+        return self._poll_rows(active)
+
+    def _poll_rows(self, runs):
+        ids = (c_uint64 * len(runs))(*(run.async_task for run in runs)); rows = (_SqpAsyncStatus * len(runs))()
+        started = perf_counter(); code = self.library.af_v3_async_sqp_poll_many(self.handle, ids, len(runs), rows)
+        if code: raise RuntimeError(f"native asynchronous V3 poll failed: {code}")
+        elapsed = 1000.0 * (perf_counter() - started); return _install_async_rows(runs, rows, elapsed)
+
+    def detach(self, run, cancel):
+        task = int(run.async_task or 0)
+        if not task: return
+        if cancel and self.library.af_v3_async_sqp_cancel(self.handle, task):
+            raise RuntimeError("native asynchronous V3 cancellation failed")
+        code = self.library.af_v3_async_sqp_remove(self.handle, task)
+        if code: raise RuntimeError(f"native asynchronous V3 removal failed: {code}")
+        self.runs.pop(task, None); run.async_task, run.async_owner = 0, None
+
+    def close(self):
+        if not self.handle: return
+        for run in tuple(self.runs.values()): self.detach(run, cancel=not run.done)
+        self.library.af_v3_async_sqp_destroy(self.handle); self.handle = None
+
+    @property
+    def active(self):
+        return bool(self.runs)
 
 
 def solve_native_controller(session, ccd_mode=INDEXED_CCD):
@@ -165,6 +222,28 @@ def step_native_controllers(runs, trials=1):
     code = library.af_v3_native_sqp_step_many(handles, len(active), max(1, int(trials)), cn._plain(results), byref(stats))
     if code: raise RuntimeError(f"native V3 multi-session step failed: {code}")
     _install_batch_rows(active, results); return _batch_report(stats)
+
+
+def poll_native_controllers(runs):
+    active = tuple(run for run in runs if run.handle and not run.done)
+    if not active: return _empty_batch_report()
+    if not cn.native_async_controller_status(): raise RuntimeError("native asynchronous V3 coordinator is unavailable")
+    return _async_coordinator(active[0].library).poll(active)
+
+
+def native_async_controllers_active():
+    return any(row.active for row in _ASYNC_COORDINATORS.values())
+
+
+def shutdown_native_async_controllers():
+    for value in tuple(_ASYNC_COORDINATORS.values()): value.close()
+    _ASYNC_COORDINATORS.clear()
+
+
+def _async_coordinator(library):
+    key = id(library)
+    if key not in _ASYNC_COORDINATORS: _ASYNC_COORDINATORS[key] = NativeAsyncCoordinator(library)
+    return _ASYNC_COORDINATORS[key]
 
 
 def finish_native_controller(session, run):
@@ -227,11 +306,36 @@ def _configure_many(library):
     function.restype = c_int
 
 
+def _configure_async(library):
+    library.af_v3_async_sqp_create.argtypes = [c_int]; library.af_v3_async_sqp_create.restype = c_void_p
+    library.af_v3_async_sqp_submit.argtypes = [c_void_p, c_void_p, POINTER(c_uint64)]
+    library.af_v3_async_sqp_poll_many.argtypes = [c_void_p, POINTER(c_uint64), c_int, POINTER(_SqpAsyncStatus)]
+    library.af_v3_async_sqp_cancel.argtypes = [c_void_p, c_uint64]
+    library.af_v3_async_sqp_remove.argtypes = [c_void_p, c_uint64]
+    library.af_v3_async_sqp_destroy.argtypes = [c_void_p]
+    for name in ("submit", "poll_many", "cancel", "remove"): getattr(library, f"af_v3_async_sqp_{name}").restype = c_int
+
+
 def _install_batch_rows(runs, values):
     for index, run in enumerate(runs):
         row = values[3 * index:3 * index + 3]
         run.done, run.accepted, run.infeasible = bool(row[0]), int(row[1]), bool(row[2])
         run.externally_advanced = True; _publish_working(run.session, run.invocation)
+
+
+def _install_async_rows(runs, rows, poll_ms):
+    trials = 0; elapsed = 0.0
+    for run, row in zip(runs, rows):
+        if row.code or row.state == 4: raise RuntimeError(f"native asynchronous V3 task failed: {row.code}")
+        trials += max(0, int(row.trials) - run.async_trials)
+        elapsed = max(elapsed, max(0.0, float(row.elapsed_ms) - run.async_elapsed))
+        run.async_trials, run.async_elapsed = int(row.trials), float(row.elapsed_ms)
+        run.done, run.accepted, run.infeasible = bool(row.done), int(row.accepted), bool(row.infeasible)
+        run.externally_advanced = True
+    workers = max((int(row.workers) for row in rows), default=0)
+    return {"sessions": len(rows), "active": sum(not run.done for run in runs),
+            "stepped": len(rows), "completed": sum(run.done for run in runs),
+            "workers": workers, "trials": trials, "elapsed_ms": max(elapsed, poll_ms)}
 
 
 def _batch_report(stats):
@@ -280,8 +384,14 @@ def _trajectory(count, traces):
 
 def _install_report(session, report):
     session.rounds = max((row.trials for row in report.spans), default=0)
+    _prepare_report_install(session, report)
     for index, (span, row) in enumerate(zip(session.spans, report.spans)):
         _install_span(span, row); session.completed[index] = session.rounds
+
+
+def _prepare_report_install(session, report):
+    for span, row in zip(session.spans, report.spans): span.state.points = row.points.copy()
+    _synchronize_spans(session)
 
 
 def _install_span(session, report):
@@ -296,7 +406,7 @@ def _install_span(session, report):
     state.regularization_decreases = report.regularization_decreases
     state.injected, state.limiting = report.injected_contacts, report.limiting_contacts
     _install_histories(state, report); _refresh_state(state)
-    _finish_contact_session(session, _termination(report), "persistent native V3 controller")
+    _finish_contact_session(session, _termination(report, state), "persistent native V3 controller")
 
 
 def _install_histories(state, report):
@@ -306,6 +416,9 @@ def _install_histories(state, report):
     state.ccd_step_history.extend(row[2] for row in report.trajectory)
 
 
-def _termination(report):
+def _termination(report, state):
     value = V2Termination(report.termination)
-    return V2Termination.UNSAFE_OUTPUT if not report.validated else value
+    return value if state.metrics.feasible else V2Termination.UNSAFE_OUTPUT
+
+
+atexit.register(shutdown_native_async_controllers)

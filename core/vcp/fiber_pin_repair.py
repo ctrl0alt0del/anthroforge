@@ -1,5 +1,6 @@
 """Resumable on-demand repair for invalid authored Fiber pins."""
 
+from math import cos, sin, tau
 from time import perf_counter
 
 import numpy as np
@@ -16,7 +17,8 @@ from .fiber_anchor_preflight import (_capture_colliders, _clearance_slack, _coll
 from .fiber_collision import CollisionOracle
 from .fiber_pin_repair_policy import (FiberPinCandidate, FiberPinFailure, FiberPinRef,
                                       FiberPinRepair, FiberPinRepairPlan, FiberPinRepairReport,
-                                      serialization_guard, use_owner_transfer)
+                                      auto_repair_search_distance, serialization_guard,
+                                      use_owner_transfer)
 from .prop_update_guard import suppress_vcp_prop_updates
 
 
@@ -55,11 +57,12 @@ class _CandidateSampler:
 
 
 class _ProjectedRefiner:
-    def __init__(self, world, obj, runtime, pin, rows, threshold):
+    def __init__(self, world, obj, runtime, pin, rows, threshold, limits=(8, 32, 18)):
         source = Vector(pin.point)
         self.world = world; self.obj = obj; self.runtime = runtime; self.pin = pin
         self.threshold = float(threshold); self.source = source
-        self.seeds = sorted(rows, key=lambda row: (Vector(row["point"]) - source).length_squared)[:8]
+        self.seed_limit, self.path_steps, self.bisect_steps = tuple(map(int, limits))
+        self.seeds = sorted(rows, key=lambda row: (Vector(row["point"]) - source).length_squared)[:self.seed_limit]
         self.seed = 0; self.bisect = 0; self.intervals = []; self.results = []
         self.done = not self.seeds
 
@@ -75,12 +78,13 @@ class _ProjectedRefiner:
         return min(self.results, key=lambda row: (Vector(row["point"]) - self.source).length_squared)
 
     def _step_scan(self):
-        rows = tuple(self._candidate(self.seed, index / 32.0) for index in range(1, 33))
+        rows = tuple(self._candidate(self.seed, index / self.path_steps)
+                     for index in range(1, self.path_steps + 1))
         match = _first_valid(rows, self.world, self.pin.owner, self.threshold)
         if match is None: self.results.append(self.seeds[self.seed])
         else: self._add_interval(match)
         self.seed += 1
-        if self.seed == len(self.seeds): self.bisect = 18 if self.intervals else 0
+        if self.seed == len(self.seeds): self.bisect = self.bisect_steps if self.intervals else 0
 
     def _step_bisect(self):
         rows = tuple(self._candidate(row[0], 0.5 * (row[1] + row[2])) for row in self.intervals)
@@ -96,7 +100,8 @@ class _ProjectedRefiner:
 
     def _add_interval(self, match):
         index, row = match
-        self.intervals.append([self.seed, index / 32.0, (index + 1) / 32.0, row])
+        self.intervals.append([self.seed, index / self.path_steps,
+                               (index + 1) / self.path_steps, row])
 
     def _finish(self):
         self.results.extend(row[3] for row in self.intervals)
@@ -226,6 +231,148 @@ class FiberPinRepairSession:
 
 def begin_fiber_pin_repair(root, scene, depsgraph, solver):
     return FiberPinRepairSession(root, scene, depsgraph, solver)
+
+
+def repair_current_preflight_pins(root, scene, fiber, result, solver, depsgraph):
+    snapshot = _binding_snapshot(fiber); context = _local_repair_context(root, scene, fiber, depsgraph)
+    current, repaired = result, set()
+    while current is not None and not current.valid:
+        pin = _next_local_pin(fiber, current, repaired)
+        if pin is None or not _repair_local_pin(context, fiber, pin):
+            return _restore_local_repair(root, scene, fiber, snapshot, solver, depsgraph, result, repaired)
+        repaired.add((pin.role, pin.index)); current = _repeat_preflight(root, scene, fiber, solver, depsgraph)
+    if current is not None and current.valid and repaired: _refresh_local_repair_handles(root, scene, fiber)
+    return current or _restore_local_repair(root, scene, fiber, snapshot, solver, depsgraph, result, repaired)
+
+
+def _local_repair_context(root, scene, fiber, depsgraph):
+    runtime = attachment_runtime(scene, depsgraph)
+    sources = tuple(CollisionOracle(root, scene, depsgraph, float(fiber.collision_radius), .002).colliders())
+    colliders = _capture_colliders(sources); key = ("pin-auto-repair", tuple(_source_key(row) for row in sources))
+    return root, scene, depsgraph, runtime, colliders, _collision_world(colliders, key)
+
+
+def _next_local_pin(fiber, result, repaired):
+    for pin in _dedupe_pins(_invalid_pin_refs(fiber, result)):
+        if (pin.role, pin.index) not in repaired: return pin
+    return None
+
+
+def _repair_local_pin(context, fiber, pin):
+    candidate = _local_pin_candidate(context, pin)
+    if candidate is None: return False
+    with suppress_vcp_prop_updates():
+        _set_pin(fiber, FiberPinRepair(pin, candidate, "LOCAL_SAME_OWNER", False))
+    _invalidate_preflight(context[1], context[0], {fiber.id}); context[2].update()
+    return True
+
+
+def _local_pin_candidate(context, pin):
+    obj, surface = _local_surface(context, pin.owner)
+    threshold = _repair_threshold(context[4], pin.radius)
+    valid = _first_valid_radial_rows(context, obj, pin, threshold)
+    rows = _local_surface_rows(surface, pin) if not valid else ()
+    valid = valid or _valid_rows_chunked(context[5], rows, pin.owner, threshold)
+    refined = _refine_local_rows(context, obj, pin, valid)
+    return _candidate_value(pin, pin.owner, refined)
+
+
+def _local_surface(context, owner):
+    obj = find_geometry_mesh_scp_obj(context[1], context[0].name, owner)
+    surface = None if obj is None else build_mesh_surface_data(obj, context[2], context[3]["surface_cache"])
+    return obj, surface
+
+
+def _local_surface_rows(surface, pin):
+    if not surface: return ()
+    distance = _local_search_distance(pin); indices = _nearby_triangle_indices(surface, pin, distance)
+    values = (_triangle_samples(surface, index, pin.offset, distance, pin.point) for index in indices)
+    return _dedupe_candidate_rows(tuple(row for group in values for row in group))
+
+
+def _first_valid_radial_rows(context, obj, pin, threshold):
+    frame = resolve_surface_frame(obj, pin.raw, context[3]) if obj is not None else None
+    if frame is None: return ()
+    tangent = Vector(frame["tangent_world"]); bitangent = Vector(frame["normal_world"]).cross(tangent)
+    for ratio in (.05, .1, .2, .35, .5, .75, 1.0):
+        rows = _radial_ring_rows(context[3], obj, pin, frame["point_world"], tangent, bitangent, ratio)
+        valid = _valid_rows(context[5], rows, pin.owner, threshold)
+        if valid: return valid
+    return ()
+
+
+def _radial_ring_rows(runtime, obj, pin, origin, tangent, bitangent, ratio):
+    radius = _local_search_distance(pin) * float(ratio)
+    rows = (_radial_candidate(obj, runtime, origin, tangent, bitangent, radius, angle, pin.offset)
+            for angle in range(24))
+    return tuple(row for row in rows if row is not None)
+
+
+def _radial_candidate(obj, runtime, origin, tangent, bitangent, radius, angle, offset):
+    radians = tau * int(angle) / 24.0
+    target = Vector(origin) + float(radius) * (cos(radians) * tangent + sin(radians) * bitangent)
+    return _candidate_from_target(obj, runtime, target, offset)
+
+
+def _dedupe_candidate_rows(rows):
+    values = {}
+    for row in rows: values.setdefault(str(row["raw"]), row)
+    return tuple(values.values())
+
+
+def _local_search_distance(pin):
+    return auto_repair_search_distance(pin.radius)
+
+
+def _nearby_triangle_indices(surface, pin, distance):
+    hits = surface["bvh_world"].find_nearest_range(Vector(pin.point), distance + abs(float(pin.offset)))
+    ranked = sorted(((float(row[3]), int(row[2])) for row in hits if row[2] is not None))
+    attached = _attached_triangle_index(surface, pin.raw)
+    values = ([attached] if attached is not None else []) + [index for _dist, index in ranked]
+    return tuple(dict.fromkeys(values))[:128]
+
+
+def _attached_triangle_index(surface, raw):
+    from ..attachment_codec import fiber_surface_param
+    param = fiber_surface_param(raw); target = () if param is None else tuple(param["tri_vidx"])
+    return next((index for index, row in enumerate(surface["triangles"]) if tuple(row) == target), None)
+
+
+def _triangle_samples(surface, index, offset, distance, source):
+    triangle = tuple(int(value) for value in surface["triangles"][int(index)])
+    rows = (_triangle_row(surface, triangle, weights, offset) for weights in _weights(4))
+    origin, limit = Vector(source), float(distance)
+    return tuple(row for row in rows if (Vector(row["point"]) - origin).length <= limit)
+
+
+def _valid_rows_chunked(world, rows, owner, threshold):
+    values = []
+    for start in range(0, len(rows), 4096): values.extend(_valid_rows(world, rows[start:start + 4096], owner, threshold))
+    return tuple(values)
+
+
+def _refine_local_rows(context, obj, pin, rows):
+    if obj is None or not rows: return None
+    refiner = _ProjectedRefiner(context[5], obj, context[3], pin, rows,
+                                _repair_threshold(context[4], pin.radius), (4, 12, 14))
+    while not refiner.done: refiner.step()
+    return refiner.result()
+
+
+def _repeat_preflight(root, scene, fiber, solver, depsgraph):
+    return preflight_fiber_hard_anchors(root, scene, fiber, solver, depsgraph, "FINAL")
+
+
+def _refresh_local_repair_handles(root, scene, fiber):
+    from ..visualization.fiber_sync import register_fiber_sync
+    register_fiber_sync().refresh_selection(root=root, scene=scene,
+                                            fiber_ids={fiber.id}, sync_handles=True)
+
+
+def _restore_local_repair(root, scene, fiber, snapshot, solver, depsgraph, result, repaired):
+    if not repaired: return result
+    _restore_binding_snapshot(fiber, snapshot); _invalidate_preflight(scene, root, {fiber.id})
+    depsgraph.update(); return _repeat_preflight(root, scene, fiber, solver, depsgraph)
 
 
 def _yield_after_advance(phase, sampler, refiner, session):

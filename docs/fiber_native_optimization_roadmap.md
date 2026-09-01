@@ -91,12 +91,12 @@ prevents starvation. Cancellation unregisters the job and closes every retained 
 session. Successful commits from one coordinator turn are combined into one
 `FIBER_SOLVE_READY` event per root. A batch exception fails closed and retains last-good output.
 
-Cross-session work is dynamically dispatched. A two-batch qualification measures whether the
-native jobs recover the OpenMP team cost. Jobs below 0.25 ms use the serial native call path;
-parallel execution remains available for qualified work. Automatic multi-session scheduling is
-enabled for four or more simultaneous small Fibers or a Fiber with at least 256 nodes. The
-internal `AF_FIBER_V3_BATCH=0/1` overrides exist for reference/qualification only; `AUTO` is the
-production default.
+Cross-session controller work is the production default and uses `step_many` whenever at least two
+native controller sessions are ready; a single ready session advances serially. The internal
+`AF_FIBER_V3_MULTI_SESSION=0` override retains the serial reference. The older sweep executor still
+uses its two-batch qualification: jobs below 0.25 ms use its serial native call path, while
+parallel execution remains available for qualified sweep work. `AF_FIBER_V3_BATCH=0/1` remains a
+reference/qualification override and `AUTO` is its production default.
 
 The supplied skull fixture showed why the dynamic gate is required. `FIBER_1` and `FIBER_14`
 used only about 31 ms of actual CCD time across 366 sweeps. Three fresh-process runs measured
@@ -295,6 +295,54 @@ identities, and decisions. Matching Blender comparison copies and trajectory plo
 the task visualization output; they are generated from source files without saving the sources.
 
 ## Proposed next improvements
+
+## Persistent asynchronous production coordinator
+
+`fiber-v3-production-9` and native ABI `v3_9` move the accepted finite-work SQP/controller
+behind one persistent C++ worker. Blender still captures immutable requests, resolves attachments,
+creates native worlds, validates request identity, and publishes on its main thread. After native
+initialization, Python submits all ready span controllers together and only polls terminal state;
+contact acquisition, SQP assembly, factor/solve, CCD, acceptance, multiplier updates, and the
+global accepted-step budget continue in C++ without timer-driven Python iteration.
+
+The coordinator owns task state, cancellation flags, scheduling cursors, and the worker lifetime.
+Python retains every NumPy/native-session buffer until the task is terminal. Cancellation first
+marks the native task, waits for the current bounded native quantum, removes the task, and only
+then releases its buffers. The worker never accesses `bpy`, RNA, the depsgraph, or Python objects.
+The async worker reserves one logical worker for Blender/main-thread setup; synchronous diagnostic
+execution may still use the full configured native team.
+
+The production defaults are asynchronous multi-session execution. Internal deterministic
+references remain available through `AF_FIBER_V3_ASYNC_SESSION=0` and
+`AF_FIBER_V3_MULTI_SESSION=0`.
+
+Three fresh Blender runs of the real Cranium Lobe Width shortcut measured:
+
+| Boundary | Median full cycle | Result parity |
+| --- | ---: | --- |
+| Prior serial/timer production | 20.62 s | Earlier runtime baseline |
+| Synchronous production-9, 1 ms setup timer | 3.97 s | Reference |
+| Persistent asynchronous production-9 | 3.73 s | Exact to synchronous production-9 |
+
+The asynchronous full-cycle result is 5.5x faster than the earlier paced runtime and about 6%
+faster than the equivalent synchronous production-9 path. The 5.5x comparison includes the
+already accepted runtime changes made between those revisions; only the paired 6% comparison is
+a timing attribution for asynchrony alone. The paired complete point digest was
+`a9aea6fa16c9ce716b5fc6338169d666aaad2a6f5c31e8ef55b6633b0fd3b4c7`; all samples returned the
+same 8 `CONVERGED`, 13 `STALLED`, and 3 `BUDGET_EXHAUSTED` results. The source `.blend` hash stayed
+`4855042f259135c569c3e89b50df5d0441e6794bef5e774aebf924fd8372287e`.
+
+Timer callbacks fell from 1,223 to a median of 151 and transient `apply_points` calls fell from
+2,264 to about 208. Timer waits no longer control solver progress: the 1 ms callback services
+bounded Blender-side initialization and the 5 ms callback polls an independently running native
+task. A real in-flight cancellation drained in 122 ms and left no queued job or live native task.
+
+The remaining responsiveness defect is now isolated rather than mixed into solver timing.
+`FIBER_17` still performs a duplicated seed/contact measurement and hard-pin validation during
+`NATIVE_INIT` on Blender's thread; this creates a 0.59-0.60 s maximum setup slice. The native
+controller measures the same initial seed again when its state is constructed. Moving that seed
+measurement and pin-preflight result into the native task contract is the next boundary change;
+it must preserve `INVALID_CONFIGURATION` semantics before the Python measurement can be removed.
 
 ### 1. Topology-shared worlds and batched transform refit
 

@@ -1,8 +1,8 @@
 import unittest
 
 from core.vcp.fiber_pin_repair_policy import (FiberPinCandidate, FiberPinRef, FiberPinRepair,
-                                              FiberPinRepairPlan, serialization_guard,
-                                              use_owner_transfer)
+                                              FiberPinRepairPlan, auto_repair_search_distance,
+                                              serialization_guard, use_owner_transfer)
 
 
 def _pin(role="TOUCH", index=1, relation="UNRELATED", radius=.002):
@@ -30,6 +30,9 @@ class FiberPinRepairTests(unittest.TestCase):
         risky = FiberPinRepair(_pin("ENDPOINT_A", 0), _candidate(), "", True)
         plan = FiberPinRepairPlan((), (), (safe, risky), (), 1.0)
         self.assertEqual(plan.risky, (risky,))
+
+    def test_local_search_distance_is_bounded_to_five_radii(self):
+        self.assertEqual(auto_repair_search_distance(.002), .01)
 
 
 if __name__ == "__main__":

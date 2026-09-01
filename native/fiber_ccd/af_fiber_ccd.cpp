@@ -1,13 +1,16 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <condition_variable>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <mutex>
 #include <numeric>
 #include <queue>
 #include <unordered_map>
 #include <tuple>
+#include <thread>
 #include <utility>
 #include <vector>
 #ifdef _OPENMP
@@ -127,6 +130,14 @@ static int af_v3_multi_sqp_capability() {
 #endif
 }
 
+static int af_v3_async_sqp_capability() {
+#if defined(AF_V3_OPERATION_EXPERIMENT) || defined(AF_V3_NATIVE_CONTROLLER)
+    return 16777216;
+#else
+    return 0;
+#endif
+}
+
 static double point_segment(Vec p, Vec a, Vec b) {
     Vec d = sub(b, a);
     double length = dot(d, d);
@@ -240,7 +251,7 @@ AF_EXPORT int af_fiber_ccd_version() { return 3; }
 AF_EXPORT int af_fiber_ccd_capabilities() {
     return 8191|af_parallel_capability()|af_llvm_openmp_capability()|
            af_v3_session_capability()|af_v3_batch_capability()|af_v3_indexed_ccd_capability()|af_v3_native_world_capability()|af_v3_operations_capability()|
-           af_v3_coordinator_capability()|af_v3_native_sqp_capability()|af_v3_resumable_sqp_capability()|af_v3_multi_sqp_capability();
+           af_v3_coordinator_capability()|af_v3_native_sqp_capability()|af_v3_resumable_sqp_capability()|af_v3_multi_sqp_capability()|af_v3_async_sqp_capability();
 }
 
 AF_EXPORT int af_fiber_worker_threads() { return af_requested_workers; }

@@ -640,6 +640,7 @@ static void af_v3_sqp_copy_current(AfV3SqpCoordinator& value) {
 static void af_v3_sqp_finalize(AfV3SqpCoordinator& value) {
     if(value.finished)return;double elapsed=std::chrono::duration<double,std::milli>(
         std::chrono::steady_clock::now()-value.started).count();
+    af_v3_sqp_sync_owner_span(value.states);
     bool budget=af_v3_sqp_accepted(value.states)>=value.accepted_cap;
     for(auto& state:value.states)af_v3_sqp_finish(state,budget,elapsed);value.finished=true;
 }
@@ -685,15 +686,21 @@ static int af_v3_sqp_batch_code(const std::vector<int>& codes) {
     return found==codes.end()?0:*found;
 }
 
-AF_EXPORT int af_v3_native_sqp_step_many(void** handles,int count,int trials,int* results,
-                                         AfV3SqpBatchStats* stats) {
+static int af_v3_native_sqp_step_many_limit(void** handles,int count,int trials,int* results,
+                                             AfV3SqpBatchStats* stats,int limit) {
     if(!handles||count<1||trials<1||!results||!stats)return 1;
-    auto started=std::chrono::steady_clock::now();std::vector<int> codes(count),used(count,-1);int workers=af_task_workers(count);
+    auto started=std::chrono::steady_clock::now();std::vector<int> codes(count),used(count,-1);
+    int workers=std::max(1,std::min(af_task_workers(count),limit));
 #pragma omp parallel for schedule(dynamic,1) if(workers>1) num_threads(workers)
     for(int index=0;index<count;++index)codes[index]=af_v3_sqp_step_handle(handles[index],trials,results+3*index,used[index]);
     double elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
     af_v3_sqp_batch_stats(*stats,results,used,codes,count,trials,elapsed);
     return af_v3_sqp_batch_code(codes);
+}
+
+AF_EXPORT int af_v3_native_sqp_step_many(void** handles,int count,int trials,int* results,
+                                         AfV3SqpBatchStats* stats) {
+    return af_v3_native_sqp_step_many_limit(handles,count,trials,results,stats,af_requested_workers);
 }
 
 AF_EXPORT int af_v3_native_sqp_cancel(void* handle) {
@@ -713,4 +720,107 @@ AF_EXPORT int af_v3_native_sqp_solve(AfV3SqpJob* jobs,int count,int accepted_cap
     void* handle=af_v3_native_sqp_begin(jobs,count,accepted_cap,trial_cap);if(!handle)return 1;
     int done=0,accepted=0,infeasible=0;int code=af_v3_native_sqp_step(handle,trial_cap,&done,&accepted,&infeasible);
     if(!code&&!done)code=af_v3_native_sqp_finish(handle);af_v3_native_sqp_destroy(handle);return code;
+}
+
+enum { AF_V3_ASYNC_QUEUED=0,AF_V3_ASYNC_RUNNING=1,AF_V3_ASYNC_DONE=2,
+       AF_V3_ASYNC_CANCELLED=3,AF_V3_ASYNC_ERROR=4 };
+
+struct AfV3AsyncStatus {
+    uint64_t revision=0;int state=AF_V3_ASYNC_QUEUED,code=0,done=0,accepted=0,infeasible=1;
+    int workers=0,trials=0;double elapsed_ms=0.0;
+};
+
+struct AfV3AsyncTask {
+    uint64_t id=0;void* controller=nullptr;AfV3AsyncStatus status;bool cancel=false;
+};
+
+struct AfV3AsyncCoordinator {
+    std::mutex mutex;std::condition_variable changed;std::thread worker;
+    std::unordered_map<uint64_t,AfV3AsyncTask> tasks;uint64_t next_id=1;int trials=4;bool stop=false;
+};
+
+struct AfV3AsyncWork { std::vector<uint64_t> ids;std::vector<void*> handles; };
+
+static bool af_v3_async_terminal(const AfV3AsyncTask& task) { return task.status.state>=AF_V3_ASYNC_DONE; }
+
+static bool af_v3_async_ready(const AfV3AsyncCoordinator& value) {
+    for(const auto& row:value.tasks)if(!af_v3_async_terminal(row.second))return true;
+    return false;
+}
+
+static AfV3AsyncWork af_v3_async_collect(AfV3AsyncCoordinator& value) {
+    std::lock_guard<std::mutex> guard(value.mutex);AfV3AsyncWork work;
+    for(auto& row:value.tasks){auto& task=row.second;if(af_v3_async_terminal(task))continue;
+        if(task.cancel){af_v3_native_sqp_cancel(task.controller);task.status.state=AF_V3_ASYNC_CANCELLED;
+            task.status.code=2;++task.status.revision;continue;}
+        task.status.state=AF_V3_ASYNC_RUNNING;work.ids.push_back(task.id);work.handles.push_back(task.controller);}
+    value.changed.notify_all();return work;
+}
+
+static void af_v3_async_update(AfV3AsyncCoordinator& value,const AfV3AsyncWork& work,
+                               const std::vector<int>& results,const AfV3SqpBatchStats& stats,int code) {
+    std::lock_guard<std::mutex> guard(value.mutex);
+    for(int index=0;index<int(work.ids.size());++index){auto found=value.tasks.find(work.ids[index]);
+        if(found==value.tasks.end())continue;auto& task=found->second;task.status.code=code;
+        task.status.done=results[3*index];task.status.accepted=results[3*index+1];task.status.infeasible=results[3*index+2];
+        task.status.workers=stats.workers;task.status.trials+=value.trials;task.status.elapsed_ms+=stats.elapsed_ms;
+        task.status.state=code?AF_V3_ASYNC_ERROR:task.status.done?AF_V3_ASYNC_DONE:AF_V3_ASYNC_RUNNING;++task.status.revision;}
+    value.changed.notify_all();
+}
+
+static void af_v3_async_step(AfV3AsyncCoordinator& value,const AfV3AsyncWork& work) {
+    if(work.handles.empty())return;std::vector<int> results(3*work.handles.size());AfV3SqpBatchStats stats;
+    int reserve=std::max(1,af_requested_workers-1);
+    int code=af_v3_native_sqp_step_many_limit(const_cast<void**>(work.handles.data()),int(work.handles.size()),
+                                              value.trials,results.data(),&stats,reserve);
+    af_v3_async_update(value,work,results,stats,code);
+}
+
+static void af_v3_async_loop(AfV3AsyncCoordinator* value) {
+    while(true){std::unique_lock<std::mutex> lock(value->mutex);
+        value->changed.wait(lock,[&]{return value->stop||af_v3_async_ready(*value);});
+        if(value->stop&&!af_v3_async_ready(*value))break;lock.unlock();af_v3_async_step(*value,af_v3_async_collect(*value));}
+}
+
+static std::vector<uint64_t> af_v3_async_ids(AfV3AsyncCoordinator& value) {
+    std::lock_guard<std::mutex> guard(value.mutex);std::vector<uint64_t> ids;
+    for(const auto& row:value.tasks)ids.push_back(row.first);return ids;
+}
+
+AF_EXPORT void* af_v3_async_sqp_create(int trials) {
+    auto* value=new AfV3AsyncCoordinator();value->trials=std::max(1,trials);
+    value->worker=std::thread(af_v3_async_loop,value);return value;
+}
+
+AF_EXPORT int af_v3_async_sqp_submit(void* handle,void* controller,uint64_t* task_id) {
+    if(!handle||!controller||!task_id)return 1;auto& value=*static_cast<AfV3AsyncCoordinator*>(handle);
+    std::lock_guard<std::mutex> guard(value.mutex);uint64_t id=value.next_id++;
+    AfV3AsyncTask task;task.id=id;task.controller=controller;value.tasks.emplace(id,task);*task_id=id;
+    value.changed.notify_one();return 0;
+}
+
+AF_EXPORT int af_v3_async_sqp_poll_many(void* handle,const uint64_t* ids,int count,AfV3AsyncStatus* output) {
+    if(!handle||!ids||count<0||!output)return 1;auto& value=*static_cast<AfV3AsyncCoordinator*>(handle);
+    std::lock_guard<std::mutex> guard(value.mutex);
+    for(int index=0;index<count;++index){auto found=value.tasks.find(ids[index]);if(found==value.tasks.end())return 2;
+        output[index]=found->second.status;}return 0;
+}
+
+AF_EXPORT int af_v3_async_sqp_cancel(void* handle,uint64_t id) {
+    if(!handle||!id)return 1;auto& value=*static_cast<AfV3AsyncCoordinator*>(handle);std::unique_lock<std::mutex> lock(value.mutex);
+    auto found=value.tasks.find(id);if(found==value.tasks.end())return 2;found->second.cancel=true;value.changed.notify_one();
+    value.changed.wait(lock,[&]{auto row=value.tasks.find(id);return row==value.tasks.end()||af_v3_async_terminal(row->second);});return 0;
+}
+
+AF_EXPORT int af_v3_async_sqp_remove(void* handle,uint64_t id) {
+    if(!handle||!id)return 1;auto& value=*static_cast<AfV3AsyncCoordinator*>(handle);std::lock_guard<std::mutex> guard(value.mutex);
+    auto found=value.tasks.find(id);if(found==value.tasks.end())return 2;
+    if(!af_v3_async_terminal(found->second))return 3;value.tasks.erase(found);return 0;
+}
+
+AF_EXPORT void af_v3_async_sqp_destroy(void* handle) {
+    if(!handle)return;auto* value=static_cast<AfV3AsyncCoordinator*>(handle);
+    for(uint64_t id:af_v3_async_ids(*value))af_v3_async_sqp_cancel(value,id);
+    {std::lock_guard<std::mutex> guard(value->mutex);value->stop=true;}value->changed.notify_one();
+    if(value->worker.joinable())value->worker.join();delete value;
 }
