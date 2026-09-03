@@ -94,6 +94,7 @@ def restore_legacy_fiber(context, fiber_id=""):
     _restore_legacy_state(fiber)
     _clear_v3_warm(context, root, fiber)
     proxy = _fiber_sync().apply_points(root, context.scene, fiber, points, commit=True)
+    _capture_legacy_node_attachments(root, context.scene, fiber, points)
     _write_legacy_provenance(proxy)
     return success("Legacy Fiber shape restored.", value=proxy)
 
@@ -105,6 +106,12 @@ def _save_legacy_snapshot(root, scene, fiber):
     fiber.legacy_diagnostics_json = json.dumps(_legacy_diagnostics(fiber))
     fiber.legacy_status = fiber_recompute_status(fiber)
     fiber.legacy_eps_disp, fiber.legacy_eps_pen = fiber_eps_disp(fiber), fiber_eps_pen(fiber)
+
+
+def _capture_legacy_node_attachments(root, scene, fiber, points):
+    try: from ...core.visualization.fiber_node_attachment_runtime import capture_committed_fiber_node_attachments
+    except ImportError: from core.visualization.fiber_node_attachment_runtime import capture_committed_fiber_node_attachments
+    return capture_committed_fiber_node_attachments(root, scene, fiber, points)
 
 
 def _legacy_diagnostics(fiber):

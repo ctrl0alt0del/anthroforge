@@ -116,7 +116,13 @@ def _loop_anchor_stamp(fiber):
 
 def _fiber_stamp(root):
     items = getattr(getattr(root, "af_vcp_system", None), "fibers", ())
-    return tuple((str(f.id or ""), str(getattr(f, "topology_mode", "OPEN") or "OPEN"), str(f.a_parent_id or ""), str(f.b_parent_id or ""), _touch_stamp(f), _loop_anchor_stamp(f)) for f in items)
+    return tuple((str(f.id or ""), str(getattr(f, "topology_mode", "OPEN") or "OPEN"), str(f.a_parent_id or ""), str(f.b_parent_id or ""), _touch_stamp(f), _loop_anchor_stamp(f), _node_attachment_targets(f)) for f in items)
+
+
+def _node_attachment_targets(fiber):
+    try: from ..vcp.fiber_node_attachment_codec import node_attachment_target_ids
+    except ImportError: return ()
+    return node_attachment_target_ids(fiber)
 
 
 def _muscle_stamp(root):

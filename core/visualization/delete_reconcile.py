@@ -13,6 +13,8 @@ from ..scp_runtime.common import as_id, scp_prop_map
 from ..scp_runtime.marking import normalize_active_index
 from ..scp_runtime.tree import sanitize_parent_links
 from ..vcp.fiber_modes import fiber_parent_ids
+from ..vcp.fiber_node_attachment import clear_fiber_node_attachments
+from ..vcp.fiber_node_attachment_codec import node_attachment_target_ids
 from ..vcp.prop_update_guard import suppress_vcp_prop_updates
 from .fiber_cache_lifecycle import invalidate_fiber_caches
 
@@ -145,8 +147,17 @@ def _reconcile_scp_dependents(root):
     parent_changed, _scp_by_id = sanitize_parent_links(root, scp_prop_map(root))
     live_scp_ids = set(scp_prop_map(root))
     changed = _remove_fibers(root, _fiber_orphan_ids(root, live_scp_ids))
+    changed = _clear_orphan_node_attachments(root, live_scp_ids) or changed
     changed = _clear_blob_targets(root, "SCP", _orphan_blob_scp_ids(root)) or changed
     return bool(parent_changed) or changed
+
+
+def _clear_orphan_node_attachments(root, live_ids):
+    changed = False
+    for fiber in root.af_vcp_system.fibers:
+        missing = set(node_attachment_target_ids(fiber)) - set(live_ids or ())
+        if missing: clear_fiber_node_attachments(fiber); changed = True
+    return changed
 
 
 def cleanup_scp_dependents(root):

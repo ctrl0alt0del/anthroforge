@@ -13,6 +13,9 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
         sys.path.insert(0, value)
 
 from _support import ensure_import_path
+from core.vcp.fiber_node_attachment_codec import (FiberNodeAttachment,
+                                                   FiberNodeAttachmentPayload,
+                                                   encode_node_attachments)
 
 ensure_import_path()
 
@@ -46,6 +49,12 @@ def fiber(fid, a_id, b_id, touch_ids=(), topology="OPEN", loop_ids=()):
     touches = [SimpleNamespace(parent_id=value) for value in touch_ids]
     anchors = [SimpleNamespace(parent_id=value, attach_param="RAW") for value in loop_ids]
     return SimpleNamespace(id=fid, a_parent_id=a_id, b_parent_id=b_id, mid_touches=touches, topology_mode=topology, loop_anchors=anchors)
+
+
+def _with_node_target(item, target_id):
+    nodes = tuple(FiberNodeAttachment(target_id, "RAW", (0.0, 0.0, 0.0)) for _index in range(2))
+    item.node_attachments_json = encode_node_attachments(FiberNodeAttachmentPayload(1, 2, False, nodes))
+    return item
 
 
 def muscle(mid, fiber_ids):
@@ -98,6 +107,14 @@ class RuntimeGraphTests(unittest.TestCase):
         expected = {("SCP", "S2"), ("FIBER", "F1"), ("MUSCLE", "M1"), ("BLOB", "B1"),
                     ("SOFT_TISSUE", "T1")}
         self.assertTrue(expected <= impacted)
+
+    def test_fiber_node_surface_is_an_attachment_dependency(self):
+        scps = [SimpleNamespace(id="S1", parent_id=""), SimpleNamespace(id="S2", parent_id="")]
+        item = _with_node_target(fiber("F1", "S1", "S1"), "S2")
+        vcp = SimpleNamespace(fibers=[item], muscles=[], fiber_surfaces=[], blobs=[], soft_tissues=[])
+        root = SimpleNamespace(af_scp_system=SimpleNamespace(scps=scps), af_vcp_system=vcp)
+        graph = runtime_graph.RuntimeGraph(); adapters.build_runtime_graph(root, graph)
+        self.assertIn(("FIBER", "F1"), graph.downstream_entities({("SCP", "S2")}))
 
     def test_tarjan_scc_groups_cycle(self):
         adjacency = {"A": {"B"}, "B": {"A"}, "C": {"D"}, "D": set()}

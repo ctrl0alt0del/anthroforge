@@ -182,25 +182,60 @@ class FiberSyncDriver(DependencyDriver):
 
     def sync(self, root, scene, is_full, impacted, bake, gate_meta=None):
         ids = set(impacted.get("FIBER", set()) or set())
-        if _selection_event(gate_meta):
-            register_fiber_sync().refresh_selection(root=root, scene=scene, fiber_ids=ids, sync_handles=True)
-            return
-        if _load_event(gate_meta):
-            register_fiber_sync().refresh_selection(root=root, scene=scene, sync_handles=True)
-            return
-        if _fiber_update_event(gate_meta):
-            _sync_fiber_update(root, scene, ids, _fiber_quality(gate_meta, bake))
-            return
-        solved = _solved_fiber_ids(gate_meta)
-        ids -= solved
-        if solved:
-            register_fiber_sync().refresh_selection(root=root, scene=scene)
-        _sync_unsolved_fibers(root, scene, is_full, ids, solved, bake, not _deferred_fiber_event(gate_meta))
+        if _sync_special_fiber_event(root, scene, ids, bake, gate_meta): return
+        _sync_impacted_fibers(root, scene, ids, is_full, bake, gate_meta)
+
+
+def _sync_special_fiber_event(root, scene, ids, bake, meta):
+    if _selection_event(meta):
+        register_fiber_sync().refresh_selection(root=root, scene=scene, fiber_ids=ids, sync_handles=True)
+        return True
+    if _load_event(meta):
+        _capture_loaded_fiber_nodes(root, scene, ids)
+        register_fiber_sync().refresh_selection(root=root, scene=scene, sync_handles=True)
+        return True
+    if _fiber_update_event(meta):
+        _sync_fiber_update(root, scene, ids, _fiber_quality(meta, bake)); return True
+    return False
+
+
+def _sync_impacted_fibers(root, scene, ids, is_full, bake, meta):
+    solved = _solved_fiber_ids(meta)
+    ids -= solved
+    authored = _authored_fiber_ids(ids, meta, is_full)
+    derived = ids - authored
+    _sync_attached_fiber_nodes(root, scene, derived)
+    if solved:
+        register_fiber_sync().refresh_selection(root=root, scene=scene)
+    _sync_unsolved_fibers(root, scene, False, authored, solved, bake,
+                          not _deferred_fiber_event(meta)) if authored else None
 
 
 def _sync_fiber_update(root, scene, ids, quality):
     register_fiber_sync().refresh_selection(root=root, scene=scene, fiber_ids=ids, sync_handles=True)
     _request_fiber_refinements(root, scene, ids, quality)
+
+
+def _capture_loaded_fiber_nodes(root, scene, ids):
+    from ..visualization.fiber_node_attachment_runtime import capture_missing_fiber_node_attachments
+    return capture_missing_fiber_node_attachments(root, scene, ids or None)
+
+
+def _sync_attached_fiber_nodes(root, scene, ids):
+    if not ids: return set()
+    from ..visualization.fiber_node_attachment_runtime import apply_fiber_node_attachments
+    return set(apply_fiber_node_attachments(root, scene, ids) or set())
+
+
+def _authored_fiber_ids(ids, meta, is_full):
+    event = str(dict(meta or {}).get("event_type", "") or "").upper()
+    if is_full and event == "IMPORT": return set(ids or ())
+    return set(ids or ()) & _runtime_dirty_ids(meta, "FIBER")
+
+
+def _runtime_dirty_ids(meta, entity_type):
+    rows = dict(dict(meta or {}).get("runtime_dirty_ids_by_type", {}) or {})
+    return {str(value or "") for value in rows.get(str(entity_type), ()) if str(value or "")}
 
 
 def _request_fiber_refinements(root, scene, ids, quality):

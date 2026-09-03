@@ -21,7 +21,7 @@ class ScpSyncAmplificationTests(BlenderTestCase):
         clear_request_telemetry()
         sync_runner.clear_pending_runtime(keep_timer=False)
 
-    def test_one_scp_request_solves_each_affected_fiber_once_without_property_tail(self):
+    def test_one_scp_request_applies_nodes_without_solver_or_property_tail(self):
         root_obj = root()
         source = scp_with_object(root_obj, "Source", mesh_object("Source"))
         target = scp_with_object(root_obj, "Target", mesh_object("Target"))
@@ -30,11 +30,10 @@ class ScpSyncAmplificationTests(BlenderTestCase):
         sync_runner.clear_pending_runtime(keep_timer=False)
         set_request_telemetry(True); clear_request_telemetry()
         with patch("core.visualization.fiber_refinement.request_fiber_refinement") as request, \
-                patch("core.visualization.fiber_refinement.drain_fiber_refinements") as drain:
+                patch("core.visualization.fiber_node_attachment_runtime.apply_fiber_node_attachments") as apply:
             sync_runner.sync_from_dirty_hints(root_obj, bpy.context.scene, {"SCP": {source.id}},
                                               source="shortcut", event_type="UPDATE", payload=payload, full=False)
-        requested = [call.args[2].id for call in request.call_args_list]
         sources = [record["source"] for record in request_telemetry()]
-        drain.assert_not_called()
-        self.assertEqual((requested, sources, len(sync_runner._TAIL_PENDING)),
-                         ([item.id for item in fibers], ["shortcut"], 0))
+        request.assert_not_called(); apply.assert_called_once()
+        self.assertEqual((set(apply.call_args.args[2]), sources, len(sync_runner._TAIL_PENDING)),
+                         ({item.id for item in fibers}, ["shortcut"], 0))

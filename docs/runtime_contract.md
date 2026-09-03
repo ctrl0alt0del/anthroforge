@@ -56,6 +56,8 @@ The current payload contract includes these keys:
 - A targeted request whose ids no longer exist is a no-op and never escalates to a full pass.
 - `non_source_ids_by_type` removes side-effect ids from the source-start set but does not remove them from the impacted sync set.
 - `source`, `event_type`, and `payload` are forwarded into `gate_meta` unchanged.
+- The runtime adds `runtime_dirty_ids_by_type` after dirty normalization. Drivers use it to distinguish authored entity inputs from downstream attachment-derived impacts; it is not a caller payload key.
+- Direct Fiber `input` mutations use the Fiber engine. SCP attachment edges target `FIBER.attachment_world`; derived SCP changes resolve pin and node surface attachments without invoking planner or solver code.
 
 ## Refactor Constraint
 

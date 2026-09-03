@@ -347,6 +347,7 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     collision_radius: bpy.props.FloatProperty(name="Collision Radius", subtype="DISTANCE", default=0.002,
                                               min=0.0, update=_on_fiber_prop_update)
     use_warm_start: bpy.props.BoolProperty(name="Use Warm Start", default=True, update=_on_fiber_prop_update)
+    node_attachments_json: bpy.props.StringProperty(default="", options={"HIDDEN"})
     use_surface_routing: bpy.props.BoolProperty(name="Use Surface Routing", default=False, update=_on_fiber_prop_update)
     use_segment_collisions: bpy.props.BoolProperty(name="Segment Collisions", default=False, update=_on_fiber_prop_update)
     preview_planner_route: bpy.props.BoolProperty(name="Preview Planner Route", default=False, update=_on_fiber_prop_update)

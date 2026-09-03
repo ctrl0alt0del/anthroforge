@@ -499,6 +499,7 @@ def _finish_refined_job(job, result):
     committed = bool(job.output_committed and _commit_allowed(job, result))
     kept = bool(not committed and _keep_failed_preview(job, result))
     _restore_previous_output(job, stale=True) if not committed and not kept else None
+    _refresh_node_attachments(job, result) if committed else None
     _publish_commit_identity(job, result) if committed else None
     _finish_pending_version(job, committed)
     _publish_result_cache(job, result) if committed else None
@@ -512,6 +513,13 @@ def _publish_commit_identity(job, result):
     root, scene, fiber = _owned_job_data(job)
     proxy = _find_proxy(scene, root.name, fiber.id) if root and scene and fiber else None
     _commit_provenance(job, result, fiber, proxy)
+
+
+def _refresh_node_attachments(job, result):
+    root, scene, fiber = _owned_job_data(job)
+    if root is None or scene is None or fiber is None: return False
+    from .fiber_node_attachment_runtime import capture_committed_fiber_node_attachments
+    return capture_committed_fiber_node_attachments(root, scene, fiber, result.points)
 
 
 def _publish_result_cache(job, result):

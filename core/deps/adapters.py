@@ -14,9 +14,11 @@ from .types import (
 
 try:
     from ..vcp.fiber_modes import fiber_parent_ids
+    from ..vcp.fiber_node_attachment_codec import node_attachment_target_ids
     from ..vcp.surface_target import SurfaceTargetKind, effective_tissue_target, target_dependency
 except ImportError:
     from core.vcp.fiber_modes import fiber_parent_ids
+    from core.vcp.fiber_node_attachment_codec import node_attachment_target_ids
     from core.vcp.surface_target import SurfaceTargetKind, effective_tissue_target, target_dependency
 
 
@@ -53,14 +55,22 @@ def _add_fiber_entities(root, graph, entity_sets):
         entity_sets["FIBER"].add(fid)
         fp_in = graph.add_port(PortRef("FIBER", fid, "input", PHASE_INPUT, MUT_INPUT))
         fp_local = graph.add_port(PortRef("FIBER", fid, "local_eval", PHASE_LOCAL_EVAL, MUT_DERIVED))
+        fp_att = graph.add_port(PortRef("FIBER", fid, "attachment_world", PHASE_ATTACHMENT_WORLD, MUT_DERIVED))
         fp_probe = graph.add_port(PortRef("FIBER", fid, "probe", PHASE_PROBES, MUT_PROBE))
         graph.add_edge(Edge(fp_in, fp_local, EDGE_EVAL))
         graph.add_edge(Edge(fp_local, fp_probe, EDGE_EVAL))
+        graph.add_edge(Edge(fp_att, fp_probe, EDGE_EVAL))
 
-        for sid in fiber_parent_ids(f):
+        for sid in _fiber_attachment_ids(f):
             sp = graph.add_port(PortRef("SCP", sid, "probe", PHASE_PROBES, MUT_PROBE))
-            graph.add_edge(Edge(sp, fp_local, EDGE_ATTACHMENT))
+            graph.add_edge(Edge(sp, fp_att, EDGE_ATTACHMENT))
             _add_dependency_edge(graph, ("SCP", sid), ("FIBER", fid))
+
+
+def _fiber_attachment_ids(fiber):
+    values = list(fiber_parent_ids(fiber))
+    values.extend(node_attachment_target_ids(fiber))
+    return tuple(dict.fromkeys(str(value or "") for value in values if str(value or "")))
 
 
 def _add_muscle_entities(root, graph, entity_sets):

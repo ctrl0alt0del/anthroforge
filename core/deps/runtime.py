@@ -75,10 +75,18 @@ def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=
     trace = trace_session(root=root, scene=scene)
     build, build_ms = timed_call(build_runtime_context, root, scene, dirty_hints, gate_meta, full)
     impacted, impact_ms = timed_call(compute_impacted_sets, build.graph, build.dirty, gate_meta)
+    gate_meta = _with_dirty_provenance(gate_meta, dirty_hints)
     c_impacts, c_ms = timed_call(apply_constraint_drivers, root, scene, build, bake, gate_meta, trace.profile)
     _, expand_ms = timed_call(expand_constraint_impacts, build.graph, impacted, c_impacts, gate_meta)
     _, sync_ms = timed_call(run_sync_drivers, root, scene, build.is_full, impacted, bake, gate_meta, trace.profile)
     emit_trace_report(trace, gate_meta, build, impacted, c_impacts, build_ms, impact_ms, c_ms, expand_ms, sync_ms)
+
+
+def _with_dirty_provenance(meta, dirty):
+    values = dict(meta or {})
+    rows = {} if dirty is None else dict(dirty or {})
+    values["runtime_dirty_ids_by_type"] = {key: sorted(set(ids or ())) for key, ids in rows.items()}
+    return values
 
 
 def _request_meta(gate_meta, full, dirty_aspects, quality, bake):
