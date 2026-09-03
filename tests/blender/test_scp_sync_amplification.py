@@ -11,6 +11,7 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
 import bpy
 from _helpers import BlenderTestCase, fiber, mesh_object, root, scp_with_object
 from core.deps.runtime_trace import clear_request_telemetry, request_telemetry, set_request_telemetry
+from core.scp_runtime.attachment_wave_runtime import AttachmentWaveRuntimeReport
 from core.visualization import sync_runner
 from core.visualization.fiber_sync import register_fiber_sync
 
@@ -29,11 +30,12 @@ class ScpSyncAmplificationTests(BlenderTestCase):
         sync, payload = register_fiber_sync(), {"scp_apply_target_ids": [source.id]}
         sync_runner.clear_pending_runtime(keep_timer=False)
         set_request_telemetry(True); clear_request_telemetry()
+        report = AttachmentWaveRuntimeReport(handled_fibers=tuple(item.id for item in fibers))
         with patch("core.visualization.fiber_refinement.request_fiber_refinement") as request, \
-                patch("core.visualization.fiber_node_attachment_runtime.apply_fiber_node_attachments") as apply:
+                patch("core.scp_runtime.attachment_wave_runtime.apply_attachment_wave", return_value=report) as apply:
             sync_runner.sync_from_dirty_hints(root_obj, bpy.context.scene, {"SCP": {source.id}},
                                               source="shortcut", event_type="UPDATE", payload=payload, full=False)
         sources = [record["source"] for record in request_telemetry()]
         request.assert_not_called(); apply.assert_called_once()
-        self.assertEqual((set(apply.call_args.args[2]), sources, len(sync_runner._TAIL_PENDING)),
+        self.assertEqual(({item.id for item in apply.call_args.args[6]}, sources, len(sync_runner._TAIL_PENDING)),
                          ({item.id for item in fibers}, ["shortcut"], 0))

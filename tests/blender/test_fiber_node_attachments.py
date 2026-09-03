@@ -1,4 +1,5 @@
 from pathlib import Path
+from dataclasses import replace
 import sys
 from unittest.mock import patch
 
@@ -11,10 +12,12 @@ import bpy
 from mathutils import Vector
 
 from _helpers import BlenderTestCase, capture_world_attachment, fiber, mesh_object, root, scp_with_object
-from core.deps.builtin_drivers import FiberSyncDriver
+from core.deps.builtin_drivers import FiberSyncDriver, SCPSyncDriver
 from core.vcp.fiber_node_attachment import (capture_fiber_node_attachments,
                                             resolve_fiber_node_attachments)
-from core.vcp.fiber_node_attachment_codec import node_attachment_target_ids
+from core.vcp.fiber_node_attachment_codec import (decode_node_attachments, encode_node_attachments,
+                                                   node_attachment_target_ids)
+from core.vcp.runtime_state import fiber_recompute_status
 from core.visualization.fiber_node_attachment_runtime import capture_missing_fiber_node_attachments
 from core.visualization.fiber_sync import register_fiber_sync
 from core.visualization.fiber_sync_helpers import persisted_fiber_points
@@ -52,9 +55,35 @@ class FiberNodeAttachmentTests(BlenderTestCase):
         self.assertEqual(request.call_count, 0)
         self.assertTrue(all(abs(point.z - 0.45) < 1.0e-6 for point in moved))
 
+    def test_scp_driver_resolves_nodes_and_skips_later_serial_pass(self):
+        root_obj, scp, surface, item, points = _fixture()
+        self.assertTrue(capture_fiber_node_attachments(root_obj, bpy.context.scene, item, points).ok)
+        surface.location.z = 0.4; bpy.context.view_layer.update()
+        impacted = {"SCP": {scp.id}, "FIBER": {item.id}}
+        meta = {"runtime_dirty_ids_by_type": {"SCP": [scp.id]}, "event_type": "UPDATE"}
+        target = "core.visualization.fiber_node_attachment_runtime._apply_fiber_node_attachments_serial"
+        with patch(target) as serial, patch("core.visualization.fiber_refinement.request_fiber_refinement") as request:
+            SCPSyncDriver().sync(root_obj, bpy.context.scene, False, impacted, False, meta)
+            FiberSyncDriver().sync(root_obj, bpy.context.scene, False, impacted, False, meta)
+        moved = persisted_fiber_points(bpy.context.scene, root_obj.name, item.id)
+        self.assertEqual((serial.call_count, request.call_count), (0, 0))
+        self.assertTrue(all(abs(point.z - 0.45) < 1.0e-6 for point in moved))
+
     def test_load_hydrates_missing_node_attachments_without_solving(self):
         root_obj, scp, _surface, item, _points = _fixture()
         item.node_attachments_json = ""
         captured = capture_missing_fiber_node_attachments(root_obj, bpy.context.scene, {item.id})
         self.assertEqual(captured, {item.id})
         self.assertEqual(node_attachment_target_ids(item), (scp.id,))
+
+    def test_invalid_node_causes_atomic_fiber_rollback(self):
+        root_obj, scp, surface, item, points = _fixture()
+        self.assertTrue(capture_fiber_node_attachments(root_obj, bpy.context.scene, item, points).ok)
+        payload = decode_node_attachments(item.node_attachments_json)
+        nodes = (replace(payload.nodes[0], attach_raw="{}"),) + payload.nodes[1:]
+        item.node_attachments_json = encode_node_attachments(replace(payload, nodes=nodes))
+        before = persisted_fiber_points(bpy.context.scene, root_obj.name, item.id)
+        impacted = {"SCP": {scp.id}, "FIBER": {item.id}}
+        SCPSyncDriver().sync(root_obj, bpy.context.scene, False, impacted, False, {"event_type": "UPDATE"})
+        after = persisted_fiber_points(bpy.context.scene, root_obj.name, item.id)
+        self.assertEqual(tuple(before), tuple(after)); self.assertEqual(fiber_recompute_status(item), "INVALID_ATTACHMENT")

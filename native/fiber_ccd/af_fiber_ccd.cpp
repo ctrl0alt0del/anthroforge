@@ -138,6 +138,8 @@ static int af_v3_async_sqp_capability() {
 #endif
 }
 
+static int af_attachment_wave_capability() { return 33554432; }
+
 static double point_segment(Vec p, Vec a, Vec b) {
     Vec d = sub(b, a);
     double length = dot(d, d);
@@ -251,7 +253,7 @@ AF_EXPORT int af_fiber_ccd_version() { return 3; }
 AF_EXPORT int af_fiber_ccd_capabilities() {
     return 8191|af_parallel_capability()|af_llvm_openmp_capability()|
            af_v3_session_capability()|af_v3_batch_capability()|af_v3_indexed_ccd_capability()|af_v3_native_world_capability()|af_v3_operations_capability()|
-           af_v3_coordinator_capability()|af_v3_native_sqp_capability()|af_v3_resumable_sqp_capability()|af_v3_multi_sqp_capability()|af_v3_async_sqp_capability();
+           af_v3_coordinator_capability()|af_v3_native_sqp_capability()|af_v3_resumable_sqp_capability()|af_v3_multi_sqp_capability()|af_v3_async_sqp_capability()|af_attachment_wave_capability();
 }
 
 AF_EXPORT int af_fiber_worker_threads() { return af_requested_workers; }
@@ -544,6 +546,7 @@ AF_EXPORT int af_candidate_pairs(const double* start, const double* end, const i
 #include "af_fiber_contact3.hpp"
 #include "af_fiber_v3_session.hpp"
 #include "af_fiber_v3_batch.hpp"
+#include "af_attachment_wave.hpp"
 #if defined(AF_V3_OPERATION_EXPERIMENT) || defined(AF_V3_NATIVE_CONTROLLER)
 #include "af_fiber_v3_operations.hpp"
 #include "af_fiber_v3_coordinator.hpp"

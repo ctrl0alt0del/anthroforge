@@ -17,15 +17,25 @@ def invalidate_fiber_caches(scene=None, root=None, fiber_ids=None):
     _cancel_refinements(scene, ids)
     _clear_solver_cache(ids)
     clear_factor_cache()
-    clear_v2_runtime_capture_cache() if ids is None else None
-    clear_v2_production_caches() if ids is None else None
-    clear_v3_caches() if ids is None else None
+    _clear_global_caches(ids)
     clear_v3_runtime_warm_cache(scene, root, ids) if ids is not None else None
     clear_runtime_context_cache(root)
     clear_scene_cache(scene)
     clear_collider_generations() if ids is None else None
     clear_geometry_generations() if ids is None else None
     _invalidate_anchor_caches(scene, root, ids)
+
+
+def _clear_global_caches(ids):
+    if ids is not None: return
+    clear_v2_runtime_capture_cache(); clear_v2_production_caches()
+    clear_v3_caches(); _clear_attachment_wave_state()
+
+
+def _clear_attachment_wave_state():
+    from ..scp_runtime.attachment_wave_capture import clear_attachment_surface_cache
+    from ..scp_runtime.attachment_wave_runtime import clear_attachment_wave_reports
+    clear_attachment_surface_cache(); clear_attachment_wave_reports()
 
 
 def _invalidate_anchor_caches(scene, root, fiber_ids):

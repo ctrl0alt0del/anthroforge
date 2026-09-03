@@ -33,8 +33,13 @@ class SCPSceneSync:
             scene.collection.children.link(collection)
         return collection
 
-    def sync_root_to_scene(self, root=None, scene=None, target_scp_ids=None, attachment_parent_ids=None, attachment_gate_meta=None):
-        return _sync_root_to_scene_runtime(self, root=root, scene=scene, target_scp_ids=target_scp_ids, attachment_parent_ids=attachment_parent_ids, attachment_gate_meta=attachment_gate_meta)
+    def sync_root_to_scene(self, root=None, scene=None, target_scp_ids=None,
+                           attachment_parent_ids=None, attachment_gate_meta=None,
+                           attachment_fiber_ids=None):
+        return _sync_root_to_scene_runtime(self, root=root, scene=scene,
+            target_scp_ids=target_scp_ids, attachment_parent_ids=attachment_parent_ids,
+            attachment_gate_meta=attachment_gate_meta,
+            attachment_fiber_ids=attachment_fiber_ids)
 
     def on_depsgraph_update(self, scene, depsgraph):
         return _on_depsgraph_update_runtime(self, scene, depsgraph)

@@ -13,6 +13,10 @@ from .fiber_sync_helpers import persisted_fiber_points
 
 
 def apply_fiber_node_attachments(root, scene, fiber_ids):
+    return _apply_fiber_node_attachments_serial(root, scene, fiber_ids)
+
+
+def _apply_fiber_node_attachments_serial(root, scene, fiber_ids):
     fibers = _selected_fibers(root, fiber_ids); handled = {fiber.id for fiber in fibers}
     if not fibers: return handled
     sync = register_fiber_sync(); runtime = attachment_runtime(scene, depsgraph_for_scene(scene))

@@ -21,13 +21,16 @@ def _resolve_sync_inputs(root, scene):
     return (None, None) if root is None or scene is None else (root, scene)
 
 
-def sync_root_to_scene(sync, root=None, scene=None, target_scp_ids=None, attachment_parent_ids=None, attachment_gate_meta=None):
+def sync_root_to_scene(sync, root=None, scene=None, target_scp_ids=None,
+                       attachment_parent_ids=None, attachment_gate_meta=None,
+                       attachment_fiber_ids=None):
     if sync._syncing:
         return
     root, scene = _resolve_sync_inputs(root, scene)
     if root is None:
         return
-    _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta)
+    return _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_ids,
+                          attachment_gate_meta, attachment_fiber_ids)
 
 
 def _refresh_view_layer(scene):
@@ -51,25 +54,28 @@ def _trace_sync_start(target_scp_ids, attachment_parent_ids):
     _sync_trace(f"sync start targets={_sorted_ids(target_scp_ids)} parents={_sorted_ids(attachment_parent_ids)}")
 
 
-def _sync_pass_body(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta):
+def _sync_pass_body(sync, root, scene, target_scp_ids, attachment_parent_ids,
+                    attachment_gate_meta, attachment_fiber_ids):
     start = perf_timer()
     try:
-        _sync_pass_steps(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta)
+        return _sync_pass_steps(sync, root, scene, target_scp_ids, attachment_parent_ids,
+                                attachment_gate_meta, attachment_fiber_ids)
     finally:
         perf_time(scene, "scp_sync_body", start)
 
 
-def _sync_pass_steps(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta):
+def _sync_pass_steps(sync, root, scene, target_scp_ids, attachment_parent_ids,
+                     attachment_gate_meta, attachment_fiber_ids):
     _sync_roles(root, target_scp_ids, attachment_parent_ids)
     detach_native_scp_parent_links(root, scene)
     sync_parent_links(root)
     normalize_active_index(root)
     scp_by_id = scp_prop_map(root)
-    _refresh_view_layer(scene)
-    apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids, attachment_parent_ids, attachment_gate_meta)
-    _refresh_view_layer(scene)
+    report = apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids,
+        attachment_parent_ids, attachment_gate_meta, attachment_fiber_ids)
     sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=target_scp_ids)
     _refresh_view_layer(scene)
+    return report
 
 
 def _sync_roles(root, target_scp_ids, attachment_parent_ids):
@@ -94,12 +100,15 @@ def _expanded_role_ids(scp_by_id, seeds):
     return out
 
 
-def _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta):
+def _run_sync_pass(sync, root, scene, target_scp_ids, attachment_parent_ids,
+                   attachment_gate_meta, attachment_fiber_ids):
     sync._syncing = True
     _trace_sync_start(target_scp_ids, attachment_parent_ids)
     try:
-        _sync_pass_body(sync, root, scene, target_scp_ids, attachment_parent_ids, attachment_gate_meta)
+        result = _sync_pass_body(sync, root, scene, target_scp_ids, attachment_parent_ids,
+                                 attachment_gate_meta, attachment_fiber_ids)
         _sync_trace("sync end")
+        return result
     finally:
         sync._syncing = False
 

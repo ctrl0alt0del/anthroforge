@@ -13,11 +13,14 @@ import bpy
 from _helpers import BlenderTestCase, empty_object, mesh_object, root, scp_with_object
 from anthroforge.core.visualization import sync_runner
 from core.scp_runtime.attachment_runtime import apply_scp_attachments, capture_attachment_from_link
+from core.scp_runtime.attachment_wave_capture import plan_attachment_waves
+from core.scp_runtime.attachment_wave_runtime import last_attachment_wave_report
 from core.scp_runtime import surface as surface_runtime
 from core.scp_runtime.common import scp_prop_map
 from core.scp_runtime.lookup import set_parent_relation
 from core.scp_runtime.object_roles import set_scp_geometry_object
-from core.scp_runtime.runtime_state import attach_child_origin_local
+from core.scp_runtime.prop_update_guard import set_parent_id_raw
+from core.scp_runtime.runtime_state import attach_child_origin_local, set_attach_initialized
 from core.vcp.attachment_backend import capture_attachment_from_mesh_vertex, resolve_attachment_world
 
 
@@ -102,6 +105,32 @@ def _large_surface_binding(root_obj, count=300):
 
 
 class AttachmentPipelineTests(BlenderTestCase):
+    def test_sibling_attachments_share_one_wave(self):
+        root_obj = root(); parent = scp_with_object(root_obj, "Parent", empty_object("Parent"), with_geometry=False)
+        left = scp_with_object(root_obj, "Left", empty_object("Left"), with_geometry=False)
+        right = scp_with_object(root_obj, "Right", empty_object("Right"), with_geometry=False)
+        _capture_object_origin_link(parent, left); _capture_object_origin_link(parent, right)
+        waves, issues = plan_attachment_waves(scp_prop_map(root_obj), (), {parent.id})
+        self.assertEqual((waves, issues), ((tuple(sorted((left.id, right.id))),), ()))
+
+    def test_attachment_cycle_blocks_only_its_component(self):
+        root_obj = root(); left = scp_with_object(root_obj, "Left", empty_object("Left"), with_geometry=False)
+        right = scp_with_object(root_obj, "Right", empty_object("Right"), with_geometry=False)
+        set_parent_id_raw(left, right.id); set_parent_id_raw(right, left.id)
+        set_attach_initialized(left, True); set_attach_initialized(right, True)
+        waves, issues = plan_attachment_waves(scp_prop_map(root_obj), {left.id, right.id}, ())
+        self.assertEqual(waves, ()); self.assertEqual({row[0] for row in issues}, {left.id, right.id})
+
+    def test_missing_native_capability_uses_recorded_serial_fallback(self):
+        root_obj, parent, mid, _child = _object_origin_chain()
+        parent.transform_object_ref.location.z = 2.0
+        target = "core.scp_runtime.attachment_wave_runtime.attachment_wave_status"
+        with patch(target, return_value=False):
+            changed = apply_scp_attachments(None, root_obj, bpy.context.scene,
+                scp_prop_map(root_obj), parent_ids={parent.id})
+        report = last_attachment_wave_report(root_obj)
+        self.assertIn(mid.id, changed); self.assertEqual(report.fallback_reason, "NATIVE_ATTACHMENT_UNAVAILABLE")
+
     def test_surface_binding_refreshes_after_direct_mesh_update(self):
         root_obj = root()
         parent = scp_with_object(root_obj, "Parent", mesh_object("Parent"))

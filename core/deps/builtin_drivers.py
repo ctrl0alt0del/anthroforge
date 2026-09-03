@@ -87,14 +87,15 @@ def _fiber_quality(meta, bake=False):
     return "FINAL" if bake or value in {"BAKE", "FINAL"} else "INTERACTIVE"
 
 
-def _sync_scp_scene(root, scene, ids, is_full, meta):
+def _sync_scp_scene(root, scene, ids, is_full, meta, fiber_ids=()):
     parent_ids = _scp_parent_ids(meta) or (_all_scp_parent_ids(root) if is_full else set())
     target_ids = _scp_target_ids(meta, ids)
-    kwargs = {"root": root, "scene": scene, "attachment_parent_ids": parent_ids, "attachment_gate_meta": meta}
+    kwargs = {"root": root, "scene": scene, "attachment_parent_ids": parent_ids,
+              "attachment_gate_meta": meta, "attachment_fiber_ids": set(fiber_ids)}
     if is_full:
-        register_sync().sync_root_to_scene(**kwargs)
+        return register_sync().sync_root_to_scene(**kwargs)
     elif ids or target_ids or parent_ids:
-        register_sync().sync_root_to_scene(target_scp_ids=target_ids, **kwargs)
+        return register_sync().sync_root_to_scene(target_scp_ids=target_ids, **kwargs)
 
 
 class RuntimeGraphDriver(DependencyDriver):
@@ -171,7 +172,9 @@ class SCPSyncDriver(DependencyDriver):
         if _selection_event(gate_meta):
             return
         ids = set(impacted.get("SCP", set()) or set())
-        _sync_scp_scene(root, scene, ids, is_full, dict(gate_meta or {}))
+        fibers = _propagated_fiber_ids(impacted, gate_meta, is_full)
+        report = _sync_scp_scene(root, scene, ids, is_full, gate_meta, fibers)
+        _record_wave_fibers(gate_meta, report)
 
 
 class FiberSyncDriver(DependencyDriver):
@@ -203,7 +206,7 @@ def _sync_impacted_fibers(root, scene, ids, is_full, bake, meta):
     solved = _solved_fiber_ids(meta)
     ids -= solved
     authored = _authored_fiber_ids(ids, meta, is_full)
-    derived = ids - authored
+    derived = ids - authored - _attachment_wave_fiber_ids(meta)
     _sync_attached_fiber_nodes(root, scene, derived)
     if solved:
         register_fiber_sync().refresh_selection(root=root, scene=scene)
@@ -236,6 +239,21 @@ def _authored_fiber_ids(ids, meta, is_full):
 def _runtime_dirty_ids(meta, entity_type):
     rows = dict(dict(meta or {}).get("runtime_dirty_ids_by_type", {}) or {})
     return {str(value or "") for value in rows.get(str(entity_type), ()) if str(value or "")}
+
+
+def _propagated_fiber_ids(impacted, meta, is_full):
+    if _selection_event(meta) or _load_event(meta) or _fiber_update_event(meta): return set()
+    ids = set(impacted.get("FIBER", set()) or set())
+    return ids - _authored_fiber_ids(ids, meta, is_full)
+
+
+def _record_wave_fibers(meta, report):
+    if not isinstance(meta, dict) or report is None: return
+    meta["_attachment_wave_fiber_ids"] = tuple(getattr(report, "handled_fibers", ()))
+
+
+def _attachment_wave_fiber_ids(meta):
+    return set(dict(meta or {}).get("_attachment_wave_fiber_ids", ()) or ())
 
 
 def _request_fiber_refinements(root, scene, ids, quality):

@@ -127,7 +127,7 @@ class FiberV2CollisionTests(unittest.TestCase):
     def test_packaged_backend_is_available(self):
         status = collision_backend_status()
         self.assertTrue(status.available, status.message)
-        self.assertEqual(status.version, f"af_fiber_ccd-3.33554431.t{status.worker_threads}")
+        self.assertEqual(status.version, f"af_fiber_ccd-3.67108863.t{status.worker_threads}")
         self.assertGreaterEqual(status.worker_threads, 1); self.assertLessEqual(status.worker_threads, 4)
 
     def test_indexed_ccd_activation_requires_full_worker_width(self):

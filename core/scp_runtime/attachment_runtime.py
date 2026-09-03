@@ -439,7 +439,8 @@ def _active_parent_ids(parent_ids):
     return {as_id(value) for value in set(parent_ids or set()) if as_id(value)}
 
 
-def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, parent_ids=None, gate_meta=None):
+def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None,
+                          parent_ids=None, gate_meta=None, fiber_ids=None):
     _ = sync
     if not attachments_enabled(scene):
         return set()
@@ -448,7 +449,17 @@ def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, par
     if not active_target_ids and not active_parent_ids:
         return set()
     blocked_ids = _blocked_apply_ids(gate_meta)
-    return _apply_attachment_targets(root, scene, scp_by_id, active_target_ids, active_parent_ids, blocked_ids, _shortcut_backsolve(gate_meta))
+    report = _apply_wave(sync, root, scene, scp_by_id, active_target_ids,
+                         active_parent_ids, blocked_ids, gate_meta, fiber_ids)
+    return report if fiber_ids is not None else set(report.changed_scps)
+
+
+def _apply_wave(sync, root, scene, scps, targets, parents, blocked, meta, fiber_ids):
+    from .attachment_wave_runtime import apply_attachment_wave
+    wanted = set(fiber_ids or ()); fibers = getattr(root.af_vcp_system, "fibers", ())
+    selected = tuple(row for row in fibers if str(row.id) in wanted)
+    return apply_attachment_wave(sync, root, scene, scps, targets, parents, selected,
+                                 blocked, _shortcut_backsolve(meta))
 
 
 def _apply_order(scp_by_id, active_target_ids, active_parent_ids):
