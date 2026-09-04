@@ -1,4 +1,5 @@
 import bpy
+import json
 
 
 def get_collection(scene, name):
@@ -251,15 +252,83 @@ def _copy_poly_points(src_spline, dst_spline):
 
 
 def copy_data(src_obj, dst_obj):
+    ensure_private_data(dst_obj)
     if src_obj.type == "MESH":
         copy_mesh_data(src_obj, dst_obj)
     elif src_obj.type == "CURVE":
         copy_curve_data(src_obj, dst_obj)
 
 
+def share_source_data(src_obj, dst_obj):
+    source, previous = getattr(src_obj, "data", None), getattr(dst_obj, "data", None)
+    if source is None: return False
+    if previous is not source:
+        _remember_curve_snapshot(source, dst_obj)
+        dst_obj.data = source; _remove_orphan_data(previous)
+    dst_obj["af_mirror_shared_data"] = True
+    dst_obj["af_mirror_data_source"] = str(src_obj.name)
+    return True
+
+
+def ensure_private_data(obj):
+    if obj is None or not bool(obj.get("af_mirror_shared_data")): return
+    if getattr(obj, "data", None) is not None: obj.data = obj.data.copy()
+    for key in ("af_mirror_shared_data", "af_mirror_data_source"):
+        if key in obj: del obj[key]
+
+
+def detach_shared_mirrors(source):
+    data = None if source is None else getattr(source, "data", None)
+    if data is None or data.users <= 1: return
+    for obj in tuple(bpy.data.objects):
+        if obj is not source and getattr(obj, "data", None) is data and _shares_from(obj, source):
+            ensure_private_data(obj)
+
+
+def _shares_from(obj, source):
+    return bool(obj.get("af_mirror_shared_data") and
+                obj.get("af_mirror_data_source") == str(source.name))
+
+
+def restore_curve_snapshot(obj):
+    raw = "" if obj is None else str(obj.get("af_mirror_curve_snapshot", "") or "")
+    if not raw or getattr(obj, "type", "") != "CURVE": return False
+    try: rows = json.loads(raw)
+    except Exception: return False
+    ensure_private_data(obj); _clear_splines(obj.data)
+    for row in rows: _restore_poly_spline(obj.data, row)
+    return True
+
+
+def _remember_curve_snapshot(data, obj):
+    if not isinstance(data, bpy.types.Curve): return
+    rows = tuple(_poly_snapshot(row) for row in data.splines)
+    if all(row is not None for row in rows): obj["af_mirror_curve_snapshot"] = json.dumps(rows)
+
+
+def _poly_snapshot(spline):
+    if str(spline.type) != "POLY": return None
+    points = tuple(tuple(float(value) for value in point.co) for point in spline.points)
+    return {"points": points, "cyclic": bool(spline.use_cyclic_u)}
+
+
+def _restore_poly_spline(curve, row):
+    points = tuple(row.get("points", ())); spline = curve.splines.new(type="POLY")
+    spline.points.add(max(0, len(points) - 1))
+    if points: spline.points.foreach_set("co", tuple(value for point in points for value in point))
+    spline.use_cyclic_u = bool(row.get("cyclic", False))
+
+
+def _remove_orphan_data(data):
+    if data is None or data.users: return
+    if isinstance(data, bpy.types.Mesh): bpy.data.meshes.remove(data)
+    elif isinstance(data, bpy.types.Curve): bpy.data.curves.remove(data)
+
+
 def ensure_mirror_material(obj, alpha_mult=0.35):
     if obj is None or obj.data is None or not hasattr(obj.data, "materials"):
         return
+    ensure_private_data(obj)
     src_mat = obj.data.materials[0] if obj.data.materials else None
     mat = _ensure_material(_mirror_material_name(obj, src_mat))
     mat.diffuse_color = _mirror_color(src_mat, alpha_mult)

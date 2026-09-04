@@ -261,6 +261,13 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
             muscle_sync_helpers.update_mesh(obj, changed, faces)
         self.assertEqual((rebuild.call_count, round(obj.data.vertices[1].co.x, 4)), (0, 2.0))
 
+    def test_binary_signature_supports_mixed_face_sizes(self):
+        obj = mesh_object("MixedFaces")
+        verts = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (2, 1, 0)]
+        faces = [(0, 1, 2), (1, 4, 3, 2)]
+        muscle_sync_helpers.update_mesh(obj, verts, faces)
+        self.assertEqual((len(obj.data.polygons), len(obj.data.vertices)), (2, 5))
+
     def test_closed_loop_rows_are_rephased_before_muscle_surface(self):
         outer = _circle_points(32, 1.0, 0.0)
         inner = list(reversed(_circle_points(32, 0.8, 0.1)[9:] + _circle_points(32, 0.8, 0.1)[:9]))

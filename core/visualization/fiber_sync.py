@@ -26,6 +26,7 @@ from .fiber_sync_runtime import (
     sync_handles as _sync_handles_runtime,
     apply_selection_highlight as _apply_selection_highlight_runtime,
     refresh_selection as _refresh_selection_runtime,
+    refresh_propagated_handles as _refresh_propagated_handles_runtime,
     sync_root_to_scene as _sync_root_to_scene_runtime,
     on_depsgraph_update as _on_depsgraph_update_runtime,
     apply_fiber_points as _apply_fiber_points_runtime,
@@ -151,6 +152,9 @@ class FiberSceneSync:
     def refresh_selection(self, root=None, scene=None, window_manager=None, fiber_ids=None, sync_handles=False):
         return _refresh_selection_runtime(self, root=root, scene=scene, window_manager=window_manager,
                                           fiber_ids=fiber_ids, sync_handles=sync_handles)
+
+    def refresh_propagated_handles(self, root, scene, points_by_id, fiber_ids):
+        return _refresh_propagated_handles_runtime(self, root, scene, points_by_id, fiber_ids)
 
     def refresh_display(self, root=None, scene=None, target_fiber_ids=None):
         return _refresh_display_runtime(self, root=root, scene=scene, target_fiber_ids=target_fiber_ids)

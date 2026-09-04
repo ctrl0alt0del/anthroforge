@@ -4,6 +4,7 @@ import hashlib
 
 from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
+import numpy as np
 
 from ..perf_trace import perf_count, perf_time, perf_timer
 from ..utils import (deformation_generation, depsgraph_for_scene, geometry_generation,
@@ -232,6 +233,19 @@ def build_mesh_collision_data(mesh_obj, depsgraph, cache=None):
     return _remember_payload(cache, key, stamp, "collision", value)
 
 
+def build_mesh_attachment_vertices(mesh_obj, depsgraph, cache=None):
+    key = _typed_cache_key("attachment", mesh_obj); obj_eval = mesh_obj.evaluated_get(depsgraph)
+    scene, stamp = scene_for_id(mesh_obj), _collision_stamp(mesh_obj, obj_eval, depsgraph)
+    local = _local_payload(cache, key, stamp, "attachment")
+    if local is not None: return local
+    entry = scene_cache_get(scene, _surface_entry_key(mesh_obj, "attachment"))
+    if entry and entry.get("stamp") == stamp:
+        return _remember_payload(cache, key, stamp, "attachment", entry["attachment"])
+    value = _build_attachment_vertices(obj_eval)
+    _store_payload(scene, mesh_obj, stamp, "attachment", "attachment", value)
+    return _remember_payload(cache, key, stamp, "attachment", value)
+
+
 def build_mesh_surface_bounds(mesh_obj, depsgraph, cache=None):
     key = _typed_cache_key("bounds", mesh_obj)
     scene, stamp, entry = _cached_surface(mesh_obj, depsgraph, "bounds")
@@ -281,6 +295,16 @@ def _build_collision(obj_eval):
     mesh_eval = obj_eval.to_mesh()
     if mesh_eval is None or len(mesh_eval.vertices) <= 0: return None
     try: return _collision_payload(mesh_eval)
+    finally: obj_eval.to_mesh_clear()
+
+
+def _build_attachment_vertices(obj_eval):
+    mesh = obj_eval.to_mesh()
+    if mesh is None or len(mesh.vertices) <= 0: return None
+    try:
+        values = np.empty(len(mesh.vertices) * 3, dtype=np.float64)
+        mesh.vertices.foreach_get("co", values)
+        return {"verts_local": values.reshape((-1, 3)), "triangles": ()}
     finally: obj_eval.to_mesh_clear()
 
 

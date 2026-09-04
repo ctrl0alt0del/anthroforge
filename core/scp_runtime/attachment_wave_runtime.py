@@ -158,8 +158,22 @@ def _commit_fibers(root, scene, outcome, result):
     handled = set(str(row.id) for row in _requested_fibers(root, outcome)); failed = set()
     started = perf_counter(); _write_fibers(sync, root, scene, by_id, outcome, result, failed)
     write_ms = _elapsed(started); started = perf_counter()
-    if handled: sync.refresh_selection(root=root, scene=scene, fiber_ids=handled, sync_handles=True)
+    if handled: _refresh_fiber_handles(sync, root, scene, outcome, result, handled, failed)
     return handled, failed, write_ms, _elapsed(started)
+
+
+def _refresh_fiber_handles(sync, root, scene, outcome, result, handled, failed):
+    refresh = getattr(sync, "refresh_propagated_handles", None)
+    points = _successful_point_map(outcome, result, failed)
+    if refresh is not None and refresh(root, scene, points, handled): return
+    sync.refresh_selection(root=root, scene=scene, fiber_ids=handled, sync_handles=True)
+
+
+def _successful_point_map(outcome, result, failed):
+    values = {}
+    for index, fiber_id in enumerate(outcome.request.fiber_ids):
+        if fiber_id not in failed: values[fiber_id] = result.fiber_points[index]
+    return values
 
 
 def _write_fibers(sync, root, scene, by_id, outcome, result, failed):

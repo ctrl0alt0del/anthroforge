@@ -389,8 +389,10 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         sync_vcp_mirrors(root_obj, bpy.context.scene, target_fiber_ids={item.id})
         mirror = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_mirror_proxy"))
         before = _curve_coords(mirror)
+        self.assertIs(mirror.data, proxy.data)
         proxy.data.splines[0].points[0].co.x += 5.0
         proxy["af_fiber_output_state"] = "STALE"
         sync_vcp_mirrors(root_obj, bpy.context.scene, target_fiber_ids={item.id})
         retained = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_mirror_proxy"))
         self.assertEqual((retained is mirror, _curve_coords(retained)), (True, before))
+        self.assertIsNot(retained.data, proxy.data)

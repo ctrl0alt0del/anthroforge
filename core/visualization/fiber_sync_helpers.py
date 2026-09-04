@@ -339,6 +339,8 @@ def _reuse_curve_payload(obj, points, signature, scene):
 
 
 def _write_curve_preview(obj, points, thickness, cyclic):
+    from .mirror_objects import detach_shared_mirrors
+    detach_shared_mirrors(obj)
     telemetry_count("fiber_preview_writes")
     _write_curve_spline(obj.data, points, cyclic)
     update_curve_style(obj, thickness)

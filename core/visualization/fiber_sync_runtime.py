@@ -5,6 +5,7 @@ from ..deps.controls import classify_control_object, enqueue_control_intent
 from ..deps.conflict_resolver import resolve_conflict
 from ..scp_runtime.common import is_runtime_applied_matrix, mark_applied_matrix
 from ..vcp.fiber_modes import is_loop_fiber, is_open_fiber
+from ..vcp.fiber_node_attachment_codec import decode_node_attachments
 from ..vcp.prop_update_guard import suppress_vcp_prop_updates
 from ..vcp.runtime_state import fiber_eps_pen, fiber_invalid_reason, fiber_not_converged, fiber_route_mode
 from ..utils import depsgraph_for_scene, get_af_root, scene_for_id
@@ -253,6 +254,70 @@ def refresh_selection(sync, root=None, scene=None, window_manager=None, fiber_id
     if root is None or scene is None:
         return
     _run_selection_refresh(sync, root, scene, window_manager, fiber_ids, sync_handles)
+
+
+def refresh_propagated_handles(sync, root, scene, points_by_id, fiber_ids):
+    fiber = _active_fiber(root, scene); affected = set(fiber_ids or ())
+    if fiber is None or str(fiber.id) not in affected: return True
+    points = tuple(dict(points_by_id or {}).get(str(fiber.id), ()))
+    if len(points) != int(fiber.node_count): return False
+    payload = decode_node_attachments(fiber.node_attachments_json)
+    indices = _propagated_pin_indices(fiber, payload)
+    if indices is None: return False
+    vis_col = sync._get_vis_collection(scene); index = build_vcp_object_index(vis_col, root.name)
+    return _place_propagated_handles(index, fiber, points, indices)
+
+
+def _propagated_pin_indices(fiber, payload):
+    if payload is None or payload.point_count != int(fiber.node_count): return None
+    bindings = _propagated_bindings(fiber)
+    if is_loop_fiber(fiber): return _ordered_matches(payload.nodes, bindings, 0, len(payload.nodes))
+    return _open_matches(payload.nodes, bindings)
+
+
+def _propagated_bindings(fiber):
+    if is_loop_fiber(fiber):
+        return tuple((row.parent_id, row.attach_param) for row in fiber.loop_anchors)
+    values = [(fiber.a_parent_id, fiber.a_attach_param)]
+    values.extend((row.parent_id, row.attach_param) for row in fiber.mid_touches)
+    values.append((fiber.b_parent_id, fiber.b_attach_param)); return tuple(values)
+
+
+def _open_matches(nodes, bindings):
+    if len(nodes) < 2 or len(bindings) < 2: return None
+    if not _binding_matches(nodes[0], bindings[0]): return None
+    if not _binding_matches(nodes[-1], bindings[-1]): return None
+    middle = _ordered_matches(nodes, bindings[1:-1], 1, len(nodes) - 1)
+    return None if middle is None else (0, *middle, len(nodes) - 1)
+
+
+def _ordered_matches(nodes, bindings, start, stop):
+    indices, cursor = [], int(start)
+    for binding in bindings:
+        match = next((i for i in range(cursor, stop) if _binding_matches(nodes[i], binding)), None)
+        if match is None: return None
+        indices.append(match); cursor = match + 1
+    return tuple(indices)
+
+
+def _binding_matches(node, binding):
+    return node.target_id == str(binding[0] or "") and node.attach_raw == str(binding[1] or "")
+
+
+def _place_propagated_handles(index, fiber, points, indices):
+    handles = _propagated_handle_rows(index, fiber)
+    if len(handles) != len(indices) or any(handle is None for handle in handles): return False
+    for handle, point_index in zip(handles, indices): _place_handle_world(handle, points[point_index])
+    return True
+
+
+def _propagated_handle_rows(index, fiber):
+    fid = str(fiber.id)
+    if is_loop_fiber(fiber):
+        return tuple(index["loop"].get((fid, i)) for i in range(len(fiber.loop_anchors)))
+    values = [index["endpoint"].get((fid, "A"))]
+    values.extend(index["touch"].get((fid, i)) for i in range(len(fiber.mid_touches)))
+    values.append(index["endpoint"].get((fid, "B"))); return tuple(values)
 
 
 def refresh_display(sync, root=None, scene=None, target_fiber_ids=None):

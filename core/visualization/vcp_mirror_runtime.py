@@ -2,9 +2,11 @@ import bpy
 
 from ..scp_runtime.runtime_state import mirror_effective_axis, mirror_source_id, mirror_status
 from ..utils import get_af_root, scene_for_id
-from ..vcp.fiber_modes import fiber_parent_ids
+from ..vcp.fiber_modes import fiber_parent_ids, is_loop_fiber
 from ..vcp.surface_target import SurfaceTargetKind, effective_tissue_target
-from .mirror_objects import create_mirror_from_source, ensure_obj_type, remove_obj, copy_data
+from .mirror_objects import (create_mirror_from_source, ensure_obj_type, ensure_private_data,
+                             remove_obj, restore_curve_snapshot, share_source_data)
+from .fiber_sync_helpers import persisted_fiber_points, show_curve_preview
 from .muscle_sync_helpers import resolve_muscle_surface
 from .mirror_rules import mirror_world_matrix
 
@@ -211,7 +213,7 @@ def _ensure_mirror_from_source(collection, src_obj, existing):
 
 
 def _copy_mirror_transform(src_obj, mirror_obj, axis, origin):
-    copy_data(src_obj, mirror_obj)
+    share_source_data(src_obj, mirror_obj)
     mirror_obj.matrix_world = mirror_world_matrix(src_obj.matrix_world, axis=axis, origin=origin)
     mirror_obj.hide_select = True
 
@@ -330,12 +332,23 @@ def _sync_one_fiber_mirror(root, vis_col, fiber, fid, fibers_by_id, scp_by_id):
     if rule is None or src is None:
         return False
     if src.get("af_fiber_output_state") != "CURRENT":
-        return mir is not None
+        return _retain_stale_fiber_mirror(root, fiber, src, mir)
     mir = _ensure_mirror_from_source(vis_col, src, mir)
     if mir is None:
         return False
     _copy_mirror_transform(src, mir, *rule)
     _tag_fiber_mirror(mir, root.name, fid)
+    return True
+
+
+def _retain_stale_fiber_mirror(root, fiber, source, mirror):
+    if mirror is None: return False
+    if not bool(mirror.get("af_mirror_shared_data")): return True
+    points = persisted_fiber_points(scene_for_id(root), root.name, fiber.id)
+    restored = restore_curve_snapshot(mirror)
+    if not restored: ensure_private_data(mirror)
+    if points and not restored:
+        show_curve_preview(mirror, points, fiber.thickness, cyclic=is_loop_fiber(fiber))
     return True
 
 

@@ -105,6 +105,12 @@ def _large_surface_binding(root_obj, count=300):
 
 
 class AttachmentPipelineTests(BlenderTestCase):
+    def test_attachment_capture_uses_vertex_only_payload(self):
+        obj = mesh_object("AttachmentVertices")
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        payload = surface_runtime.build_mesh_attachment_vertices(obj, depsgraph)
+        self.assertEqual((payload["verts_local"].shape, payload["triangles"]), ((3, 3), ()))
+
     def test_sibling_attachments_share_one_wave(self):
         root_obj = root(); parent = scp_with_object(root_obj, "Parent", empty_object("Parent"), with_geometry=False)
         left = scp_with_object(root_obj, "Left", empty_object("Left"), with_geometry=False)

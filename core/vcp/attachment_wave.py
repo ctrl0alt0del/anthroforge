@@ -6,7 +6,7 @@ from enum import Enum
 import numpy as np
 
 
-ATTACHMENT_WAVE_VERSION = "attachment-wave-1"
+ATTACHMENT_WAVE_VERSION = "attachment-wave-2"
 
 
 class AttachmentExecutorKind(str, Enum):

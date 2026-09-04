@@ -22,7 +22,7 @@ from .runtime_state import (attach_child_normal_local, attach_child_origin_local
                             attach_child_tangent_local, attach_flow_param,
                             attach_initialized, attach_parent_offset_local,
                             attach_parent_tangent_hint_local)
-from .surface import build_mesh_collision_data, resolve_tangent_strategy
+from .surface import build_mesh_attachment_vertices, resolve_tangent_strategy
 from .tree import children_map
 
 
@@ -170,7 +170,7 @@ class _WaveCapture:
     def _surface_snapshot(self, sid):
         obj = indexed_geometry_mesh_scp_obj(self.objects, sid); owner = self._transform_object(sid)
         if obj is None or owner is None or self.depsgraph is None: return None
-        payload = build_mesh_collision_data(obj, self.depsgraph, self.surface_cache)
+        payload = build_mesh_attachment_vertices(obj, self.depsgraph, self.surface_cache)
         if not payload: return None
         vertices, triangles = _cached_arrays(self.scene, self.root, sid, payload)
         evaluated = obj.evaluated_get(self.depsgraph); relative = owner.matrix_world.inverted_safe() @ evaluated.matrix_world
