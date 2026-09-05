@@ -1,9 +1,12 @@
+import builtins
+
 from mathutils import Vector
 
 from ..utils import scene_cache_drop, scene_cache_get, scene_cache_set, scene_for_id
 
 _EPS = 1.0e-6
 _APPLIED_MW_KEY = "af_scp_attach_applied_mw"
+_INDEX_GENERATIONS_KEY = "_af_scp_object_index_generations"
 
 
 def as_id(value):
@@ -115,20 +118,45 @@ def _scp_ids(root):
 
 def invalidate_scp_object_maps(scene, root_name):
     scene_cache_drop(scene, _index_key(root_name))
+    key = _index_generation_key(scene, root_name)
+    state = _index_generations()
+    state[key] = state.get(key, 0) + 1
 
 
-def _cached_index_ok(cached, count):
-    return bool(cached and cached.get("count") == count and cached.get("index"))
+def invalidate_scp_prop_map(root):
+    scene_cache_drop(scene_for_id(root), _prop_key(root))
+
+
+def _index_generations():
+    state = getattr(builtins, _INDEX_GENERATIONS_KEY, None)
+    if state is None:
+        state = {}
+        setattr(builtins, _INDEX_GENERATIONS_KEY, state)
+    return state
+
+
+def _index_generation_key(scene, root_name):
+    return (_root_id(scene), as_id(root_name))
+
+
+def _index_generation(scene, root_name):
+    return _index_generations().get(_index_generation_key(scene, root_name), 0)
+
+
+def _cached_index_ok(cached, count, generation):
+    return bool(cached and cached.get("count") == count and
+                cached.get("generation") == generation and cached.get("index"))
 
 
 def scp_object_maps(scene, root_name):
     key = _index_key(root_name)
     count = 0 if scene is None else len(scene.objects)
+    generation = _index_generation(scene, root_name)
     cached = scene_cache_get(scene, key)
-    if _cached_index_ok(cached, count):
+    if _cached_index_ok(cached, count, generation):
         return cached["index"]
     index = _build_scp_object_maps(scene, root_name)
-    scene_cache_set(scene, key, {"count": count, "index": index})
+    scene_cache_set(scene, key, {"count": count, "generation": generation, "index": index})
     return index
 
 

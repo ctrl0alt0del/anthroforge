@@ -109,9 +109,11 @@ class VcpUseCaseTests(unittest.TestCase):
         root_obj.af_vcp_system.fibers = FakeCollection()
         calls = []
         ctx = context(scene(root_obj))
+        sync = SimpleNamespace(refresh_selection=lambda **_kwargs: None)
         with patch("app.use_cases.fiber_create._resolved_inputs", return_value=("S1", "S2", "A", "B")):
             with patch("app.use_cases.fiber_create._sync_entity", side_effect=lambda *args: calls.append(args)):
-                result = create_fiber_vcp(ctx)
+                with patch("app.use_cases.fiber_create._fiber_sync", return_value=sync):
+                    result = create_fiber_vcp(ctx)
         fiber = root_obj.af_vcp_system.fibers[0]
         self.assertTrue(result.ok)
         self.assertEqual((fiber.a_parent_id, fiber.b_parent_id), ("S1", "S2"))
@@ -255,10 +257,12 @@ class VcpUseCaseTests(unittest.TestCase):
         root_obj = root(fibers=[fiber], active_type="FIBER", active_id="F1")
         calls = []
         ctx = context(scene(root_obj))
-        with patch("app.use_cases.fiber_tools._fiber_sync", return_value=SimpleNamespace(clear_solver_cache=calls.append)):
+        with patch("app.use_cases.fiber_tools._fiber_sync", return_value=SimpleNamespace(clear_solver_cache=calls.append)), \
+             patch("app.use_cases.fiber_tools._clear_v3_warm") as clear_v3:
             result = clear_fiber_warm_start(ctx)
         self.assertTrue(result.ok)
         self.assertEqual(calls, ["F1"])
+        clear_v3.assert_called_once_with(ctx, root_obj, fiber)
         self.assertEqual((fiber_recompute_status(fiber), fiber_recompute_ms(fiber)), ("UNKNOWN", 0.0))
         self.assertEqual((fiber_eps_disp(fiber), fiber_eps_pen(fiber)), (0.0, 0.0))
 
@@ -271,7 +275,7 @@ class VcpUseCaseTests(unittest.TestCase):
         with patch("app.use_cases.fiber_tools._request_refinement", return_value=runner):
             result = recompute_fiber(ctx)
         self.assertTrue(result.ok)
-        runner.assert_called_once_with(root_obj, ctx.scene, fiber, show_preview=False)
+        runner.assert_called_once_with(root_obj, ctx.scene, fiber, show_preview=True)
         self.assertIn("background", result.message)
 
     def test_recompute_fiber_reports_enqueue_failure(self):

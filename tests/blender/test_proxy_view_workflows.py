@@ -12,13 +12,14 @@ import bmesh
 import bpy
 from mathutils import Vector
 
-from _helpers import BlenderTestCase, empty_object, find_flagged, mesh_object, root, scp_with_object, select_only, temp_blend_path
+from _helpers import BlenderTestCase, empty_object, fiber, find_flagged, mesh_object, root, scp_with_object, select_only, temp_blend_path
 from anthroforge.app.use_cases.proxy_view import switch_to_proxy_view
 from anthroforge.core.attachment_codec import parse_fiber_attach_param
 from anthroforge.core.scp_proxy import flush_proxy_session_runtime, run_proxy_session_guard
 from anthroforge.core.scp_proxy.consts import ATTR_SLOT, ATTR_VERTEX, SIDE_MIRRORED
 from anthroforge.core.scp_proxy.session import active_session
 from anthroforge.core.scp_runtime.lookup import set_parent_relation
+from anthroforge.core.scp_runtime.mirror_roles import apply_scp_mirror_roles
 from anthroforge.core.scp_runtime import viewport_picker
 from anthroforge.core.utils import get_af_root
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
@@ -134,6 +135,39 @@ def _modal_proxy_hit(root_obj, obj, face_index=0):
 def _fiber_points_world(fiber_id):
     obj = find_flagged("af_fiber_proxy", fiber_id, "af_fiber_id")
     return [] if obj is None else [Vector(point) for point in json.loads(obj["af_fiber_points_world"])]
+
+
+def _fiber_curve_points_world(fiber_id):
+    obj = find_flagged("af_fiber_proxy", fiber_id, "af_fiber_id")
+    splines = () if obj is None else tuple(obj.data.splines)
+    if not splines:
+        return []
+    return [obj.matrix_world @ point.co.xyz for point in splines[0].points]
+
+
+def _vcp_collection():
+    collection = bpy.context.scene.collection.children.get("AF_VCP_VIS")
+    if collection is None:
+        collection = bpy.data.collections.new("AF_VCP_VIS")
+        bpy.context.scene.collection.children.link(collection)
+    return collection
+
+
+def _source_fiber_proxy(root_obj, item):
+    curve = bpy.data.curves.new("FiberSource", "CURVE")
+    curve.dimensions = "3D"
+    spline = curve.splines.new("POLY")
+    spline.points.add(1)
+    spline.points[0].co, spline.points[1].co = (0, 0, 0, 1), (1, 1, 0, 1)
+    obj = bpy.data.objects.new("FiberSource", curve)
+    _vcp_collection().objects.link(obj)
+    obj["af_fiber_proxy"], obj["af_root_name"] = True, root_obj.name
+    obj["af_fiber_id"], obj["af_fiber_output_state"] = item.id, "CURRENT"
+    return obj
+
+
+def _curve_coords(obj):
+    return tuple(tuple(float(value) for value in point.co) for spline in obj.data.splines for point in spline.points)
 
 
 def _polyline_has_interior_samples(points, limit=1.0, steps=4):
@@ -319,11 +353,18 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         _edit_select(proxy, _proxy_vertex_index(proxy, cube.id, 0), _proxy_vertex_index(proxy, cube.id, 7))
         self.assertEqual(bpy.ops.af.connect_proxy_vertices_with_fiber(), {"FINISHED"})
         fiber = root_obj.af_vcp_system.fibers[0]
-        self.assertFalse(_polyline_has_interior_samples(_fiber_points_world(fiber.id)))
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        preview = _fiber_curve_points_world(fiber.id)
+        self.assertEqual(proxy.get("af_fiber_output_state"), "STALE")
+        self.assertFalse(proxy.get("af_fiber_points_world"))
+        self.assertFalse(_polyline_has_interior_samples(preview, limit=0.99))
         _object_mode()
         self.assertEqual(bpy.ops.af.recompute_fiber(fiber_id=fiber.id), {"FINISHED"})
         self.assertTrue(drain_fiber_refinements())
-        self.assertFalse(_polyline_has_interior_samples(_fiber_points_world(fiber.id)))
+        retained = _fiber_curve_points_world(fiber.id)
+        self.assertEqual(len(retained), len(preview))
+        self.assertEqual(proxy.get("af_fiber_display_mode"), "FAILED_PREVIEW")
+        self.assertFalse(_polyline_has_interior_samples(retained, limit=0.99))
 
     def test_mirrored_proxy_selection_maps_back_to_target_scp(self):
         root_obj, source, target = _mirror_setup()
@@ -339,3 +380,19 @@ class ProxyViewWorkflowTests(BlenderTestCase):
         sync_vcp_mirrors(root=root_obj, scene=bpy.context.scene, target_fiber_ids={fiber.id})
         mirror = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_mirror_proxy") and obj.get("af_source_fiber_id") == fiber.id)
         self.assertEqual((fiber.a_parent_id, fiber.b_parent_id, parse_fiber_attach_param(fiber.a_attach_param)[0], mirror is not None), (target.id, target.id, "surface_param_v2", True))
+
+    def test_stale_fiber_preserves_last_good_mirror(self):
+        root_obj, _source, target = _mirror_setup()
+        apply_scp_mirror_roles(root_obj)
+        item = fiber(root_obj, target.id, target.id)
+        proxy = _source_fiber_proxy(root_obj, item)
+        sync_vcp_mirrors(root_obj, bpy.context.scene, target_fiber_ids={item.id})
+        mirror = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_mirror_proxy"))
+        before = _curve_coords(mirror)
+        self.assertIs(mirror.data, proxy.data)
+        proxy.data.splines[0].points[0].co.x += 5.0
+        proxy["af_fiber_output_state"] = "STALE"
+        sync_vcp_mirrors(root_obj, bpy.context.scene, target_fiber_ids={item.id})
+        retained = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_mirror_proxy"))
+        self.assertEqual((retained is mirror, _curve_coords(retained)), (True, before))
+        self.assertIsNot(retained.data, proxy.data)

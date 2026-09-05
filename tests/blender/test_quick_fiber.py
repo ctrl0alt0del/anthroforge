@@ -20,6 +20,7 @@ from anthroforge.core.visualization.fiber_refinement import (
     drain_fiber_refinements,
     fiber_refinement_state,
 )
+from anthroforge.core.vcp.runtime_state import fiber_eps_pen
 from anthroforge.operators import action_library_quick_fiber as modal_ops
 
 
@@ -55,9 +56,13 @@ class QuickFiberTests(BlenderTestCase):
         fiber, proxy = result.value.fiber, result.value.proxy
         self.assertEqual((len(fiber.mid_touches), fiber.mid_touches[0].parent_id), (1, guide.id))
         self.assertEqual(fiber_refinement_state(bpy.context.scene, fiber.id), "REFINING")
-        self.assertLess(len(json.loads(proxy["af_fiber_points_world"])), fiber.node_count)
+        self.assertNotIn("af_fiber_points_world", proxy)
+        self.assertLess(len(proxy.data.splines[0].points), fiber.node_count)
         self.assertTrue(drain_fiber_refinements())
+        self.assertTrue(fiber.use_segment_collisions)
+        self.assertLess(fiber_eps_pen(fiber), 1.0e-5)
         self.assertEqual(len(json.loads(proxy["af_fiber_points_world"])), fiber.node_count)
+        self.assertEqual(len(proxy.data.splines[0].points), fiber.node_count)
         self.assertEqual((bpy.context.active_object, tuple(bpy.context.selected_objects)), (proxy, (proxy,)))
 
     def test_commit_rolls_back_fiber_and_runtime_objects_on_preview_failure(self):
@@ -70,6 +75,16 @@ class QuickFiberTests(BlenderTestCase):
         self.assertFalse(result.ok)
         self.assertEqual(len(root_obj.af_vcp_system.fibers), 0)
         self.assertFalse(any(obj.get("af_fiber_proxy") for obj in bpy.context.scene.objects))
+
+    def test_quick_fiber_requests_interactive_quality(self):
+        root_obj = root()
+        origin = scp_with_object(root_obj, "Origin", mesh_object("Origin"))
+        insert = scp_with_object(root_obj, "Insert", mesh_object("Insert", (2.0, 0.0, 0.0)))
+        failed = RefinementRequest(False, "stop")
+        with patch("anthroforge.app.use_cases.action_library_quick_fiber.request_fiber_refinement",
+                   return_value=failed) as request:
+            commit_quick_fiber(bpy.context, (_point(root_obj, origin), _point(root_obj, insert)))
+        self.assertEqual(request.call_args.kwargs["quality"], "INTERACTIVE")
 
     def test_modal_backspace_navigation_and_coincident_rejection(self):
         point = QuickFiberPoint("S1", "raw", bpy.context.scene.cursor.location.copy(),

@@ -27,14 +27,20 @@ def compute_scc_index(adjacency):
     return idx, sizes
 
 
-def normalize_dirty_hints(entity_sets, dirty_hints):
+def _full_requested(dirty_hints, full):
+    if full is not None:
+        return bool(full)
+    marked = getattr(dirty_hints, "full", None)
+    return bool(marked) if marked is not None else dirty_hints is None or not dirty_hints
+
+
+def normalize_dirty_hints(entity_sets, dirty_hints, full=None):
     all_ids = {et: set(ids) for et, ids in entity_sets.items()}
-    if not dirty_hints:
+    if _full_requested(dirty_hints, full):
         return all_ids, True
-    out = {et: set(dirty_hints.get(et, set()) or set()) & ids for et, ids in all_ids.items()}
-    if any(out.values()):
-        return out, False
-    return all_ids, True
+    hints = dict(dirty_hints or {})
+    out = {et: set(hints.get(et, set()) or set()) & ids for et, ids in all_ids.items()}
+    return out, False
 
 
 def _inject_delayed_dirty(root, scene, dirty):
@@ -110,7 +116,13 @@ def _loop_anchor_stamp(fiber):
 
 def _fiber_stamp(root):
     items = getattr(getattr(root, "af_vcp_system", None), "fibers", ())
-    return tuple((str(f.id or ""), str(getattr(f, "topology_mode", "OPEN") or "OPEN"), str(f.a_parent_id or ""), str(f.b_parent_id or ""), _touch_stamp(f), _loop_anchor_stamp(f)) for f in items)
+    return tuple((str(f.id or ""), str(getattr(f, "topology_mode", "OPEN") or "OPEN"), str(f.a_parent_id or ""), str(f.b_parent_id or ""), _touch_stamp(f), _loop_anchor_stamp(f), _node_attachment_targets(f)) for f in items)
+
+
+def _node_attachment_targets(fiber):
+    try: from ..vcp.fiber_node_attachment_codec import node_attachment_target_ids
+    except ImportError: return ()
+    return node_attachment_target_ids(fiber)
 
 
 def _muscle_stamp(root):
@@ -175,9 +187,9 @@ def _cached_graph_data(root):
     return data
 
 
-def build_runtime_context(root, scene, dirty_hints, gate_meta=None):
+def build_runtime_context(root, scene, dirty_hints, gate_meta=None, full=None):
     graph, entity_sets, adjacency, scc_idx, scc_sizes = _cached_graph_data(root)
-    dirty, is_full = normalize_dirty_hints(entity_sets, dirty_hints)
+    dirty, is_full = normalize_dirty_hints(entity_sets, dirty_hints, full)
     _inject_delayed_dirty(root, scene, dirty)
     dirty, is_full = _apply_ingest_gate(root, scene, dirty, is_full, gate_meta)
     return RuntimeBuild(graph, entity_sets, adjacency, scc_idx, scc_sizes, dirty, is_full)

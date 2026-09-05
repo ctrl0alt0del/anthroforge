@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 TEST_ROOT = Path(__file__).resolve().parents[1]
 ADDON_ROOT = Path(__file__).resolve().parents[2]
@@ -12,10 +13,15 @@ import bpy
 from _helpers import BlenderTestCase, empty_object, mesh_object, root, scp_with_object
 from anthroforge.core.visualization import sync_runner
 from core.scp_runtime.attachment_runtime import apply_scp_attachments, capture_attachment_from_link
+from core.scp_runtime.attachment_wave_capture import plan_attachment_waves
+from core.scp_runtime.attachment_wave_runtime import last_attachment_wave_report
+from core.scp_runtime import surface as surface_runtime
 from core.scp_runtime.common import scp_prop_map
 from core.scp_runtime.lookup import set_parent_relation
 from core.scp_runtime.object_roles import set_scp_geometry_object
-from core.scp_runtime.runtime_state import attach_child_origin_local
+from core.scp_runtime.prop_update_guard import set_parent_id_raw
+from core.scp_runtime.runtime_state import attach_child_origin_local, set_attach_initialized
+from core.vcp.attachment_backend import capture_attachment_from_mesh_vertex, resolve_attachment_world
 
 
 def _world_verts(obj):
@@ -79,7 +85,75 @@ def _offset_mesh_z(obj, distance):
     obj.data.update()
 
 
+def _move_surface_binding(root_obj, parent):
+    scene, mesh = bpy.context.scene, parent.geometry_object_ref.data
+    raw = capture_attachment_from_mesh_vertex(root_obj, scene, parent.id, 1)
+    before = resolve_attachment_world(root_obj, scene, parent.id, raw)
+    mesh.vertices[1].co.z = 1.25
+    mesh.update()
+    after = resolve_attachment_world(root_obj, scene, parent.id, raw)
+    return before, after
+
+
+def _large_surface_binding(root_obj, count=300):
+    mesh = bpy.data.meshes.new("LargeParent")
+    vertices = [(float(i), float(i % 2), 0.0) for i in range(count)]
+    mesh.from_pydata(vertices, (), [(0, index, index + 1) for index in range(1, count - 1, 2)])
+    obj = bpy.data.objects.new("LargeParent", mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    return scp_with_object(root_obj, "LargeParent", obj)
+
+
 class AttachmentPipelineTests(BlenderTestCase):
+    def test_attachment_capture_uses_vertex_only_payload(self):
+        obj = mesh_object("AttachmentVertices")
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        payload = surface_runtime.build_mesh_attachment_vertices(obj, depsgraph)
+        self.assertEqual((payload["verts_local"].shape, payload["triangles"]), ((3, 3), ()))
+
+    def test_sibling_attachments_share_one_wave(self):
+        root_obj = root(); parent = scp_with_object(root_obj, "Parent", empty_object("Parent"), with_geometry=False)
+        left = scp_with_object(root_obj, "Left", empty_object("Left"), with_geometry=False)
+        right = scp_with_object(root_obj, "Right", empty_object("Right"), with_geometry=False)
+        _capture_object_origin_link(parent, left); _capture_object_origin_link(parent, right)
+        waves, issues = plan_attachment_waves(scp_prop_map(root_obj), (), {parent.id})
+        self.assertEqual((waves, issues), ((tuple(sorted((left.id, right.id))),), ()))
+
+    def test_attachment_cycle_blocks_only_its_component(self):
+        root_obj = root(); left = scp_with_object(root_obj, "Left", empty_object("Left"), with_geometry=False)
+        right = scp_with_object(root_obj, "Right", empty_object("Right"), with_geometry=False)
+        set_parent_id_raw(left, right.id); set_parent_id_raw(right, left.id)
+        set_attach_initialized(left, True); set_attach_initialized(right, True)
+        waves, issues = plan_attachment_waves(scp_prop_map(root_obj), {left.id, right.id}, ())
+        self.assertEqual(waves, ()); self.assertEqual({row[0] for row in issues}, {left.id, right.id})
+
+    def test_missing_native_capability_uses_recorded_serial_fallback(self):
+        root_obj, parent, mid, _child = _object_origin_chain()
+        parent.transform_object_ref.location.z = 2.0
+        target = "core.scp_runtime.attachment_wave_runtime.attachment_wave_status"
+        with patch(target, return_value=False):
+            changed = apply_scp_attachments(None, root_obj, bpy.context.scene,
+                scp_prop_map(root_obj), parent_ids={parent.id})
+        report = last_attachment_wave_report(root_obj)
+        self.assertIn(mid.id, changed); self.assertEqual(report.fallback_reason, "NATIVE_ATTACHMENT_UNAVAILABLE")
+
+    def test_surface_binding_refreshes_after_direct_mesh_update(self):
+        root_obj = root()
+        parent = scp_with_object(root_obj, "Parent", mesh_object("Parent"))
+        with patch.object(surface_runtime, "geometry_generation", return_value=0):
+            before, after = _move_surface_binding(root_obj, parent)
+        self.assertEqual((round(before.z, 4), round(after.z, 4)), (0.0, 1.25))
+
+    def test_pending_update_fingerprints_every_large_mesh_vertex(self):
+        root_obj, index = root(), 257
+        parent = _large_surface_binding(root_obj)
+        raw = capture_attachment_from_mesh_vertex(root_obj, bpy.context.scene, parent.id, index)
+        before = resolve_attachment_world(root_obj, bpy.context.scene, parent.id, raw)
+        parent.geometry_object_ref.data.vertices[index].co.z = 1.25
+        parent.geometry_object_ref.data.update()
+        after = resolve_attachment_world(root_obj, bpy.context.scene, parent.id, raw)
+        self.assertEqual((round(before.z, 4), round(after.z, 4)), (0.0, 1.25))
+
     def test_object_origin_attachment_tracks_parent_move(self):
         root_obj = root()
         parent_obj = empty_object("Parent", (0.0, 0.0, 0.0))

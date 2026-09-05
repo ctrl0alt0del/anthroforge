@@ -38,6 +38,12 @@ def clear_override_session():
     _ACTIVE.clear()
 
 
+def reset_shortcut_runtime_state():
+    _ACTIVE.clear()
+    _SUPPRESSED.clear()
+    _RUNTIME.clear()
+
+
 def active_parent_override(child_scp):
     return _active_mode(child_scp, "parent_mode")
 

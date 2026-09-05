@@ -55,6 +55,12 @@ class ImportModelTests(unittest.TestCase):
         settings = PackageSnapshot.from_dict(_snapshot_dict()).topology_settings
         self.assertEqual((settings["target_quad_count"], settings["symmetry_mode"]), (8100, "X"))
 
+    def test_package_snapshot_preserves_optional_unit_contract(self):
+        data = _snapshot_dict()
+        self.assertIsNone(PackageSnapshot.from_dict(data).unit_contract)
+        data["unit_contract"] = {"state": "DECLARED", "version": 1, "meters_per_world_unit": 1.0}
+        self.assertEqual(PackageSnapshot.from_dict(data).unit_contract, data["unit_contract"])
+
 
 def _snapshot_dict():
     return {

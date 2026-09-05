@@ -3,7 +3,7 @@ from collections import OrderedDict
 from types import SimpleNamespace
 import os
 import sys
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 TEST_ROOT = Path(__file__).resolve().parents[1]
 ADDON_ROOT = Path(__file__).resolve().parents[2]
@@ -15,7 +15,7 @@ import bpy
 
 from _helpers import BlenderTestCase, add_shortcut, capture_mesh_attachment, empty_object, fiber, mesh_object, root, scp_with_object, temp_blend_path
 from app.context import AddonContext
-from app.runtime_requests import RuntimeRequest
+from app.runtime_requests import RuntimeRequest, runtime_request
 from core.deps.drivers import DependencyDriver
 from core.id_utils import next_prefixed_id
 from core.scp_runtime.attachment_runtime import apply_scp_attachments, capture_attachment_from_link
@@ -146,6 +146,15 @@ class RecorderDriver(DependencyDriver):
 
 
 class RuntimeContractTests(BlenderTestCase):
+    def test_solve_ready_payloads_union_completed_fiber_ids(self):
+        old = runtime_request({"FIBER": {"F1"}}, source="fiber_refinement",
+                              event_type="FIBER_SOLVE_READY", payload={"solved_fiber_ids": ["F1"]})
+        new = runtime_request({"FIBER": {"F2"}}, source="fiber_refinement",
+                              event_type="FIBER_SOLVE_READY", payload={"solved_fiber_ids": ["F2"]})
+        merged = sync_runner._merge_request(old, new)
+        self.assertEqual((merged.dirty_hints["FIBER"], merged.payload["solved_fiber_ids"]),
+                         ({"F1", "F2"}, ["F1", "F2"]))
+
     def test_register_cycle_restores_properties_and_handlers(self):
         import anthroforge
         from anthroforge.core.visualization import control_runtime as package_control_runtime
@@ -179,6 +188,20 @@ class RuntimeContractTests(BlenderTestCase):
         self.assertEqual(control_runtime._CONTROL_RUNTIME._last_active, ("NONE", ""))
         self.assertEqual((hydrate.call_count, delete_reconcile._DELETE_RECONCILE._owners), (1, {}))
 
+    def test_load_hydration_suppresses_only_internal_property_callbacks(self):
+        from anthroforge.properties import scp_properties, vcp_properties
+        root_obj = root()
+        scp = scp_with_object(root_obj, "Root", empty_object("HydrationScp"))
+        fib = fiber(root_obj, scp.id, scp.id)
+        def mutate_during_load(**_kwargs):
+            scp.name, fib.bend_stiffness = scp.name, fib.bend_stiffness
+        with patch.object(control_runtime, "sync_scene", side_effect=mutate_during_load), patch.object(
+                scp_properties, "sync_context") as scp_sync, patch.object(vcp_properties, "schedule_context") as fiber_sync:
+            control_runtime._hydrate_runtime_state(root_obj, bpy.context.scene)
+            self.assertEqual((scp_sync.call_count, fiber_sync.call_count), (0, 0))
+            scp.name, fib.bend_stiffness = "User Rename", fib.bend_stiffness + 0.01
+        self.assertEqual((scp_sync.call_count, fiber_sync.call_count), (1, 1))
+
     def test_save_reload_preserves_authored_relationships(self):
         path, ids = _save_load_fixture()
         self.addCleanup(lambda: Path(path).unlink(missing_ok=True))
@@ -203,6 +226,12 @@ class RuntimeContractTests(BlenderTestCase):
         self.assertEqual(meta["payload"]["scp_apply_parent_ids"], ["S1"])
         self.assertEqual(meta["payload"]["non_source_ids_by_type"]["SCP"], ["S2"])
 
+    def test_runtime_request_preserves_explicit_contract(self):
+        request = runtime_request({}, full=False, dirty_aspects={"FIBER": {"SOLVER"}}, quality="BAKE")
+        self.assertEqual((request.full, request.bake, request.quality), (False, True, "FINAL"))
+        self.assertEqual(request.dirty_aspects, {"FIBER": {"SOLVER"}})
+        self.assertEqual(request.gate_meta()["dirty_aspects"], {"FIBER": {"SOLVER"}})
+
     def test_schedule_sync_keeps_pending_request_when_runner_busy(self):
         self.addCleanup(_reset_sync_runner)
         _reset_sync_runner()
@@ -226,6 +255,17 @@ class RuntimeContractTests(BlenderTestCase):
         self.assertEqual(request.payload["scp_apply_parent_ids"], ["S1", "S2"])
         self.assertEqual(request.payload["scp_recapture_ids"], ["S2"])
         self.assertEqual(request.payload["non_source_ids_by_type"], {"SCP": ["S9"], "FIBER": ["F1"]})
+
+    def test_fiber_property_updates_coalesce_for_125ms(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        root_obj = root()
+        with patch.object(sync_runner, "_now", return_value=8.0), patch.object(bpy.app.timers, "register") as arm:
+            sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"FIBER": {"F1"}}, source="property", event_type="FIBER_UPDATE", dirty_aspects={"FIBER": {"SOLVER"}})
+            sync_runner.schedule_sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"FIBER": {"F2"}}, source="property", event_type="FIBER_UPDATE", dirty_aspects={"FIBER": {"ATTACHMENT"}})
+        request = sync_runner._PENDING[0].request
+        self.assertEqual((len(sync_runner._PENDING), request.dirty_hints["FIBER"]), (1, {"F1", "F2"}))
+        self.assertEqual((request.dirty_aspects["FIBER"], round(arm.call_args.kwargs["first_interval"], 3)), ({"SOLVER", "ATTACHMENT"}, 0.125))
 
     def test_deferred_scp_transform_waits_for_quiet_delay(self):
         self.addCleanup(_reset_sync_runner)
@@ -333,6 +373,18 @@ class RuntimeContractTests(BlenderTestCase):
         sync_runner._on_history_pre(None)
         self.assertEqual((len(sync_runner._PENDING), sync_runner._RUNNING), (0, False))
 
+    def test_nested_sync_runs_as_bounded_tail_request(self):
+        self.addCleanup(_reset_sync_runner)
+        _reset_sync_runner()
+        root_obj, calls = root(), []
+        def run(**kwargs):
+            calls.append(set(kwargs["dirty_hints"]["FIBER"]))
+            if len(calls) == 1:
+                sync_runner.sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"FIBER": {"F2"}})
+        with patch.object(sync_runner, "run_dependency_runtime", side_effect=run):
+            outcome = sync_runner.sync_from_dirty_hints(root=root_obj, scene=bpy.context.scene, dirty_hints={"FIBER": {"F1"}})
+        self.assertEqual((outcome, calls, len(sync_runner._TAIL_PENDING)), (True, [{"F1"}, {"F2"}], 0))
+
     def test_control_runtime_history_pre_skips_next_depsgraph_sync(self):
         runtime = control_runtime.register_control_runtime()
         runtime._last_active = ("SCP", "S1")
@@ -347,10 +399,15 @@ class RuntimeContractTests(BlenderTestCase):
         meta = {"payload": {"non_source_ids_by_type": {"SCP": ["S2"]}}}
         self.assertEqual(runtime._source_start_nodes(starts, meta), {("SCP", "S1"), ("FIBER", "F1")})
 
-    def test_normalize_dirty_hints_falls_back_to_full_when_no_ids_match(self):
+    def test_normalize_dirty_hints_keeps_unmatched_target_empty(self):
         dirty, is_full = runtime._normalize_dirty_hints({"SCP": {"S1", "S2"}, "FIBER": {"F1"}}, {"SCP": {"MISS"}})
+        self.assertFalse(is_full)
+        self.assertEqual((dirty["SCP"], dirty["FIBER"]), (set(), set()))
+
+    def test_normalize_legacy_empty_hints_still_requests_full(self):
+        dirty, is_full = runtime._normalize_dirty_hints({"SCP": {"S1"}, "FIBER": {"F1"}}, {})
         self.assertTrue(is_full)
-        self.assertEqual((dirty["SCP"], dirty["FIBER"]), ({"S1", "S2"}, {"F1"}))
+        self.assertEqual((dirty["SCP"], dirty["FIBER"]), ({"S1"}, {"F1"}))
 
     def test_dispatch_runtime_intent_enqueues_and_seeds_dirty_sync(self):
         root_obj = root()
@@ -396,6 +453,7 @@ class RuntimeContractTests(BlenderTestCase):
         with patch.object(builtin_drivers, "register_fiber_sync", return_value=sync):
             driver.sync(root(), bpy.context.scene, False, {"FIBER": {"F1"}}, False, gate_meta={"event_type": "SELECTION"})
         self.assertEqual((sync.refresh_selection.call_count, sync.sync_root_to_scene.call_count), (1, 0))
+        self.assertTrue(sync.refresh_selection.call_args.kwargs["sync_handles"])
 
     def test_fiber_sync_driver_skips_load_geometry_sync(self):
         driver = builtin_drivers.FiberSyncDriver()
@@ -403,3 +461,44 @@ class RuntimeContractTests(BlenderTestCase):
         with patch.object(builtin_drivers, "register_fiber_sync", return_value=sync):
             driver.sync(root(), bpy.context.scene, True, {"FIBER": {"F1"}}, False, gate_meta={"event_type": "LOAD"})
         self.assertEqual((sync.refresh_selection.call_count, sync.sync_root_to_scene.call_count), (1, 0))
+        self.assertTrue(sync.refresh_selection.call_args.kwargs["sync_handles"])
+
+    def test_fiber_update_requests_refinement_with_request_quality(self):
+        root_obj = root()
+        item = fiber(root_obj, "A", "B")
+        driver = builtin_drivers.FiberSyncDriver()
+        sync = SimpleNamespace(refresh_selection=Mock())
+        with patch.object(builtin_drivers, "register_fiber_sync", return_value=sync), patch.object(builtin_drivers, "_request_fiber_refinements") as request:
+            driver.sync(root_obj, bpy.context.scene, False, {"FIBER": {item.id}}, False,
+                        gate_meta={"event_type": "FIBER_UPDATE", "quality": "INTERACTIVE"})
+        request.assert_called_once_with(root_obj, bpy.context.scene, {item.id}, "INTERACTIVE")
+        sync.refresh_selection.assert_called_once_with(root=root_obj, scene=bpy.context.scene,
+                                                       fiber_ids={item.id}, sync_handles=True)
+
+    def test_fiber_update_refinement_requests_immediate_preview(self):
+        root_obj = root()
+        item = fiber(root_obj, "A", "B")
+        with patch("core.visualization.fiber_refinement.request_fiber_refinement") as request:
+            builtin_drivers._request_fiber_refinements(root_obj, bpy.context.scene, {item.id}, "INTERACTIVE")
+        request.assert_called_once_with(root_obj, bpy.context.scene, item, show_preview=True,
+                                        quality="INTERACTIVE")
+
+    def test_mirror_skips_provisional_fiber_and_selection_events(self):
+        driver = builtin_drivers.VCPMirrorSyncDriver()
+        impacted = {"FIBER": {"F1"}}
+        with patch.object(builtin_drivers, "sync_vcp_mirrors") as sync:
+            driver.sync(root(), bpy.context.scene, False, impacted, False, {"event_type": "FIBER_UPDATE"})
+            driver.sync(root(), bpy.context.scene, False, impacted, False, {"event_type": "SELECTION"})
+        self.assertEqual(sync.call_count, 0)
+
+    def test_downstream_drivers_skip_selection_events(self):
+        meta = {"event_type": "SELECTION"}
+        drivers = (builtin_drivers.MuscleSyncDriver(), builtin_drivers.FiberSurfaceSyncDriver(),
+                   builtin_drivers.BlobSyncDriver(), builtin_drivers.SoftTissueSyncDriver())
+        with patch.object(builtin_drivers, "register_muscle_sync") as muscle, patch.object(
+                builtin_drivers, "register_fiber_surface_sync") as surface, patch.object(
+                builtin_drivers, "register_blob_sync") as blob, patch.object(
+                builtin_drivers, "register_soft_tissue_sync") as tissue:
+            for driver in drivers:
+                driver.sync(root(), bpy.context.scene, False, {driver.entity_types()[0]: {"X"}}, False, meta)
+        self.assertEqual(sum(item.call_count for item in (muscle, surface, blob, tissue)), 0)

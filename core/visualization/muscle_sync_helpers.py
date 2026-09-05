@@ -1,5 +1,6 @@
 import bpy
 import hashlib
+import numpy as np
 
 from ..deps.control_lifecycle import mark_dynamic_control_object
 from ..perf_trace import perf_count, perf_time, perf_timer
@@ -157,14 +158,20 @@ def update_mesh(obj, verts, faces):
 
 def _update_mesh_payload(obj, verts, faces):
     mesh = obj.data
-    sig, topo = _mesh_signature(verts, faces), _topology_signature(faces)
+    coordinates, topo = _mesh_payload(verts, faces)
+    sig = _mesh_signature(coordinates, topo)
     if obj.get("af_mesh_signature") == sig:
         perf_count(scene_for_id(obj), "mesh_rewrite_skipped")
         return
     if _same_topology(obj, mesh, verts, topo):
-        _update_mesh_vertices(obj, mesh, verts, sig)
+        _update_mesh_vertices(obj, mesh, coordinates, sig)
         return
     _rebuild_mesh(obj, mesh, verts, faces, sig, topo)
+
+
+def _mesh_payload(verts, faces):
+    coordinates = np.ascontiguousarray(verts, dtype=np.float64).reshape((-1, 3))
+    return coordinates, _topology_signature(faces)
 
 
 def _same_topology(obj, mesh, verts, topo):
@@ -172,7 +179,7 @@ def _same_topology(obj, mesh, verts, topo):
 
 
 def _update_mesh_vertices(obj, mesh, verts, sig):
-    mesh.vertices.foreach_set("co", _flat_verts(verts))
+    mesh.vertices.foreach_set("co", np.asarray(verts, dtype=np.float64).reshape(-1))
     mesh.update()
     obj["af_mesh_signature"] = sig
 
@@ -185,25 +192,19 @@ def _rebuild_mesh(obj, mesh, verts, faces, sig, topo):
     obj["af_mesh_topology_signature"] = topo
 
 
-def _flat_verts(verts):
-    return [float(value) for co in verts for value in _co3(co)]
-
-
-def _co3(co):
-    return (float(co.x), float(co.y), float(co.z)) if hasattr(co, "x") else (float(co[0]), float(co[1]), float(co[2]))
-
-
 def _topology_signature(faces):
-    h = hashlib.sha1()
-    for face in tuple(faces or ()):
-        h.update((",".join(str(int(v)) for v in face) + ";").encode())
+    rows = tuple(faces) if faces is not None else ()
+    try: values = np.ascontiguousarray(rows, dtype=np.int64)
+    except ValueError:
+        values = np.fromiter((value for row in rows for value in (len(row), *row)), dtype=np.int64)
+    shape = np.ascontiguousarray(values.shape, dtype=np.int64)
+    h = hashlib.sha1(shape.tobytes()); h.update(values.tobytes())
     return h.hexdigest()
 
 
-def _mesh_signature(verts, faces):
-    h = hashlib.sha1(_topology_signature(faces).encode())
-    for co in tuple(verts or ()):
-        h.update("|{:.6f},{:.6f},{:.6f}".format(*_co3(co)).encode())
+def _mesh_signature(coordinates, topology):
+    h = hashlib.sha1(str(topology).encode())
+    h.update(np.ascontiguousarray(coordinates, dtype=np.float64).tobytes())
     return h.hexdigest()
 
 

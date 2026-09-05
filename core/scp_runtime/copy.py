@@ -5,6 +5,8 @@ from ..shortcuts import remap_overrides
 from ..shortcuts.owner_backsolve import owner_backsolve_enabled
 from ..shortcuts.owners import remapped_shortcut_owner
 from ..vcp.fiber_modes import fiber_parent_ids
+from ..vcp.fiber_node_attachment_codec import (node_attachment_target_ids,
+                                                remap_node_attachment_targets)
 from .bound_objects import clear_scp_tags, iter_bound_objects
 from .common import as_id, find_scp_by_id, scp_prop_map, set_prop_raw
 from .lookup import clear_native_parent_keep_world
@@ -116,7 +118,8 @@ def _apply_scp_links(pairs, scp_map):
 
 def _copyable_fiber(fiber, scp_ids, fiber_ids=None):
     _ = fiber_ids
-    parent_ids = {as_id(pid) for pid in fiber_parent_ids(fiber) if as_id(pid)}
+    values = tuple(fiber_parent_ids(fiber)) + tuple(node_attachment_target_ids(fiber))
+    parent_ids = {as_id(pid) for pid in values if as_id(pid)}
     return bool(parent_ids) and parent_ids <= set(scp_ids or set())
 
 
@@ -144,10 +147,16 @@ def _copy_fiber_item(root, src, maps):
     dst = _new_item(root.af_vcp_system.fibers, "FIBER")
     maps["fibers"][as_id(src.id)] = as_id(dst.id)
     _copy_scalars(src, dst, skip=_FIBER_SKIP), _copy_name(src, dst, dst.id)
+    _remap_node_attachment_copy(dst, maps["scps"])
     dst.a_parent_id = maps["scps"].get(as_id(src.a_parent_id), "")
     dst.b_parent_id = maps["scps"].get(as_id(src.b_parent_id), "")
     _copy_touches(src, dst, maps["scps"])
     _copy_loop_anchors(src, dst, maps["scps"])
+
+
+def _remap_node_attachment_copy(fiber, scp_map):
+    raw = str(getattr(fiber, "node_attachments_json", "") or "")
+    if raw: fiber.node_attachments_json = remap_node_attachment_targets(raw, scp_map)
 
 
 def _copy_fibers(root, scp_ids, maps):

@@ -1,15 +1,55 @@
+import json
+
 try:
     from ...core.vcp.runtime_state import (
+        fiber_active_colliders,
         fiber_invalid_reason,
+        fiber_not_converged,
+        fiber_planner_ms,
+        fiber_recompute_ms,
         fiber_recompute_status,
+        fiber_refine_ms,
+        fiber_eps_disp,
+        fiber_eps_pen,
+        fiber_route_mode,
         reset_fiber_runtime,
+        set_fiber_active_colliders,
+        set_fiber_eps_disp,
+        set_fiber_eps_pen,
+        set_fiber_invalid_reason,
+        set_fiber_not_converged,
+        set_fiber_planner_ms,
+        set_fiber_recompute_ms,
+        set_fiber_recompute_status,
+        set_fiber_refine_ms,
+        set_fiber_route_mode,
     )
+    from ...core.vcp.prop_update_guard import suppress_vcp_prop_updates
 except ImportError:
     from core.vcp.runtime_state import (
+        fiber_active_colliders,
         fiber_invalid_reason,
+        fiber_not_converged,
+        fiber_planner_ms,
+        fiber_recompute_ms,
         fiber_recompute_status,
+        fiber_refine_ms,
+        fiber_eps_disp,
+        fiber_eps_pen,
+        fiber_route_mode,
         reset_fiber_runtime,
+        set_fiber_active_colliders,
+        set_fiber_eps_disp,
+        set_fiber_eps_pen,
+        set_fiber_invalid_reason,
+        set_fiber_not_converged,
+        set_fiber_planner_ms,
+        set_fiber_recompute_ms,
+        set_fiber_recompute_status,
+        set_fiber_refine_ms,
+        set_fiber_route_mode,
     )
+    from core.vcp.prop_update_guard import suppress_vcp_prop_updates
 from ..queries.root import root_for_context
 from .results import failure, success
 
@@ -20,8 +60,17 @@ def clear_fiber_warm_start(context, fiber_id=""):
     if fiber is None:
         return failure(error)
     _fiber_sync().clear_solver_cache(fiber.id)
+    _clear_v3_warm(context, root, fiber)
     _reset_fiber_stats(fiber)
     return success(f"Warm-start cache cleared for {fiber.id}", value=fiber)
+
+
+def _clear_v3_warm(context, root, fiber):
+    try:
+        from ...core.vcp.fiber_v2_runtime import clear_v3_runtime_warm_cache
+    except ImportError:
+        from core.vcp.fiber_v2_runtime import clear_v3_runtime_warm_cache
+    clear_v3_runtime_warm_cache(context.scene, root, {fiber.id})
 
 
 def recompute_fiber(context, fiber_id="", max_passes=12):
@@ -30,10 +79,127 @@ def recompute_fiber(context, fiber_id="", max_passes=12):
     fiber, error = _resolved_fiber(root, fiber_id)
     if fiber is None:
         return failure(error)
-    request = _request_refinement()(root, context.scene, fiber, show_preview=False)
+    request = _request_refinement()(root, context.scene, fiber, show_preview=True)
     if not request.ok:
         return failure(request.error or _invalid_message(fiber))
     return success(f"Refining {fiber.id} in the background", value=fiber)
+
+
+def restore_legacy_fiber(context, fiber_id=""):
+    root = root_for_context(context)
+    fiber, error = _resolved_fiber(root, fiber_id)
+    points = None if fiber is None else _decoded_points(fiber.legacy_points_json)
+    if fiber is None or not points:
+        return failure(error or "No legacy Fiber shape is available.")
+    _restore_legacy_state(fiber)
+    _clear_v3_warm(context, root, fiber)
+    proxy = _fiber_sync().apply_points(root, context.scene, fiber, points, commit=True)
+    _capture_legacy_node_attachments(root, context.scene, fiber, points)
+    _write_legacy_provenance(proxy)
+    return success("Legacy Fiber shape restored.", value=proxy)
+
+
+def _save_legacy_snapshot(root, scene, fiber):
+    persisted_fiber_points = _persisted_fiber_points()
+    points = persisted_fiber_points(scene, root.name, fiber.id) or ()
+    fiber.legacy_points_json = json.dumps([list(point) for point in points])
+    fiber.legacy_diagnostics_json = json.dumps(_legacy_diagnostics(fiber))
+    fiber.legacy_status = fiber_recompute_status(fiber)
+    fiber.legacy_eps_disp, fiber.legacy_eps_pen = fiber_eps_disp(fiber), fiber_eps_pen(fiber)
+
+
+def _capture_legacy_node_attachments(root, scene, fiber, points):
+    try: from ...core.visualization.fiber_node_attachment_runtime import capture_committed_fiber_node_attachments
+    except ImportError: from core.visualization.fiber_node_attachment_runtime import capture_committed_fiber_node_attachments
+    return capture_committed_fiber_node_attachments(root, scene, fiber, points)
+
+
+def _legacy_diagnostics(fiber):
+    return {"status": fiber_recompute_status(fiber), "eps_disp": fiber_eps_disp(fiber),
+            "eps_pen": fiber_eps_pen(fiber), "route": fiber_route_mode(fiber),
+            "planner_ms": fiber_planner_ms(fiber), "refine_ms": fiber_refine_ms(fiber),
+            "recompute_ms": fiber_recompute_ms(fiber),
+            "active_colliders": fiber_active_colliders(fiber),
+            "invalid_reason": fiber_invalid_reason(fiber),
+            "not_converged": fiber_not_converged(fiber)}
+
+
+def _cancel_v2_migration(fiber):
+    try:
+        from ...core.visualization.fiber_engine_migration import clear_engine_migration
+    except ImportError:
+        from core.visualization.fiber_engine_migration import clear_engine_migration
+    clear_engine_migration(fiber)
+
+
+def _write_legacy_provenance(proxy):
+    try:
+        from ...core.vcp.fiber_engine_registry import V1_PRODUCTION_VERSION
+        from ...core.vcp.fiber_engine_selection import resolve_fiber_engine
+        from ...core.visualization.fiber_engine_migration import write_engine_provenance
+    except ImportError:
+        from core.vcp.fiber_engine_registry import V1_PRODUCTION_VERSION
+        from core.vcp.fiber_engine_selection import resolve_fiber_engine
+        from core.visualization.fiber_engine_migration import write_engine_provenance
+    write_engine_provenance(proxy, resolve_fiber_engine("V1"), V1_PRODUCTION_VERSION)
+
+
+def _restore_legacy_state(fiber):
+    with suppress_vcp_prop_updates():
+        fiber.solver_version = 1
+    _cancel_v2_migration(fiber)
+    _restore_legacy_diagnostics(fiber)
+    _fiber_sync().clear_solver_cache(fiber.id)
+
+
+def _restore_legacy_diagnostics(fiber):
+    data = _decoded_mapping(fiber.legacy_diagnostics_json)
+    set_fiber_recompute_status(fiber, data.get("status", fiber.legacy_status or "UNKNOWN"))
+    set_fiber_eps_disp(fiber, data.get("eps_disp", fiber.legacy_eps_disp))
+    set_fiber_eps_pen(fiber, data.get("eps_pen", fiber.legacy_eps_pen))
+    _restore_legacy_detail(fiber, data)
+
+
+def _restore_legacy_detail(fiber, data):
+    set_fiber_route_mode(fiber, data.get("route", "LOCAL_FALLBACK"))
+    set_fiber_planner_ms(fiber, data.get("planner_ms", 0.0))
+    set_fiber_refine_ms(fiber, data.get("refine_ms", 0.0))
+    set_fiber_recompute_ms(fiber, data.get("recompute_ms", 0.0))
+    set_fiber_active_colliders(fiber, data.get("active_colliders", 0))
+    set_fiber_invalid_reason(fiber, data.get("invalid_reason", ""))
+    set_fiber_not_converged(fiber, data.get("not_converged", False))
+
+
+def _decoded_points(raw):
+    Vector = _vector_type()
+    try:
+        return [Vector(tuple(float(value) for value in row[:3])) for row in json.loads(str(raw or ""))]
+    except Exception:
+        return None
+
+
+def _vector_type():
+    try:
+        from mathutils import Vector
+        return Vector
+    except ImportError:
+        return lambda values: tuple(values)
+
+
+def _decoded_mapping(raw):
+    try:
+        value = json.loads(str(raw or ""))
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def _persisted_fiber_points():
+    try:
+        from ...core.visualization.fiber_sync_helpers import persisted_fiber_points
+    except ImportError:
+        from core.visualization.fiber_sync_helpers import persisted_fiber_points
+    return persisted_fiber_points
 
 
 def add_fiber_touch_point(context, fiber_id=""):
@@ -70,6 +236,7 @@ def remove_fiber_touch_point(context, fiber_id="", touch_index=-1):
     fiber.mid_touches.remove(index)
     _set_prefer_bake(fiber, False)
     _fiber_sync().clear_solver_cache(fiber.id)
+    _clear_v3_warm(context, root, fiber)
     _sync_entity(root, context.scene, "FIBER", {fiber.id}, bake=False)
     return success(value=fiber)
 
@@ -143,6 +310,7 @@ def _append_touch_result(context, root, fiber, touch_specs):
 def _touch_order_changed(context, root, fiber):
     _set_prefer_bake(fiber, False)
     _fiber_sync().clear_solver_cache(fiber.id)
+    _clear_v3_warm(context, root, fiber)
     _sync_entity(root, context.scene, "FIBER", {fiber.id}, bake=False)
     return success(value=fiber)
 
@@ -166,8 +334,9 @@ def _is_fiber_touch_handle(obj, root_name, fiber_id):
 
 
 def _append_touch_specs(fiber, touch_specs):
-    for scp_id, attach_param in tuple(touch_specs or ()):
-        _append_touch(fiber, scp_id, attach_param)
+    with suppress_vcp_prop_updates():
+        for scp_id, attach_param in tuple(touch_specs or ()):
+            _append_touch(fiber, scp_id, attach_param)
 
 
 def _append_touch(fiber, scp_id, attach_param):

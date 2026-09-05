@@ -7,11 +7,6 @@ from ..deps.conflict_resolver import resolve_conflict
 from ..utils import get_af_root, scene_for_id
 from ..vcp.fiber_modes import is_loop_fiber
 from ..vcp.runtime_state import muscle_inflation_ctrl_world, set_muscle_inflation_ctrl_world
-from ..vcp.muscle_surface import (
-    build_surface_data,
-    validate_anchor_structure,
-    prepare_surface_rows,
-)
 from .muscle_sync_helpers import (
     get_vis_collection,
     find_muscle_proxy,
@@ -29,9 +24,26 @@ from .muscle_sync_helpers import (
 )
 from .muscle_inflation_modes import muscle_inflation_behavior, uses_inflation_control
 from .muscle_sync_runtime import collect_muscle_rows, ensure_inflation_ctrl
+from .muscle_numeric_runtime import capture_muscle_work, execute_muscle_work, publish_muscle_work
 from .fiber_surface_sync import evaluate_surface_record
 from .control_runtime import active_entity_id
 from .vcp_object_index import build_vcp_object_index
+
+
+def _fiber_stale(scene, root_name, fiber_id):
+    objects = () if scene is None else tuple(scene.objects)
+    return any(obj.get("af_fiber_proxy") and not obj.get("af_fiber_mirror_proxy")
+               and obj.get("af_root_name") == root_name
+               and obj.get("af_fiber_id") == fiber_id
+               and obj.get("af_fiber_output_state") == "STALE" for obj in objects)
+
+
+def _fiber_surface_stale(scene, root_name, surface_id):
+    objects = () if scene is None else tuple(scene.objects)
+    return any(obj.get("af_fiber_surface_proxy")
+               and obj.get("af_root_name") == root_name
+               and obj.get("af_fiber_surface_id") == surface_id
+               and obj.get("af_fiber_surface_output_state") == "STALE" for obj in objects)
 
 
 class MuscleSceneSync:
@@ -129,14 +141,29 @@ class MuscleSceneSync:
     def _clear_muscle_meshes(self, vcp, muscle_id, base_obj, infl_obj):
         self._update_mesh(base_obj, [], [])
         self._update_mesh(infl_obj, [], [])
+        self._set_output_state((base_obj, infl_obj), "INVALID")
         self._set_muscle_active_materials(vcp, muscle_id, base_obj, infl_obj)
+
+    def _set_output_state(self, objects, state):
+        for obj in tuple(objects or ()):
+            if obj is not None:
+                obj["af_muscle_output_state"] = str(state)
+
+    def _retain_stale_muscle(self, base_obj, infl_obj):
+        self._set_output_state((base_obj, infl_obj), "STALE")
 
     def _collect_points_with_fallback(self, root, scene, muscle, ordered_fibers):
         ordered_points = collect_muscle_rows(root, scene, muscle, ordered_fibers)
-        if ordered_points:
+        if ordered_points or self._runtime_request_active():
             return ordered_points
-        # Route fallback updates through dependency runtime so downstream impacts
-        # stay centralized in one scheduler.
+        self._request_fiber_fallback(root, scene, ordered_fibers)
+        return collect_muscle_rows(root, scene, muscle, ordered_fibers)
+
+    def _runtime_request_active(self):
+        from .sync_runner import runtime_request_active
+        return runtime_request_active()
+
+    def _request_fiber_fallback(self, root, scene, ordered_fibers):
         from .sync_runner import sync_from_dirty_hints
         sync_from_dirty_hints(
             root=root,
@@ -144,40 +171,6 @@ class MuscleSceneSync:
             dirty_hints=dirty_hints_for("FIBER", {f.id for f in ordered_fibers}),
             bake=False,
         )
-        return collect_muscle_rows(root, scene, muscle, ordered_fibers)
-
-    def _build_surface(self, points, closed_v, closed_u):
-        try:
-            verts, faces_raw, _n = build_surface_data(ordered_fiber_points=points, closed_v=bool(closed_v), closed_u=bool(closed_u))
-        except Exception:
-            return None, None
-        return verts, faces_raw
-
-    def _legacy_surface_base_points(self, root, scene, muscle, ordered_fibers, missing):
-        if missing or not ordered_fibers:
-            return None
-        points = self._collect_points_with_fallback(root, scene, muscle, ordered_fibers)
-        if not points or len(points) < 2:
-            return None
-        if len(ordered_fibers) > 1 and not validate_anchor_structure(ordered_fibers)[0]:
-            return None
-        return prepare_surface_rows(points, int(ordered_fibers[0].node_count), densify_v=True, closed_u=self._closed_u(ordered_fibers))
-
-    def _surface_mesh_data(self, base_points, config, closed_u):
-        base_verts, faces_raw = self._build_surface(base_points, self._closed_v(config), closed_u)
-        if base_verts is None:
-            return None
-        flip = bool(getattr(config, "flip_normals", False))
-        faces = [(f[0], f[3], f[2], f[1]) for f in faces_raw] if flip else faces_raw
-        return base_verts, faces
-
-    def _inflated_surface_verts(self, base_points, muscle, config, closed_u):
-        infl_points = self._inflation_behavior(muscle).field.inflate(base_points, muscle)
-        infl_verts, _faces_raw = self._build_surface(infl_points, self._closed_v(config), closed_u)
-        return infl_verts
-
-    def _closed_v(self, config):
-        return bool(getattr(config, "close_across_fibers", getattr(config, "closed_v", False)))
 
     def _closed_u(self, fibers):
         return bool(fibers and is_loop_fiber(fibers[0]))
@@ -188,21 +181,20 @@ class MuscleSceneSync:
             return control.ensure_control(self, vis_col, root, muscle, base_obj, base_points)
         return control.cleanup_controls(self, vis_col, root, muscle)
 
-    def _sync_single_muscle(self, vis_col, root, scene, vcp, muscle):
-        base_obj, infl_obj = self._ensure_muscle_meshes(vis_col, root, muscle.id)
-        surface_input = self._muscle_surface_input(root, scene, muscle)
-        if surface_input is None:
-            self._clear_muscle_meshes(vcp, muscle.id, base_obj, infl_obj)
-            return
-        base_points, closed_u, config = surface_input
-        self._apply_synced_surface(vis_col, root, scene, vcp, muscle, base_obj, infl_obj, base_points, closed_u, config)
+    def _source_output_stale(self, root, scene, muscle):
+        mode = str(getattr(muscle, "surface_source_mode", "LEGACY_FIBERS"))
+        if mode == "FIBER_SURFACE":
+            if _fiber_surface_stale(scene, root.name, muscle.fiber_surface_id):
+                return True
+            return self._surface_fibers_stale(root, scene, muscle.fiber_surface_id)
+        ids = tuple(ref.fiber_id for ref in muscle.fiber_refs if ref.fiber_id)
+        return any(_fiber_stale(scene, root.name, fiber_id) for fiber_id in ids)
 
-    def _muscle_surface_input(self, root, scene, muscle):
-        if str(getattr(muscle, "surface_source_mode", "LEGACY_FIBERS")) == "FIBER_SURFACE":
-            return self._fiber_surface_input(root, scene, muscle)
-        fibers, missing = self._collect_fiber_props(root, muscle)
-        points = self._legacy_surface_base_points(root, scene, muscle, fibers, missing)
-        return None if points is None else (points, self._closed_u(fibers), muscle)
+    def _surface_fibers_stale(self, root, scene, surface_id):
+        surfaces = getattr(root.af_vcp_system, "fiber_surfaces", ())
+        surface = next((row for row in surfaces if row.id == surface_id), None)
+        refs = () if surface is None else tuple(surface.fiber_refs)
+        return any(_fiber_stale(scene, root.name, ref.fiber_id) for ref in refs)
 
     def _fiber_surface_input(self, root, scene, muscle):
         surface = next((item for item in root.af_vcp_system.fiber_surfaces if item.id == muscle.fiber_surface_id), None)
@@ -214,22 +206,6 @@ class MuscleSceneSync:
             return None
         rows = [[Vector(point) for point in row] for row in result.rows]
         return None if not rows else (rows, bool(result.closed_along_fibers), surface)
-
-    def _apply_synced_surface(self, vis_col, root, scene, vcp, muscle, base_obj, infl_obj, base_points, closed_u, config):
-        ensure = self._selected_muscle_id(vcp, root, scene) == muscle.id
-        self._apply_muscle_surface(vis_col, root, vcp, muscle, base_obj, infl_obj, base_points, ensure, closed_u, config)
-
-    def _apply_muscle_surface(self, vis_col, root, vcp, muscle, base_obj, infl_obj, base_points, ensure_control, closed_u, config):
-        surface = self._surface_mesh_data(base_points, config, closed_u)
-        if surface is None:
-            self._clear_muscle_meshes(vcp, muscle.id, base_obj, infl_obj)
-            return
-        base_verts, faces_final = surface
-        self._update_mesh(base_obj, base_verts, faces_final)
-        self._sync_inflation_control(vis_col, root, muscle, base_obj, base_points, ensure_control)
-        infl_verts = self._inflated_surface_verts(base_points, muscle, config, closed_u)
-        self._update_mesh(infl_obj, list(base_verts) if infl_verts is None else infl_verts, faces_final)
-        self._set_muscle_active_materials(vcp, muscle.id, base_obj, infl_obj)
 
     def _active_muscle_id(self, root, scene=None, active_object=None):
         return active_entity_id(root, "MUSCLE", scene, active_object)
@@ -259,9 +235,10 @@ class MuscleSceneSync:
         return {muscle.id for muscle in vcp.muscles if self._uses_inflation_control(muscle)}
 
     def _sync_target_muscles(self, vis_col, root, scene, vcp, muscle_ids_to_sync):
-        for muscle in vcp.muscles:
-            if muscle.id in muscle_ids_to_sync:
-                self._sync_single_muscle(vis_col, root, scene, vcp, muscle)
+        muscles = tuple(muscle for muscle in vcp.muscles if muscle.id in muscle_ids_to_sync)
+        work = tuple(capture_muscle_work(self, vis_col, root, scene, vcp, muscle) for muscle in muscles)
+        batch = execute_muscle_work(scene, work)
+        publish_muscle_work(self, vis_col, root, scene, vcp, work, batch)
 
     def _cleanup_after_sync(self, vis_col, root, all_muscle_ids, active_muscle_id, control_muscle_ids):
         self._cleanup_removed_muscles(vis_col, root.name, all_muscle_ids)

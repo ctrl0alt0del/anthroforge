@@ -106,6 +106,8 @@ def _fiber_surface_entity_sample(root, scene, tissue):
     proxy = find_fiber_surface_proxy(scene, root.name, str(tissue.base_source_id))
     if proxy is None or not len(proxy.data.vertices):
         raise ValueError("Fiber Surface source geometry is unavailable.")
+    if proxy.get("af_fiber_surface_output_state") == "STALE":
+        raise ValueError("Fiber Surface source geometry is stale.")
     return _mesh_proxy_sample(proxy, tissue)
 
 

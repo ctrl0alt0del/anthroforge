@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 TEST_ROOT = Path(__file__).resolve().parents[1]
 ADDON_ROOT = Path(__file__).resolve().parents[2]
@@ -48,3 +49,15 @@ class ScpRuntimeTests(BlenderTestCase):
         item.color, item.color_initialized = (0.1, 0.2, 0.3, 1.0), True
         sync_scp_roles(root_obj, item)
         self.assertEqual(tuple(round(v, 4) for v in item.transform_object_ref.color), (0.1, 0.2, 0.3, 1.0))
+
+    def test_role_sync_identity_does_not_emit_property_requests(self):
+        from anthroforge.properties import scp_properties
+        root_obj = root()
+        item = scp_with_object(root_obj, "Arm", mesh_object("Identity"))
+        with patch.object(scp_properties, "sync_context") as sync:
+            sync_scp_roles(root_obj, item)
+            item.transform_object_ref.name = "Renamed"
+            sync_scp_roles(root_obj, item)
+            self.assertEqual((item.name, sync.call_count), ("Renamed", 0))
+            item.name = "User Authored"
+        self.assertEqual(sync.call_count, 1)

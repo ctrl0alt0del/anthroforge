@@ -2,6 +2,7 @@ from mathutils import Matrix, Vector
 
 from ..utils import depsgraph_for_scene, scene_for_id, update_scene_view_layer
 from ..shortcuts.owner_backsolve import apply_owner_backsolve
+from ..shortcuts.session_state import suppress_next_depsgraph_ids
 from .attachment_session import follow_rotation_enabled, tangent_strategy
 from .common import as_bool, as_id, as_vec3, find_geometry_mesh_scp_obj, find_transform_scp_obj, indexed_geometry_mesh_scp_obj
 from .common import indexed_transform_scp_obj, is_runtime_applied_matrix, mark_applied_matrix, scp_object_maps
@@ -438,7 +439,8 @@ def _active_parent_ids(parent_ids):
     return {as_id(value) for value in set(parent_ids or set()) if as_id(value)}
 
 
-def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, parent_ids=None, gate_meta=None):
+def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None,
+                          parent_ids=None, gate_meta=None, fiber_ids=None):
     _ = sync
     if not attachments_enabled(scene):
         return set()
@@ -447,7 +449,17 @@ def apply_scp_attachments(sync, root, scene, scp_by_id, target_scp_ids=None, par
     if not active_target_ids and not active_parent_ids:
         return set()
     blocked_ids = _blocked_apply_ids(gate_meta)
-    return _apply_attachment_targets(root, scene, scp_by_id, active_target_ids, active_parent_ids, blocked_ids, _shortcut_backsolve(gate_meta))
+    report = _apply_wave(sync, root, scene, scp_by_id, active_target_ids,
+                         active_parent_ids, blocked_ids, gate_meta, fiber_ids)
+    return report if fiber_ids is not None else set(report.changed_scps)
+
+
+def _apply_wave(sync, root, scene, scps, targets, parents, blocked, meta, fiber_ids):
+    from .attachment_wave_runtime import apply_attachment_wave
+    wanted = set(fiber_ids or ()); fibers = getattr(root.af_vcp_system, "fibers", ())
+    selected = tuple(row for row in fibers if str(row.id) in wanted)
+    return apply_attachment_wave(sync, root, scene, scps, targets, parents, selected,
+                                 blocked, _shortcut_backsolve(meta))
 
 
 def _apply_order(scp_by_id, active_target_ids, active_parent_ids):
@@ -545,7 +557,10 @@ def _refresh_child_chain(scene, active_parent_ids, sid, kids, pending, depsgraph
 
 def _apply_shortcut_backsolve(root, scene, sid, backsolve):
     owner_id = as_id(dict(backsolve or {}).get("owner_id"))
-    return bool(owner_id and owner_id == sid and apply_owner_backsolve(root, scene, backsolve))
+    moved = bool(owner_id and owner_id == sid and apply_owner_backsolve(root, scene, backsolve))
+    if moved:
+        suppress_next_depsgraph_ids({sid})
+    return moved
 
 
 def _needs_child_refresh(kids, pending, sid):

@@ -2,6 +2,8 @@ import bpy
 
 from ...app.queries.action_library import curve_loft_panel_state, local_transform_panel_state, quick_fiber_panel_state, quick_hook_panel_state, split_corner_panel_state
 from ...app.queries.proxy_view import proxy_view_panel_state
+from ...app.queries.root import root_for_context
+from ...core.visualization.fiber_repair_runtime import fiber_repair_state
 
 
 def _status_icon(state):
@@ -86,11 +88,38 @@ def _draw_quick_fiber_box(layout, context):
     row.operator("af.quick_fiber", text="Create Quick Fiber", icon="CURVE_DATA")
 
 
-def _draw_fiber_utilities_box(layout):
+def _draw_fiber_utilities_box(layout, context):
     box = layout.box()
     box.label(text="Fiber Utilities")
-    box.label(text="Apply settings to every Fiber in this file.", icon="CURVE_DATA")
+    box.label(text="Repair the active root or apply file-wide settings.", icon="CURVE_DATA")
+    _draw_repair_fibers(box, context)
     box.operator("af.disable_all_fiber_surface_routing", text="Disable Surface Routing for All Fibers", icon="X")
+
+
+def _draw_repair_fibers(box, context):
+    root = root_for_context(context); state = None if root is None else fiber_repair_state(root, context.scene)
+    row = box.row(); row.enabled = bool(root and len(root.af_vcp_system.fibers) and not (state or {}).get("active"))
+    row.operator("af.repair_fibers", text="Repair Fibers", icon="TOOL_SETTINGS")
+    _draw_repair_status(box, state)
+
+
+def _draw_repair_status(box, state):
+    if not state: return
+    if state.get("active"): _draw_active_repair_status(box, state); return
+    summary = state.get("summary") or state.get("last_summary")
+    if summary: box.label(text=summary, icon="CHECKMARK" if state.get("phase") == "DONE" else "INFO")
+
+
+def _draw_active_repair_status(box, state):
+    if state.get("phase") == "SCANNING":
+        progress = state.get("progress", {}); box.label(text=f"Scan: {progress.get('current', 0)}/{progress.get('total', 0)}")
+        box.label(text=f"Invalid pins found: {state.get('invalid', 0)}", icon="VIEWZOOM")
+        return
+    group = state.get("group") or {}; total = len(group.get("targets", ()))
+    complete = total - len(group.get("pending", ()))
+    box.label(text=f"Recompute: {complete}/{total}", icon="FILE_REFRESH")
+    box.label(text=f"Successful {len(group.get('committed', ()))} · failed {len(group.get('failures', {}))}")
+    box.label(text=f"Pins repaired {state.get('repaired', 0)} · unresolved {state.get('unresolved', 0)}")
 
 
 def _draw_split_corner_status(box, state):
@@ -174,7 +203,7 @@ class AF_PT_ActionLibraryPanel(bpy.types.Panel):
     def draw(self, context):
         _draw_local_transform_box(self.layout, context)
         _draw_quick_fiber_box(self.layout, context)
-        _draw_fiber_utilities_box(self.layout)
+        _draw_fiber_utilities_box(self.layout, context)
         _draw_proxy_box(self.layout, context)
         _draw_curve_loft_box(self.layout, context)
         _draw_quick_hook_box(self.layout, context)

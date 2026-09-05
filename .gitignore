@@ -21,6 +21,9 @@ Thumbs.db
 # JetBrains
 .idea/
 
+# Ticket-isolated Git worktrees
+.worktrees/
+
 # OS junk
 *.log
 *.tmp
@@ -29,6 +32,12 @@ Thumbs.db
 # Compiled extensions (if ever added)
 *.so
 *.dll
+!native/fiber_ccd/af_fiber_ccd.dll
+!native/fiber_ccd/af_fiber_ccd_v3.dll
+!native/fiber_ccd/af_fiber_ccd_v3_8.dll
+!native/fiber_ccd/af_fiber_ccd_v3_9.dll
+!native/fiber_ccd/af_fiber_ccd_v3_10.dll
+!native/fiber_ccd/af_fiber_ccd_v3_11.dll
 *.dylib
 
 # Distribution artifacts
@@ -40,3 +49,4 @@ build/
 venv/
 .env/
 artifacts/
+.artifacts/

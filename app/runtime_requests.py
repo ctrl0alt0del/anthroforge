@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from time import monotonic
 
 
 @dataclass(frozen=True)
@@ -8,18 +9,40 @@ class RuntimeRequest:
     source: str = "manual"
     event_type: str = "UPDATE"
     payload: dict = field(default_factory=dict)
+    full: bool = False
+    dirty_aspects: dict = field(default_factory=dict)
+    quality: str = "INTERACTIVE"
+    queued_at: float = field(default_factory=monotonic)
 
     def gate_meta(self):
-        return {"source": self.source, "event_type": self.event_type, "payload": dict(self.payload or {})}
+        return {"source": self.source, "event_type": self.event_type, "payload": dict(self.payload or {}),
+                "full": self.full, "dirty_aspects": dict(self.dirty_aspects or {}), "quality": self.quality}
 
 
-def runtime_request(dirty_hints=None, bake=False, source="manual", event_type="UPDATE", payload=None):
-    return RuntimeRequest(dict(dirty_hints or {}), bool(bake), str(source or "manual"), str(event_type or "UPDATE"), dict(payload or {}))
+def _request_full(dirty_hints, full):
+    if full is not None:
+        return bool(full)
+    marked = getattr(dirty_hints, "full", None)
+    return bool(marked) if marked is not None else dirty_hints is None or not dirty_hints
+
+
+def _request_quality(quality, bake):
+    value = str(quality or "").strip().upper()
+    return "FINAL" if bake or value in {"BAKE", "FINAL"} else "INTERACTIVE"
+
+
+def runtime_request(dirty_hints=None, bake=False, source="manual", event_type="UPDATE", payload=None,
+                    full=None, dirty_aspects=None, quality="", queued_at=None):
+    quality = _request_quality(quality, bake)
+    return RuntimeRequest(dict(dirty_hints or {}), quality == "FINAL", str(source or "manual"),
+                          str(event_type or "UPDATE"), dict(payload or {}), _request_full(dirty_hints, full),
+                          dict(dirty_aspects or {}), quality,
+                          monotonic() if queued_at is None else float(queued_at))
 
 
 def seeded_dirty_hints(dirty_hints, entity_type, entity_id, dirty_hints_for, empty_dirty_hints):
     if dirty_hints is not None:
-        return dict(dirty_hints or {})
+        return dirty_hints
     if entity_type and entity_id:
         return dirty_hints_for(entity_type, {entity_id})
     return empty_dirty_hints()

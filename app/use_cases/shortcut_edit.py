@@ -10,6 +10,7 @@ try:
     from ...core.shortcuts.owners import shortcut_relation
     from ...core.shortcuts.session_state import begin_override_sessions, cached_override_runtime, clear_override_session, store_override_runtime, suppress_next_depsgraph_ids
     from ...core.scp_runtime.common import find_scp_by_id
+    from ...core.scp_runtime.prop_update_guard import suppress_scp_prop_updates
     from ...core.scp_runtime.runtime_state import restore_attachment_runtime, snapshot_attachment_runtime
 except ImportError:
     from core.shortcuts import override_values, raw_target_value, resolve_shortcut, target_value, upsert_override, write_target_value
@@ -19,6 +20,7 @@ except ImportError:
     from core.shortcuts.owners import shortcut_relation
     from core.shortcuts.session_state import begin_override_sessions, cached_override_runtime, clear_override_session, store_override_runtime, suppress_next_depsgraph_ids
     from core.scp_runtime.common import find_scp_by_id
+    from core.scp_runtime.prop_update_guard import suppress_scp_prop_updates
     from core.scp_runtime.runtime_state import restore_attachment_runtime, snapshot_attachment_runtime
 
 
@@ -306,7 +308,8 @@ def _descendant_ids(kids, owner_id):
 
 def _run_shortcut_sync(context, request):
     dirty_ids, payload = request
-    _sync_context()(context, dirty_hints=_dirty_hints_for()("SCP", dirty_ids), source="shortcut", event_type="UPDATE", payload=payload)
+    with suppress_scp_prop_updates():
+        _sync_context()(context, dirty_hints=_dirty_hints_for()("SCP", dirty_ids), source="shortcut", event_type="UPDATE", payload=payload)
 
 
 def _needs_session_recapture(values):

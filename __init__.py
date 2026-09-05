@@ -52,10 +52,12 @@ from .operators.add_blob_vcp import AF_OT_AddBlobVCP
 from .operators.fiber_tools import (
     AF_OT_ClearFiberWarmStart,
     AF_OT_RecomputeFiber,
+    AF_OT_RestoreLegacyFiber,
     AF_OT_AddFiberTouchPoint,
     AF_OT_RemoveFiberTouchPoint,
     AF_OT_MoveFiberTouchPoint,
 )
+from .operators.fiber_repair import AF_OT_ConfirmFiberRepairs, AF_OT_RepairFibers
 from .operators.muscle_tools import (
     AF_OT_FlipMuscleNormals,
     AF_OT_SelectMuscleInflationCtrl,
@@ -172,6 +174,18 @@ from .core.visualization.fiber_refinement import (
     register_fiber_refinement_runtime,
     unregister_fiber_refinement_runtime,
 )
+from .core.visualization.fiber_repair_runtime import (
+    register_fiber_repair_runtime,
+    unregister_fiber_repair_runtime,
+)
+from .core.visualization.fiber_anchor_overlay import (
+    register_fiber_anchor_overlay,
+    unregister_fiber_anchor_overlay,
+)
+from .core.visualization.fiber_cache_lifecycle import (
+    register_fiber_cache_lifecycle,
+    unregister_fiber_cache_lifecycle,
+)
 from .core.visualization.muscle_sync import register_muscle_sync, unregister_muscle_sync
 from .core.visualization.blob_sync import register_blob_sync, unregister_blob_sync
 from .core.visualization.soft_tissue_sync import register_soft_tissue_sync, unregister_soft_tissue_sync
@@ -238,9 +252,12 @@ classes = (
 
     AF_OT_ClearFiberWarmStart,
     AF_OT_RecomputeFiber,
+    AF_OT_RestoreLegacyFiber,
     AF_OT_AddFiberTouchPoint,
     AF_OT_RemoveFiberTouchPoint,
     AF_OT_MoveFiberTouchPoint,
+    AF_OT_RepairFibers,
+    AF_OT_ConfirmFiberRepairs,
 
     AF_PT_FiberEditPanel,
     AF_PT_FiberSurfaceEditPanel,
@@ -371,9 +388,12 @@ def _ensure_scene_props():
 
 def _register_runtime_hooks():
     register_sync()
-    register_fiber_sync()
+    register_fiber_sync(context_provider=lambda: bpy.context)
+    register_fiber_cache_lifecycle()
+    register_fiber_anchor_overlay(context_provider=lambda: bpy.context)
     register_fiber_surface_sync()
     register_fiber_refinement_runtime()
+    register_fiber_repair_runtime()
     register_muscle_sync()
     register_blob_sync()
     register_soft_tissue_sync()
@@ -386,7 +406,7 @@ def _register_runtime_hooks():
 def _unregister_runtime_hooks():
     _shutdown_background_jobs()
     _clear_transient_sessions()
-    unregister_fiber_refinement_runtime()
+    _unregister_fiber_attachment_runtime()
     unregister_proxy_session_runtime()
     unregister_delete_reconcile()
     unregister_control_runtime()
@@ -397,6 +417,13 @@ def _unregister_runtime_hooks():
     unregister_fiber_surface_sync()
     unregister_fiber_sync()
     unregister_sync()
+
+
+def _unregister_fiber_attachment_runtime():
+    unregister_fiber_repair_runtime()
+    unregister_fiber_cache_lifecycle()
+    unregister_fiber_anchor_overlay()
+    unregister_fiber_refinement_runtime()
 
 
 def _shutdown_background_jobs():

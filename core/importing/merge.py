@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from ..deps.dirty_hints import empty_dirty_hints
+from ..deps.dirty_hints import DirtyHints, empty_dirty_hints
 from ..id_utils import next_prefixed_id
 from ..scp_proxy.signature import mesh_topology_signature
 from ..scp_runtime.bound_objects import find_bound_entry_by_object, sync_all_scp_roles
@@ -12,6 +12,8 @@ from ..shortcuts.path_codec import make_bound_entity_id, make_shortcut_path, par
 from ..vcp.prop_update_guard import suppress_vcp_prop_updates
 from ..vcp.attachment_backend import attachment_runtime, surface_binding_topology
 from ..vcp.surface_binding_codec import remap_binding_target
+from ..vcp.fiber_node_attachment_codec import (node_attachment_target_ids_from_raw,
+                                                remap_node_attachment_targets)
 from ..visualization.delete_reconcile import cleanup_scp_dependents
 from ..visualization.sync_runner import schedule_sync_from_dirty_hints, sync_from_dirty_hints
 from .model import ImportResult
@@ -198,6 +200,7 @@ def _create_one_fiber(state, snap):
     dst.name, dst.a_parent_id = str(snap.name or dst.id), _remap(state.scps, snap.a_parent_id)
     dst.b_parent_id, dst.muscle_id = _remap(state.scps, snap.b_parent_id), ""
     apply_scalar_dict(dst, snap.props)
+    _remap_fiber_node_attachments(dst, state.scps)
     _copy_touches(dst, snap, state)
     _copy_loop_anchors(dst, snap, state)
 
@@ -207,10 +210,16 @@ def _create_fibers(state):
         _create_one_fiber(state, snap)
 
 
+def _remap_fiber_node_attachments(fiber, scp_map):
+    raw = str(getattr(fiber, "node_attachments_json", "") or "")
+    if raw: fiber.node_attachments_json = remap_node_attachment_targets(raw, scp_map)
+
+
 def _fiber_scp_ids(snap):
     ids = {snap.a_parent_id, snap.b_parent_id}
     ids |= {touch.parent_id for touch in snap.touches}
     ids |= {anchor.parent_id for anchor in getattr(snap, "loop_anchors", ())}
+    ids |= set(node_attachment_target_ids_from_raw(snap.props.get("node_attachments_json", "")))
     return {str(sid or "") for sid in ids if str(sid or "")}
 
 
@@ -572,7 +581,7 @@ def _result(state):
 
 
 def _dirty_for_diff(state):
-    dirty = empty_dirty_hints()
+    dirty = DirtyHints(full=False)
     dirty["SCP"] = {sid for sid in state.imported_scps if sid}
     dirty["FIBER"] = set(state.fibers.values())
     dirty["FIBER_SURFACE"] = set(state.fiber_surfaces.values())

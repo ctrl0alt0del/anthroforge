@@ -1,10 +1,14 @@
 from heapq import heappop, heappush
+from array import array
+import hashlib
 
 from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
+import numpy as np
 
 from ..perf_trace import perf_count, perf_time, perf_timer
-from ..utils import depsgraph_for_scene, scene_cache_get, scene_cache_set, scene_for_id
+from ..utils import (deformation_generation, depsgraph_for_scene, geometry_generation,
+                     scene_cache_get, scene_cache_set, scene_for_id)
 from .common import _EPS, matrix_flat16
 
 _AXIS_VECTORS = {
@@ -15,6 +19,8 @@ _AXIS_VECTORS = {
     "POS_Z": Vector((0.0, 0.0, 1.0)),
     "NEG_Z": Vector((0.0, 0.0, -1.0)),
 }
+_FINGERPRINT_FULL_LIMIT = 256
+_FINGERPRINT_SAMPLE_COUNT = 32
 
 
 def _normalized(vector, fallback):
@@ -83,7 +89,17 @@ def _curve_modifier(parent_obj):
 
 
 def _cache_key(mesh_obj):
-    return None if mesh_obj is None else int(mesh_obj.as_pointer())
+    if mesh_obj is None:
+        return None
+    data = getattr(mesh_obj, "data", None)
+    return _runtime_id(mesh_obj), _runtime_id(data)
+
+
+def _runtime_id(value):
+    if value is None:
+        return 0
+    uid = int(getattr(value, "session_uid", 0) or 0)
+    return uid or int(value.as_pointer())
 
 
 def _typed_cache_key(kind, mesh_obj):
@@ -92,7 +108,7 @@ def _typed_cache_key(kind, mesh_obj):
 
 
 def _surface_entry_key(mesh_obj, kind="full"):
-    return None if mesh_obj is None else f"surface:{kind}:{_cache_key(mesh_obj)}"
+    return None if mesh_obj is None else f"surface:{kind}:{int(mesh_obj.as_pointer())}"
 
 
 def _data_id(data):
@@ -106,9 +122,66 @@ def _mesh_counts(data):
     return (0, 0) if data is None else (len(data.vertices), len(data.polygons))
 
 
-def _surface_stamp(obj_eval):
+def _fingerprint_indices(count):
+    if count <= _FINGERPRINT_FULL_LIMIT:
+        return range(count)
+    last = count - 1
+    return tuple((index * last) // (_FINGERPRINT_SAMPLE_COUNT - 1)
+                 for index in range(_FINGERPRINT_SAMPLE_COUNT))
+
+
+def _coordinate_fingerprint(data, full=False):
+    vertices = getattr(data, "vertices", ())
+    try:
+        if full:
+            return _full_coordinate_fingerprint(vertices)
+        indices = _fingerprint_indices(len(vertices))
+        return tuple(_vertex_coordinate(vertices[index]) for index in indices)
+    except Exception:
+        return ()
+
+
+def _full_coordinate_fingerprint(vertices):
+    values = array("f", [0.0]) * (len(vertices) * 3)
+    vertices.foreach_get("co", values)
+    return hashlib.blake2b(values.tobytes(), digest_size=16).digest()
+
+
+def _vertex_coordinate(vertex):
+    co = vertex.co
+    return float(co.x), float(co.y), float(co.z)
+
+
+def _pending_geometry_ids(depsgraph):
+    return {getattr(update, "id", None) for update in tuple(getattr(depsgraph, "updates", ()) or ())
+            if getattr(update, "is_updated_geometry", False) or getattr(update, "is_updated_transform", False)}
+
+
+def _pending_deformation_ids(depsgraph):
+    return {getattr(update, "id", None) for update in tuple(getattr(depsgraph, "updates", ()) or ())
+            if getattr(update, "is_updated_geometry", False)}
+
+
+def _surface_stamp(mesh_obj, obj_eval, depsgraph):
     data = getattr(obj_eval, "data", None)
-    return (_data_id(data), _mesh_counts(data), tuple(matrix_flat16(obj_eval.matrix_world)))
+    source = getattr(mesh_obj, "data", None)
+    generations = geometry_generation(mesh_obj), geometry_generation(source)
+    identities = _runtime_id(mesh_obj), _runtime_id(source)
+    pending = _pending_geometry_ids(depsgraph)
+    coordinates = _coordinate_fingerprint(source, mesh_obj in pending or source in pending)
+    coordinates = coordinates, _coordinate_fingerprint(data, obj_eval in pending or data in pending)
+    return (identities, _data_id(data), _mesh_counts(data),
+            tuple(matrix_flat16(obj_eval.matrix_world)), generations, coordinates)
+
+
+def _collision_stamp(mesh_obj, obj_eval, depsgraph):
+    data, source = getattr(obj_eval, "data", None), getattr(mesh_obj, "data", None)
+    identities = _runtime_id(mesh_obj), _runtime_id(source)
+    generations = deformation_generation(mesh_obj), deformation_generation(source)
+    pending = _pending_deformation_ids(depsgraph)
+    coordinates = (_coordinate_fingerprint(source, mesh_obj in pending or source in pending),
+                   _coordinate_fingerprint(data, obj_eval in pending or data in pending))
+    return identities, _data_id(data), _mesh_counts(data), generations, coordinates
 
 
 def _remember_payload(cache, key, stamp, name, payload):
@@ -127,7 +200,7 @@ def _cached_surface(mesh_obj, depsgraph, kind="full"):
     if scene is None or mesh_obj is None or depsgraph is None:
         return None, None, None
     obj_eval = mesh_obj.evaluated_get(depsgraph)
-    return scene, _surface_stamp(obj_eval), scene_cache_get(scene, _surface_entry_key(mesh_obj, kind))
+    return scene, _surface_stamp(mesh_obj, obj_eval, depsgraph), scene_cache_get(scene, _surface_entry_key(mesh_obj, kind))
 
 
 def _store_payload(scene, mesh_obj, stamp, kind, name, payload):
@@ -146,6 +219,31 @@ def build_mesh_surface_data(mesh_obj, depsgraph, cache=None):
     surface = _build_surface(mesh_obj, depsgraph)
     _store_payload(scene, mesh_obj, stamp, "full", "surface", surface)
     return _remember_payload(cache, key, stamp, "surface", surface)
+
+
+def build_mesh_collision_data(mesh_obj, depsgraph, cache=None):
+    key = _typed_cache_key("collision", mesh_obj);obj_eval = mesh_obj.evaluated_get(depsgraph)
+    scene, stamp = scene_for_id(mesh_obj), _collision_stamp(mesh_obj, obj_eval, depsgraph)
+    local = _local_payload(cache, key, stamp, "collision")
+    if local is not None: return local
+    entry = scene_cache_get(scene, _surface_entry_key(mesh_obj, "collision"))
+    if entry and entry.get("stamp") == stamp:
+        return _remember_payload(cache, key, stamp, "collision", entry["collision"])
+    value = _build_collision(obj_eval);_store_payload(scene, mesh_obj, stamp, "collision", "collision", value)
+    return _remember_payload(cache, key, stamp, "collision", value)
+
+
+def build_mesh_attachment_vertices(mesh_obj, depsgraph, cache=None):
+    key = _typed_cache_key("attachment", mesh_obj); obj_eval = mesh_obj.evaluated_get(depsgraph)
+    scene, stamp = scene_for_id(mesh_obj), _collision_stamp(mesh_obj, obj_eval, depsgraph)
+    local = _local_payload(cache, key, stamp, "attachment")
+    if local is not None: return local
+    entry = scene_cache_get(scene, _surface_entry_key(mesh_obj, "attachment"))
+    if entry and entry.get("stamp") == stamp:
+        return _remember_payload(cache, key, stamp, "attachment", entry["attachment"])
+    value = _build_attachment_vertices(obj_eval)
+    _store_payload(scene, mesh_obj, stamp, "attachment", "attachment", value)
+    return _remember_payload(cache, key, stamp, "attachment", value)
 
 
 def build_mesh_surface_bounds(mesh_obj, depsgraph, cache=None):
@@ -191,6 +289,29 @@ def _build_surface_uncached(mesh_obj, depsgraph, scene):
         return _surface_payload(obj_eval, mesh_eval, scene)
     finally:
         obj_eval.to_mesh_clear()
+
+
+def _build_collision(obj_eval):
+    mesh_eval = obj_eval.to_mesh()
+    if mesh_eval is None or len(mesh_eval.vertices) <= 0: return None
+    try: return _collision_payload(mesh_eval)
+    finally: obj_eval.to_mesh_clear()
+
+
+def _build_attachment_vertices(obj_eval):
+    mesh = obj_eval.to_mesh()
+    if mesh is None or len(mesh.vertices) <= 0: return None
+    try:
+        values = np.empty(len(mesh.vertices) * 3, dtype=np.float64)
+        mesh.vertices.foreach_get("co", values)
+        return {"verts_local": values.reshape((-1, 3)), "triangles": ()}
+    finally: obj_eval.to_mesh_clear()
+
+
+def _collision_payload(mesh_eval):
+    mesh_eval.calc_loop_triangles();vertices = tuple(tuple(vertex.co) for vertex in mesh_eval.vertices)
+    triangles = tuple(tuple(triangle.vertices) for triangle in mesh_eval.loop_triangles)
+    return {"verts_local": vertices, "triangles": triangles}
 
 
 def _build_bounds(mesh_obj, depsgraph):
@@ -242,8 +363,18 @@ def _surface_payload_data(obj_eval, mesh_eval, verts_local, verts_world, triangl
     return {
         "bvh_local": bvh_local, "bvh_world": bvh_world, "face_centers": _face_centers(obj_eval, mesh_eval),
         "triangles": triangles, "verts_world": verts_world, "bounds_world": _world_bounds(verts_world),
+        "vertex_normals_world": _surface_vertex_normals(verts_world, triangles),
         "route_graph": _surface_route_graph(verts_world, triangles),
     }
+
+
+def _surface_vertex_normals(verts, triangles):
+    normals = [Vector() for _point in verts]
+    for tri in triangles:
+        normal = (verts[tri[1]] - verts[tri[0]]).cross(verts[tri[2]] - verts[tri[0]])
+        for index in tri:
+            normals[index] += normal
+    return tuple(_normalized(normal, (0.0, 0.0, 1.0)) for normal in normals)
 
 
 def _surface_route_graph(verts_world, triangles):
@@ -303,6 +434,41 @@ def surface_shortest_param_path(surface, start_param, end_param):
     points, start, end, extra = setup
     path = _route_path(surface["route_graph"], points, start, end, extra)
     return None if path is None else [points[i].copy() for i in path]
+
+
+def surface_shortest_param_samples(surface, start_param, end_param):
+    setup = _param_route_setup(surface, start_param, end_param)
+    if setup is None:
+        return None
+    points, start, end, extra = setup
+    path = _route_path(surface["route_graph"], points, start, end, extra)
+    params = (start_param, end_param)
+    return None if path is None else [_route_sample(surface, points, node, (start, end), params) for node in path]
+
+
+def _route_sample(surface, points, node, ends, params):
+    normals = _surface_normals(surface)
+    if node < len(normals):
+        return points[node].copy(), normals[node].copy()
+    param = params[0] if node == ends[0] else params[1]
+    return points[node].copy(), _param_normal(normals, param)
+
+
+def _surface_normals(surface):
+    normals = tuple(surface.get("vertex_normals_world", ()))
+    verts = tuple(surface.get("verts_world", ()))
+    if len(normals) != len(verts):
+        normals = _surface_vertex_normals(verts, tuple(surface.get("triangles", ())))
+        surface["vertex_normals_world"] = normals
+    return normals
+
+
+def _param_normal(normals, param):
+    tri = tuple(dict(param or {}).get("tri_vidx", (-1, -1, -1)))
+    weights = tuple(dict(param or {}).get("tri_weights", (1.0, 0.0, 0.0)))
+    values = [normals[int(index)] * float(weight) for index, weight in zip(tri, weights)
+              if 0 <= int(index) < len(normals)]
+    return _normalized(sum(values, Vector()), (0.0, 0.0, 1.0))
 
 
 def _param_route_setup(surface, start_param, end_param):
@@ -488,6 +654,22 @@ def nearest_parent_param_from_world(parent_obj, target_world, depsgraph, cache=N
     surface = build_mesh_surface_data(parent_obj, depsgraph, cache=cache)
     hit = _nearest_triangle_hit(surface, target_world)
     return None if hit is None else _param_from_hit(hit)
+
+
+def nearest_parent_param_from_ray(parent_obj, ray_origin, ray_direction, depsgraph, cache=None):
+    surface = build_mesh_surface_data(parent_obj, depsgraph, cache=cache)
+    hit = _front_facing_ray_hit(surface, ray_origin, ray_direction)
+    return None if hit is None else _param_from_hit(hit)
+
+
+def _front_facing_ray_hit(surface, ray_origin, ray_direction):
+    direction = ray_direction.normalized()
+    if not surface or direction.length_squared <= _EPS:
+        return None
+    hit = surface["bvh_world"].ray_cast(ray_origin, direction)
+    if not hit or hit[0] is None or hit[1] is None:
+        return None
+    return _hit_from_bvh(surface, hit) if hit[1].dot(direction) < -_EPS else None
 
 
 def closest_child_face_center_to_parent(child_obj, parent_obj, depsgraph, cache=None):

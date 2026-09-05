@@ -2,9 +2,11 @@ import bpy
 
 from ..scp_runtime.runtime_state import mirror_effective_axis, mirror_source_id, mirror_status
 from ..utils import get_af_root, scene_for_id
-from ..vcp.fiber_modes import fiber_parent_ids
+from ..vcp.fiber_modes import fiber_parent_ids, is_loop_fiber
 from ..vcp.surface_target import SurfaceTargetKind, effective_tissue_target
-from .mirror_objects import create_mirror_from_source, ensure_obj_type, remove_obj, copy_data
+from .mirror_objects import (create_mirror_from_source, ensure_obj_type, ensure_private_data,
+                             remove_obj, restore_curve_snapshot, share_source_data)
+from .fiber_sync_helpers import persisted_fiber_points, show_curve_preview
 from .muscle_sync_helpers import resolve_muscle_surface
 from .mirror_rules import mirror_world_matrix
 
@@ -211,7 +213,7 @@ def _ensure_mirror_from_source(collection, src_obj, existing):
 
 
 def _copy_mirror_transform(src_obj, mirror_obj, axis, origin):
-    copy_data(src_obj, mirror_obj)
+    share_source_data(src_obj, mirror_obj)
     mirror_obj.matrix_world = mirror_world_matrix(src_obj.matrix_world, axis=axis, origin=origin)
     mirror_obj.hide_select = True
 
@@ -312,37 +314,55 @@ def _find_mirror_soft_obj(vis_col, root_name, tissue_id):
 
 def _sync_fiber_mirrors(root, vis_col, fibers_by_id, scp_by_id, target_fiber_ids=None):
     target_ids = None if target_fiber_ids is None else {_as_id(v) for v in set(target_fiber_ids)}
-    desired = set()
     affected = set(target_ids) if target_ids is not None else set()
-
+    desired = set()
     for fid, fiber in fibers_by_id.items():
         if target_ids is not None and fid not in target_ids:
             continue
         affected.add(fid)
-        rule = _rule_for_fiber(fiber, fibers_by_id, scp_by_id)
-        src = _find_source_fiber_obj(vis_col, root.name, fid)
-        mir = _find_mirror_fiber_obj(vis_col, root.name, fid)
-        if rule is None or src is None:
-            if target_ids is None and mir is not None:
-                remove_obj(mir)
-            continue
+        if _sync_one_fiber_mirror(root, vis_col, fiber, fid, fibers_by_id, scp_by_id):
+            desired.add(fid)
+    _remove_stale_fiber_mirrors(vis_col, root.name, desired, affected, target_ids)
 
-        axis, origin = rule
-        mir = _ensure_mirror_from_source(vis_col, src, mir)
-        if mir is None:
-            continue
-        _copy_mirror_transform(src, mir, axis, origin)
-        mir["af_fiber_proxy"] = True
-        mir["af_fiber_mirror_proxy"] = True
-        mir["af_root_name"] = root.name
-        mir["af_source_fiber_id"] = fid
-        mir["af_fiber_id"] = fid
-        desired.add(fid)
 
+def _sync_one_fiber_mirror(root, vis_col, fiber, fid, fibers_by_id, scp_by_id):
+    rule = _rule_for_fiber(fiber, fibers_by_id, scp_by_id)
+    src = _find_source_fiber_obj(vis_col, root.name, fid)
+    mir = _find_mirror_fiber_obj(vis_col, root.name, fid)
+    if rule is None or src is None:
+        return False
+    if src.get("af_fiber_output_state") != "CURRENT":
+        return _retain_stale_fiber_mirror(root, fiber, src, mir)
+    mir = _ensure_mirror_from_source(vis_col, src, mir)
+    if mir is None:
+        return False
+    _copy_mirror_transform(src, mir, *rule)
+    _tag_fiber_mirror(mir, root.name, fid)
+    return True
+
+
+def _retain_stale_fiber_mirror(root, fiber, source, mirror):
+    if mirror is None: return False
+    if not bool(mirror.get("af_mirror_shared_data")): return True
+    points = persisted_fiber_points(scene_for_id(root), root.name, fiber.id)
+    restored = restore_curve_snapshot(mirror)
+    if not restored: ensure_private_data(mirror)
+    if points and not restored:
+        show_curve_preview(mirror, points, fiber.thickness, cyclic=is_loop_fiber(fiber))
+    return True
+
+
+def _tag_fiber_mirror(mirror, root_name, fid):
+    mirror["af_fiber_proxy"] = True
+    mirror["af_fiber_mirror_proxy"] = True
+    mirror["af_root_name"] = root_name
+    mirror["af_source_fiber_id"] = fid
+    mirror["af_fiber_id"] = fid
+
+
+def _remove_stale_fiber_mirrors(vis_col, root_name, desired, affected, target_ids):
     for obj in list(vis_col.objects):
-        if not obj.get("af_fiber_proxy") or not obj.get("af_fiber_mirror_proxy"):
-            continue
-        if obj.get("af_root_name") != root.name:
+        if not _owned_fiber_mirror(obj, root_name):
             continue
         fid = _as_id(obj.get("af_source_fiber_id") or obj.get("af_fiber_id"))
         if fid in desired:
@@ -350,6 +370,11 @@ def _sync_fiber_mirrors(root, vis_col, fibers_by_id, scp_by_id, target_fiber_ids
         if target_ids is not None and fid not in affected:
             continue
         remove_obj(obj)
+
+
+def _owned_fiber_mirror(obj, root_name):
+    return bool(obj.get("af_fiber_proxy") and obj.get("af_fiber_mirror_proxy")
+                and obj.get("af_root_name") == root_name)
 
 
 def _sync_muscle_mirrors(root, vis_col, muscles_by_id, fibers_by_id, scp_by_id, target_muscle_ids=None):

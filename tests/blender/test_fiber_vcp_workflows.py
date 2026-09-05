@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import sys
 import json
 from types import SimpleNamespace
@@ -19,9 +20,11 @@ from _helpers import BlenderTestCase, capture_mesh_attachment, capture_world_att
 from anthroforge.app.use_cases.fiber_tools import recompute_fiber as recompute_fiber_action
 from anthroforge.core.attachment_codec import encode_fiber_mesh_anchor, encode_fiber_shape_param, encode_fiber_surface_param, encode_fiber_vertex_index, parse_fiber_attach_param
 from anthroforge.core.deps.dirty_hints import dirty_hints_for
+from anthroforge.core.deps import builtin_drivers
 from anthroforge.core.scp_runtime.surface import _surface_route_graph, surface_shortest_param_path
 from anthroforge.core.vcp import fiber_collision
 from anthroforge.core.vcp import fiber_planner
+from anthroforge.core.vcp.attachment_backend import capture_attachment_from_object_ray
 from anthroforge.core.vcp.fiber_collision import CollisionOracle, _active_for_bounds, _mesh_shell_nodes
 from anthroforge.core.vcp.fiber_solver import FiberSolver
 from anthroforge.core.vcp.runtime_state import (
@@ -39,6 +42,7 @@ from anthroforge.core.vcp.runtime_state import (
 )
 from anthroforge.core.vcp.prop_update_guard import suppress_vcp_prop_updates
 from anthroforge.core.visualization import fiber_sync_runtime as fiber_runtime
+from anthroforge.core.visualization import fiber_view_capture
 from anthroforge.core.visualization import fiber_sync_helpers
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
 from anthroforge.core.visualization.fiber_sync_helpers import cached_fiber_points, endpoint_world, mark_endpoint_handle, mark_touch_handle, touch_world
@@ -143,6 +147,13 @@ def _handle_count(fiber_id):
     return sum(bool(obj.get("af_fiber_id") == fiber_id and (obj.get("af_fiber_endpoint_handle") or obj.get("af_fiber_touch_handle"))) for obj in bpy.context.scene.objects)
 
 
+def _remove_fiber_handles(fiber_id):
+    handles = [obj for obj in bpy.context.scene.objects if obj.get("af_fiber_id") == fiber_id
+               and (obj.get("af_fiber_endpoint_handle") or obj.get("af_fiber_touch_handle"))]
+    for obj in handles:
+        bpy.data.objects.remove(obj, do_unlink=True)
+
+
 def _touch_handle(fiber_id, index=0):
     return next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_touch_handle") and obj.get("af_fiber_id") == fiber_id and int(obj.get("af_fiber_touch_index", -1)) == index)
 
@@ -163,6 +174,15 @@ def _loop_mesh_object(name, location=(0.0, 0.0, 0.0)):
     bpy.context.scene.collection.objects.link(obj)
     obj.location = location
     return obj
+
+
+def _set_stacked_surface(obj, reverse_front=False):
+    verts = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (0, 1, 1)]
+    front = (3, 5, 4) if reverse_front else (3, 4, 5)
+    obj.data.clear_geometry()
+    obj.data.from_pydata(verts, [], [(0, 1, 2), front])
+    obj.data.update()
+    bpy.context.view_layer.update()
 
 
 def _symmetric_loop_mesh_object(name):
@@ -192,6 +212,11 @@ def _symmetric_loop_setup():
 
 def _fiber_world_vectors(fiber):
     return [Vector(value) for value in _fiber_points_world(fiber)]
+
+
+def _shown_fiber_world_vectors(fiber):
+    proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+    return [Vector(point.co[:3]) for point in proxy.data.splines[0].points]
 
 
 def _cache_has_point(sync, fiber_id, point, eps=1.0e-6):
@@ -273,9 +298,9 @@ class _WideBandPushOracle:
 
 def _owner_zone_hit(point, sid):
     if sid == "START":
-        return point.x < 0.25
+        return point.x < 0.005
     if sid == "END":
-        return point.x > 1.75
+        return point.x > 1.995
     return sid == "BLOCK" and abs(point.x - 1.0) < 0.2 and point.z < 0.25
 
 
@@ -289,6 +314,14 @@ class _OwnerZoneOracle:
 
     def push_out_point(self, point, colliders):
         hit = any(_owner_zone_hit(point, c["sid"]) for c in colliders)
+        return point.copy(), 1.0 if hit else 0.0
+
+
+class _LocalizedPinOracle:
+    def push_out_point(self, point, colliders):
+        index = round(float(point.x))
+        hits = {"A": index <= 2 or index >= 8, "B": 4 <= index <= 6}
+        hit = any(hits.get(str(c["sid"]), False) for c in colliders)
         return point.copy(), 1.0 if hit else 0.0
 
 
@@ -376,17 +409,23 @@ class _NeverVisiblePlannerOracle:
 class _SelfSurfacePlannerOracle:
     margin, clearance = 0.0, 0.01
 
+    def __init__(self):
+        self.shell_calls = 0
+        self.owner_calls = []
+
     def active_colliders_for_segment(self, a, b, padding=0.0):
         _ = a, b, padding
         return ({"sid": "S"},)
 
     def segment_visible(self, a, b, owners=(), colliders=None):
-        _ = a, b, owners
-        return not any(c.get("sid") == "S" for c in tuple(colliders or ()))
+        self.owner_calls.append(((a.x, a.y), (b.x, b.y), tuple(owners)))
+        blocked = any(c.get("sid") == "S" for c in tuple(colliders or ()))
+        return not blocked or abs(a.y) > 0.1 or abs(b.y) > 0.1
 
     def shell_nodes(self, collider, dense=False):
         _ = collider, dense
-        raise AssertionError("same owner should not create roadmap shell nodes")
+        self.shell_calls += 1
+        return [Vector((0.5, 1.0, 0.0))]
 
 
 class _ExternalBlockerPlannerOracle:
@@ -409,6 +448,29 @@ class _ExternalBlockerPlannerOracle:
         return [Vector((0.5, 1.0, 0.0))]
 
 
+class _DetourBlockerPlannerOracle:
+    margin, clearance = 0.0, 0.01
+
+    def active_colliders_for_segment(self, *_args, **_kwargs):
+        return ({"sid": "A"},)
+
+    def active_colliders_for_polyline(self, points, padding=0.0):
+        _ = padding
+        ids = ("A", "B") if max(point.y for point in points) > 0.5 else ("A",)
+        return tuple({"sid": sid} for sid in ids)
+
+    def segment_visible(self, a, b, owners=(), colliders=None):
+        _ = owners
+        ids = {collider["sid"] for collider in tuple(colliders or ())}
+        return not (("A" in ids and max(a.y, b.y) < 0.5) or
+                    ("B" in ids and max(a.y, b.y) < 1.5))
+
+    def shell_nodes(self, collider, dense=False):
+        _ = dense
+        height = 1.0 if collider["sid"] == "A" else 2.0
+        return [Vector((1.0, height, 0.0))]
+
+
 def _path_len(points):
     return sum((points[i + 1] - points[i]).length for i in range(len(points) - 1))
 
@@ -428,6 +490,14 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual((fiber.a_parent_id, fiber.b_parent_id, proxy is not None), (origin.id, insert.id, True))
         self.assertEqual((bpy.context.active_object, count), (proxy, 2))
 
+    def test_reselecting_fiber_recreates_removed_control_handles(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        _remove_fiber_handles(fiber.id)
+        root_obj.af_vcp_system.active_vcp_type, root_obj.af_vcp_system.active_vcp_id = "FIBER", fiber.id
+        sync_from_dirty_hints(root_obj, bpy.context.scene, dirty_hints_for("FIBER", {fiber.id}),
+                              event_type="SELECTION")
+        self.assertEqual(_handle_count(fiber.id), 2)
+
     def test_add_fiber_operator_creates_proxy_and_endpoint_handles(self):
         root_obj, fiber, origin, insert = _fiber_setup()
         _sync_active_fiber(root_obj, fiber)
@@ -445,6 +515,30 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         with patch.object(vcp_properties, "sync_context") as sync:
             self.assertEqual(bpy.ops.af.add_fiber_vcp(), {"FINISHED"})
         self.assertEqual(sync.call_count, 0)
+
+    def test_fiber_display_edits_do_not_schedule_solver_runtime(self):
+        _root_obj, fiber, _origin, _insert = _fiber_setup()
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        with patch.object(vcp_properties, "schedule_context") as schedule, patch.object(vcp_properties, "sync_context") as sync:
+            fiber.name = "Display only"
+            fiber.thickness = 0.031
+        self.assertEqual((schedule.call_count, sync.call_count), (0, 0))
+        self.assertAlmostEqual(proxy.data.bevel_depth, 0.031)
+
+    def test_fiber_solver_edit_schedules_targeted_aspect(self):
+        _root_obj, fiber, _origin, _insert = _fiber_setup()
+        with patch.object(vcp_properties, "schedule_context") as schedule, patch.object(vcp_properties, "sync_context") as sync:
+            fiber.bend_stiffness = 0.25
+        kwargs = schedule.call_args.kwargs
+        self.assertEqual((schedule.call_count, sync.call_count, kwargs["event_type"]), (1, 0, "FIBER_UPDATE"))
+        self.assertEqual((kwargs["dirty_hints"]["FIBER"], kwargs["dirty_aspects"]), ({fiber.id}, {"FIBER": {"SOLVER"}}))
+
+    def test_fiber_touch_add_suppresses_nested_callback_runtime(self):
+        _root_obj, fiber, origin, _insert = _fiber_setup()
+        select_only(origin.geometry_object_ref)
+        with patch.object(vcp_properties, "schedule_context") as schedule:
+            result = bpy.ops.af.add_fiber_touch_point(fiber_id=fiber.id)
+        self.assertEqual((result, schedule.call_count), ({"FINISHED"}, 0))
 
     def test_touch_tools_and_clear_warm_start_update_runtime_fields(self):
         root_obj, fiber, origin, _insert = _fiber_setup()
@@ -472,7 +566,8 @@ class FiberVcpWorkflowTests(BlenderTestCase):
     def test_recompute_fiber_sets_status_and_elapsed_time(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup()
         _recompute_and_drain()
-        self.assertIn(fiber_recompute_status(fiber), {"CONVERGED", "NOT_CONVERGED"})
+        self.assertIn(fiber_recompute_status(fiber), {"CONVERGED", "NOT_CONVERGED",
+                                                     "STALLED", "BUDGET_EXHAUSTED"})
         self.assertGreaterEqual(fiber_recompute_ms(fiber), 0.0)
 
     def test_recompute_returns_while_blocked_route_is_refining(self):
@@ -537,6 +632,32 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         cached = cached_fiber_points(bpy.context.scene, root_obj.name, fiber.id)
         self.assertEqual((writer.call_count, len(cached)), (0, len(points)))
 
+    def test_transient_curve_preview_skips_persisted_output_and_cache(self):
+        _root_obj, fiber, _origin, _insert = _fiber_setup()
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        points = [Vector(value) for value in json.loads(proxy["af_fiber_points_world"])]
+        middle, preview = len(points) // 2, [point.copy() for point in points]
+        preview[middle].z += 0.25
+        keys = ("af_fiber_points_world", "af_fiber_points_mode", "af_fiber_points_signature")
+        before = tuple(proxy.get(key) for key in keys)
+        with patch.object(fiber_sync_helpers, "scene_cache_set") as cache:
+            fiber_sync_helpers.update_curve_points(proxy, preview, 0.027, commit=False)
+        after = tuple(proxy.get(key) for key in keys)
+        shown = proxy.data.splines[0].points[middle].co.z
+        self.assertEqual((cache.call_count, after), (0, before))
+        self.assertEqual((round(shown, 6), round(proxy.data.bevel_depth, 6)), (round(preview[middle].z, 6), 0.027))
+
+    def test_bake_quality_is_one_shot_and_clears_legacy_preference(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        sync = register_fiber_sync()
+        fiber["af_prefer_bake"] = True
+        sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene, bake=True, target_fiber_ids={fiber.id})
+        first = proxy.get("af_fiber_points_mode")
+        sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene, bake=False, target_fiber_ids={fiber.id})
+        self.assertEqual((first, proxy.get("af_fiber_points_mode"), bool(fiber.get("af_prefer_bake", False))),
+                         ("BAKE", "INTERACTIVE", False))
+
     def test_recompute_fiber_direct_mode_records_planner_metrics(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup_direct()
         _recompute_and_drain()
@@ -552,29 +673,80 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(fiber_route_mode(fiber), "ROADMAP")
         self.assertTrue(any(abs(p[1]) > 1.0e-4 or abs(p[2]) > 1.0e-4 for p in points[1:-1]))
 
-    def test_interactive_sync_skips_roadmap_planner(self):
+    def test_interactive_sync_uses_collision_safe_roadmap(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
         _cube_scp(root_obj, "Blocker", (1.0, 0.0, 0.0), 0.8)
         register_fiber_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene, bake=False)
-        self.assertEqual(fiber_route_mode(fiber), "LOCAL_FALLBACK")
-        self.assertEqual(fiber_planner_ms(fiber), 0.0)
+        self.assertEqual(fiber_route_mode(fiber), "ROADMAP")
+        self.assertGreaterEqual(fiber_planner_ms(fiber), 0.0)
 
     def test_interactive_planner_preview_renders_cleaned_planner_route(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
         fiber.preview_planner_route = True
         _cube_scp(root_obj, "Blocker", (1.0, 0.0, 0.0), 0.8)
+        persisted = _fiber_points_world(fiber)
         register_fiber_sync().sync_root_to_scene(root=root_obj, scene=bpy.context.scene, bake=False)
-        points = _fiber_world_vectors(fiber)
+        points = _shown_fiber_world_vectors(fiber)
         a_world = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
         b_world = endpoint_world(root_obj, bpy.context.scene, {}, fiber.b_parent_id, fiber.b_attach_param)
         self.assertEqual(fiber_route_mode(fiber), "ROADMAP")
         self.assertGreater(fiber_planner_ms(fiber), 0.0)
         self.assertLess(len(points), fiber.node_count)
+        self.assertEqual(_fiber_points_world(fiber), persisted)
         self.assertLess((points[0] - a_world).length, 1.0e-6)
         self.assertLess((points[-1] - b_world).length, 1.0e-6)
         self.assertTrue(any(abs(p.y) > 1.0e-4 or abs(p.z) > 1.0e-4 for p in points[1:-1]))
 
-    def test_segment_collision_toggle_catches_thin_blocker_in_interactive_mode(self):
+    def test_progressive_planner_preview_remains_after_drain(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        _cube_scp(root_obj, "Blocker", (1.0, 0.0, 0.0), 0.8)
+        persisted = _fiber_points_world(fiber)
+        with suppress_vcp_prop_updates():
+            fiber.preview_planner_route = True
+        request = fiber_refinement.request_fiber_refinement(
+            root_obj, bpy.context.scene, fiber, True, "INTERACTIVE")
+        self.assertTrue(request.ok and drain_fiber_refinements())
+        shown = _shown_fiber_world_vectors(fiber)
+        self.assertEqual(fiber_recompute_status(fiber), "PLANNER_PREVIEW")
+        self.assertLess(len(shown), fiber.node_count)
+        self.assertEqual(_fiber_points_world(fiber), persisted)
+        self.assertEqual(request.job.session.preview, shown)
+        self.assertEqual(_shown_fiber_world_vectors(fiber), shown)
+
+    def test_failed_planner_preview_keeps_last_curve(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        persisted = _fiber_points_world(fiber)
+        with suppress_vcp_prop_updates():
+            fiber.preview_planner_route = True
+        request = fiber_refinement.request_fiber_refinement(
+            root_obj, bpy.context.scene, fiber, False, "INTERACTIVE")
+        request.job.session.preview = [Vector((0, 0, 0)), Vector((2, 0, 0))]
+        request.job.session.done = True
+        request.job.session.termination_reason = "NO_FEASIBLE_PATH"
+        result = request.job.session.result()
+        fiber_refinement._apply_progress(request.job, result)
+        fiber_refinement._finish_job(request.job, result)
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        self.assertEqual((_shown_fiber_world_vectors(fiber), _fiber_points_world(fiber)),
+                         (request.job.session.preview, persisted))
+        self.assertEqual(proxy.get("af_fiber_display_mode"), "FAILED_PREVIEW")
+
+    def test_sync_failed_planner_preview_keeps_last_curve(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        sync = register_fiber_sync()
+        kept = [Vector((0, 0, 0)), Vector((1, 0, 0.5)), Vector((2, 0, 0))]
+        sync.apply_points(root_obj, bpy.context.scene, fiber, kept, commit=True)
+        persisted = _fiber_points_world(fiber)
+        fiber.preview_planner_route = True
+        fallback = [Vector((0, 0, 0)), Vector((2, 0, 0))]
+        request = fiber_refinement.request_fiber_refinement(root_obj, bpy.context.scene, fiber, True, "INTERACTIVE")
+        request.job.session.preview, request.job.session.level = fallback, None
+        request.job.session.done, request.job.session.termination_reason = True, "NO_FEASIBLE_PATH"
+        result = request.job.session.result(); fiber_refinement._apply_progress(request.job, result)
+        fiber_refinement._finish_job(request.job, result)
+        self.assertEqual((_shown_fiber_world_vectors(fiber), _fiber_points_world(fiber)), (fallback, persisted))
+
+    def test_planner_avoids_thin_blocker_independently_of_segment_toggle(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
         fiber.node_count, fiber.iterations_interactive = 8, 20
         _cube_scp(root_obj, "ThinBlocker", (1.0, 0.0, 0.0), 0.1)
@@ -586,7 +758,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         sync.clear_solver_cache(fiber.id)
         sync.sync_root_to_scene(root=root_obj, scene=bpy.context.scene, bake=False)
         points_on = _fiber_world_vectors(fiber)
-        self.assertTrue(_polyline_hits_box(points_off, Vector((1.0, 0.0, 0.0)), 0.05))
+        self.assertFalse(_polyline_hits_box(points_off, Vector((1.0, 0.0, 0.0)), 0.05))
         self.assertFalse(_polyline_hits_box(points_on, Vector((1.0, 0.0, 0.0)), 0.05))
 
     def test_segment_collision_oracle_samples_zero_thickness_plane_hit(self):
@@ -690,7 +862,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         fiber = type("Fiber", (), {"id": "F", "use_warm_start": False})()
         params = {"node_count": 64, "iterations": 4, "margin": 0.0}
         with patch.object(solver, "_active_colliders", return_value=()), patch.object(solver, "_run_iterations", return_value=(True, 0.0, 0.0)):
-            nodes, *_rest = solver._solve_multilevel(fiber, anchors, [], object(), params, None)
+            nodes, *_rest = solver._solve_multilevel(fiber, anchors, [], _ClearOracle(), params, None)
         self.assertEqual(len(nodes), 64)
 
     def test_surface_route_toggle_skips_guides_when_disabled(self):
@@ -779,6 +951,25 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertGreater(min(nodes[2].z, nodes[3].z), 0.5)
         self.assertTrue(solver._segments_clear(nodes, oracle, oracle._colliders, params, skip_ends=True))
 
+    def test_owner_zones_are_bounded_to_authored_pins(self):
+        solver, oracle = FiberSolver(), _LocalizedPinOracle()
+        nodes = [Vector((float(index), 0.0, 0.0)) for index in range(10)]
+        colliders = ({"sid": "A"}, {"sid": "B"})
+        params = {"pin_owners": {0: "A", 5: "B"}}
+        zones = solver._owner_zone_limits(nodes, oracle, colliders, params)
+        self.assertEqual(zones, {"A": ((0, 0),), "B": ((5, 5),)})
+        self.assertTrue(solver._node_collider_allowed(colliders[0], 8, zones))
+
+    def test_accepted_state_keeps_authored_owner_zones_stable(self):
+        solver, oracle = FiberSolver(), _LocalizedPinOracle()
+        nodes = [Vector((float(index), 0.0, 0.0)) for index in range(10)]
+        colliders, params = ({"sid": "A"}, {"sid": "B"}), {"margin": 0.0, "pin_owners": {0: "A", 5: "B"}}
+        self.assertEqual(solver._owner_zone_limits(nodes, oracle, colliders, params)["A"], ((0, 0),))
+        nodes[2].x = 4.0
+        with patch.object(solver, "_active_colliders", return_value=colliders), patch.object(solver, "_refresh_safe_snapshot", return_value=None):
+            solver._post_iteration_state(nodes, oracle, params, None)
+        self.assertEqual(solver._owner_zone_limits(nodes, oracle, colliders, params)["A"], ((0, 0),))
+
     def test_segment_blocked_early_out_uses_ray_hit_without_pushout(self):
         blocked = FiberSolver()._segment_blocked(Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.0)), _RayHitOnlyOracle(), ({"sid": "A"},))
         self.assertTrue(blocked)
@@ -811,11 +1002,16 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         nodes = fiber_planner._roadmap_nodes(_ManyShellOracle(), segment, ({"sid": "A"},), False)
         self.assertEqual(len(nodes), 96)
 
-    def test_planner_ignores_same_owner_surface_collider(self):
+    def test_planner_routes_around_same_owner_chord(self):
+        oracle = _SelfSurfacePlannerOracle()
         start = fiber_planner.PlannerAnchor(Vector((0.0, 0.0, 0.0)), "S")
         end = fiber_planner.PlannerAnchor(Vector((1.0, 0.0, 0.0)), "S")
-        result = fiber_planner._plan_segment(_SelfSurfacePlannerOracle(), fiber_planner.PlannerSegment(start, end), False)
-        self.assertEqual((result.mode, len(result.points), result.active_ids), (fiber_planner.DIRECT, 2, ()))
+        result = fiber_planner._plan_segment(oracle, fiber_planner.PlannerSegment(start, end), False)
+        self.assertEqual((result.mode, len(result.points), result.active_ids), (fiber_planner.ROADMAP, 3, ("S",)))
+        self.assertGreater(oracle.shell_calls, 0)
+        detour_owners = [owners for a, b, owners in oracle.owner_calls if abs(a[1]) > 0.1 or abs(b[1]) > 0.1]
+        self.assertIn(("S", ""), detour_owners)
+        self.assertIn(("", "S"), detour_owners)
 
     def test_planner_keeps_external_blocker_as_roadmap_collider(self):
         oracle = _ExternalBlockerPlannerOracle()
@@ -824,6 +1020,15 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         result = fiber_planner._plan_segment(oracle, fiber_planner.PlannerSegment(start, end), False)
         self.assertEqual((result.mode, len(result.points), result.active_ids), (fiber_planner.ROADMAP, 3, ("B",)))
         self.assertGreater(oracle.shell_calls, 0)
+
+    def test_planner_replans_for_blocker_discovered_on_detour(self):
+        oracle = _DetourBlockerPlannerOracle()
+        anchors = (fiber_planner.PlannerAnchor(Vector((0.0, 0.0, 0.0))),
+                   fiber_planner.PlannerAnchor(Vector((2.0, 0.0, 0.0))))
+        result = fiber_planner.plan_route(oracle, anchors, allow_dense=False)
+        self.assertEqual((result.mode, result.active_ids),
+                         (fiber_planner.ROADMAP, ("A", "B")))
+        self.assertGreater(max(point.y for point in result.points), 1.5)
 
     def test_planner_relax_shortens_visible_zigzag_seed(self):
         route = [Vector((0.0, 0.0, 0.0)), Vector((0.5, 1.0, 0.0)), Vector((1.0, 0.0, 0.0))]
@@ -849,17 +1054,18 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertGreater(pen, 0.0)
         self.assertGreater(oracle.pushes, 0)
 
-    def test_recompute_fiber_preserves_mid_touch_anchor(self):
+    def test_recompute_fiber_rejects_unsafe_mid_touch_result(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
         blocker, blocker_obj = _cube_scp(root_obj, "TouchBlocker", (1.0, 0.0, 0.0), 0.8)
         target_local = Vector((0.0, 0.0, 0.4))
+        before = _fiber_points_world(fiber)
         touch = fiber.mid_touches.add()
         touch.parent_id = blocker.id
         touch.attach_param = capture_world_attachment(root_obj, blocker.id, blocker_obj.matrix_world @ target_local)
         _recompute_and_drain()
-        target_world = blocker_obj.matrix_world @ target_local
-        points = [Vector(value) for value in _fiber_points_world(fiber)]
-        self.assertLess(min((point - target_world).length for point in points), 1.0e-6)
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        self.assertEqual(_fiber_points_world(fiber), before)
+        self.assertEqual(proxy.get("af_fiber_output_state"), "STALE")
 
     def test_move_fiber_touch_point_reorders_handles_in_viewport(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
@@ -891,6 +1097,26 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertFalse(fiber.use_segment_collisions)
         self.assertTrue(hasattr(fiber, "preview_planner_route"))
         self.assertFalse(fiber.preview_planner_route)
+
+    def test_new_fiber_defaults_include_solver_version_and_rollback_state(self):
+        _root_obj, fiber, _origin, _insert = _fiber_setup()
+        self.assertEqual(fiber.solver_version, 1)
+        self.assertAlmostEqual(fiber.collision_radius, 0.002)
+        self.assertEqual((fiber.legacy_points_json, fiber.legacy_status), ("", ""))
+        self.assertEqual((fiber.legacy_eps_disp, fiber.legacy_eps_pen), (0.0, 0.0))
+
+    def test_new_fiber_v2_commit_updates_provenance_atomically(self):
+        with patch.dict("os.environ", {"AF_FIBER_ENGINE": "V2"}):
+            _root_obj, fiber, _origin, _insert = _fiber_setup()
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        self.assertEqual((fiber.solver_version, proxy.get("af_fiber_output_engine")), (2, "V2"))
+        self.assertEqual(proxy.get("af_fiber_output_engine_version"), "fiber-v2-production-3")
+
+    def test_bake_iteration_policy_edit_does_not_trigger_runtime(self):
+        _root_obj, fiber, _origin, _insert = _fiber_setup()
+        with patch.object(vcp_properties, "schedule_context") as schedule, patch.object(vcp_properties, "sync_context") as sync:
+            fiber.iterations_bake += 1
+        self.assertEqual((schedule.call_count, sync.call_count), (0, 0))
 
     def test_new_fiber_defaults_remove_legacy_solver_knobs(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup()
@@ -930,7 +1156,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         _sync_active_fiber(root_obj, fiber)
         sync = register_fiber_sync()
         handle = mark_endpoint_handle(empty_object("Endpoint"), root_obj, fiber.id, "A")
-        with patch.object(fiber_runtime, "resolve_conflict", return_value="ENDPOINT_RAW"):
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY), patch.object(fiber_runtime, "resolve_conflict", return_value="ENDPOINT_RAW"):
             fiber_runtime.apply_fiber_control_update(sync, root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
         self.assertEqual(fiber.a_attach_param, "ENDPOINT_RAW")
 
@@ -941,7 +1167,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         _sync_active_fiber(root_obj, fiber)
         sync = register_fiber_sync()
         handle = mark_touch_handle(empty_object("Touch"), root_obj, fiber.id, 0)
-        with patch.object(fiber_runtime, "resolve_conflict", return_value="TOUCH_RAW"):
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY), patch.object(fiber_runtime, "resolve_conflict", return_value="TOUCH_RAW"):
             fiber_runtime.apply_fiber_control_update(sync, root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
         self.assertEqual(fiber.mid_touches[0].attach_param, "TOUCH_RAW")
 
@@ -964,12 +1190,137 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         handle = mark_touch_handle(empty_object("TouchMove"), root_obj, fiber.id, 0)
         handle.location = origin.geometry_object_ref.matrix_world @ origin.geometry_object_ref.data.vertices[2].co
         sync = register_fiber_sync()
-        with patch.object(fiber_runtime, "resolve_conflict", side_effect=lambda **kwargs: kwargs["incoming"]):
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY), patch.object(fiber_runtime, "resolve_conflict", side_effect=lambda **kwargs: kwargs["incoming"]):
             fiber_runtime.apply_fiber_control_update(sync, root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
         target = origin.geometry_object_ref.matrix_world @ origin.geometry_object_ref.data.vertices[2].co
         actual = endpoint_world(root_obj, bpy.context.scene, {}, fiber.mid_touches[0].parent_id, fiber.mid_touches[0].attach_param)
         self.assertEqual(parse_fiber_attach_param(fiber.mid_touches[0].attach_param)[0], "surface_param_v2")
         self.assertLess((actual - target).length, 1.0e-6)
+
+    def test_endpoint_handle_transfers_to_another_scp_surface(self):
+        root_obj, fiber, _origin, insert = _fiber_setup()
+        _sync_active_fiber(root_obj, fiber)
+        handle = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_endpoint") == "A")
+        target = insert.geometry_object_ref.matrix_world @ insert.geometry_object_ref.data.vertices[1].co
+        handle.location = target
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY):
+            changed = fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        actual = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
+        self.assertEqual((changed, fiber.a_parent_id), (fiber.id, insert.id))
+        self.assertLess((actual - target).length, 1.0e-6)
+
+    def test_endpoint_transfer_uses_frontmost_visible_scp(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        front = scp_with_object(root_obj, "Front", mesh_object("Front", (0.0, 0.0, 1.0)))
+        _sync_active_fiber(root_obj, fiber)
+        handle = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_endpoint") == "A")
+        handle.location = Vector((0.2, 0.2, 1.0)); ray = (Vector((0.2, 0.2, 3.0)), Vector((0, 0, -1)))
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=ray):
+            fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        actual = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
+        self.assertEqual(fiber.a_parent_id, front.id)
+        self.assertAlmostEqual(actual.z, 1.0)
+
+    def test_touch_handle_transfers_owner_and_preserves_offset(self):
+        root_obj, fiber, origin, insert = _fiber_setup()
+        _edit_select_vertex(origin.geometry_object_ref, 1); bpy.ops.af.add_fiber_touch_point(fiber_id=fiber.id)
+        touch = fiber.mid_touches[0]; touch.normal_offset = 0.2; _sync_active_fiber(root_obj, fiber)
+        handle = _touch_handle(fiber.id)
+        target = insert.geometry_object_ref.matrix_world @ insert.geometry_object_ref.data.vertices[2].co
+        handle.location = target
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY):
+            fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        actual = endpoint_world(root_obj, bpy.context.scene, {}, touch.parent_id, touch.attach_param)
+        self.assertEqual(touch.parent_id, insert.id)
+        self.assertAlmostEqual(touch.normal_offset, 0.2)
+        self.assertLess((actual - target).length, 1.0e-6)
+
+    def test_ambiguous_equal_surface_keeps_current_owner(self):
+        root_obj, fiber, origin, _insert = _fiber_setup()
+        duplicate = scp_with_object(root_obj, "Duplicate", mesh_object("Duplicate"))
+        _sync_active_fiber(root_obj, fiber)
+        handle = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_endpoint") == "A")
+        handle.location = origin.geometry_object_ref.matrix_world @ origin.geometry_object_ref.data.vertices[1].co
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY):
+            fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        self.assertNotEqual(origin.id, duplicate.id)
+        self.assertEqual(fiber.a_parent_id, origin.id)
+
+    def test_rejected_owner_transfer_keeps_attachment_atomic(self):
+        root_obj, fiber, origin, insert = _fiber_setup(); before = fiber.a_attach_param
+        _sync_active_fiber(root_obj, fiber)
+        handle = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_endpoint") == "A")
+        handle.location = insert.geometry_object_ref.matrix_world @ insert.geometry_object_ref.data.vertices[1].co
+        policy = lambda **row: row["current"] if row["aspect"].endswith(".owner") else row["incoming"]
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY), patch.object(fiber_runtime, "resolve_conflict", side_effect=policy):
+            changed = fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        self.assertIsNone(changed)
+        self.assertEqual((fiber.a_parent_id, fiber.a_attach_param), (origin.id, before))
+
+    def test_fiber_update_projects_endpoint_handle_to_surface(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        handle = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_endpoint_handle") and obj.get("af_fiber_endpoint") == "A")
+        select_only(handle)
+        handle.location += Vector((0.2, 0.2, 0.75))
+        sync = register_fiber_sync()
+        fiber_runtime.apply_fiber_control_update(sync, root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        with patch.object(builtin_drivers, "_request_fiber_refinements"):
+            builtin_drivers.FiberSyncDriver().sync(root_obj, bpy.context.scene, False, {"FIBER": {fiber.id}}, False, {"event_type": "FIBER_UPDATE"})
+        target = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
+        self.assertLess((handle.location - target).length, 1.0e-6)
+
+    def test_fiber_update_projects_touch_handle_to_surface(self):
+        root_obj, fiber, _origin, _insert = _fiber_setup()
+        _append_touch(root_obj, fiber, "Touch", (1.0, 1.0, 0.0))
+        _sync_active_fiber(root_obj, fiber)
+        handle = _touch_handle(fiber.id)
+        select_only(handle)
+        handle.location += Vector((0.2, 0.2, 0.75))
+        fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        with patch.object(builtin_drivers, "_request_fiber_refinements"):
+            builtin_drivers.FiberSyncDriver().sync(root_obj, bpy.context.scene, False, {"FIBER": {fiber.id}}, False, {"event_type": "FIBER_UPDATE"})
+        touch = fiber.mid_touches[0]
+        target = endpoint_world(root_obj, bpy.context.scene, {}, touch.parent_id, touch.attach_param)
+        self.assertAlmostEqual(target.z, 0.0, places=6)
+        self.assertLess((handle.location - target).length, 1.0e-6)
+
+    def test_endpoint_capture_uses_first_camera_facing_surface(self):
+        root_obj, fiber, origin, _insert = _fiber_setup()
+        _set_stacked_surface(origin.geometry_object_ref)
+        fiber.a_attach_param = capture_mesh_attachment(root_obj, origin, 0)
+        _sync_active_fiber(root_obj, fiber)
+        handle = next(obj for obj in bpy.context.scene.objects if obj.get("af_fiber_endpoint_handle") and obj.get("af_fiber_endpoint") == "A")
+        handle.location = Vector((0.2, 0.2, 0.1))
+        ray = (Vector((0.2, 0.2, 2.0)), Vector((0.0, 0.0, -1.0)))
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=ray):
+            fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        actual = endpoint_world(root_obj, bpy.context.scene, {}, fiber.a_parent_id, fiber.a_attach_param)
+        self.assertAlmostEqual(actual.z, 1.0, places=6)
+
+    def test_camera_capture_rejects_a_back_facing_first_hit(self):
+        _root_obj, _fiber, origin, _insert = _fiber_setup()
+        _set_stacked_surface(origin.geometry_object_ref, reverse_front=True)
+        ray = (Vector((0.2, 0.2, 2.0)), Vector((0.0, 0.0, -1.0)))
+        raw = capture_attachment_from_object_ray(origin.geometry_object_ref, *ray)
+        self.assertIsNone(raw)
+
+    def test_view_ray_uses_active_viewport_through_control(self):
+        region, rv3d = SimpleNamespace(type="WINDOW"), SimpleNamespace(view_location=Vector())
+        context = SimpleNamespace(area=SimpleNamespace(type="VIEW_3D"), region=region,
+                                  space_data=SimpleNamespace(region_3d=rv3d))
+        with patch.object(fiber_view_capture.view3d_utils, "location_3d_to_region_2d", return_value=Vector((4, 5))), patch.object(
+                fiber_view_capture.view3d_utils, "region_2d_to_origin_3d", return_value=Vector((0, 0, 3))), patch.object(
+                fiber_view_capture.view3d_utils, "region_2d_to_vector_3d", return_value=Vector((0, 0, -2))):
+            ray = fiber_view_capture.view_ray_for_world_point(Vector((0, 0, 1)), context)
+        self.assertEqual((tuple(ray[0]), tuple(ray[1])), ((0.0, 0.0, 3.0), (0.0, 0.0, -1.0)))
+
+    def test_view_capture_does_not_nearest_fallback_behind_camera(self):
+        region, rv3d = SimpleNamespace(type="WINDOW"), SimpleNamespace(view_location=Vector())
+        context = SimpleNamespace(area=SimpleNamespace(type="VIEW_3D"), region=region,
+                                  space_data=SimpleNamespace(region_3d=rv3d))
+        with patch.object(fiber_view_capture.view3d_utils, "location_3d_to_region_2d", return_value=None):
+            ray = fiber_view_capture.view_ray_for_world_point(Vector((0, 0, 1)), context)
+        self.assertIsNone(ray)
 
     def test_recompute_fiber_rejects_legacy_attach_payloads(self):
         for raw in (encode_fiber_shape_param(0.25), encode_fiber_mesh_anchor(Vector((0.0, 0.0, 0.0))), encode_fiber_vertex_index(0, "sig")):
@@ -982,13 +1333,17 @@ class FiberVcpWorkflowTests(BlenderTestCase):
 
     def test_recompute_fiber_marks_missing_parent_geometry_invalid(self):
         root_obj, fiber, origin, _insert = _fiber_setup()
+        before = _fiber_points_world(fiber)
         missing = scp_with_object(root_obj, "NoGeo", empty_object("NoGeo"), with_geometry=False)
         fiber.a_parent_id = missing.id
         fiber.a_attach_param = capture_mesh_attachment(root_obj, origin, 0)
         result = recompute_fiber_action(bpy.context, fiber.id)
         self.assertFalse(result.ok)
         self.assertEqual((fiber_recompute_status(fiber), fiber_invalid_reason(fiber)), ("INVALID_ATTACHMENT", "Missing parent geometry."))
-        self.assertEqual(_fiber_points_world(fiber), [])
+        self.assertEqual(_fiber_points_world(fiber), before)
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        self.assertEqual(proxy.get("af_fiber_output_state"), "STALE")
+        self.assertIsNone(cached_fiber_points(bpy.context.scene, root_obj.name, fiber.id))
 
     def test_delete_fiber_in_tree_removes_proxy_and_handles(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
@@ -1005,6 +1360,15 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual((fiber.topology_mode, len(fiber.loop_anchors)), ("LOOP", 4))
         self.assertEqual((proxy.data.splines[0].use_cyclic_u, fiber_route_mode(fiber)), (True, "DIRECT"))
         self.assertTrue(all((anchors[i] - expected[i]).length < 1.0e-6 for i in range(4)))
+
+    def test_v2_request_records_loop_compatibility_provenance(self):
+        with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V2"}):
+            _root_obj, fiber, _loop = _loop_setup()
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        self.assertEqual((fiber.solver_version, proxy.get("af_fiber_output_engine")), (1, "V1"))
+        self.assertEqual(proxy.get("af_fiber_requested_engine"), "V2")
+        self.assertEqual(proxy.get("af_fiber_engine_fallback_reason"),
+                         "V2_TOPOLOGY_COMPATIBILITY")
 
     def test_create_loop_fiber_suppresses_intermediate_prop_sync(self):
         root_obj = root()
@@ -1033,6 +1397,36 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertTrue(any(point.x < -0.25 for point in points))
         self.assertTrue(any(point.x > 0.25 for point in points))
 
+    def test_v2_request_records_symmetric_loop_compatibility(self):
+        with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V2"}):
+            _root_obj, fiber, _loop = _symmetric_loop_setup()
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        self.assertEqual((fiber.solver_version, proxy.get("af_fiber_output_engine")), (1, "V1"))
+        self.assertEqual(proxy.get("af_fiber_engine_fallback_reason"),
+                         "V2_TOPOLOGY_COMPATIBILITY")
+
+    def test_v3_loop_commits_native_cyclic_output(self):
+        with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V3"}):
+            _root_obj, fiber, _loop = _loop_setup(); fiber.node_count = 48
+            _recompute_and_drain(fiber.id)
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        self.assertEqual((fiber.solver_version, proxy.get("af_fiber_output_engine")), (3, "V3"))
+        self.assertEqual((len(_fiber_points_world(fiber)), proxy.data.splines[0].use_cyclic_u),
+                         (48, True))
+        self.assertFalse(proxy.get("af_fiber_engine_fallback_reason"))
+
+    def test_v3_symmetric_loop_uses_global_cyclic_solver(self):
+        with patch.dict(os.environ, {"AF_FIBER_ENGINE": "V3"}):
+            root_obj, fiber, _loop = _symmetric_loop_setup(); _recompute_and_drain(fiber.id)
+        proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
+        self.assertEqual((fiber.solver_version, proxy.get("af_fiber_output_engine")), (3, "V3"))
+        self.assertTrue(proxy.data.splines[0].use_cyclic_u)
+        self.assertFalse(proxy.get("af_fiber_engine_fallback_reason"))
+        solver = register_fiber_sync()._solver
+        _runtime, anchors, issue = solver._loop_anchors(
+            root_obj, bpy.context.scene, bpy.context.evaluated_depsgraph_get(), fiber)
+        self.assertFalse(issue); self.assertTrue(all(anchor.owner_id for anchor in anchors))
+
     def test_selected_loop_fiber_shows_anchor_handles(self):
         root_obj, fiber, _loop = _loop_setup()
         _sync_active_fiber(root_obj, fiber)
@@ -1048,7 +1442,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         handle.location = loop.geometry_object_ref.matrix_world @ loop.geometry_object_ref.data.vertices[2].co
         sync = register_fiber_sync()
         sync._solver._cache[fiber.id] = [Vector((9.0, 9.0, 9.0))]
-        with patch.object(fiber_runtime, "resolve_conflict", side_effect=lambda **kwargs: kwargs["incoming"]):
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY), patch.object(fiber_runtime, "resolve_conflict", side_effect=lambda **kwargs: kwargs["incoming"]):
             fiber_runtime.apply_fiber_control_update(sync, root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
         target = loop.geometry_object_ref.matrix_world @ loop.geometry_object_ref.data.vertices[2].co
         anchor = fiber.loop_anchors[0]
@@ -1056,6 +1450,19 @@ class FiberVcpWorkflowTests(BlenderTestCase):
         self.assertEqual(parse_fiber_attach_param(anchor.attach_param)[0], "surface_param_v2")
         self.assertFalse(_cache_has_point(sync, fiber.id, Vector((9.0, 9.0, 9.0))))
         self.assertLess(min((point - target).length for point in _fiber_world_vectors(fiber)), 1.0e-6)
+        self.assertLess((actual - target).length, 1.0e-6)
+
+    def test_loop_anchor_handle_transfers_to_another_scp(self):
+        root_obj, fiber, _loop = _loop_setup()
+        target_scp = scp_with_object(root_obj, "LoopTarget", mesh_object("LoopTarget", (3.0, 0.0, 0.0)))
+        _sync_active_fiber(root_obj, fiber); handle = _loop_anchor_handle(fiber.id, 0)
+        target = target_scp.geometry_object_ref.matrix_world @ target_scp.geometry_object_ref.data.vertices[1].co
+        handle.location = target
+        with patch.object(fiber_view_capture, "view_ray_for_world_point", return_value=fiber_view_capture.NO_VIEW_RAY):
+            fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
+        anchor = fiber.loop_anchors[0]
+        actual = endpoint_world(root_obj, bpy.context.scene, {}, anchor.parent_id, anchor.attach_param)
+        self.assertEqual(anchor.parent_id, target_scp.id)
         self.assertLess((actual - target).length, 1.0e-6)
 
     def test_recompute_loop_fiber_preserves_node_count_and_hides_handles(self):
