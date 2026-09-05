@@ -193,7 +193,7 @@ def _rebuild_mesh(obj, mesh, verts, faces, sig, topo):
 
 
 def _topology_signature(faces):
-    rows = tuple(faces or ())
+    rows = tuple(faces) if faces is not None else ()
     try: values = np.ascontiguousarray(rows, dtype=np.int64)
     except ValueError:
         values = np.fromiter((value for row in rows for value in (len(row), *row)), dtype=np.int64)

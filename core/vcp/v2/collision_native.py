@@ -15,6 +15,7 @@ V3_NATIVE_MULTI_SESSION_CAPABILITY = 65536
 V3_NATIVE_CONTROLLER_CAPABILITIES = 5111808
 V3_NATIVE_ASYNC_CAPABILITY = 16777216
 ATTACHMENT_WAVE_CAPABILITY = 33554432
+MUSCLE_NUMERIC_CAPABILITY = 67108864
 
 
 class _NativeMeshSweep(Structure):
@@ -77,7 +78,7 @@ class _NativeV3BatchStats(Structure):
 
 _REASONS = ("CLEAR", "AABB_CLEAR", "INVALID_START", "POSSIBLE_COLLISION", "BUDGET_EXHAUSTED")
 _LIBRARIES = {}
-_DEFAULT_NATIVE_PATH = Path(__file__).resolve().parents[3] / "native" / "fiber_ccd" / "af_fiber_ccd_v3_10.dll"
+_DEFAULT_NATIVE_PATH = Path(__file__).resolve().parents[3] / "native" / "fiber_ccd" / "af_fiber_ccd_v3_11.dll"
 
 
 def native_path():
