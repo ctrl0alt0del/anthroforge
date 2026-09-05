@@ -1,4 +1,5 @@
 from pathlib import Path
+import importlib.util
 import os
 import sys
 import unittest
@@ -13,6 +14,22 @@ if str(BLENDER_TESTS) not in sys.path:
 from _support import ensure_import_path
 
 ensure_import_path()
+
+
+def _load_worktree_addon():
+    path = HERE.parent / "__init__.py"
+    existing = sys.modules.get("anthroforge")
+    if existing is not None:
+        assert Path(existing.__file__).resolve() == path.resolve(), "Wrong AnthroForge checkout loaded"
+        return
+    spec = importlib.util.spec_from_file_location("anthroforge", path,
+                                                submodule_search_locations=[str(HERE.parent)])
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["anthroforge"] = module
+    spec.loader.exec_module(module)
+
+
+_load_worktree_addon()
 os.environ["AF_DEPS_TRACE"] = "0"
 os.environ.setdefault("AF_FIBER_ENGINE", "V1")
 

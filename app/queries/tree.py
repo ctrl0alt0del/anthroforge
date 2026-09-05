@@ -5,8 +5,10 @@ from .scp import active_scp_id
 
 try:
     from ...core.scp_runtime.visibility import isolated_scp_id
+    from ...core.visualization.category_visibility import CategoryVisibility, category_visibility
 except ImportError:
     from core.scp_runtime.visibility import isolated_scp_id
+    from core.visualization.category_visibility import CategoryVisibility, category_visibility
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,8 @@ class TreePanelState:
     active_scp_id: str = ""
     isolated_scp_id: str = ""
     selection: TreeSelection = field(default_factory=TreeSelection)
+    muscle_visibility: CategoryVisibility = field(default_factory=CategoryVisibility)
+    fiber_visibility: CategoryVisibility = field(default_factory=CategoryVisibility)
 
 
 def _selected_objects(context):
@@ -88,4 +92,8 @@ def tree_panel_state(context):
     if root is None:
         return TreePanelState(scene=scene)
     isolated = isolated_scp_id(scene, getattr(context, "view_layer", None), root.name)
-    return TreePanelState(scene=scene, root=root, active_scp_id=active_scp_id(context), isolated_scp_id=isolated, selection=_tree_selection(context, root))
+    layer = getattr(context, "view_layer", None)
+    return TreePanelState(scene=scene, root=root, active_scp_id=active_scp_id(context),
+                         isolated_scp_id=isolated, selection=_tree_selection(context, root),
+                         muscle_visibility=category_visibility(scene, layer, root, "MUSCLE"),
+                         fiber_visibility=category_visibility(scene, layer, root, "FIBER"))

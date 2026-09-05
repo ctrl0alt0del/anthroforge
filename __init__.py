@@ -41,6 +41,7 @@ from .operators.fiber_proxy import (
     AF_OT_CreateSymmetricLoopFiberFromSelectedVertices,
 )
 from .operators.add_muscle_vcp import AF_OT_AddMuscleVCP
+from .operators.category_visibility import AF_OT_SetVCPCategoryVisibility
 from .operators.fiber_surface import (
     AF_OT_CreateFiberSurface,
     AF_OT_CreateMuscleFromFiberSurface,
@@ -205,6 +206,7 @@ from .core.scp_proxy import register_proxy_session_runtime, unregister_proxy_ses
 from .ui.scene_props import register_scene_props, unregister_scene_props
 
 classes = (
+    AF_OT_SetVCPCategoryVisibility,
     AF_OT_CreateRoot,
     AF_OT_AddSCP,
     AF_OT_SetSCPParent,
