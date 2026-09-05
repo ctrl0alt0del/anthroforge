@@ -3,6 +3,7 @@ from ...app.queries.root import has_root
 from ...app.queries.tree import tree_panel_state
 from ..sections.tree_section import draw_tree_section
 from ..sections.vcp_tree_section import draw_vcp_tree_section
+from ..sections.category_visibility import draw_category_visibility
 
 
 def _draw_vcp_box(box, scene, root, selected_fibers, selected_surfaces, selected_muscles, selected_blobs, selected_tissues):
@@ -33,5 +34,6 @@ class AF_PT_TreePanel(bpy.types.Panel):
         box.label(text="SCPs")
         draw_tree_section(box, state.scene, state.root, state.active_scp_id, state.isolated_scp_id, state.selection.scp_ids)
         selected = state.selection
+        draw_category_visibility(box, state.muscle_visibility, state.fiber_visibility)
         _draw_vcp_box(box, state.scene, state.root, selected.fiber_ids, selected.fiber_surface_ids, selected.muscle_ids,
                       selected.blob_ids, selected.soft_tissue_ids)

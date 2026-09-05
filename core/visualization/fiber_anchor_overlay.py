@@ -104,8 +104,18 @@ def _active_scope():
     fiber = _active_fiber(root)
     if scene is None or root is None or fiber is None:
         return None
+    if not _fiber_visible(context, scene, root, fiber):
+        return None
     from ..vcp.fiber_anchor_preflight import fiber_anchor_scope
     return fiber_anchor_scope(scene, root, fiber)
+
+
+def _fiber_visible(context, scene, root, fiber):
+    from .category_visibility import fiber_proxy_visible
+    viewport = getattr(context, "space_data", None)
+    if getattr(viewport, "type", None) != "VIEW_3D":
+        viewport = None
+    return fiber_proxy_visible(scene, getattr(context, "view_layer", None), root, fiber.id, viewport)
 
 
 def _root_for_scene(scene):
