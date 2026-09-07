@@ -93,11 +93,8 @@ class MuscleSceneSync:
             vis_col=vis_col,
             root=root,
             muscle=muscle,
-            base_obj=base_obj,
-            base_points=base_points,
             find_inflation_ctrl_fn=self._find_inflation_ctrl,
             create_inflation_ctrl_fn=self._create_inflation_ctrl,
-            nearest_on_mesh_surface_fn=self._nearest_on_mesh_surface,
         )
 
     def _remove_inflation_ctrl_for_muscle(self, vis_col, root_name, muscle_id):

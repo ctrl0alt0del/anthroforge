@@ -8,10 +8,10 @@ from time import perf_counter
 import numpy as np
 
 from .fiber_surface import build_loft_topology, prepare_loft_rows
+from .muscle_inflation_state import INITIALIZED_KEY, WORLD_KEY
 
 
 MUSCLE_NUMERIC_VERSION = "muscle-numeric-1"
-_CTRL_KEY = "_af_rt_muscle_inflation_ctrl_world"
 
 
 class MuscleNumericBackend(str, Enum):
@@ -104,7 +104,9 @@ def execute_python_muscle_batch(requests):
 class _InflationAdapter:
     def __init__(self, spec): self._spec = spec
     def __getattr__(self, name): return getattr(self._spec, name)
-    def get(self, key, default=None): return self._spec.control_world if key == _CTRL_KEY else default
+    def get(self, key, default=None):
+        if key == WORLD_KEY: return self._spec.control_world
+        return True if key == INITIALIZED_KEY else default
 
 
 def _python_result(request):
