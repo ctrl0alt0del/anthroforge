@@ -48,6 +48,12 @@ class MuscleNumericBackendTests(unittest.TestCase):
     def test_zero_control_matches_python_reference(self):
         _compare(self, "CTRL_POINT", control_world=(0.0, 0.0, 0.0), initialize_control=True)
 
+    def test_authored_origin_matches_python_without_initialization(self):
+        _compare(self, "CTRL_POINT", control_world=(0.0, 0.0, 0.0), initialize_control=False)
+
+    def test_offcentre_control_matches_python_without_initialization(self):
+        _compare(self, "CTRL_POINT", control_world=(1.13, 0.77, 0.03), initialize_control=False)
+
     def test_closed_surface_matches_python_reference(self):
         _compare(self, "DISTRIBUTED", closed_u=True, close_across_fibers=True, closed_v=True)
 

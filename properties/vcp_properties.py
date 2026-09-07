@@ -221,6 +221,11 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
     active_fiber_ref_index: bpy.props.IntProperty(name="Active Fiber Ref", default=-1)
 
     inflation_enabled: bpy.props.BoolProperty(name="Inflation Enabled", default=True, update=_on_muscle_prop_update)
+    inflation_ctrl_world: bpy.props.FloatVectorProperty(
+        name="Inflation Control Position", size=3, default=(0.0, 0.0, 0.0),
+        options={"HIDDEN"}, update=_on_muscle_prop_update,
+    )
+    inflation_ctrl_initialized: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
     inflation_mode: bpy.props.EnumProperty(
         name="Inflation Mode",
         items=(

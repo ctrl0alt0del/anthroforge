@@ -3,6 +3,7 @@ import importlib.util
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
@@ -37,5 +38,9 @@ pattern = next((arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--pa
 test_name = next((arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--test=")), "")
 suite = (unittest.defaultTestLoader.loadTestsFromName(test_name) if test_name else
          unittest.defaultTestLoader.discover("tests/blender", pattern=pattern))
-result = unittest.TextTestRunner(verbosity=2).run(suite)
+from _snapshot_worktree import snapshot_command
+from anthroforge.core.importing import service
+
+with patch.object(service, "_snapshot_cmd", snapshot_command):
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
 raise SystemExit(0 if result.wasSuccessful() else 1)

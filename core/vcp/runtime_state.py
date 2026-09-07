@@ -11,7 +11,6 @@ _FIBER_INVALID = "_af_rt_fiber_last_invalid_reason"
 _BLOB_OK = "_af_rt_blob_last_solve_converged"
 _BLOB_DISP = "_af_rt_blob_last_solve_max_disp"
 _BLOB_ITERS = "_af_rt_blob_last_solve_iterations"
-_MUSCLE_CTRL = "_af_rt_muscle_inflation_ctrl_world"
 _SURFACE_STATUS = "_af_rt_fiber_surface_status"
 _SURFACE_MS = "_af_rt_fiber_surface_ms"
 _SURFACE_ERROR = "_af_rt_fiber_surface_error"
@@ -146,15 +145,18 @@ def reset_blob_runtime(blob):
 
 
 def muscle_inflation_ctrl_world(muscle):
-    return _vec3(_read(muscle, _MUSCLE_CTRL, (0.0, 0.0, 0.0)))
+    from .muscle_inflation_state import inflation_control_world
+    return inflation_control_world(muscle)
 
 
 def set_muscle_inflation_ctrl_world(muscle, value):
-    _write(muscle, _MUSCLE_CTRL, _vec3(value))
+    from .muscle_inflation_state import set_inflation_control_world
+    set_inflation_control_world(muscle, value)
 
 
 def reset_muscle_runtime(muscle):
-    set_muscle_inflation_ctrl_world(muscle, (0.0, 0.0, 0.0))
+    from .muscle_inflation_state import migrate_inflation_control
+    migrate_inflation_control(muscle)
 
 
 def fiber_surface_status(surface):

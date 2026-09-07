@@ -2,7 +2,7 @@ import json
 
 from mathutils import Vector
 
-from ..vcp.runtime_state import muscle_inflation_ctrl_world, set_muscle_inflation_ctrl_world
+from ..vcp.runtime_state import muscle_inflation_ctrl_world
 from .fiber_sync_helpers import cached_fiber_points
 from .muscle_sync_helpers import mark_inflation_ctrl_location
 from .mirror_rules import axis_index, effective_rule_for_muscle
@@ -105,18 +105,8 @@ def _mirror_coords(point, axis, origin):
     return values
 
 
-def ensure_inflation_ctrl(
-    vis_col,
-    root,
-    muscle,
-    base_obj,
-    base_points,
-    find_inflation_ctrl_fn,
-    create_inflation_ctrl_fn,
-    nearest_on_mesh_surface_fn,
-):
-    _ensure_initial_ctrl_world(muscle, base_points)
-    target = _snap_ctrl_to_surface(muscle, base_obj, nearest_on_mesh_surface_fn)
+def ensure_inflation_ctrl(vis_col, root, muscle, find_inflation_ctrl_fn, create_inflation_ctrl_fn):
+    target = Vector(muscle_inflation_ctrl_world(muscle))
     ctrl = find_inflation_ctrl_fn(vis_col, root.name, muscle.id)
     if ctrl is None:
         ctrl = create_inflation_ctrl_fn(vis_col, root, muscle.id)
@@ -125,23 +115,3 @@ def ensure_inflation_ctrl(
     ctrl.show_in_front = True
     ctrl.hide_render = True
     return ctrl
-
-
-def _ensure_initial_ctrl_world(muscle, base_points):
-    if Vector(muscle_inflation_ctrl_world(muscle)).length_squared != 0.0:
-        return
-    rows = len(base_points)
-    cols = len(base_points[0]) if rows > 0 else 0
-    if rows <= 0 or cols <= 0:
-        return
-    p = base_points[rows // 2][cols // 2]
-    set_muscle_inflation_ctrl_world(muscle, (p.x, p.y, p.z))
-
-
-def _snap_ctrl_to_surface(muscle, base_obj, nearest_on_mesh_surface_fn):
-    target = Vector(muscle_inflation_ctrl_world(muscle))
-    snapped, _n = nearest_on_mesh_surface_fn(base_obj, target)
-    if snapped is None:
-        return target
-    set_muscle_inflation_ctrl_world(muscle, (snapped.x, snapped.y, snapped.z))
-    return snapped

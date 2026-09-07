@@ -124,6 +124,15 @@ class ImportPackageE2ETests(BlenderTestCase):
         path = temp_blend_path()
         self.addCleanup(lambda: os.remove(path) if os.path.exists(path) else None)
         bpy.ops.wm.save_as_mainfile(filepath=path)
+        self._assert_snapshot_authoring(snapshot)
+        reset_scene()
+        scp_with_object(root(), "Existing", mesh_object("Existing"))
+        result = import_package_from_blend(path, bpy.context)
+        root_obj = get_af_root(bpy.context.scene)
+        self._assert_imported_relationships(root_obj, result)
+        self._assert_imported_shortcuts_and_geometry(root_obj)
+
+    def _assert_snapshot_authoring(self, snapshot):
         self.assertNotIn("not_converged", snapshot.fibers[0].props)
         self.assertIn("mirror_enabled", snapshot.scps[0].props)
         self.assertNotIn("mirror_status", snapshot.scps[0].props)
@@ -133,11 +142,10 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertNotIn("attach_initialized", snapshot.scps[0].props)
         self.assertNotIn("attach_child_origin_local", snapshot.scps[0].props)
         self.assertEqual(snapshot.muscles[0].props["inflation_mode"], "DISTRIBUTED")
-        self.assertNotIn("inflation_ctrl_world", snapshot.muscles[0].props)
-        reset_scene()
-        scp_with_object(root(), "Existing", mesh_object("Existing"))
-        result = import_package_from_blend(path, bpy.context)
-        root_obj = get_af_root(bpy.context.scene)
+        self.assertEqual(snapshot.muscles[0].props["inflation_ctrl_world"], [7.0, 8.0, 9.0])
+        self.assertTrue(snapshot.muscles[0].props["inflation_ctrl_initialized"])
+
+    def _assert_imported_relationships(self, root_obj, result):
         imported = {scp.name: scp for scp in root_obj.af_scp_system.scps if scp.name in {"Left", "Right"}}
         fiber_item = root_obj.af_vcp_system.fibers[-1]
         self.assertEqual((result.scp_count, result.fiber_count, result.muscle_count, result.blob_count, result.shortcut_count), (2, 1, 1, 1, 1))
@@ -145,6 +153,10 @@ class ImportPackageE2ETests(BlenderTestCase):
         self.assertEqual((root_obj.af_vcp_system.muscles[-1].fiber_refs[0].fiber_id, root_obj.af_vcp_system.blobs[-1].attach_target_id), (fiber_item.id, root_obj.af_vcp_system.muscles[-1].id))
         self.assertEqual(root_obj.af_vcp_system.muscles[-1].inflation_mode, "DISTRIBUTED")
         self.assertEqual((len(fiber_item.mid_touches), round(fiber_item.mid_touches[0].normal_offset, 4)), (1, 0.125))
+
+    def _assert_imported_shortcuts_and_geometry(self, root_obj):
+        imported = {scp.name: scp for scp in root_obj.af_scp_system.scps if scp.name in {"Left", "Right"}}
+        fiber_item = root_obj.af_vcp_system.fibers[-1]
         self.assertEqual((root_obj.af_shortcut_system.shortcuts[-1].owner_id, imported["Right"].id in root_obj.af_shortcut_system.shortcuts[-1].data_path), (imported["Right"].id, True))
         self.assertFalse(root_obj.af_shortcut_system.shortcuts[-1].owner_backsolve)
         self.assertEqual(root_obj.af_shortcut_system.shortcuts[-1].overrides[0].target_scp_id, imported["Left"].id)

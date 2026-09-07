@@ -8,6 +8,7 @@ from ..shortcuts.owner_backsolve import owner_backsolve_enabled
 from ..shortcuts.path_codec import make_bound_entity_id, make_shortcut_path, parse_shortcut_path
 from ..units import unit_contract_payload
 from ..utils import get_af_root
+from ..vcp.muscle_inflation_state import migrate_inflation_control
 from .model import (
     BlobSnapshot,
     BoundObjectSnapshot,
@@ -116,6 +117,7 @@ def _fiber_snapshot(fiber):
 
 
 def _muscle_snapshot(muscle):
+    migrate_inflation_control(muscle)
     ids = [str(ref.fiber_id or "") for ref in muscle.fiber_refs if str(ref.fiber_id or "")]
     return MuscleSnapshot(str(muscle.id or ""), str(muscle.name or ""), scalar_dict(muscle, _MUSCLE_SKIP), ids,
                           str(getattr(muscle, "fiber_surface_id", "") or ""))

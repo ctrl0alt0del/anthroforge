@@ -8,6 +8,7 @@ from mathutils import Vector
 from ..perf_trace import perf_time, perf_timer
 from ..vcp.muscle_numeric import MuscleNumericSpec, execute_muscle_batch, make_muscle_request
 from ..vcp.muscle_surface import validate_anchor_structure
+from ..vcp.muscle_inflation_state import inflation_control_initialized, migrate_inflation_control
 from ..vcp.runtime_state import muscle_inflation_ctrl_world, set_muscle_inflation_ctrl_world
 
 
@@ -21,10 +22,11 @@ class MuscleNumericWork:
 
 
 def capture_muscle_work(sync, vis_col, root, scene, vcp, muscle):
+    migrate_inflation_control(muscle)
     base, inflated = sync._ensure_muscle_meshes(vis_col, root, muscle.id)
     payload = _numeric_input(sync, root, scene, muscle)
     stale = payload is None and sync._source_output_stale(root, scene, muscle)
-    initialize = _initialize_control(sync, root, scene, vcp, muscle)
+    initialize = _initialize_control(muscle)
     try: request = None if payload is None else _make_request(muscle, payload, initialize)
     except (TypeError, ValueError): request = None
     return MuscleNumericWork(muscle, base, inflated, request, stale)
@@ -97,11 +99,8 @@ def _inflation_values(muscle):
         closed_v=bool(muscle.closed_v), flip_normals=bool(muscle.flip_normals), control_world=muscle_inflation_ctrl_world(muscle))
 
 
-def _initialize_control(sync, root, scene, vcp, muscle):
-    if str(muscle.inflation_mode) != "CTRL_POINT":
-        return False
-    selected = sync._selected_muscle_id(vcp, root, scene) == muscle.id
-    return selected and not any(abs(value) > 0.0 for value in muscle_inflation_ctrl_world(muscle))
+def _initialize_control(muscle):
+    return str(muscle.inflation_mode) == "CTRL_POINT" and not inflation_control_initialized(muscle)
 
 
 def _publish_one(sync, vis_col, root, scene, vcp, work, result, batch):
