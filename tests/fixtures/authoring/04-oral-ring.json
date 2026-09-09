@@ -1,0 +1,889 @@
+{
+  "$schema": "../authoring.schema.json",
+  "dsl": "anthroforge.authoring",
+  "version": "0.2.0",
+  "document_id": "oral_ring_pattern",
+  "revision": 0,
+  "context": {
+    "reference_pose": "demo_rest",
+    "units": {
+      "mode": "relative"
+    },
+    "scope": "Synthetic authoring-contract fixture only.",
+    "example_only": true
+  },
+  "sources": {
+    "fixture": {
+      "title": "AnthroForge v0.2 synthetic fixture",
+      "kind": "synthetic",
+      "locator": "local:DESIGN.md",
+      "version": "0.2.0",
+      "license": "No external anatomical assets included"
+    }
+  },
+  "targets": {
+    "upper_lip": {
+      "concept": "demo.upper_lip",
+      "side": "midline",
+      "binding": {
+        "kind": "scene_scp_id",
+        "id": "SCP_DEMO_upper_lip"
+      }
+    },
+    "lower_lip": {
+      "concept": "demo.lower_lip",
+      "side": "midline",
+      "binding": {
+        "kind": "scene_scp_id",
+        "id": "SCP_DEMO_lower_lip"
+      }
+    },
+    "maxilla": {
+      "concept": "demo.maxilla",
+      "side": "midline",
+      "binding": {
+        "kind": "scene_scp_id",
+        "id": "SCP_DEMO_maxilla"
+      }
+    },
+    "mandible": {
+      "concept": "demo.mandible",
+      "side": "midline",
+      "binding": {
+        "kind": "scene_scp_id",
+        "id": "SCP_DEMO_mandible"
+      }
+    }
+  },
+  "frames": {
+    "upper_lip": {
+      "owner": "upper_lip",
+      "kind": "anatomical_box",
+      "axes_owner_local": [
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          1
+        ]
+      ],
+      "axis_labels": [
+        "demo_lateral",
+        "demo_anterior",
+        "demo_superior"
+      ],
+      "bounds": "evaluated_geometry_at_reference_pose",
+      "editor_grid": 64,
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    },
+    "lower_lip": {
+      "owner": "lower_lip",
+      "kind": "anatomical_box",
+      "axes_owner_local": [
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          1
+        ]
+      ],
+      "axis_labels": [
+        "demo_lateral",
+        "demo_anterior",
+        "demo_superior"
+      ],
+      "bounds": "evaluated_geometry_at_reference_pose",
+      "editor_grid": 64,
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    },
+    "maxilla": {
+      "owner": "maxilla",
+      "kind": "anatomical_box",
+      "axes_owner_local": [
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          1
+        ]
+      ],
+      "axis_labels": [
+        "demo_lateral",
+        "demo_anterior",
+        "demo_superior"
+      ],
+      "bounds": "evaluated_geometry_at_reference_pose",
+      "editor_grid": 64,
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    },
+    "mandible": {
+      "owner": "mandible",
+      "kind": "anatomical_box",
+      "axes_owner_local": [
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          1
+        ]
+      ],
+      "axis_labels": [
+        "demo_lateral",
+        "demo_anterior",
+        "demo_superior"
+      ],
+      "bounds": "evaluated_geometry_at_reference_pose",
+      "editor_grid": 64,
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    }
+  },
+  "regions": {
+    "inner_upper": {
+      "frame": "upper_lip",
+      "concept": "demo.inner_upper",
+      "purpose": "attachment",
+      "definition": {
+        "kind": "point",
+        "seed": [
+          0.5,
+          0.9,
+          0.7
+        ]
+      },
+      "projection": {
+        "method": "ray",
+        "direction_in_frame": [
+          0,
+          -1,
+          0
+        ],
+        "expected_normal_in_frame": [
+          0,
+          1,
+          0
+        ],
+        "min_normal_dot": 0.5,
+        "search_distance": {
+          "fraction": 0.25,
+          "of": "frame_extent",
+          "frame": "upper_lip",
+          "axis": "z"
+        },
+        "hit_policy": "unique",
+        "continuity": "single_sheet",
+        "max_surface_error": {
+          "fraction": 0.001,
+          "of": "frame_extent",
+          "frame": "upper_lip",
+          "axis": "z"
+        },
+        "max_samples": 4096
+      },
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    },
+    "inner_left": {
+      "frame": "upper_lip",
+      "concept": "demo.inner_left",
+      "purpose": "attachment",
+      "definition": {
+        "kind": "point",
+        "seed": [
+          0.25,
+          0.9,
+          0.5
+        ]
+      },
+      "projection": {
+        "method": "ray",
+        "direction_in_frame": [
+          0,
+          -1,
+          0
+        ],
+        "expected_normal_in_frame": [
+          0,
+          1,
+          0
+        ],
+        "min_normal_dot": 0.5,
+        "search_distance": {
+          "fraction": 0.25,
+          "of": "frame_extent",
+          "frame": "upper_lip",
+          "axis": "z"
+        },
+        "hit_policy": "unique",
+        "continuity": "single_sheet",
+        "max_surface_error": {
+          "fraction": 0.001,
+          "of": "frame_extent",
+          "frame": "upper_lip",
+          "axis": "z"
+        },
+        "max_samples": 4096
+      },
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    },
+    "inner_lower": {
+      "frame": "lower_lip",
+      "concept": "demo.inner_lower",
+      "purpose": "attachment",
+      "definition": {
+        "kind": "point",
+        "seed": [
+          0.5,
+          0.9,
+          0.3
+        ]
+      },
+      "projection": {
+        "method": "ray",
+        "direction_in_frame": [
+          0,
+          -1,
+          0
+        ],
+        "expected_normal_in_frame": [
+          0,
+          1,
+          0
+        ],
+        "min_normal_dot": 0.5,
+        "search_distance": {
+          "fraction": 0.25,
+          "of": "frame_extent",
+          "frame": "lower_lip",
+          "axis": "z"
+        },
+        "hit_policy": "unique",
+        "continuity": "single_sheet",
+        "max_surface_error": {
+          "fraction": 0.001,
+          "of": "frame_extent",
+          "frame": "lower_lip",
+          "axis": "z"
+        },
+        "max_samples": 4096
+      },
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    },
+    "inner_right": {
+      "frame": "upper_lip",
+      "concept": "demo.inner_right",
+      "purpose": "attachment",
+      "definition": {
+        "kind": "point",
+        "seed": [
+          0.75,
+          0.9,
+          0.5
+        ]
+      },
+      "projection": {
+        "method": "ray",
+        "direction_in_frame": [
+          0,
+          -1,
+          0
+        ],
+        "expected_normal_in_frame": [
+          0,
+          1,
+          0
+        ],
+        "min_normal_dot": 0.5,
+        "search_distance": {
+          "fraction": 0.25,
+          "of": "frame_extent",
+          "frame": "upper_lip",
+          "axis": "z"
+        },
+        "hit_policy": "unique",
+        "continuity": "single_sheet",
+        "max_surface_error": {
+          "fraction": 0.001,
+          "of": "frame_extent",
+          "frame": "upper_lip",
+          "axis": "z"
+        },
+        "max_samples": 4096
+      },
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    },
+    "outer_upper": {
+      "frame": "maxilla",
+      "concept": "demo.outer_upper",
+      "purpose": "attachment",
+      "definition": {
+        "kind": "point",
+        "seed": [
+          0.5,
+          0.9,
+          0.7
+        ]
+      },
+      "projection": {
+        "method": "ray",
+        "direction_in_frame": [
+          0,
+          -1,
+          0
+        ],
+        "expected_normal_in_frame": [
+          0,
+          1,
+          0
+        ],
+        "min_normal_dot": 0.5,
+        "search_distance": {
+          "fraction": 0.25,
+          "of": "frame_extent",
+          "frame": "maxilla",
+          "axis": "z"
+        },
+        "hit_policy": "unique",
+        "continuity": "single_sheet",
+        "max_surface_error": {
+          "fraction": 0.001,
+          "of": "frame_extent",
+          "frame": "maxilla",
+          "axis": "z"
+        },
+        "max_samples": 4096
+      },
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    },
+    "outer_left": {
+      "frame": "maxilla",
+      "concept": "demo.outer_left",
+      "purpose": "attachment",
+      "definition": {
+        "kind": "point",
+        "seed": [
+          0.25,
+          0.9,
+          0.5
+        ]
+      },
+      "projection": {
+        "method": "ray",
+        "direction_in_frame": [
+          0,
+          -1,
+          0
+        ],
+        "expected_normal_in_frame": [
+          0,
+          1,
+          0
+        ],
+        "min_normal_dot": 0.5,
+        "search_distance": {
+          "fraction": 0.25,
+          "of": "frame_extent",
+          "frame": "maxilla",
+          "axis": "z"
+        },
+        "hit_policy": "unique",
+        "continuity": "single_sheet",
+        "max_surface_error": {
+          "fraction": 0.001,
+          "of": "frame_extent",
+          "frame": "maxilla",
+          "axis": "z"
+        },
+        "max_samples": 4096
+      },
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    },
+    "outer_lower": {
+      "frame": "mandible",
+      "concept": "demo.outer_lower",
+      "purpose": "attachment",
+      "definition": {
+        "kind": "point",
+        "seed": [
+          0.5,
+          0.9,
+          0.3
+        ]
+      },
+      "projection": {
+        "method": "ray",
+        "direction_in_frame": [
+          0,
+          -1,
+          0
+        ],
+        "expected_normal_in_frame": [
+          0,
+          1,
+          0
+        ],
+        "min_normal_dot": 0.5,
+        "search_distance": {
+          "fraction": 0.25,
+          "of": "frame_extent",
+          "frame": "mandible",
+          "axis": "z"
+        },
+        "hit_policy": "unique",
+        "continuity": "single_sheet",
+        "max_surface_error": {
+          "fraction": 0.001,
+          "of": "frame_extent",
+          "frame": "mandible",
+          "axis": "z"
+        },
+        "max_samples": 4096
+      },
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    },
+    "outer_right": {
+      "frame": "maxilla",
+      "concept": "demo.outer_right",
+      "purpose": "attachment",
+      "definition": {
+        "kind": "point",
+        "seed": [
+          0.75,
+          0.9,
+          0.5
+        ]
+      },
+      "projection": {
+        "method": "ray",
+        "direction_in_frame": [
+          0,
+          -1,
+          0
+        ],
+        "expected_normal_in_frame": [
+          0,
+          1,
+          0
+        ],
+        "min_normal_dot": 0.5,
+        "search_distance": {
+          "fraction": 0.25,
+          "of": "frame_extent",
+          "frame": "maxilla",
+          "axis": "z"
+        },
+        "hit_policy": "unique",
+        "continuity": "single_sheet",
+        "max_surface_error": {
+          "fraction": 0.001,
+          "of": "frame_extent",
+          "frame": "maxilla",
+          "axis": "z"
+        },
+        "max_samples": 4096
+      },
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    }
+  },
+  "recipes": {
+    "oral_ring": {
+      "concept": "demo.oral_ring",
+      "architecture": "ring",
+      "region_roles": {
+        "inner_upper": {
+          "anatomical_target": "demo.inner_upper",
+          "region_kind": "point",
+          "purpose": "attachment"
+        },
+        "inner_left": {
+          "anatomical_target": "demo.inner_left",
+          "region_kind": "point",
+          "purpose": "attachment"
+        },
+        "inner_lower": {
+          "anatomical_target": "demo.inner_lower",
+          "region_kind": "point",
+          "purpose": "attachment"
+        },
+        "inner_right": {
+          "anatomical_target": "demo.inner_right",
+          "region_kind": "point",
+          "purpose": "attachment"
+        },
+        "outer_upper": {
+          "anatomical_target": "demo.outer_upper",
+          "region_kind": "point",
+          "purpose": "attachment"
+        },
+        "outer_left": {
+          "anatomical_target": "demo.outer_left",
+          "region_kind": "point",
+          "purpose": "attachment"
+        },
+        "outer_lower": {
+          "anatomical_target": "demo.outer_lower",
+          "region_kind": "point",
+          "purpose": "attachment"
+        },
+        "outer_right": {
+          "anatomical_target": "demo.outer_right",
+          "region_kind": "point",
+          "purpose": "attachment"
+        }
+      },
+      "construction": {
+        "kind": "closed_loft",
+        "stations": [
+          {
+            "id": "upper",
+            "s": 0.0
+          },
+          {
+            "id": "left",
+            "s": 0.25
+          },
+          {
+            "id": "lower",
+            "s": 0.5
+          },
+          {
+            "id": "right",
+            "s": 0.75
+          }
+        ],
+        "loops": [
+          {
+            "u": 0,
+            "anchors": {
+              "upper": {
+                "region_role": "inner_upper",
+                "at": {
+                  "kind": "point"
+                },
+                "offset": {
+                  "value": 0,
+                  "unit": "scene"
+                }
+              },
+              "left": {
+                "region_role": "inner_left",
+                "at": {
+                  "kind": "point"
+                },
+                "offset": {
+                  "value": 0,
+                  "unit": "scene"
+                }
+              },
+              "lower": {
+                "region_role": "inner_lower",
+                "at": {
+                  "kind": "point"
+                },
+                "offset": {
+                  "value": 0,
+                  "unit": "scene"
+                }
+              },
+              "right": {
+                "region_role": "inner_right",
+                "at": {
+                  "kind": "point"
+                },
+                "offset": {
+                  "value": 0,
+                  "unit": "scene"
+                }
+              }
+            }
+          },
+          {
+            "u": 1,
+            "anchors": {
+              "upper": {
+                "region_role": "outer_upper",
+                "at": {
+                  "kind": "point"
+                },
+                "offset": {
+                  "value": 0,
+                  "unit": "scene"
+                }
+              },
+              "left": {
+                "region_role": "outer_left",
+                "at": {
+                  "kind": "point"
+                },
+                "offset": {
+                  "value": 0,
+                  "unit": "scene"
+                }
+              },
+              "lower": {
+                "region_role": "outer_lower",
+                "at": {
+                  "kind": "point"
+                },
+                "offset": {
+                  "value": 0,
+                  "unit": "scene"
+                }
+              },
+              "right": {
+                "region_role": "outer_right",
+                "at": {
+                  "kind": "point"
+                },
+                "offset": {
+                  "value": 0,
+                  "unit": "scene"
+                }
+              }
+            }
+          }
+        ],
+        "nodes_per_fiber": 96,
+        "route_solver": "native_v3",
+        "correspondence": "named_stations"
+      },
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    }
+  },
+  "volume_presets": {
+    "baseline": {
+      "applies_to": [
+        "demo.oral_ring"
+      ],
+      "calibration": "candidate",
+      "enabled": true,
+      "amount": {
+        "fraction": 0.045,
+        "of": "reference_fiber_length"
+      },
+      "boundary": {
+        "space": "material",
+        "along": 0,
+        "across": 0.12,
+        "strength": 1,
+        "power": 1.2
+      },
+      "flip_normals": false,
+      "shape_checks": [
+        {
+          "metric": "normal_height",
+          "s": 0.5,
+          "u_range": [
+            0.1,
+            0.9
+          ],
+          "statistic": "max",
+          "minimum": {
+            "fraction": 0.005,
+            "of": "reference_fiber_length"
+          },
+          "maximum": {
+            "fraction": 0.12,
+            "of": "reference_fiber_length"
+          }
+        }
+      ],
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      },
+      "mode": "distributed",
+      "length_taper": 0
+    }
+  },
+  "policies": {
+    "default": {
+      "evaluate": "default_inflated",
+      "trigger": "penetration",
+      "base_intersections": "diagnostic_only",
+      "colliders": "all_enabled_scps",
+      "clearance": {
+        "fraction": 0.002,
+        "of": "reference_fiber_length"
+      },
+      "penetration_tolerance": {
+        "fraction": 0.0001,
+        "of": "reference_fiber_length"
+      },
+      "refinement": {
+        "method": "none"
+      },
+      "solver_budget_ms": 2000,
+      "on_failure": "report_unresolved"
+    }
+  },
+  "muscles": {
+    "example_muscle": {
+      "recipe": "oral_ring",
+      "side": "midline",
+      "region_bindings": {
+        "inner_upper": {
+          "region": "inner_upper",
+          "relationship": "direct"
+        },
+        "inner_left": {
+          "region": "inner_left",
+          "relationship": "direct"
+        },
+        "inner_lower": {
+          "region": "inner_lower",
+          "relationship": "direct"
+        },
+        "inner_right": {
+          "region": "inner_right",
+          "relationship": "direct"
+        },
+        "outer_upper": {
+          "region": "outer_upper",
+          "relationship": "direct"
+        },
+        "outer_left": {
+          "region": "outer_left",
+          "relationship": "direct"
+        },
+        "outer_lower": {
+          "region": "outer_lower",
+          "relationship": "direct"
+        },
+        "outer_right": {
+          "region": "outer_right",
+          "relationship": "direct"
+        }
+      },
+      "volume_preset": "baseline",
+      "policy": "default",
+      "symmetry": {
+        "mode": "explicit"
+      }
+    }
+  },
+  "roster": {
+    "oral_ring": {
+      "state": "included",
+      "instances": [
+        "example_muscle"
+      ],
+      "reason": "Synthetic construction example, not anatomical coverage."
+    }
+  }
+}

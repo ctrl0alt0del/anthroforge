@@ -1,2 +1,4 @@
+# Subagent capability is available only when the user requests delegation
+# or the named-ticket skill is active. This setting does not start a Jira workflow.
 [agents]
 enabled = true

@@ -16,6 +16,9 @@ from .core.scp_runtime.visibility import restore_all_scp_isolations
 __addon_enabled__ = False
 
 from .operators.create_root import AF_OT_CreateRoot
+from .operators.authoring_dsl import AF_OT_ExecuteAuthoringDSL
+from .operators.authoring_inspection import AF_OT_InspectAuthoringCandidate, AF_OT_AdoptAuthoringCandidate, AF_PT_AuthoringInspector
+from .operators.authoring_visual import AF_OT_InspectSCPVisuals
 from .operators.add_scp import (
     AF_OT_AddSCP,
     AF_OT_ClearSCPChildAnchorLock,
@@ -206,6 +209,11 @@ from .core.scp_proxy import register_proxy_session_runtime, unregister_proxy_ses
 from .ui.scene_props import register_scene_props, unregister_scene_props
 
 classes = (
+    AF_OT_ExecuteAuthoringDSL,
+    AF_OT_InspectSCPVisuals,
+    AF_OT_InspectAuthoringCandidate,
+    AF_OT_AdoptAuthoringCandidate,
+    AF_PT_AuthoringInspector,
     AF_OT_SetVCPCategoryVisibility,
     AF_OT_CreateRoot,
     AF_OT_AddSCP,

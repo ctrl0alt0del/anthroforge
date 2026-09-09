@@ -1,0 +1,1780 @@
+{
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dsl": {
+      "enum": [
+        "anthroforge.authoring"
+      ]
+    },
+    "version": {
+      "enum": [
+        "0.3.0"
+      ]
+    },
+    "document_id": {
+      "$ref": "#/$defs/id"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "context": {
+      "$ref": "#/$defs/context"
+    },
+    "sources": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "targets": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/target"
+      }
+    },
+    "frames": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/frame"
+      }
+    },
+    "regions": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/region"
+      }
+    },
+    "recipes": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/recipe"
+      }
+    },
+    "volume_presets": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/volume"
+      }
+    },
+    "policies": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/policy"
+      }
+    },
+    "muscles": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/muscle"
+      }
+    },
+    "roster": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/roster_entry"
+      }
+    }
+  },
+  "required": [
+    "$schema",
+    "dsl",
+    "version",
+    "document_id",
+    "revision",
+    "context",
+    "sources",
+    "targets",
+    "frames",
+    "regions",
+    "recipes",
+    "volume_presets",
+    "policies",
+    "muscles",
+    "roster"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:anthroforge:authoring:0.3.0",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"
+    },
+    "xyz": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "q3": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "uv": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "basis": {
+          "enum": [
+            "source_stated",
+            "geometry_measured",
+            "inferred",
+            "designer_authored",
+            "synthetic"
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "minItems": 0
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "basis",
+        "sources",
+        "note"
+      ],
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "text",
+            "mesh",
+            "simulation_model",
+            "designer",
+            "synthetic"
+          ]
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "title",
+        "kind",
+        "locator",
+        "version",
+        "license"
+      ],
+      "additionalProperties": false
+    },
+    "length": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "number",
+              "minimum": 0
+            },
+            "unit": {
+              "enum": [
+                "scene",
+                "mm"
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "fraction": {
+              "type": "number",
+              "minimum": 0
+            },
+            "of": {
+              "enum": [
+                "frame_extent"
+              ]
+            },
+            "frame": {
+              "$ref": "#/$defs/id"
+            },
+            "axis": {
+              "enum": [
+                "x",
+                "y",
+                "z"
+              ]
+            }
+          },
+          "required": [
+            "fraction",
+            "of",
+            "frame",
+            "axis"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "fraction": {
+              "type": "number",
+              "minimum": 0
+            },
+            "of": {
+              "enum": [
+                "reference_fiber_length",
+                "reference_attachment_width"
+              ]
+            }
+          },
+          "required": [
+            "fraction",
+            "of"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "units": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "relative"
+              ]
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "metric"
+              ]
+            },
+            "meters_per_scene_unit": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "mode",
+            "meters_per_scene_unit"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "reference_pose": {
+          "$ref": "#/$defs/id"
+        },
+        "units": {
+          "$ref": "#/$defs/units"
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        },
+        "example_only": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "reference_pose",
+        "units",
+        "scope",
+        "example_only"
+      ],
+      "additionalProperties": false
+    },
+    "binding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "scene_scp_id"
+              ]
+            },
+            "id": {
+              "$ref": "#/$defs/id"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "semantic_query"
+              ]
+            },
+            "concept": {
+              "type": "string",
+              "minLength": 1
+            },
+            "side": {
+              "enum": [
+                "left",
+                "right",
+                "midline"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "concept",
+            "side"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "concept": {
+          "type": "string",
+          "minLength": 1
+        },
+        "side": {
+          "enum": [
+            "left",
+            "right",
+            "midline"
+          ]
+        },
+        "binding": {
+          "$ref": "#/$defs/binding"
+        }
+      },
+      "required": [
+        "concept",
+        "side",
+        "binding"
+      ],
+      "additionalProperties": false
+    },
+    "frame": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "enum": [
+                "anatomical_box"
+              ]
+            },
+            "axes_owner_local": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/xyz"
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "axis_labels": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "bounds": {
+              "enum": [
+                "evaluated_geometry_at_reference_pose"
+              ]
+            },
+            "editor_grid": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024
+            },
+            "evidence": {
+              "$ref": "#/$defs/evidence"
+            }
+          },
+          "required": [
+            "owner",
+            "kind",
+            "axes_owner_local",
+            "axis_labels",
+            "bounds",
+            "editor_grid",
+            "evidence"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "enum": [
+                "landmark_box"
+              ]
+            },
+            "axis_labels": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "bounds": {
+              "enum": [
+                "evaluated_geometry_at_reference_pose"
+              ]
+            },
+            "editor_grid": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024
+            },
+            "evidence": {
+              "$ref": "#/$defs/evidence"
+            },
+            "landmarks_q": {
+              "type": "object",
+              "properties": {
+                "origin": {
+                  "$ref": "#/$defs/q3"
+                },
+                "x": {
+                  "$ref": "#/$defs/q3"
+                },
+                "xy": {
+                  "$ref": "#/$defs/q3"
+                }
+              },
+              "required": [
+                "origin",
+                "x",
+                "xy"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "owner",
+            "kind",
+            "axis_labels",
+            "bounds",
+            "editor_grid",
+            "evidence",
+            "landmarks_q"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "projection": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "enum": [
+            "ray"
+          ]
+        },
+        "direction_in_frame": {
+          "$ref": "#/$defs/xyz"
+        },
+        "expected_normal_in_frame": {
+          "$ref": "#/$defs/xyz"
+        },
+        "min_normal_dot": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "search_distance": {
+          "$ref": "#/$defs/length"
+        },
+        "hit_policy": {
+          "enum": [
+            "unique",
+            "closest_seed"
+          ]
+        },
+        "continuity": {
+          "enum": [
+            "single_sheet"
+          ]
+        },
+        "max_surface_error": {
+          "$ref": "#/$defs/length"
+        },
+        "max_samples": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 65536
+        },
+        "selection_margin": {
+          "$ref": "#/$defs/length"
+        },
+        "charts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "domain": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "minItems": 1,
+                "maxItems": 2
+              },
+              "direction_in_frame": {
+                "$ref": "#/$defs/xyz"
+              },
+              "expected_normal_in_frame": {
+                "$ref": "#/$defs/xyz"
+              }
+            },
+            "required": [
+              "domain",
+              "direction_in_frame",
+              "expected_normal_in_frame"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "method",
+        "direction_in_frame",
+        "expected_normal_in_frame",
+        "min_normal_dot",
+        "search_distance",
+        "hit_policy",
+        "continuity",
+        "max_surface_error",
+        "max_samples"
+      ],
+      "additionalProperties": false
+    },
+    "region_shape": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "point"
+              ]
+            },
+            "seed": {
+              "$ref": "#/$defs/q3"
+            }
+          },
+          "required": [
+            "kind",
+            "seed"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "curve"
+              ]
+            },
+            "seeds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/q3"
+              },
+              "minItems": 2
+            },
+            "closed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "seeds",
+            "closed"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "patch"
+              ]
+            },
+            "corners": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/q3"
+              },
+              "minItems": 4,
+              "maxItems": 4
+            },
+            "trim_uv": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/uv"
+              },
+              "minItems": 3
+            }
+          },
+          "required": [
+            "kind",
+            "corners"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "region": {
+      "type": "object",
+      "properties": {
+        "frame": {
+          "$ref": "#/$defs/id"
+        },
+        "concept": {
+          "type": "string",
+          "minLength": 1
+        },
+        "purpose": {
+          "enum": [
+            "attachment",
+            "route_touch",
+            "landmark"
+          ]
+        },
+        "definition": {
+          "$ref": "#/$defs/region_shape"
+        },
+        "projection": {
+          "$ref": "#/$defs/projection"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        }
+      },
+      "required": [
+        "frame",
+        "concept",
+        "purpose",
+        "definition",
+        "projection",
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "role": {
+      "type": "object",
+      "properties": {
+        "anatomical_target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "region_kind": {
+          "enum": [
+            "point",
+            "curve",
+            "patch"
+          ]
+        },
+        "purpose": {
+          "enum": [
+            "attachment",
+            "route_touch",
+            "landmark"
+          ]
+        }
+      },
+      "required": [
+        "anatomical_target",
+        "region_kind",
+        "purpose"
+      ],
+      "additionalProperties": false
+    },
+    "sample": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "point"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "curve_span"
+              ]
+            },
+            "start": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "end": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "kind",
+            "start",
+            "end"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "patch_segment"
+              ]
+            },
+            "start": {
+              "$ref": "#/$defs/uv"
+            },
+            "end": {
+              "$ref": "#/$defs/uv"
+            }
+          },
+          "required": [
+            "kind",
+            "start",
+            "end"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "location": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "point"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "curve"
+              ]
+            },
+            "t": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "kind",
+            "t"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "patch"
+              ]
+            },
+            "uv": {
+              "$ref": "#/$defs/uv"
+            }
+          },
+          "required": [
+            "kind",
+            "uv"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "station": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "s": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "role": {
+          "enum": [
+            "origin",
+            "guide",
+            "insertion"
+          ]
+        },
+        "region_role": {
+          "$ref": "#/$defs/id"
+        },
+        "sample": {
+          "$ref": "#/$defs/sample"
+        },
+        "offset": {
+          "$ref": "#/$defs/length"
+        }
+      },
+      "required": [
+        "id",
+        "s",
+        "role",
+        "region_role",
+        "sample",
+        "offset"
+      ],
+      "additionalProperties": false
+    },
+    "loop_anchor": {
+      "type": "object",
+      "properties": {
+        "region_role": {
+          "$ref": "#/$defs/id"
+        },
+        "at": {
+          "$ref": "#/$defs/location"
+        },
+        "offset": {
+          "$ref": "#/$defs/length"
+        }
+      },
+      "required": [
+        "region_role",
+        "at",
+        "offset"
+      ],
+      "additionalProperties": false
+    },
+    "loop_station": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "s": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "id",
+        "s"
+      ],
+      "additionalProperties": false
+    },
+    "loop": {
+      "type": "object",
+      "properties": {
+        "u": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "anchors": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/loop_anchor"
+          }
+        }
+      },
+      "required": [
+        "u",
+        "anchors"
+      ],
+      "additionalProperties": false
+    },
+    "open_loft": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "open_loft"
+          ]
+        },
+        "stations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/station"
+          },
+          "minItems": 2
+        },
+        "fiber_u": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "minItems": 2
+        },
+        "nodes_per_fiber": {
+          "type": "integer",
+          "minimum": 8,
+          "maximum": 512
+        },
+        "route_solver": {
+          "enum": [
+            "native_v3"
+          ]
+        },
+        "unattached_spans": {
+          "enum": [
+            "free"
+          ]
+        },
+        "correspondence": {
+          "enum": [
+            "named_stations"
+          ]
+        },
+        "boundary_conformance": {
+          "$ref": "#/$defs/conformance"
+        }
+      },
+      "required": [
+        "kind",
+        "stations",
+        "fiber_u",
+        "nodes_per_fiber",
+        "route_solver",
+        "unattached_spans",
+        "correspondence"
+      ],
+      "additionalProperties": false
+    },
+    "closed_loft": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "closed_loft"
+          ]
+        },
+        "stations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/loop_station"
+          },
+          "minItems": 3
+        },
+        "loops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/loop"
+          },
+          "minItems": 2
+        },
+        "nodes_per_fiber": {
+          "type": "integer",
+          "minimum": 8,
+          "maximum": 512
+        },
+        "route_solver": {
+          "enum": [
+            "native_v3"
+          ]
+        },
+        "correspondence": {
+          "enum": [
+            "named_stations"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "stations",
+        "loops",
+        "nodes_per_fiber",
+        "route_solver",
+        "correspondence"
+      ],
+      "additionalProperties": false
+    },
+    "recipe": {
+      "type": "object",
+      "properties": {
+        "concept": {
+          "type": "string",
+          "minLength": 1
+        },
+        "architecture": {
+          "enum": [
+            "fusiform",
+            "strap",
+            "fan",
+            "sheet",
+            "ring"
+          ]
+        },
+        "region_roles": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/role"
+          }
+        },
+        "construction": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/open_loft"
+            },
+            {
+              "$ref": "#/$defs/closed_loft"
+            }
+          ]
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        }
+      },
+      "required": [
+        "concept",
+        "architecture",
+        "region_roles",
+        "construction",
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "boundary": {
+      "type": "object",
+      "properties": {
+        "space": {
+          "enum": [
+            "material"
+          ]
+        },
+        "along": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.5
+        },
+        "across": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.5
+        },
+        "strength": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "power": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "space",
+        "along",
+        "across",
+        "strength",
+        "power"
+      ],
+      "additionalProperties": false
+    },
+    "shape_check": {
+      "type": "object",
+      "properties": {
+        "metric": {
+          "enum": [
+            "normal_height",
+            "section_width",
+            "section_arc_length"
+          ]
+        },
+        "s": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "u_range": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "statistic": {
+          "enum": [
+            "max",
+            "mean"
+          ]
+        },
+        "minimum": {
+          "$ref": "#/$defs/length"
+        },
+        "maximum": {
+          "$ref": "#/$defs/length"
+        }
+      },
+      "required": [
+        "metric",
+        "s",
+        "u_range",
+        "statistic",
+        "minimum",
+        "maximum"
+      ],
+      "additionalProperties": false
+    },
+    "control_point": {
+      "type": "object",
+      "properties": {
+        "applies_to": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "calibration": {
+          "enum": [
+            "candidate",
+            "reviewed"
+          ]
+        },
+        "enabled": {
+          "enum": [
+            true
+          ]
+        },
+        "amount": {
+          "$ref": "#/$defs/length"
+        },
+        "boundary": {
+          "$ref": "#/$defs/boundary"
+        },
+        "flip_normals": {
+          "type": "boolean"
+        },
+        "shape_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/shape_check"
+          },
+          "minItems": 1
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        },
+        "mode": {
+          "enum": [
+            "control_point"
+          ]
+        },
+        "control": {
+          "$ref": "#/$defs/uv"
+        },
+        "radius": {
+          "$ref": "#/$defs/length"
+        },
+        "direction_depth": {
+          "$ref": "#/$defs/length"
+        },
+        "falloff": {
+          "enum": [
+            "gaussian",
+            "linear",
+            "smoothstep"
+          ]
+        }
+      },
+      "required": [
+        "applies_to",
+        "calibration",
+        "enabled",
+        "amount",
+        "boundary",
+        "flip_normals",
+        "shape_checks",
+        "evidence",
+        "mode",
+        "control",
+        "radius",
+        "direction_depth",
+        "falloff"
+      ],
+      "additionalProperties": false
+    },
+    "distributed": {
+      "type": "object",
+      "properties": {
+        "applies_to": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "calibration": {
+          "enum": [
+            "candidate",
+            "reviewed"
+          ]
+        },
+        "enabled": {
+          "enum": [
+            true
+          ]
+        },
+        "amount": {
+          "$ref": "#/$defs/length"
+        },
+        "boundary": {
+          "$ref": "#/$defs/boundary"
+        },
+        "flip_normals": {
+          "type": "boolean"
+        },
+        "shape_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/shape_check"
+          },
+          "minItems": 1
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        },
+        "mode": {
+          "enum": [
+            "distributed"
+          ]
+        },
+        "length_taper": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.5
+        }
+      },
+      "required": [
+        "applies_to",
+        "calibration",
+        "enabled",
+        "amount",
+        "boundary",
+        "flip_normals",
+        "shape_checks",
+        "evidence",
+        "mode",
+        "length_taper"
+      ],
+      "additionalProperties": false
+    },
+    "volume": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/control_point"
+        },
+        {
+          "$ref": "#/$defs/distributed"
+        }
+      ]
+    },
+    "refinement": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "enum": [
+                "none"
+              ]
+            }
+          },
+          "required": [
+            "method"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "enum": [
+                "adaptive_native_fibers"
+              ]
+            },
+            "candidate": {
+              "enum": [
+                "longitudinal_surface_slice"
+              ]
+            },
+            "max_added_fibers": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16
+            },
+            "max_attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "min_relative_area_reduction": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "freeze_volume": {
+              "enum": [
+                true
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "candidate",
+            "max_added_fibers",
+            "max_attempts",
+            "min_relative_area_reduction",
+            "freeze_volume"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "evaluate": {
+          "enum": [
+            "default_inflated"
+          ]
+        },
+        "trigger": {
+          "enum": [
+            "penetration"
+          ]
+        },
+        "base_intersections": {
+          "enum": [
+            "diagnostic_only"
+          ]
+        },
+        "colliders": {
+          "enum": [
+            "all_enabled_scps"
+          ]
+        },
+        "clearance": {
+          "$ref": "#/$defs/length"
+        },
+        "penetration_tolerance": {
+          "$ref": "#/$defs/length"
+        },
+        "refinement": {
+          "$ref": "#/$defs/refinement"
+        },
+        "solver_budget_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000
+        },
+        "on_failure": {
+          "enum": [
+            "report_unresolved"
+          ]
+        },
+        "max_surface_vertices": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "total_budget_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000
+        }
+      },
+      "required": [
+        "evaluate",
+        "trigger",
+        "base_intersections",
+        "colliders",
+        "clearance",
+        "penetration_tolerance",
+        "refinement",
+        "solver_budget_ms",
+        "on_failure"
+      ],
+      "additionalProperties": false
+    },
+    "region_binding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "region": {
+              "$ref": "#/$defs/id"
+            },
+            "relationship": {
+              "enum": [
+                "direct"
+              ]
+            }
+          },
+          "required": [
+            "region",
+            "relationship"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "region": {
+              "$ref": "#/$defs/id"
+            },
+            "relationship": {
+              "enum": [
+                "support_proxy"
+              ]
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence": {
+              "$ref": "#/$defs/evidence"
+            }
+          },
+          "required": [
+            "region",
+            "relationship",
+            "reason",
+            "evidence"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "symmetry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "explicit"
+              ]
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "native_mirror"
+              ]
+            },
+            "plane_frame": {
+              "$ref": "#/$defs/id"
+            },
+            "plane_axis": {
+              "enum": [
+                "x",
+                "y",
+                "z"
+              ]
+            },
+            "plane_coordinate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "mode",
+            "plane_frame",
+            "plane_axis",
+            "plane_coordinate"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "muscle": {
+      "type": "object",
+      "properties": {
+        "recipe": {
+          "$ref": "#/$defs/id"
+        },
+        "side": {
+          "enum": [
+            "left",
+            "right",
+            "midline"
+          ]
+        },
+        "region_bindings": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/region_binding"
+          }
+        },
+        "volume_preset": {
+          "$ref": "#/$defs/id"
+        },
+        "policy": {
+          "$ref": "#/$defs/id"
+        },
+        "symmetry": {
+          "$ref": "#/$defs/symmetry"
+        }
+      },
+      "required": [
+        "recipe",
+        "side",
+        "region_bindings",
+        "volume_preset",
+        "policy",
+        "symmetry"
+      ],
+      "additionalProperties": false
+    },
+    "roster_entry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "enum": [
+                "included",
+                "approximate"
+              ]
+            },
+            "instances": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/id"
+              },
+              "minItems": 1
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "state",
+            "instances",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "enum": [
+                "omitted"
+              ]
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "conformance": {
+      "type": "object",
+      "properties": {
+        "stations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "minItems": 1,
+          "maxItems": 4096
+        },
+        "max_error": {
+          "$ref": "#/$defs/length"
+        },
+        "blend_span": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 0.5
+        },
+        "max_samples": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 513
+        }
+      },
+      "required": [
+        "stations",
+        "max_error",
+        "blend_span",
+        "max_samples"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

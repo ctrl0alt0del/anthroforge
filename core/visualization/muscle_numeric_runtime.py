@@ -81,6 +81,9 @@ def _numeric_spec(muscle, config, target, densify, closed_u, initialize=False):
     values = _topology_values(config, target, densify, closed_u)
     values.update(_inflation_values(muscle))
     values["initialize_control"] = bool(initialize)
+    values["authoring_material"] = str(muscle.get("af_authoring_material", "")) if hasattr(muscle, "get") else ""
+    values["authoring_boundary_along"] = float(getattr(muscle, "inflation_material_along", .04))
+    values["authoring_boundary_across"] = float(getattr(muscle, "inflation_material_across", .12))
     return MuscleNumericSpec(**values)
 
 

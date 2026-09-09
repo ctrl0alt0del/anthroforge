@@ -1,0 +1,268 @@
+{
+  "$schema": "../authoring.schema.json",
+  "dsl": "anthroforge.authoring",
+  "version": "0.2.0",
+  "document_id": "region_library_example",
+  "revision": 0,
+  "context": {
+    "reference_pose": "demo_rest",
+    "units": {
+      "mode": "relative"
+    },
+    "scope": "Synthetic authoring-contract fixture only.",
+    "example_only": true
+  },
+  "sources": {
+    "fixture": {
+      "title": "AnthroForge v0.2 synthetic fixture",
+      "kind": "synthetic",
+      "locator": "local:DESIGN.md",
+      "version": "0.2.0",
+      "license": "No external anatomical assets included"
+    }
+  },
+  "targets": {
+    "support": {
+      "concept": "demo.support",
+      "side": "left",
+      "binding": {
+        "kind": "scene_scp_id",
+        "id": "SCP_DEMO_support"
+      }
+    }
+  },
+  "frames": {
+    "support": {
+      "owner": "support",
+      "kind": "anatomical_box",
+      "axes_owner_local": [
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          1
+        ]
+      ],
+      "axis_labels": [
+        "demo_lateral",
+        "demo_anterior",
+        "demo_superior"
+      ],
+      "bounds": "evaluated_geometry_at_reference_pose",
+      "editor_grid": 64,
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    }
+  },
+  "regions": {
+    "landmark": {
+      "frame": "support",
+      "concept": "demo.landmark",
+      "purpose": "landmark",
+      "definition": {
+        "kind": "point",
+        "seed": [
+          0.5,
+          0.9,
+          0.5
+        ]
+      },
+      "projection": {
+        "method": "ray",
+        "direction_in_frame": [
+          0,
+          -1,
+          0
+        ],
+        "expected_normal_in_frame": [
+          0,
+          1,
+          0
+        ],
+        "min_normal_dot": 0.5,
+        "search_distance": {
+          "fraction": 0.25,
+          "of": "frame_extent",
+          "frame": "support",
+          "axis": "z"
+        },
+        "hit_policy": "unique",
+        "continuity": "single_sheet",
+        "max_surface_error": {
+          "fraction": 0.001,
+          "of": "frame_extent",
+          "frame": "support",
+          "axis": "z"
+        },
+        "max_samples": 4096
+      },
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    },
+    "attachment_strip": {
+      "frame": "support",
+      "concept": "demo.attachment_strip",
+      "purpose": "attachment",
+      "definition": {
+        "kind": "curve",
+        "seeds": [
+          [
+            0.25,
+            0.9,
+            0.6
+          ],
+          [
+            0.75,
+            0.9,
+            0.6
+          ]
+        ],
+        "closed": false
+      },
+      "projection": {
+        "method": "ray",
+        "direction_in_frame": [
+          0,
+          -1,
+          0
+        ],
+        "expected_normal_in_frame": [
+          0,
+          1,
+          0
+        ],
+        "min_normal_dot": 0.5,
+        "search_distance": {
+          "fraction": 0.25,
+          "of": "frame_extent",
+          "frame": "support",
+          "axis": "z"
+        },
+        "hit_policy": "unique",
+        "continuity": "single_sheet",
+        "max_surface_error": {
+          "fraction": 0.001,
+          "of": "frame_extent",
+          "frame": "support",
+          "axis": "z"
+        },
+        "max_samples": 4096
+      },
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    },
+    "attachment_patch": {
+      "frame": "support",
+      "concept": "demo.attachment_patch",
+      "purpose": "attachment",
+      "definition": {
+        "kind": "patch",
+        "corners": [
+          [
+            0.2,
+            0.9,
+            0.3
+          ],
+          [
+            0.8,
+            0.9,
+            0.3
+          ],
+          [
+            0.8,
+            0.9,
+            0.7
+          ],
+          [
+            0.2,
+            0.9,
+            0.7
+          ]
+        ],
+        "trim_uv": [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            0.9,
+            1
+          ],
+          [
+            0.1,
+            1
+          ]
+        ]
+      },
+      "projection": {
+        "method": "ray",
+        "direction_in_frame": [
+          0,
+          -1,
+          0
+        ],
+        "expected_normal_in_frame": [
+          0,
+          1,
+          0
+        ],
+        "min_normal_dot": 0.5,
+        "search_distance": {
+          "fraction": 0.25,
+          "of": "frame_extent",
+          "frame": "support",
+          "axis": "z"
+        },
+        "hit_policy": "unique",
+        "continuity": "single_sheet",
+        "max_surface_error": {
+          "fraction": 0.001,
+          "of": "frame_extent",
+          "frame": "support",
+          "axis": "z"
+        },
+        "max_samples": 4096
+      },
+      "evidence": {
+        "basis": "synthetic",
+        "sources": [
+          "fixture"
+        ],
+        "note": "Synthetic design fixture; not measured anatomy."
+      }
+    }
+  },
+  "recipes": {},
+  "volume_presets": {},
+  "policies": {},
+  "muscles": {},
+  "roster": {}
+}

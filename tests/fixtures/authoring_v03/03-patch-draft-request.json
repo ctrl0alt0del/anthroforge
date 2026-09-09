@@ -1,0 +1,20 @@
+{
+  "dsl": "anthroforge.authoring.protocol",
+  "version": "0.3.0",
+  "message_type": "request",
+  "request_id": "upper_arm_draft_2",
+  "op": "patch_draft",
+  "params": {
+    "scene_id": "AF_ROOT",
+    "expected_scene_revision": "replace_with_describe_revision",
+    "document_id": "upper_arm_pattern",
+    "expected_draft_revision": 1,
+    "operations": [
+      {
+        "op": "replace",
+        "path": "/volume_presets/baseline/shape_checks/1/minimum/fraction",
+        "value": 0.08
+      }
+    ]
+  }
+}

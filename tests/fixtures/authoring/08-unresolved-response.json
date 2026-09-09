@@ -1,0 +1,49 @@
+{
+  "dsl": "anthroforge.authoring.protocol",
+  "version": "0.2.0",
+  "request_id": "example_build",
+  "message_type": "response",
+  "op": "build",
+  "status": "unresolved",
+  "scene_revision": "demo_scene_r7",
+  "document_revision": 0,
+  "published": false,
+  "entities": [
+    {
+      "id": "origin",
+      "kind": "region",
+      "state": "unresolved",
+      "validation": {
+        "mapping": "fail",
+        "anchors": "not_evaluated",
+        "route": "not_evaluated",
+        "surface": "not_evaluated",
+        "shape": "not_evaluated",
+        "inflated_contact": "not_evaluated",
+        "native_editability": "not_evaluated",
+        "persistence": "not_evaluated"
+      }
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "TARGET_NOT_FOUND",
+      "severity": "error",
+      "entity_id": "origin",
+      "document_pointer": "/targets/origin/binding",
+      "message": "The example SCP identifier does not exist in this scene. Discover an actual target and bind its anatomical region.",
+      "suggested_operations": [
+        "describe",
+        "resolve"
+      ]
+    }
+  ],
+  "assets": [],
+  "cost": {
+    "fibers_solved": {
+      "value": 0,
+      "unit": "count"
+    }
+  },
+  "scene_id": "demo_scene"
+}

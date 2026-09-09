@@ -58,6 +58,8 @@ def _first_scp_rule(parent_ids, scp_map):
 
 def effective_rule_for_fiber(fiber_prop, scp_map, fibers_by_id=None):
     _ = fibers_by_id
+    if hasattr(fiber_prop, "get") and fiber_prop.get("af_authoring_symmetry") == "explicit":
+        return None
     parent_ids = fiber_parent_ids(fiber_prop)
     return _first_scp_rule(parent_ids, scp_map) if parent_ids else None
 

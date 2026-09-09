@@ -1,0 +1,13 @@
+{
+  "dsl": "anthroforge.authoring.protocol",
+  "version": "0.2.0",
+  "request_id": "example_resume",
+  "message_type": "request",
+  "op": "resume",
+  "params": {
+    "scene_id": "demo_scene",
+    "expected_scene_revision": "demo_scene_r8",
+    "job_id": "demo_job",
+    "expected_document_revision": 1
+  }
+}

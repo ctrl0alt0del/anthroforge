@@ -141,9 +141,21 @@ class MirrorSceneSync:
         return bool(status_ok and in_scope and source_id in self.scp_by_id)
 
     def _rebuild_target_mirror(self, sid, scp):
+        metadata = self._mirror_authoring_metadata(sid)
         self._remove_target_cluster(sid)
         mirror_obj = self._build_target_mirror(sid, scp)
+        if mirror_obj is not None:
+            for key, value in metadata.items():
+                mirror_obj[key] = value
         self.desired_ids.add(sid) if mirror_obj is not None else None
+
+    def _mirror_authoring_metadata(self, sid):
+        objects = [obj for obj in self.scene.objects if self._is_target_mirror(obj, sid)]
+        if len(objects) != 1:
+            return {}
+        obj = objects[0]
+        keys = ('af_authoring_id', 'af_authoring_root_id', 'af_anatomical_side')
+        return {key: obj[key] for key in keys if key in obj}
 
     def _build_target_mirror(self, sid, scp):
         source_obj = self._target_geometry(scp)

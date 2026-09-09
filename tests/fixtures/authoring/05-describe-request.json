@@ -1,0 +1,11 @@
+{
+  "dsl": "anthroforge.authoring.protocol",
+  "version": "0.2.0",
+  "request_id": "example_describe",
+  "message_type": "request",
+  "op": "describe",
+  "params": {
+    "scene_id": "demo_scene",
+    "scope": "regions"
+  }
+}

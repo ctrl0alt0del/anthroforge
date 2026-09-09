@@ -96,6 +96,8 @@ def _rule_for_scp(scp_id, scp_by_id):
 
 def _rule_for_fiber(fiber, fibers_by_id, scp_by_id):
     _ = fibers_by_id
+    if hasattr(fiber,"get") and fiber.get("af_authoring_symmetry") == "explicit":
+        return None
     parent_ids = [_as_id(pid) for pid in fiber_parent_ids(fiber) if _as_id(pid)]
     for pid in parent_ids:
         rule = _rule_for_scp(pid, scp_by_id)

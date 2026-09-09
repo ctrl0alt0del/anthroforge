@@ -355,15 +355,8 @@ def _anchor(anchor, index, count, cyclic=False):
 
 
 def _tolerances(colliders, radius, quality):
-    low, high, coordinate = _bounds(colliders)
-    diagonal = float(np.linalg.norm(high - low)) if low is not None else float(radius)
-    length = max(diagonal, float(radius), 1.0e-6); coordinate = max(1.0, coordinate, length)
-    floor = max(1.0e-9 * length, 8.0 * np.finfo(np.float32).eps * coordinate)
-    slack = max(floor, 0.01 * float(radius)) if radius > 0.0 else floor
-    fixed = 1.0e-6 if quality is V2Quality.FINAL else 1.0e-4
-    return V2ResolvedTolerances(length, coordinate, floor, slack,
-                                max(1.0e-7, 1.0e-6 * length), fixed, fixed,
-                                1.0e-7 if quality is V2Quality.FINAL else 1.0e-5)
+    from .v2.scales import resolve_tolerances
+    return resolve_tolerances(colliders, radius, quality)
 
 
 def _bounds(colliders):

@@ -211,6 +211,21 @@ class AttachmentMirrorWorkflowTests(BlenderTestCase):
         sync_mirrors(register_sync(), root_obj, bpy.context.scene, scp_prop_map(root_obj), {target.id})
         self.assertIsNone(bpy.data.objects.get(clone_name))
 
+    def test_mirror_rebuild_preserves_authoring_identity(self):
+        root_obj = root()
+        source = scp_with_object(root_obj, "Source", mesh_object("Source"))
+        target = scp_with_object(root_obj, "Target", mesh_object("Target", (2.0, 0.0, 0.0)))
+        target.parent_id, source.mirror_enabled = source.id, True
+        apply_scp_mirror_roles(root_obj)
+        sync_mirrors(register_sync(), root_obj, bpy.context.scene, scp_prop_map(root_obj), {target.id})
+        clone = find_flagged("af_scp_mirror", target.id, "af_source_scp_id")
+        expected = dict(af_authoring_id="mirror-identity", af_authoring_root_id="root-identity", af_anatomical_side="left")
+        for key, value in expected.items():
+            clone[key] = value
+        sync_mirrors(register_sync(), root_obj, bpy.context.scene, scp_prop_map(root_obj), {target.id})
+        rebuilt = find_flagged("af_scp_mirror", target.id, "af_source_scp_id")
+        self.assertEqual({key: rebuilt.get(key) for key in expected}, expected)
+
     def test_mirror_sync_respects_axis_and_origin(self):
         root_obj = root()
         source = scp_with_object(root_obj, "Source", mesh_object("Source"))
