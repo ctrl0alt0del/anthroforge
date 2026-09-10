@@ -60,8 +60,22 @@ def effective_rule_for_fiber(fiber_prop, scp_map, fibers_by_id=None):
     _ = fibers_by_id
     if hasattr(fiber_prop, "get") and fiber_prop.get("af_authoring_symmetry") == "explicit":
         return None
-    parent_ids = fiber_parent_ids(fiber_prop)
-    return _first_scp_rule(parent_ids, scp_map) if parent_ids else None
+    parent_ids = mirror_parent_ids(fiber_prop)
+    return authored_mirror_rule(fiber_prop) or _first_scp_rule(parent_ids, scp_map)
+
+
+def authored_mirror_rule(fiber):
+    if not hasattr(fiber, 'get') or fiber.get('af_authoring_symmetry') != 'native_mirror':
+        return None
+    axis, origin = fiber.get('af_authoring_mirror_axis'), fiber.get('af_authoring_mirror_origin')
+    return (str(axis), tuple(origin)) if axis in ('X', 'Y', 'Z') and origin is not None and len(origin) == 3 else None
+
+
+def mirror_parent_ids(fiber):
+    from ..scp_runtime.common import attachment_dependency_id
+    root = getattr(fiber, 'id_data', None)
+    return [attachment_dependency_id(root, pid) if root and str(pid).startswith('AFI_') else pid
+            for pid in fiber_parent_ids(fiber)]
 
 
 def effective_rule_for_muscle(muscle_prop, fibers_by_id, scp_map):

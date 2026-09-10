@@ -6,7 +6,7 @@ from time import perf_counter
 
 from mathutils import Vector
 
-from ..scp_runtime.common import iter_geometry_mesh_scp_objects
+from ..scp_runtime.common import iter_geometry_mesh_scp_objects, instance_geometry_objects
 from .attachment_backend import (attachment_runtime, capture_surface_param,
                                  resolve_attachment_normal, resolve_attachment_world,
                                  resolve_surface_frame)
@@ -38,7 +38,9 @@ def resolve_fiber_node_attachments(root, scene, fiber, runtime=None):
     started = perf_counter(); payload = decode_node_attachments(fiber.node_attachments_json)
     error = _payload_issue(payload, fiber)
     if error: return FiberNodeAttachmentResult(False, error=error, elapsed_ms=_elapsed(started))
-    runtime = runtime or attachment_runtime(scene); objects = _surface_objects(scene, root)
+    runtime = runtime or attachment_runtime(scene)
+    objects = runtime.get('node_attachment_objects')
+    if objects is None: objects = _surface_objects(scene, root)
     points = tuple(_resolve_node(row, objects, runtime, scene) for row in payload.nodes)
     error = _resolved_issue(points)
     return FiberNodeAttachmentResult(not error, points if not error else (), error, _elapsed(started))
@@ -64,8 +66,10 @@ def _capture_payload(root, scene, fiber, points, depsgraph):
 
 def _surface_objects(scene, root):
     values = tuple(iter_geometry_mesh_scp_objects(scene, root.name))
-    return {str(obj.get("af_scp_id", "") or ""): obj for obj in values
-            if str(obj.get("af_scp_id", "") or "")}
+    objects = {str(obj.get("af_scp_id", "") or ""): obj for obj in values
+               if str(obj.get("af_scp_id", "") or "")}
+    objects.update(instance_geometry_objects(scene, root.name))
+    return objects
 
 
 def _candidate_objects(root, scene, fiber, points, runtime):

@@ -17,6 +17,12 @@ def normalized(value):
     return np.asarray(value) / size
 
 
+def face_normals(tris):
+    raw = np.cross(tris[:, 1]-tris[:, 0], tris[:, 2]-tris[:, 0])
+    lengths = np.linalg.norm(raw, axis=1, keepdims=True)
+    return np.divide(raw, lengths, out=np.zeros_like(raw, dtype=float), where=lengths > 1e-14)
+
+
 def ray_hits(tris, origin, direction, distance):
     e1, e2 = tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]
     cross = np.cross(direction, e2)

@@ -221,7 +221,10 @@ def _sync_fiber_update(root, scene, ids, quality):
 
 def _capture_loaded_fiber_nodes(root, scene, ids):
     from ..visualization.fiber_node_attachment_runtime import capture_missing_fiber_node_attachments
-    return capture_missing_fiber_node_attachments(root, scene, ids or None)
+    captured = capture_missing_fiber_node_attachments(root, scene, ids or None)
+    targets = ids or {fiber.id for fiber in root.af_vcp_system.fibers}
+    _sync_attached_fiber_nodes(root, scene, targets)
+    return captured
 
 
 def _sync_attached_fiber_nodes(root, scene, ids):

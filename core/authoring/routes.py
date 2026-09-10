@@ -14,6 +14,13 @@ def override(plan, specification, instance, resolver):
     rows = specification['anchors']
     require(len(rows) == len(plan.anchors), 'ROUTE_OVERRIDE_TOPOLOGY_CHANGED')
     require(all(r['region'] in instance['bindings'].values() for r in rows), 'ROUTE_OVERRIDE_ROLE_MISSING')
-    anchors = tuple(resolver.direct_anchor(identity(r['region']), r['seed'], r['offset']) for r in rows)
+    anchors = tuple(route_anchor(resolver, row) for row in rows)
     require(all(a.owner == b.owner for a, b in zip(anchors, plan.anchors)), 'ROUTE_OVERRIDE_OWNER_CHANGED')
     return replace(plan, anchors=anchors)
+
+
+def route_anchor(resolver, row):
+    name = identity(row['region'])
+    if 'surface_binding' in row:
+        return resolver.bound_anchor(name, row['surface_binding'], row['offset'])
+    return resolver.direct_anchor(name, row['seed'], row['offset'])

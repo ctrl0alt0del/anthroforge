@@ -63,6 +63,18 @@ def muscle(mid, fiber_ids):
 
 
 class RuntimeGraphTests(unittest.TestCase):
+    def test_legacy_surface_metadata_cannot_add_scp_dependency(self):
+        import json
+        material = json.dumps(dict(bound_stations=[dict(nodes=[dict(target_id='S2')])]))
+        surface = SimpleNamespace(id='FS1',fiber_refs=[],get=lambda key,default:material)
+        native = muscle('M1',[]); native.surface_source_mode='FIBER_SURFACE'; native.fiber_surface_id='FS1'
+        scps = [SimpleNamespace(id='S2',parent_id='')]
+        vcp = SimpleNamespace(fibers=[],fiber_surfaces=[surface],muscles=[native],blobs=[],soft_tissues=[])
+        root = SimpleNamespace(af_scp_system=SimpleNamespace(scps=scps),af_vcp_system=vcp)
+        graph = runtime_graph.RuntimeGraph(); entities = adapters.build_runtime_graph(root,graph)
+        self.assertFalse({('FIBER_SURFACE','FS1'),('MUSCLE','M1')} & graph.downstream_entities({('SCP','S2')}))
+        self.assertNotIn('REGION',entities)
+
     def test_selection_impacts_only_selected_entities(self):
         graph = runtime_graph.RuntimeGraph()
         graph.add_entity_edge(("FIBER", "F1"), ("MUSCLE", "M1"))

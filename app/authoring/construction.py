@@ -14,7 +14,7 @@ from ...core.authoring.fitting import fit
 from . import queries
 from .resources import EvaluationGuard, GuardedSolver
 
-BACKEND = 'static-native-v3-material-0.4.0.1'
+BACKEND = 'native-fibers-loft-inflation-0.4.0.4'
 
 
 def compile(service, request):

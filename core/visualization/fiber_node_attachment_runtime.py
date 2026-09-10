@@ -20,6 +20,8 @@ def _apply_fiber_node_attachments_serial(root, scene, fiber_ids):
     fibers = _selected_fibers(root, fiber_ids); handled = {fiber.id for fiber in fibers}
     if not fibers: return handled
     sync = register_fiber_sync(); runtime = attachment_runtime(scene, depsgraph_for_scene(scene))
+    from ..vcp.fiber_node_attachment import _surface_objects
+    runtime['node_attachment_objects'] = _surface_objects(scene, root)
     sync.begin_point_batch()
     try:
         for fiber in fibers: _apply_one(sync, root, scene, fiber, runtime)

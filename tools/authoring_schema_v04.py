@@ -148,7 +148,7 @@ def protocol(definitions):
     ident = dict(document_id=S)
     mutation = dict(**ident, expected_draft_revision=I, expected_scene_revision=S)
     patch = array(obj(dict(op=enum('add', 'replace', 'remove'), path=S, value=ref('patch_value')), ['op', 'path']))
-    operations = basic_operations(ident, mutation, patch) + candidate_operations(mutation) + visual_operations()
+    operations = basic_operations(ident, mutation, patch) + candidate_operations(mutation) + visual_operations() + [snap_points_operation()]
     definitions['patch_value'] = choice({'type': 'string'}, N, B, array(ref('patch_value')), dict(type='object', additionalProperties=ref('patch_value')))
     definitions['document'] = {k: v for k, v in authoring().items() if k != '$defs'}
     return {'$schema': 'https://json-schema.org/draft/2020-12/schema', '$id': 'urn:anthroforge:protocol:0.4.0', '$defs': definitions, 'oneOf': operations+[response()]}
@@ -186,6 +186,12 @@ def candidate_operations(mutation):
     result += [operation('anatomy.revise_candidate', fields, list(fields))]
     fields = dict(**mutation, candidate_id=S, mode=enum('resolved', 'provisional'))
     return result + [operation('anatomy.adopt_binding', fields, list(fields))]
+
+
+def snap_points_operation():
+    fields = dict(instance_id=S, expected_scene_revision=S, points=array(ref('xyz'), 1, 256))
+    fields.update(max_distance={'type': 'number', 'minimum': 0}, collision_radius={'type': 'number', 'minimum': 0})
+    return operation('anatomy.snap_points', fields, ['instance_id', 'expected_scene_revision', 'points'])
 
 
 def visual_operations():

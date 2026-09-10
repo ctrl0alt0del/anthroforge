@@ -16,7 +16,7 @@ from ..vcp.fiber_modes import is_loop_fiber
 from ..vcp.fiber_node_attachment_codec import decode_node_attachments
 from .attachment_session import follow_rotation_enabled, tangent_strategy
 from .common import (as_id, indexed_geometry_mesh_scp_obj, indexed_transform_scp_obj,
-                     scp_object_maps)
+                     scp_object_maps, instance_geometry_objects)
 from .parent_anchor import anchor_mode, stored_parent_binding
 from .runtime_state import (attach_child_normal_local, attach_child_origin_local,
                             attach_child_tangent_local, attach_flow_param,
@@ -54,11 +54,18 @@ def attachment_surface_cache_stats():
 
 def attachment_request_current(request, root, scene):
     if request.scene_id != _runtime_id(scene) or request.root_id != _runtime_id(root): return False
-    objects = scp_object_maps(scene, root.name)
+    objects = _attachment_object_maps(scene, root.name)
     for sid, generation in request.generations:
         obj = indexed_geometry_mesh_scp_obj(objects, sid)
         if obj is None or _current_generation(obj) != generation[:4]: return False
     return True
+
+
+def _attachment_object_maps(scene, root_name):
+    objects = dict(scp_object_maps(scene, root_name))
+    geometry = dict(objects.get('geometry', {}))
+    geometry.update(instance_geometry_objects(scene, root_name))
+    return dict(objects, geometry=geometry)
 
 
 def capture_attachment_wave(root, scene, scp_by_id, target_ids, parent_ids, fibers=(),
@@ -82,8 +89,9 @@ class _WaveCapture:
         self.targets, self.parents = set(targets or ()), set(parents or ())
         self.blocked, self.backsolve = set(blocked or ()), dict(backsolve or {})
         self.limit = None if limit is None else set(limit)
-        self.depsgraph = depsgraph_for_scene(scene); self.objects = scp_object_maps(scene, root.name)
-        self.ids = tuple(sorted(self.scps)); self.lookup = {sid: i for i, sid in enumerate(self.ids)}
+        self.depsgraph = depsgraph_for_scene(scene); self.objects = _attachment_object_maps(scene, root.name)
+        instances = {key for key in self.objects['geometry'] if key.startswith('AFI_')}
+        self.ids = tuple(sorted(set(self.scps) | instances)); self.lookup = {sid: i for i, sid in enumerate(self.ids)}
         self.matrices, self.rotations = self._transforms()
         self.surfaces, self.surface_lookup, self.surface_cache = [], {}, {}
         invalid = set(invalid or ())

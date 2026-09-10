@@ -14,6 +14,10 @@ class StaticScene(BlenderScene):
     def capture_authoring(self):
         return inventory.capture(self.root, self.scene)
 
+    def snap_points(self, params, captured):
+        from .point_picker import snap_points
+        return snap_points(self.root, self.scene, params, captured)
+
     def initialize(self):
         return inventory.initialize(self.root, self.scene)
 

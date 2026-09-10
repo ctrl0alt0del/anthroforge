@@ -1,7 +1,7 @@
 """Deterministic coordinate search; inflation fitting never adds fibers."""
 from copy import deepcopy
 import numpy as np
-from .inflation import inflate
+from .native_geometry import rebuild
 from .errors import require
 from .model import Budget
 from .metrics import sections, closure
@@ -40,9 +40,7 @@ def score(rows):
 
 def evaluate(output, config, targets):
     value = deepcopy(output)
-    base = np.array(output['base']).reshape((len(output['u']), len(output['s']), 3))
-    inflated = inflate(base, output['u'], output['s'], config, output['fibers'][0]['closed'])
-    value.update(config=config, inflated=inflated.reshape((-1, 3)).tolist())
+    value.update(rebuild(output, config), config=config)
     measurements = metrics(value)
     for target in targets:
         if target['metric'] in ('area', 'volume') and target['closure'] != 'none':

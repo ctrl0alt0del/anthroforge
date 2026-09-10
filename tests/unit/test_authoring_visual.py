@@ -1,5 +1,6 @@
 """Independent projection, z-buffer and image contract checks."""
 import unittest
+from unittest.mock import patch
 import numpy as np
 from core.authoring import visual_camera as camera, visual_mesh as mesh, visual_raster as raster, visual_images as images
 from core.authoring import visual_pick
@@ -7,6 +8,7 @@ from core.authoring import visual_selection as selection
 from core.authoring import surface_patch, substrate
 from core.authoring.model import Budget
 from core.authoring.errors import AuthoringError
+from core.authoring.regions import RegionEvaluator
 
 
 def geometry():
@@ -20,6 +22,33 @@ def scene():
 
 
 class VisualTests(unittest.TestCase):
+    def test_domain_reuse_shares_geometry_but_preserves_region_metadata(self):
+        from core.authoring.native_resolver import resolved_domains
+        from unittest.mock import Mock
+        region = dict(frame='/frame', owner='cube', reference_pose='rest', query=dict(kind='region', ref='/source'))
+        other = dict(region, sampling=dict(seed=[.2,.3,.4]))
+        changed = dict(region, query=dict(kind='region', ref='/different'))
+        evaluator = Mock(); evaluator.evaluate.return_value = dict(polygons=[], owner='cube')
+        document = dict(a=region, b=other, c=changed)
+        result = resolved_domains(evaluator, dict(first='/a', second='/b', third='/c'), document)
+        self.assertEqual(evaluator.evaluate.call_count, 2)
+        self.assertEqual(result['second']['reference'], '/b')
+        self.assertNotEqual(result['first']['definition_digest'], result['second']['definition_digest'])
+
+    def test_named_patch_preserves_coincident_triangle_identity(self):
+        value = geometry()
+        value['matrix'] = [[.73, 0, 0, .13], [0, 1.17, 0, -.27], [0, 0, .91, .39], [0, 0, 0, 1]]
+        value['triangles'].append(list(value['triangles'][0]))
+        patches = [dict(triangle=len(value['triangles'])-1, polygon=np.eye(3).tolist())]
+        query = dict(kind='surface_patch', topology_digest=mesh.topology(value), patches=patches)
+        region = dict(owner='cube', frame='/frame', reference_pose='rest', query=query)
+        reused = dict(region, query=dict(kind='region', ref='/regions/original'))
+        document = dict(frame=dict(owner='cube'), regions=dict(original=region, reused=reused))
+        chart = substrate.box_frame(dict(axes=np.eye(3)), dict(instance_id='cube'), value)
+        with patch.object(substrate, 'frame', return_value=chart):
+            output = RegionEvaluator(document, dict(reference_pose='rest')).evaluate('/regions/reused')
+        self.assertAlmostEqual(output['area'], selection.area(value, patches), places=8)
+
     def test_coincident_triangles_keep_distinct_patch_identity(self):
         value = geometry()
         value['triangles'].append(list(value['triangles'][0]))

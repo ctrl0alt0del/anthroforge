@@ -283,13 +283,6 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
         default=1.5, min=0.1, max=8.0, update=_on_muscle_prop_update
     )
 
-    inflation_material_along: bpy.props.FloatProperty(
-        name="Along Boundary", default=0.04, min=0.0, max=0.5, update=_on_muscle_prop_update,
-        description="Boundary width as a fraction of the authored muscle length")
-    inflation_material_across: bpy.props.FloatProperty(
-        name="Across Boundary", default=0.12, min=0.0, max=0.5, update=_on_muscle_prop_update,
-        description="Boundary width as a fraction of the authored muscle width")
-
     inflation_length_taper_band: bpy.props.FloatProperty(
         name="Length Taper Band",
         default=0.2,

@@ -39,6 +39,7 @@ class Anchor:
     normal: tuple
     surface: tuple
     offset: float
+    surface_binding: tuple | None = None
 
 
 @dataclass(frozen=True)

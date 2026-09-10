@@ -40,9 +40,6 @@ class MuscleNumericSpec:
     flip_normals: bool
     control_world: tuple
     initialize_control: bool = False
-    authoring_material: str = ""
-    authoring_boundary_along: float = .04
-    authoring_boundary_across: float = .12
 
 
 @dataclass(frozen=True)
@@ -89,9 +86,6 @@ def resolve_muscle_backend(explicit=None, environment=None):
 def execute_muscle_batch(requests, backend=None):
     kind = resolve_muscle_backend(backend)
     requests = tuple(requests)
-    if any(r.spec.authoring_material for r in requests):
-        from ..authoring.runtime import mixed_batch
-        return mixed_batch(requests, backend)
     if not requests:
         return MuscleNumericBatchResult((), kind.value, 0.0)
     if kind == MuscleNumericBackend.NATIVE:

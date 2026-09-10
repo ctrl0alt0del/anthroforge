@@ -27,6 +27,8 @@ class AuthoringService:
         return self.dispatch(request, started)
 
     def dispatch(self, request, started):
+        if request['op'] == 'anatomy.snap_points':
+            self.check(request['params'])
         cached = replay_response(self, request)
         if cached:
             return cached
@@ -57,13 +59,14 @@ def operations():
     result.update({'anatomy.'+name: getattr(persistence, name) for name in ('checkpoint', 'recover')})
     result['anatomy.reconcile'] = reconciliation.reconcile
     from .resources import cancel
-    result.update({'anatomy.cancel': cancel, 'anatomy.resume': construction.compile})
+    from .surface_points import snap_points
+    result.update({'anatomy.cancel': cancel, 'anatomy.resume': construction.compile, 'anatomy.snap_points': snap_points})
     result.update(visual.operations())
     return result
 
 
 def capabilities():
-    return ['static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1']
+    return ['static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1']
 
 
 def remember_journal(service, request):

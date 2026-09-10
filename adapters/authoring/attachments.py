@@ -1,6 +1,34 @@
 """Resolve detached native attachment records without exposing RNA."""
 from ...core.authoring.errors import require
 from ...core.vcp.attachment_backend import resolve_attachment_world
+from ...core.scp_runtime.common import find_geometry_mesh_scp_obj
+from ...core.attachment_codec import encode_fiber_surface_param
+from ...core.authoring.attachment_binding import capture as capture_binding
+from .inventory import geometry_for
+from ...core.authoring.attachment_binding import resolve as resolve_binding
+import numpy as np
+
+
+def capture(root, scene, anchor):
+    obj = find_geometry_mesh_scp_obj(scene, root.name, anchor['owner'])
+    require(obj is not None, 'ATTACHMENT_CAPTURE_FAILED', anchor['owner'])
+    geometry = geometry_for(obj)
+    value = retained_binding(geometry, anchor) if anchor.get('surface_binding') else capture_binding(geometry, anchor['surface'], anchor['normal'])
+    return encode_fiber_surface_param(value)
+
+
+def retained_binding(geometry, anchor):
+    value = anchor['surface_binding']
+    point, normal = resolve_binding(geometry, value)
+    require(np.linalg.norm(point-anchor['surface']) < 1e-5, 'ATTACHMENT_CAPTURE_FAILED')
+    require(normal @ np.asarray(anchor['normal']) > 1-1e-6, 'ATTACHMENT_NORMAL_UNRESOLVED')
+    return value
+
+
+def normal_offset(root, scene, owner, offset):
+    obj = find_geometry_mesh_scp_obj(scene, root.name, owner)
+    require(obj is not None, 'NATIVE_ATTACHMENT_UNRESOLVED', owner)
+    return offset * (-1 if obj.matrix_world.to_3x3().determinant() < 0 else 1)
 
 
 def resolve_rows(root, scene, fiber):
@@ -17,4 +45,5 @@ def resolve_rows(root, scene, fiber):
 def resolve(root, scene, row):
     point = resolve_attachment_world(root, scene, row['parent_id'], row['attach_param'])
     require(point is not None, 'NATIVE_ATTACHMENT_UNRESOLVED')
-    return dict(owner=row['parent_id'], point=list(point), offset=row.get('normal_offset', 0.))
+    offset = normal_offset(root, scene, row['parent_id'], row.get('normal_offset', 0.))
+    return dict(owner=row['parent_id'], point=list(point), offset=offset)

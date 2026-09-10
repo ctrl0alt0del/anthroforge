@@ -13,7 +13,7 @@ from _support import ensure_import_path, install_fake_modules
 ensure_import_path()
 install_fake_modules()
 
-from core.scp_runtime.surface import _closest_point_barycentric
+from core.scp_runtime.surface import _closest_point_barycentric, _param_from_hit
 
 
 class Vec:
@@ -28,6 +28,20 @@ class Vec:
 
 
 class SurfaceCaptureTests(unittest.TestCase):
+    def test_nearest_hit_roundoff_never_extrapolates_outside_triangle(self):
+        abc = (Vec(0, 0), Vec(1, 0), Vec(0, 1))
+        for point in (Vec(-5e-7, .9), Vec(.5, .5000005), Vec(1.0000005, 0)):
+            with self.subTest(point=point):
+                value = _param_from_hit(dict(abc=abc, cp=point, tri=(4, 5, 6)))
+                weights = value['tri_weights']
+                self.assertEqual(value['tri_vidx'], (4, 5, 6))
+                self.assertTrue(all(0 <= weight <= 1 for weight in weights))
+                self.assertAlmostEqual(sum(weights), 1)
+
+    def test_degenerate_hit_has_no_attachment(self):
+        abc = (Vec(0, 0), Vec(1, 0), Vec(2, 0))
+        self.assertIsNone(_param_from_hit(dict(abc=abc, cp=Vec(.5, 0), tri=(0, 1, 2))))
+
     def test_barycentric_returns_vertex_weight_for_exact_hit(self):
         a = Vec(0.0, 0.0)
         b = Vec(1.0e-3, 0.0)

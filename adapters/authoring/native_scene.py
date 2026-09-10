@@ -14,6 +14,8 @@ from .native import write_muscle, find
 from .records import record, restore
 from .ownership import validate_removal, remove_proxies
 from .publication import verify
+from .symmetry import configure as configure_symmetry
+from ...core.authoring.symmetry import mirror_planes
 
 
 class BlenderScene:
@@ -37,14 +39,14 @@ class BlenderScene:
     @contextmanager
     def publish(self, captured, document, outputs, previous):
         require(self.capture(captured.id).revision == captured.revision, "STALE_REVISION")
-        preflight(self, document, outputs, previous)
+        planes = preflight(self, document, outputs, previous, captured)
         saved = memento(self, previous)
         objects = set(bpy.data.objects)
         try:
             with suppress_vcp_prop_updates():
-                ids = write_outputs(self, document, outputs, previous)
+                ids = write_outputs(self, document, outputs, previous, planes)
                 self.refresh(ids)
-                verify(self, ids, outputs)
+                verify(self, ids, outputs, planes)
                 remember(self, document, ids)
                 yield ids
         except BaseException:
@@ -58,8 +60,8 @@ class BlenderScene:
         sync_vcp_mirrors(self.root,self.scene,targets.get("fibers"),targets.get("muscles"),(),())
 
 
-def preflight(port, document, outputs, previous):
-    require(all(m["symmetry"]["mode"] == "explicit" for m in document["muscles"].values()), "UNSUPPORTED_NATIVE_MIRROR")
+def preflight(port, document, outputs, previous, captured):
+    planes = mirror_planes(document, captured)
     for output in outputs.values():
         for row in output["fibers"]:
             ends = row["anchors"] if row["closed"] else [row["anchors"][0], row["anchors"][-1]]
@@ -69,11 +71,14 @@ def preflight(port, document, outputs, previous):
     require(bool(saved) == bool(previous), "DOCUMENT_JOURNAL_MISMATCH")
     if saved:
         require(saved["fingerprint"] == ownership(port.root, saved["ids"]), "EXTERNAL_EDIT_CONFLICT")
+    return planes
 
 
-def write_outputs(port, document, outputs, previous):
+def write_outputs(port, document, outputs, previous, planes):
     old = (previous or {}).get("native_ids", {})
     ids = {name: write_muscle(port.root, port.scene, name, output, old.get(name, {}),document) for name, output in outputs.items()}
+    for name, identity in ids.items():
+        configure_symmetry(port.root, identity, planes[name])
     remove_obsolete(port.root, old, ids)
     return ids
 

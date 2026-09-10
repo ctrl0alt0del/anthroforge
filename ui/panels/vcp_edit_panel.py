@@ -56,11 +56,7 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
     def _draw_shared_inflation(self, layout, muscle):
         layout.prop(muscle, "inflation_max_value", text="Max Inflation")
         layout.prop(muscle, "inflation_boundary_strength", text="Boundary Strength")
-        if muscle.get("af_authoring_material"):
-            layout.prop(muscle, "inflation_material_along")
-            layout.prop(muscle, "inflation_material_across")
-        else:
-            layout.prop(muscle, "inflation_boundary_band", text="Boundary Band")
+        layout.prop(muscle, "inflation_boundary_band", text="Boundary Band")
         layout.prop(muscle, "inflation_boundary_power", text="Boundary Power")
 
     def _draw_point_inflation(self, layout, muscle):

@@ -62,7 +62,7 @@ def compile_instance(document, inventory, output, key, instance, domains):
     output['volume_presets'][key] = compile_shape(document, instance)
     output['policies'][key] = native_values(lookup(document, instance['policy']), instance['profile'])
     output['recipes'][key] = dict(concept=lookup(document, recipe['concept'])['label'], architecture=recipe['strategy'].split('.')[0].replace('loop', 'ring'), region_roles=deepcopy(recipe['roles']), construction=construction, evidence=evidence(recipe['evidence']))
-    output['muscles'][key] = dict(recipe=key, side=instance['side'], region_bindings=role_bindings(instance), volume_preset=key, policy=key, symmetry=dict(mode='explicit'))
+    output['muscles'][key] = dict(recipe=key, side=instance['side'], region_bindings=role_bindings(instance), volume_preset=key, policy=key, symmetry=compile_symmetry(document, inventory, output, instance))
     output['roster'][key] = dict(state='included', instances=[key], reason='Representative static volume; not anatomically reviewed.')
 
 
@@ -72,6 +72,16 @@ def evaluation_profile(document, inventory, instance):
     value = lookup(document, reference)
     require(value['purpose'] == 'static_avatar', 'STATIC_PROFILE_REQUIRED')
     require(value['reference_pose'] == inventory['reference_pose'], 'REFERENCE_POSE_MISMATCH')
+
+
+def compile_symmetry(document, inventory, output, instance):
+    value = deepcopy(instance.get('symmetry', dict(mode='explicit')))
+    if value['mode'] == 'native_mirror':
+        reference = value['plane_frame']
+        value['plane_frame'] = identity(reference)
+        if value['plane_frame'] not in output['frames']:
+            compile_frame(document, inventory, output, dict(frame=reference, concept='Symmetry plane'))
+    return value
 
 
 def compile_shape(document, instance):

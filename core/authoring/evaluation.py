@@ -1,7 +1,7 @@
 """One muscle build, default volume checks and selective refinement."""
 import numpy as np
 from time import perf_counter
-from . import compilation, inflation, contact, surface_checks, conformance, shape, contact_repair, repair_comparison
+from . import compilation, inflation, contact, surface_checks, native_geometry, shape, contact_repair, repair_comparison
 from .errors import require, AuthoringError
 
 
@@ -66,14 +66,14 @@ def reference_samples(row,closed):
 
 def evaluated(document, name, resolver, plans, solved, refs):
     rows, row_s, terminations = solved
-    s = compilation.material_samples(plans[0].stations, plans[0].count, plans[0].closed)
+    s = np.linspace(0., 1., plans[0].count, endpoint=not plans[0].closed)
     muscle = document["muscles"][name]
     preset = document["volume_presets"][muscle["volume_preset"]]
     config = inflation.resolved_preset(preset, resolver, refs)
     base,u = build_grid(document,name,resolver,plans,rows,row_s,s)
-    inflated = inflation.inflate(base,u,s,config,plans[0].closed)
-    faces = inflation.faces(len(u),len(s),plans[0].closed)
-    result = pack_result(plans,rows,s,terminations,base,inflated,u,faces,config,{},refs,row_s)
+    native, props, point = native_geometry.evaluate(base,u,s,config,plans[0].closed)
+    result = pack_result(plans,rows,s,terminations,native.base_vertices,native.inflated_vertices,u,native.faces,config,{},refs,row_s)
+    result.update(native_properties=props, native_control_world=point)
     return checked_result(result, document, name, resolver)
 
 
@@ -104,8 +104,7 @@ def evaluate_contact(resolver,inflated,faces,tolerance):
 
 
 def build_grid(document,name,resolver,plans,rows,row_s,s):
-    base,u = inflation.material_loft(rows,row_s,[p.u for p in plans],s,plans[0].closed)
-    base,u = conformance.apply(base,u,s,document,name,resolver)
+    base,u = native_geometry.loft(rows,[p.u for p in plans],plans[0].closed)
     policy = document["policies"][document["muscles"][name]["policy"]]
     require(base.shape[0]*base.shape[1] <= policy.get("max_surface_vertices",1000000), "SURFACE_VERTEX_BUDGET")
     return base,u
@@ -113,11 +112,19 @@ def build_grid(document,name,resolver,plans,rows,row_s,s):
 
 def pack_result(plans,rows,s,terminations,base,inflated,u,faces,config,report,refs,row_s):
     fibers = [dict(id=p.id,u=p.u,closed=p.closed,stations=list(p.stations),points=np.asarray(row).tolist(),
-                   anchors=[dict(owner=a.owner,point=list(a.point),surface=list(a.surface),normal=list(a.normal),offset=a.offset) for a in p.anchors]) for p,row in zip(plans,rows)]
+                   anchors=[anchor_record(a) for a in p.anchors]) for p,row in zip(plans,rows)]
     for fiber, coordinates in zip(fibers, row_s):
         fiber["material_s"] = list(coordinates)
     return dict(fibers=fibers,s=list(s),u=list(u),base=base.reshape(-1,3).tolist(),inflated=inflated.reshape(-1,3).tolist(),
                 faces=faces.tolist(),config=config,contact=report,references=refs,terminations=terminations)
+
+
+def anchor_record(anchor):
+    result = dict(owner=anchor.owner,point=list(anchor.point),surface=list(anchor.surface),normal=list(anchor.normal),offset=anchor.offset)
+    if anchor.surface_binding is not None:
+        indices, weights = anchor.surface_binding
+        result['surface_binding'] = dict(tri_vidx=list(indices),tri_weights=list(weights))
+    return result
 
 
 def check_shape(base, inflated, u, s, config, closed, resolver, refs):

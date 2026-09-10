@@ -3463,6 +3463,9 @@
             ],
             "additionalProperties": false
           }
+        },
+        "symmetry": {
+          "$ref": "#/$defs/instance_symmetry"
         }
       },
       "required": [
@@ -3488,6 +3491,9 @@
         },
         "offset": {
           "type": "number"
+        },
+        "surface_binding": {
+          "$ref": "#/$defs/surface_binding"
         }
       },
       "required": [
@@ -3621,6 +3627,85 @@
         "baseline_digest",
         "value",
         "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "instance_symmetry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "explicit"
+              ]
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "native_mirror"
+              ]
+            },
+            "plane_frame": {
+              "$ref": "#/$defs/reference"
+            },
+            "plane_axis": {
+              "enum": [
+                "x",
+                "y",
+                "z"
+              ]
+            },
+            "plane_coordinate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "mode",
+            "plane_frame",
+            "plane_axis",
+            "plane_coordinate"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "surface_binding": {
+      "type": "object",
+      "properties": {
+        "tri_vidx": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "tri_weights": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": -1e-08,
+            "maximum": 1.00000001
+          },
+          "minItems": 3,
+          "maxItems": 3
+        }
+      },
+      "required": [
+        "tri_vidx",
+        "tri_weights"
       ],
       "additionalProperties": false
     }

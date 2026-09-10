@@ -224,6 +224,7 @@ class AuthoringV04Tests(BlenderTestCase):
             published = call(r, folder, 'publish', value)
             self.assertTrue(published['published'], published)
             self.assertTrue(all(f.a_parent_id.startswith('AFI_') for f in r.af_vcp_system.fibers))
+            self.assertTrue(all(f.node_attachments_json for f in r.af_vcp_system.fibers))
             checkpoint = call(r, folder, 'checkpoint', value)
             self.assertTrue(checkpoint['generation']['complete'], checkpoint)
             verify_reload(self, r, checkpoint['generation']['scene']['path'])

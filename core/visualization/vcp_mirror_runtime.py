@@ -2,13 +2,13 @@ import bpy
 
 from ..scp_runtime.runtime_state import mirror_effective_axis, mirror_source_id, mirror_status
 from ..utils import get_af_root, scene_for_id
-from ..vcp.fiber_modes import fiber_parent_ids, is_loop_fiber
+from ..vcp.fiber_modes import is_loop_fiber
 from ..vcp.surface_target import SurfaceTargetKind, effective_tissue_target
 from .mirror_objects import (create_mirror_from_source, ensure_obj_type, ensure_private_data,
                              remove_obj, restore_curve_snapshot, share_source_data)
 from .fiber_sync_helpers import persisted_fiber_points, show_curve_preview
 from .muscle_sync_helpers import resolve_muscle_surface
-from .mirror_rules import mirror_world_matrix
+from .mirror_rules import mirror_world_matrix, authored_mirror_rule, mirror_parent_ids
 
 
 def _as_id(value):
@@ -98,7 +98,10 @@ def _rule_for_fiber(fiber, fibers_by_id, scp_by_id):
     _ = fibers_by_id
     if hasattr(fiber,"get") and fiber.get("af_authoring_symmetry") == "explicit":
         return None
-    parent_ids = [_as_id(pid) for pid in fiber_parent_ids(fiber) if _as_id(pid)]
+    authored = authored_mirror_rule(fiber)
+    if authored is not None:
+        return authored
+    parent_ids = [_as_id(pid) for pid in mirror_parent_ids(fiber) if _as_id(pid)]
     for pid in parent_ids:
         rule = _rule_for_scp(pid, scp_by_id)
         if rule is not None:

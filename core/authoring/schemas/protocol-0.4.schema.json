@@ -3182,6 +3182,9 @@
             ],
             "additionalProperties": false
           }
+        },
+        "symmetry": {
+          "$ref": "#/$defs/instance_symmetry"
         }
       },
       "required": [
@@ -3207,6 +3210,9 @@
         },
         "offset": {
           "type": "number"
+        },
+        "surface_binding": {
+          "$ref": "#/$defs/surface_binding"
         }
       },
       "required": [
@@ -3654,9 +3660,165 @@
       "additionalProperties": false,
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "urn:anthroforge:authoring:0.4.0"
+    },
+    "instance_symmetry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "explicit"
+              ]
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "native_mirror"
+              ]
+            },
+            "plane_frame": {
+              "$ref": "#/$defs/reference"
+            },
+            "plane_axis": {
+              "enum": [
+                "x",
+                "y",
+                "z"
+              ]
+            },
+            "plane_coordinate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "mode",
+            "plane_frame",
+            "plane_axis",
+            "plane_coordinate"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "surface_binding": {
+      "type": "object",
+      "properties": {
+        "tri_vidx": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "tri_weights": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": -1e-08,
+            "maximum": 1.00000001
+          },
+          "minItems": 3,
+          "maxItems": 3
+        }
+      },
+      "required": [
+        "tri_vidx",
+        "tri_weights"
+      ],
+      "additionalProperties": false
     }
   },
   "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.snap_points"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "instance_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "points": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/xyz"
+              },
+              "minItems": 1,
+              "maxItems": 256
+            },
+            "max_distance": {
+              "type": "number",
+              "minimum": 0
+            },
+            "collision_radius": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "scene_id",
+            "instance_id",
+            "expected_scene_revision",
+            "points"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
     {
       "type": "object",
       "properties": {

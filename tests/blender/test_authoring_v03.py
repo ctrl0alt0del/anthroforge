@@ -78,19 +78,51 @@ class AuthoringV03BlenderTests(BlenderTestCase):
             self.assertEqual(len(r.af_vcp_system.muscles),0)
             repair_and_publish(self,r,directory,value["document_id"])
 
-    def test_boundary_metadata_survives_save_reload(self):
+    def test_boundaries_survive_without_authoring_documents(self):
         r = root()
         with tempfile.TemporaryDirectory() as directory:
             result = execute(request(r,"build",document=document(r),transaction="document_atomic"),r,bpy.context.scene,directory)
             self.assertTrue(result["published"],result)
             before = np.array([tuple(v.co) for v in inflated(r).data.vertices])
-            path = str(Path(directory)/"boundary.blend")
-            bpy.ops.wm.save_as_mainfile(filepath=path)
-            bpy.ops.wm.open_mainfile(filepath=path)
-            r = bpy.data.objects["AF_ROOT"]
-            BlenderScene(r,bpy.context.scene).refresh()
-            np.testing.assert_allclose(before,[tuple(v.co) for v in inflated(r).data.vertices],atol=1e-6)
-            self.assertIn("boundary_document",r.af_vcp_system.fiber_surfaces[0]["af_authoring_material"])
+            verify_detached_reload(self,r,directory,before)
+
+    def test_boundaries_follow_scp_geometry_without_regions(self):
+        r = root()
+        with tempfile.TemporaryDirectory() as directory:
+            result = execute(request(r,'build',document=document(r),transaction='document_atomic'),r,bpy.context.scene,directory)
+            self.assertTrue(result['published'],result)
+            verify_geometric_motion(self,r)
+
+
+def verify_detached_reload(test,r,directory,before):
+    from anthroforge.core.authoring.regions import RegionResolver
+    test.assertNotIn('af_authoring_material', r.af_vcp_system.fiber_surfaces[0])
+    test.assertNotIn('af_authoring_material', r.af_vcp_system.muscles[0])
+    r.pop('af_authoring_documents',None); r.pop('af_authoring_journal',None)
+    path = str(Path(directory)/'boundary.blend')
+    with patch.object(RegionResolver,'__init__',side_effect=AssertionError('Runtime read regions')):
+        bpy.ops.wm.save_as_mainfile(filepath=path)
+        bpy.ops.wm.open_mainfile(filepath=path)
+        r = bpy.data.objects['AF_ROOT']
+        BlenderScene(r,bpy.context.scene).refresh()
+        np.testing.assert_allclose(before,[tuple(v.co) for v in inflated(r).data.vertices],atol=1e-6)
+        from test_authoring_dsl import verify_volume
+        verify_volume(test,r)
+
+
+def verify_geometric_motion(test,r):
+    from anthroforge.core.authoring.regions import RegionResolver
+    from anthroforge.core.visualization.fiber_node_attachment_runtime import apply_fiber_node_attachments
+    from anthroforge.core.scp_runtime.common import find_geometry_mesh_scp_obj
+    fiber = r.af_vcp_system.fibers[0]
+    with patch.object(RegionResolver,'__init__',side_effect=AssertionError('Runtime read regions')):
+        before = np.array([tuple(v.co) for v in inflated(r).data.vertices])
+        obj = find_geometry_mesh_scp_obj(bpy.context.scene,r.name,fiber.a_parent_id)
+        obj.location.x += .25; bpy.context.view_layer.update()
+        apply_fiber_node_attachments(r,bpy.context.scene,{f.id for f in r.af_vcp_system.fibers})
+        BlenderScene(r,bpy.context.scene).refresh()
+        after = np.array([tuple(v.co) for v in inflated(r).data.vertices])
+    np.testing.assert_allclose(after[0]-before[0], [.25,0,0], atol=1e-6)
 
 
 def repair_and_publish(test,r,directory,identity):

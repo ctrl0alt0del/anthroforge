@@ -56,9 +56,6 @@ def evaluate_surface_record(root, scene, surface):
     rows = collect_surface_rows(root, scene, surface, fibers)
     if not rows:
         raise ValueError("Fiber Surface source geometry is unavailable.")
-    if surface.get("af_authoring_material"):
-        from .authoring_material import evaluate_material
-        return evaluate_material(root, scene, surface, fibers, rows)
     return evaluate_fiber_surface(rows, _surface_spec(surface, fibers))
 
 
@@ -102,7 +99,7 @@ def _validate_loft_fibers(surface, fibers):
         raise ValueError("LOFT requires at least two Fibers.")
     modes = {bool(is_loop_fiber(fiber)) for fiber in fibers}
     counts = {int(fiber.node_count) for fiber in fibers}
-    if len(modes) != 1 or (len(counts) != 1 and not surface.get("af_authoring_material")):
+    if len(modes) != 1 or len(counts) != 1:
         raise ValueError("LOFT Fibers must share topology and node count.")
 
 

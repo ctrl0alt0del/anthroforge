@@ -51,26 +51,33 @@ def _add_fiber_entities(root, graph, entity_sets):
     if not hasattr(root, "af_vcp_system"):
         return
     for f in root.af_vcp_system.fibers:
-        fid = f.id
-        entity_sets["FIBER"].add(fid)
-        fp_in = graph.add_port(PortRef("FIBER", fid, "input", PHASE_INPUT, MUT_INPUT))
-        fp_local = graph.add_port(PortRef("FIBER", fid, "local_eval", PHASE_LOCAL_EVAL, MUT_DERIVED))
-        fp_att = graph.add_port(PortRef("FIBER", fid, "attachment_world", PHASE_ATTACHMENT_WORLD, MUT_DERIVED))
-        fp_probe = graph.add_port(PortRef("FIBER", fid, "probe", PHASE_PROBES, MUT_PROBE))
-        graph.add_edge(Edge(fp_in, fp_local, EDGE_EVAL))
-        graph.add_edge(Edge(fp_local, fp_probe, EDGE_EVAL))
-        graph.add_edge(Edge(fp_att, fp_probe, EDGE_EVAL))
-
-        for sid in _fiber_attachment_ids(f):
-            sp = graph.add_port(PortRef("SCP", sid, "probe", PHASE_PROBES, MUT_PROBE))
-            graph.add_edge(Edge(sp, fp_att, EDGE_ATTACHMENT))
-            _add_dependency_edge(graph, ("SCP", sid), ("FIBER", fid))
+        _add_one_fiber(root, graph, entity_sets, f)
 
 
-def _fiber_attachment_ids(fiber):
+def _add_one_fiber(root, graph, entity_sets, fiber):
+    fid = fiber.id; entity_sets['FIBER'].add(fid)
+    fp_in = graph.add_port(PortRef('FIBER', fid, 'input', PHASE_INPUT, MUT_INPUT))
+    fp_local = graph.add_port(PortRef('FIBER', fid, 'local_eval', PHASE_LOCAL_EVAL, MUT_DERIVED))
+    fp_att = graph.add_port(PortRef('FIBER', fid, 'attachment_world', PHASE_ATTACHMENT_WORLD, MUT_DERIVED))
+    fp_probe = graph.add_port(PortRef('FIBER', fid, 'probe', PHASE_PROBES, MUT_PROBE))
+    graph.add_edge(Edge(fp_in, fp_local, EDGE_EVAL))
+    graph.add_edge(Edge(fp_local, fp_probe, EDGE_EVAL))
+    graph.add_edge(Edge(fp_att, fp_probe, EDGE_EVAL))
+    for sid in _fiber_attachment_ids(root, fiber):
+        sp = graph.add_port(PortRef('SCP', sid, 'probe', PHASE_PROBES, MUT_PROBE))
+        graph.add_edge(Edge(sp, fp_att, EDGE_ATTACHMENT))
+        _add_dependency_edge(graph, ('SCP', sid), ('FIBER', fid))
+
+
+def _fiber_attachment_ids(root, fiber):
     values = list(fiber_parent_ids(fiber))
     values.extend(node_attachment_target_ids(fiber))
-    return tuple(dict.fromkeys(str(value or "") for value in values if str(value or "")))
+    values = tuple(dict.fromkeys(str(v) for v in values if v))
+    if not any(value.startswith('AFI_') for value in values):
+        return values
+    try: from ..scp_runtime.common import attachment_dependency_id
+    except ImportError: from core.scp_runtime.common import attachment_dependency_id
+    return tuple(dict.fromkeys(attachment_dependency_id(root, value) for value in values if value))
 
 
 def _add_muscle_entities(root, graph, entity_sets):

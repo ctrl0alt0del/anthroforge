@@ -3,7 +3,7 @@ import numpy as np
 from time import perf_counter
 from . import charts, trims, contact, sheets, clipping, substrate
 from .errors import AuthoringError, require
-from .geometry import normalized, ray_hits, triangles
+from .geometry import normalized, ray_hits, triangles, face_normals
 from .model import Anchor, Budget, Registry
 from .codec import digest
 from .references import lookup
@@ -76,7 +76,8 @@ def project_one(region, chart, tris, at, resolver, spec):
     expected = normalized(chart["normal"] @ spec["expected_normal_in_frame"])
     distance = resolver.measure(spec["search_distance"])
     hits = ray_hits(tris, point - direction * distance, direction, 2 * distance)
-    normals = normalized(np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]))
+    normals = face_normals(tris)
+    normals *= np.sign(np.linalg.det(chart['mesh'].matrix[:3, :3]))
     valid = [hit for hit in hits if normals[hit[1]] @ expected >= spec["min_normal_dot"]]
     unique = deduplicate(valid, max(1e-10, distance * 1e-8))
     _, index, result = sheets.select(unique,point,spec,resolver)
@@ -183,6 +184,8 @@ class RegionEvaluator:
         require(other['owner']['instance_id'] == chart['owner']['instance_id'], 'REGION_OWNER_MISMATCH')
         self.active.add(reference)
         try:
+            if np.array_equal(other['linear'], chart['linear']) and np.array_equal(other['origin'], chart['origin']):
+                return self.partition(polygons, region['query'], other)
             transformed = [substrate.coordinates(other, substrate.world(chart, p)) for p in polygons]
             a, b = self.partition(transformed, region['query'], other)
             return tuple([substrate.coordinates(chart, substrate.world(other, p)) for p in group] for group in (a, b))

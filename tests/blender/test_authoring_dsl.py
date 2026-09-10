@@ -42,6 +42,35 @@ def build(root_obj, directory):
 
 
 class AuthoringBlenderTests(BlenderTestCase):
+    def test_second_document_preserves_first_muscle_fibers(self):
+        r = root()
+        with tempfile.TemporaryDirectory() as directory:
+            first, request = build(r, directory); self.assertTrue(first['published'], first)
+            ids = {f.id for f in r.af_vcp_system.fibers}
+            before = np.array([tuple(v.co) for v in inflated(r).data.vertices])
+            document = request['params']['document']; document['document_id'] = 'second'
+            request['request_id'] = 'second'; request['params']['expected_scene_revision'] = BlenderScene(r,bpy.context.scene).capture(r.name).revision
+            second = execute(request, r, bpy.context.scene, directory); self.assertTrue(second['published'], second)
+            self.assertEqual(len(r.af_vcp_system.fibers), 2*len(ids))
+            self.assertTrue(ids.isdisjoint(second['entities'][0]['native_ids']['fibers']))
+            BlenderScene(r,bpy.context.scene).refresh()
+            np.testing.assert_allclose(before,[tuple(v.co) for v in inflated(r).data.vertices],atol=1e-6)
+
+    def test_reflected_support_offsets_publish_and_regenerate(self):
+        from anthroforge.core.scp_runtime.common import find_geometry_mesh_scp_obj
+        r = root(); document = fixture(r); document['recipes']['pattern']['construction']['stations'][1]['offset']['value'] = .03
+        for target in document['targets'].values():
+            find_geometry_mesh_scp_obj(bpy.context.scene, r.name, target['binding']['id']).scale.x = -1
+        preset = next(iter(document['volume_presets'].values())); preset['flip_normals'] = not preset['flip_normals']
+        revision = BlenderScene(r, bpy.context.scene).capture(r.name).revision
+        request = message(r, 'build', document=document, expected_scene_revision=revision, transaction='document_atomic')
+        with tempfile.TemporaryDirectory() as directory:
+            result = execute(request, r, bpy.context.scene, directory)
+            self.assertTrue(result['published'], result)
+            self.assertTrue(all(f.mid_touches[0].normal_offset < 0 for f in r.af_vcp_system.fibers))
+            before = np.array([tuple(v.co) for v in inflated(r).data.vertices]); BlenderScene(r, bpy.context.scene).refresh()
+            np.testing.assert_allclose(before, [tuple(v.co) for v in inflated(r).data.vertices], atol=1e-6)
+
     def test_closed_loft_publishes_native_loop_anchors(self):
         from _authoring_loop_fixture import fixture as loop_fixture
         r = root()

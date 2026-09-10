@@ -3,6 +3,7 @@ import ast
 import json
 import unittest
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 import numpy as np
 from core.authoring import codec, schema, validation, inflation, contact
@@ -12,6 +13,7 @@ from core.authoring.regions import RegionResolver
 from core.authoring.model import MeshSnapshot, SceneSnapshot, FiberPlan, Anchor
 from core.authoring.compilation import material_coordinates, material_samples
 from core.authoring.nearest import nearest
+from core.authoring.attachment_binding import capture as capture_binding
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,12 +30,49 @@ def cube(identity="SCP_DEMO_origin"):
 
 
 class AuthoringCoreTests(unittest.TestCase):
-    def test_native_material_accepts_different_node_counts(self):
-        from core.authoring.runtime import surface
+    def test_projection_ignores_zero_area_faces_away_from_attachment(self):
+        document = fixture()
+        meshes = tuple(cube('SCP_DEMO_'+n) for n in document['targets'])
+        damaged = tuple(replace(m, triangles=np.vstack((m.triangles, [0, 0, 0]))) for m in meshes)
+        expected = RegionResolver(document, SceneSnapshot('s', 'r', meshes)).point('origin', (.5,))
+        actual = RegionResolver(document, SceneSnapshot('s', 'r', damaged)).point('origin', (.5,))
+        np.testing.assert_allclose(actual.surface, expected.surface)
+        np.testing.assert_allclose(actual.normal, expected.normal)
+
+    def test_native_binding_ignores_zero_area_faces_without_renumbering(self):
+        mesh = cube()
+        faces = np.vstack(([0, 0, 0], mesh.triangles))
+        geometry = dict(vertices=mesh.vertices, triangles=faces, matrix=mesh.matrix)
+        value = capture_binding(geometry, np.array([.4, 1., .6]), [0., 1., 0.])
+        triangle = mesh.vertices[value['tri_vidx']]
+        np.testing.assert_allclose(np.array(value['tri_weights']) @ triangle, [.4, 1., .6])
+        self.assertIn(value['tri_vidx'], mesh.triangles.tolist())
+
+    def test_native_binding_uses_requested_face_at_a_crease(self):
+        mesh = cube()
+        geometry = dict(vertices=mesh.vertices, triangles=mesh.triangles, matrix=mesh.matrix)
+        point = np.array([1., 1., .5])
+        for normal in ([0., 1., 0.], [1., 0., 0.]):
+            value = capture_binding(geometry, point, normal)
+            triangle = mesh.vertices[value['tri_vidx']]
+            actual = np.cross(triangle[1]-triangle[0], triangle[2]-triangle[0])
+            np.testing.assert_allclose(actual/np.linalg.norm(actual), normal)
+            np.testing.assert_allclose(np.array(value['tri_weights']) @ triangle, point, atol=1e-12)
+
+    def test_native_binding_preserves_precision_on_thin_triangles(self):
+        vertices = np.array([[0., 0., 0.], [0., 0., 10.], [.0001, 0., 10.]])
+        matrix = np.diag([-2., 3., .5, 1.]); matrix[:3, 3] = [.2, -.3, -20.]
+        geometry = dict(vertices=vertices, triangles=[[0, 1, 2]], matrix=matrix)
+        world = vertices @ matrix[:3, :3].T + matrix[:3, 3]
+        point = np.array([.21, .34, .45]) @ world
+        value = capture_binding(geometry, point, [0., 1., 0.])
+        np.testing.assert_allclose(value['tri_weights'], [.21, .34, .45], atol=1e-9)
+
+    def test_native_surface_requires_matching_node_counts(self):
+        from core.authoring.native_geometry import loft
         rows = [[[0,0,0],[0,0,1]], [[1,0,0],[1,0,.4],[1,0,1]]]
-        material = dict(u=[0,1],s=[0,.25,.5,.75,1],row_s=[[0,1],[0,.4,1]],closed=False)
-        result = surface(rows,codec.encode(material))
-        self.assertEqual(len(result.vertices),85)
+        with self.assertRaisesRegex(ValueError, 'same node count'):
+            loft(rows, [0,1], False)
 
     def test_all_schema_examples(self):
         for path in (ROOT / "tests/fixtures/authoring").glob("*.json"):
@@ -77,6 +116,30 @@ class AuthoringCoreTests(unittest.TestCase):
         samples = resolver.resolve("origin")
         self.assertTrue(all(abs(row["point"][1]-1) < 1e-10 for row in samples))
         self.assertEqual(len(samples), 3)
+
+    def test_reflected_projection_keeps_normal_offsets_outward(self):
+        document = fixture()
+        document['regions']['origin']['projection']['search_distance'] = dict(value=10, unit='scene')
+        meshes = tuple(cube('SCP_DEMO_'+n) for n in document['targets'])
+        baseline = RegionResolver(document, SceneSnapshot('s', 'r', meshes)).point('origin', (.5,))
+        for scales in [(-2., 3., .5), (2., -3., .5), (2., 3., -.5)]:
+            matrix = np.diag([*scales, 1.]); matrix[:3, 3] = [.23, -.41, .17]
+            reflected = tuple(replace(m, matrix=matrix) for m in meshes)
+            resolver = RegionResolver(document, SceneSnapshot('s', 'r', reflected))
+            anchor = resolver.point('origin', (.5,), .1)
+            normal = np.linalg.solve(matrix[:3, :3].T, baseline.normal); normal /= np.linalg.norm(normal)
+            expected = matrix[:3, :3] @ baseline.surface + matrix[:3, 3]
+            np.testing.assert_allclose(anchor.normal, normal, atol=1e-12)
+            np.testing.assert_allclose(anchor.point, expected + .1*normal, atol=1e-12)
+
+    def test_left_handed_chart_does_not_reverse_surface_normals(self):
+        document = fixture()
+        for frame in document['frames'].values():
+            frame['axes_owner_local'] = [[-1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        meshes = tuple(cube('SCP_DEMO_'+n) for n in document['targets'])
+        anchor = RegionResolver(document, SceneSnapshot('s', 'r', meshes)).point('origin', (.5,), .1)
+        np.testing.assert_allclose(anchor.normal, [0, 1, 0], atol=1e-12)
+        self.assertAlmostEqual(anchor.point[1], 1.1)
 
     def test_station_coordinates_keep_native_vertices(self):
         points = np.array([(0,0,0),(0,0,2),(0,0,3),(0,0,4)])

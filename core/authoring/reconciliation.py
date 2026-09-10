@@ -3,7 +3,7 @@ from copy import deepcopy
 from .errors import require
 from .references import lookup
 
-FIELDS = {'inflation_max_value': ('amount',), 'inflation_falloff_radius': ('radius',), 'inflation_direction_depth': ('direction_depth',), 'inflation_boundary_strength': ('boundary', 'strength'), 'inflation_boundary_power': ('boundary', 'power'), 'inflation_material_along': ('boundary', 'along'), 'inflation_material_across': ('boundary', 'across'), 'inflation_enabled': ('enabled',), 'flip_normals': ('flip_normals',), 'inflation_falloff_type': ('falloff',), 'inflation_mode': ('mode',)}
+FIELDS = {'inflation_max_value': ('amount',), 'inflation_falloff_radius': ('radius',), 'inflation_direction_depth': ('direction_depth',), 'inflation_boundary_strength': ('boundary', 'strength'), 'inflation_boundary_power': ('boundary', 'power'), 'inflation_boundary_band': (), 'inflation_enabled': ('enabled',), 'flip_normals': ('flip_normals',), 'inflation_falloff_type': ('falloff',), 'inflation_mode': ('mode',)}
 
 
 def semantic_patch(document, published, change):
@@ -38,10 +38,20 @@ def muscle_patch(document, name, native_id, before, after):
     from .lowering import shape_intent
     shape_intent(preset['native'], preset.pop('intent', {}))
     for key, value in changes.items():
-        assign_inverse(preset['native'], FIELDS[key], value, before['values'].get(key))
+        assign_change(preset['native'], key, value, before['values'].get(key))
     preset['evidence'] = dict(basis='designer_authored', sources=[], note='Explicit reconciliation of native inflation controls.')
     key = 'adopted_'+native_id
     return [dict(op='add', path='/shape_presets/'+key, value=preset), dict(op='replace', path='/instances/'+name+'/shape', value='/shape_presets/'+key)]
+
+
+def assign_change(preset, key, value, previous):
+    if key != 'inflation_boundary_band':
+        return assign_inverse(preset, FIELDS[key], value, previous)
+    require(previous is not None and .1 < previous < 16., 'INVERSE_MAPPING_UNAVAILABLE')
+    boundary = preset['boundary']
+    scaled = {axis: boundary[axis] * value / previous for axis in ('along', 'across')}
+    require(all(0 <= number <= .5 for number in scaled.values()), 'INVERSE_MAPPING_UNAVAILABLE')
+    boundary.update(scaled)
 
 
 def assign_inverse(preset, path, value, previous):

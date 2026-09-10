@@ -12,6 +12,9 @@ def fibers(document, muscle_id, resolver, extra=()):
         require(len(construction["loops"]) <= 128, "FIBER_COUNT_BUDGET")
         return tuple(closed_fiber(muscle_id, muscle, construction, loop, resolver) for loop in construction["loops"])
     coordinates = sorted(set(construction["fiber_u"]) | set(extra))
+    if construction.get('boundary_conformance'):
+        from .conformance import samples
+        coordinates = samples(document, muscle_id, resolver, coordinates)
     require(len(coordinates) <= 128, "FIBER_COUNT_BUDGET")
     return tuple(open_fiber(muscle_id, muscle, construction, u, resolver) for u in coordinates)
 

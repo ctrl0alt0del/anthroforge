@@ -46,14 +46,14 @@ class AuthoringV03Tests(unittest.TestCase):
         with self.assertRaises(AuthoringError):
             validation.document(document)
 
-    def test_curved_boundary_adds_surface_samples_not_fibers(self):
+    def test_curved_boundary_adds_real_fiber_plans(self):
+        from core.authoring.compilation import fibers
         document = fixture()
         resolver = CurvedResolver()
-        grid = np.zeros((2,3,3)); grid[1,:,0] = 1; grid[:,:,2] = [0,.5,1]
-        result,u = conformance.apply(grid,[0,1],[0,.5,1],document,"example_muscle",resolver)
-        self.assertGreater(len(u),2)
-        np.testing.assert_allclose(result[:,0,1],.2*np.sin(np.pi*u),atol=1e-10)
-        np.testing.assert_allclose(result[:,-1,1],0)
+        plans = fibers(document, 'example_muscle', resolver)
+        u = np.array([plan.u for plan in plans])
+        self.assertGreater(len(plans), 5)
+        np.testing.assert_allclose([p.anchors[0].point[1] for p in plans], .2*np.sin(np.pi*u), atol=1e-10)
         self.assertEqual(document["recipes"]["pattern"]["construction"]["fiber_u"],[0,.25,.5,.75,1])
 
     def test_split_contact_patch_is_allowed(self):

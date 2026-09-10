@@ -53,3 +53,11 @@ def recipes(old, new):
     for key, value in old['muscles'].items():
         new['instances'][key] = dict(recipe='/recipes/'+value['recipe'], profile='/skeleton_profiles/default', bindings={k: path('regions', v['region']) for k, v in value['region_bindings'].items()}, shape='/shape_presets/'+value['volume_preset'], parameters={}, policy='/policies/'+value['policy'], side=value['side'], evidence=proof(old['recipes'][value['recipe']]['evidence']))
         new['instances'][key]['supports'] = {k: dict(reason=v['reason'], evidence=proof(v['evidence'])) for k, v in value['region_bindings'].items() if v['relationship'] == 'support_proxy'}
+        new['instances'][key]['symmetry'] = migrated_symmetry(value)
+
+
+def migrated_symmetry(value):
+    result = deepcopy(value['symmetry'])
+    if result['mode'] == 'native_mirror':
+        result['plane_frame'] = path('frames', result['plane_frame'])
+    return result

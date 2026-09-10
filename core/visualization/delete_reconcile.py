@@ -8,8 +8,8 @@ except ImportError:
 from ..deps.dirty_hints import empty_dirty_hints
 from ..scp_runtime.bound_objects import sync_all_scp_roles
 from ..scp_runtime.prop_update_guard import suppress_scp_prop_updates
-from ..utils import get_af_root
-from ..scp_runtime.common import as_id, scp_prop_map
+from ..utils import get_af_root, scene_for_id
+from ..scp_runtime.common import as_id, scp_prop_map, instance_geometry_objects
 from ..scp_runtime.marking import normalize_active_index
 from ..scp_runtime.tree import sanitize_parent_links
 from ..vcp.fiber_modes import fiber_parent_ids
@@ -145,11 +145,17 @@ def _remove_muscles(root, muscle_ids):
 
 def _reconcile_scp_dependents(root):
     parent_changed, _scp_by_id = sanitize_parent_links(root, scp_prop_map(root))
-    live_scp_ids = set(scp_prop_map(root))
+    live_scp_ids = _live_attachment_ids(root)
     changed = _remove_fibers(root, _fiber_orphan_ids(root, live_scp_ids))
     changed = _clear_orphan_node_attachments(root, live_scp_ids) or changed
     changed = _clear_blob_targets(root, "SCP", _orphan_blob_scp_ids(root)) or changed
     return bool(parent_changed) or changed
+
+
+def _live_attachment_ids(root):
+    scene = scene_for_id(root)
+    instances = instance_geometry_objects(scene, root.name) if scene else {}
+    return set(scp_prop_map(root)) | set(instances)
 
 
 def _clear_orphan_node_attachments(root, live_ids):

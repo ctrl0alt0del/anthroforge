@@ -204,9 +204,7 @@ def indexed_geometry_mesh_scp_obj(index, scp_id):
 def find_geometry_mesh_scp_obj(scene, root_name, scp_id):
     sid = as_id(scp_id)
     if sid.startswith("AFI_"):
-        matches = [o for o in scene.objects if _authoring_root_matches(o, scene, root_name) and
-                   o.get("af_authoring_id") == sid[4:] and o.type == "MESH" and o.get("af_scp_geometry")]
-        return matches[0] if len(matches) == 1 else None
+        return instance_geometry_objects(scene, root_name).get(sid)
     objs = iter_geometry_mesh_scp_objects(scene, root_name)
     return next((obj for obj in objs if as_id(obj.get("af_scp_id")) == sid), None)
 
@@ -216,6 +214,29 @@ def _authoring_root_matches(obj, scene, root_name):
     identity = root.get('af_authoring_id') if root else None
     scope = obj.get('af_authoring_root_id')
     return scope == identity if scope and identity else obj.get('af_root_name') == root_name
+
+
+def instance_geometry_objects(scene, root_name):
+    root = scene.objects.get(root_name)
+    identity = root.get('af_authoring_id') if root else None
+    resolved, duplicates = {}, set()
+    for obj in scene.objects:
+        if obj.type != 'MESH' or not obj.get('af_scp_geometry') or not obj.get('af_authoring_id'): continue
+        scope = obj.get('af_authoring_root_id')
+        owned = scope == identity if scope and identity else obj.get('af_root_name') == root_name
+        if not owned: continue
+        key = 'AFI_'+obj['af_authoring_id']
+        if key in resolved: duplicates.add(key)
+        resolved[key] = obj
+    return {key: obj for key, obj in resolved.items() if key not in duplicates}
+
+
+def attachment_dependency_id(root, identity):
+    if not str(identity).startswith('AFI_'):
+        return identity
+    scene = scene_for_id(root)
+    obj = find_geometry_mesh_scp_obj(scene, root.name, identity) if scene else None
+    return str(obj.get('af_source_scp_id') or obj.get('af_scp_id') or identity) if obj else identity
 
 
 def indexed_bound_scp_obj(index, scp_id, bound_id):

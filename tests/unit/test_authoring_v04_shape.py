@@ -14,6 +14,16 @@ def output():
 
 
 class ShapeTests(unittest.TestCase):
+    def test_native_boundary_band_reconciles_through_older_preset(self):
+        from core.authoring.reconciliation import assign_change
+        from core.authoring.native_geometry import properties
+        preset = output()['config']
+        original = properties(preset, (9,17,3))['inflation_boundary_band']
+        assign_change(preset, 'inflation_boundary_band', original * 1.5, original)
+        self.assertAlmostEqual(properties(preset, (9,17,3))['inflation_boundary_band'], original * 1.5)
+        with self.assertRaises(AuthoringError):
+            assign_change(preset, 'inflation_boundary_band', 8., 16.)
+
     def test_fractional_node_count_is_rejected(self):
         with self.assertRaises(AuthoringError) as error:
             lowering.apply_parameters({}, dict(nodes_per_fiber=12.5))

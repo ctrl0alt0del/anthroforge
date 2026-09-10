@@ -647,6 +647,10 @@ def _param_from_hit(hit):
     weights = _closest_point_barycentric(*hit["abc"], hit["cp"])
     if weights is None:
         return None
+    # BVH hit coordinates use float32; edge hits can yield small negative weights.
+    weights = tuple(max(0.0, weight) for weight in weights)
+    total = sum(weights)
+    weights = tuple(weight / total for weight in weights)
     return {"tri_vidx": hit["tri"], "tri_weights": tuple(float(value) for value in weights)}
 
 
