@@ -18,6 +18,10 @@ class StaticScene(BlenderScene):
         from .point_picker import snap_points
         return snap_points(self.root, self.scene, params, captured)
 
+    def snap_binding(self, owner, point):
+        from .attachments import snap_binding
+        return snap_binding(self.root, self.scene, owner, point)
+
     def initialize(self):
         return inventory.initialize(self.root, self.scene)
 

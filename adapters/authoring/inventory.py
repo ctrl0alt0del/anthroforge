@@ -71,7 +71,9 @@ def geometry_for(obj):
     mesh = evaluated.to_mesh()
     try:
         mesh.calc_loop_triangles()
-        return dict(vertices=[list(v.co) for v in mesh.vertices], triangles=[list(t.vertices) for t in mesh.loop_triangles], matrix=[list(r) for r in evaluated.matrix_world])
+        return dict(vertices=[list(v.co) for v in mesh.vertices], triangles=[list(t.vertices) for t in mesh.loop_triangles],
+                    polygons=[list(p.vertices) for p in mesh.polygons], triangle_polygons=[t.polygon_index for t in mesh.loop_triangles],
+                    matrix=[list(r) for r in evaluated.matrix_world])
     finally:
         evaluated.to_mesh_clear()
 

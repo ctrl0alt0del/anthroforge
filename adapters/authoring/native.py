@@ -7,13 +7,13 @@ from ...core.vcp.fiber_node_attachment import capture_fiber_node_attachments
 from ...core.visualization.fiber_sync import register_fiber_sync
 from ...core.authoring.errors import require
 from .volume import configure
-from .attachments import capture, normal_offset
+from .attachments import capture, normal_offset, native_owner
 
 
 def attachment(root, scene, anchor):
     raw = capture(root, scene, anchor)
     require(raw is not None, "ATTACHMENT_CAPTURE_FAILED", anchor["owner"])
-    return anchor["owner"], raw
+    return native_owner(root, scene, anchor['owner']), raw
 
 
 def write_fiber(root, scene, row, existing=None):

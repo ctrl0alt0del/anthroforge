@@ -65,4 +65,7 @@ def relative_anchor(document, inventory, reference, attachment):
     region = lookup(document, reference)
     chart = frame(document, inventory, region['frame'])
     require(chart['owner']['instance_id'] == attachment['owner'], 'ROUTE_OVERRIDE_OWNER_CHANGED')
-    return dict(region=reference, seed=coordinates(chart, attachment['point']).tolist(), offset=attachment['offset'])
+    result = dict(region=reference, seed=coordinates(chart, attachment['point']).tolist(), offset=attachment['offset'])
+    if attachment.get('surface_binding'):
+        result['surface_binding'] = attachment['surface_binding']
+    return result

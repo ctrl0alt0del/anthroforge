@@ -54,9 +54,9 @@ def snap_one(root, scene, obj, runtime, owner, guess, index):
 
 
 def native_attachment(root, scene, obj, raw):
-    parent_id = str(obj.get('af_scp_id', ''))
-    require(find_geometry_mesh_scp_obj(scene, root.name, parent_id) == obj, 'NATIVE_ATTACHMENT_OWNER_UNRESOLVED', obj.name)
-    return dict(parent_id=parent_id, attach_param=raw)
+    from .attachments import native_owner
+    owner = 'AFI_' + obj['af_authoring_id'] if obj.get('af_authoring_id') else obj.get('af_scp_id', '')
+    return dict(parent_id=native_owner(root, scene, owner), attach_param=raw)
 
 
 def preflight(hits, params, inventory):

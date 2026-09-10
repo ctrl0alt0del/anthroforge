@@ -22,5 +22,5 @@ def override(plan, specification, instance, resolver):
 def route_anchor(resolver, row):
     name = identity(row['region'])
     if 'surface_binding' in row:
-        return resolver.bound_anchor(name, row['surface_binding'], row['offset'])
-    return resolver.direct_anchor(name, row['seed'], row['offset'])
+        return resolver.bound_anchor(name, row['surface_binding'], row.get('offset', 0))
+    return resolver.direct_anchor(name, row['seed'], row.get('offset', 0))

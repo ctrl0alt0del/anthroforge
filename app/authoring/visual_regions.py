@@ -59,11 +59,12 @@ def propose_region(service, request):
 
 def region_proposal(service, record, params, value):
     from ...core.authoring import substrate
+    from ...core.authoring.indexed_patches import bind
     from ...core.authoring.references import lookup
     spec = lookup(record['document'], params['frame'])
     owner = substrate.binding(record['document'], service.inventory, spec['owner'])
     require(owner['instance_id'] == value['owner'], 'REGION_OWNER_MISMATCH')
-    query = dict(kind='surface_patch', topology_digest=value['topology_digest'], patches=value['patches'])
+    query = bind(service.inventory['geometry'][value['owner']], value['patches'])
     evidence = dict(basis='designer_authored', sources=[], note=params['note'])
     region = dict(owner=spec['owner'], frame=params['frame'], reference_pose=service.inventory['reference_pose'], concept=params['concept'], query=query, evidence=evidence)
     return dict(kind='region', value=region)

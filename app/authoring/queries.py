@@ -13,8 +13,9 @@ def resolved_document(service, record):
 
 def discover(service, request):
     from .service import operations, capabilities
+    from .catalog import summary
     inventory = {k: v for k, v in service.inventory.items() if k not in ('geometry', 'native')}
-    return dict(inventory=inventory, capabilities=capabilities(), operations=sorted(operations()), assets=[service.store.asset(service.inventory)], unsupported=['feature_detection', 'reference_transfer', 'motion_simulation', 'arbitrary_mesh_transfer'])
+    return dict(inventory=inventory, catalog=summary(service), capabilities=capabilities(), operations=sorted(operations()), assets=[service.store.asset(service.inventory)], unsupported=['feature_detection', 'reference_transfer', 'motion_simulation', 'arbitrary_mesh_transfer'])
 
 
 def query(service, request):

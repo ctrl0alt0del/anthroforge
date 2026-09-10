@@ -1115,8 +1115,7 @@
         "s",
         "role",
         "region_role",
-        "sample",
-        "offset"
+        "sample"
       ],
       "additionalProperties": false
     },
@@ -1135,8 +1134,7 @@
       },
       "required": [
         "region_role",
-        "at",
-        "offset"
+        "at"
       ],
       "additionalProperties": false
     },
@@ -2323,26 +2321,70 @@
       "additionalProperties": false
     },
     "surface_patch": {
-      "type": "object",
-      "properties": {
-        "triangle": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "polygon": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/xyz"
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "triangle": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "polygon": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/xyz"
+              },
+              "minItems": 3,
+              "maxItems": 128
+            }
           },
-          "minItems": 3,
-          "maxItems": 128
+          "required": [
+            "triangle",
+            "polygon"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tri_vidx": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "face_vidx": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "minItems": 3,
+              "maxItems": 4096
+            },
+            "polygon": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/xyz"
+              },
+              "minItems": 3,
+              "maxItems": 128
+            },
+            "occurrence": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "tri_vidx",
+            "polygon"
+          ],
+          "additionalProperties": false
         }
-      },
-      "required": [
-        "triangle",
-        "polygon"
-      ],
-      "additionalProperties": false
+      ]
     },
     "selector": {
       "oneOf": [
@@ -3480,28 +3522,129 @@
       ],
       "additionalProperties": false
     },
-    "route_anchor": {
+    "surface_binding": {
       "type": "object",
       "properties": {
-        "region": {
-          "$ref": "#/$defs/reference"
+        "tri_vidx": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minItems": 3,
+          "maxItems": 3
         },
-        "seed": {
-          "$ref": "#/$defs/xyz"
-        },
-        "offset": {
-          "type": "number"
-        },
-        "surface_binding": {
-          "$ref": "#/$defs/surface_binding"
+        "tri_weights": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": -1e-08,
+            "maximum": 1.00000001
+          },
+          "minItems": 3,
+          "maxItems": 3
         }
       },
       "required": [
-        "region",
-        "seed",
-        "offset"
+        "tri_vidx",
+        "tri_weights"
       ],
       "additionalProperties": false
+    },
+    "route_anchor": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "region": {
+              "$ref": "#/$defs/reference"
+            },
+            "seed": {
+              "$ref": "#/$defs/xyz"
+            },
+            "offset": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "region",
+            "seed"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "region": {
+              "$ref": "#/$defs/reference"
+            },
+            "seed": {
+              "$ref": "#/$defs/xyz"
+            },
+            "offset": {
+              "type": "number"
+            },
+            "surface_binding": {
+              "$ref": "#/$defs/surface_binding"
+            }
+          },
+          "required": [
+            "region",
+            "surface_binding"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "instance_symmetry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "explicit"
+              ]
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "native_mirror"
+              ]
+            },
+            "plane_frame": {
+              "$ref": "#/$defs/reference"
+            },
+            "plane_axis": {
+              "enum": [
+                "x",
+                "y",
+                "z"
+              ]
+            },
+            "plane_coordinate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "mode",
+            "plane_frame",
+            "plane_axis",
+            "plane_coordinate"
+          ],
+          "additionalProperties": false
+        }
+      ]
     },
     "assembly": {
       "type": "object",
@@ -3627,85 +3770,6 @@
         "baseline_digest",
         "value",
         "evidence"
-      ],
-      "additionalProperties": false
-    },
-    "instance_symmetry": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "mode": {
-              "enum": [
-                "explicit"
-              ]
-            }
-          },
-          "required": [
-            "mode"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "mode": {
-              "enum": [
-                "native_mirror"
-              ]
-            },
-            "plane_frame": {
-              "$ref": "#/$defs/reference"
-            },
-            "plane_axis": {
-              "enum": [
-                "x",
-                "y",
-                "z"
-              ]
-            },
-            "plane_coordinate": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 1
-            }
-          },
-          "required": [
-            "mode",
-            "plane_frame",
-            "plane_axis",
-            "plane_coordinate"
-          ],
-          "additionalProperties": false
-        }
-      ]
-    },
-    "surface_binding": {
-      "type": "object",
-      "properties": {
-        "tri_vidx": {
-          "type": "array",
-          "items": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "minItems": 3,
-          "maxItems": 3
-        },
-        "tri_weights": {
-          "type": "array",
-          "items": {
-            "type": "number",
-            "minimum": -1e-08,
-            "maximum": 1.00000001
-          },
-          "minItems": 3,
-          "maxItems": 3
-        }
-      },
-      "required": [
-        "tri_vidx",
-        "tri_weights"
       ],
       "additionalProperties": false
     }

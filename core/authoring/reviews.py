@@ -8,7 +8,7 @@ def inputs(document, inventory, reference):
     try:
         authored = fingerprint(document, reference)
         ids = dependencies(document, reference)
-        geometry = {k: v for k, v in inventory.get('geometry', {}).items() if k in ids}
+        geometry = {k: {field: v[field] for field in ('vertices', 'triangles', 'matrix')} for k, v in inventory.get('geometry', {}).items() if k in ids}
         controls = {c['instance_id']: c['digest'] for c in inventory.get('controls', []) if c['instance_id'] in ids}
         return digest([authored, geometry, controls, inventory.get('reference_pose')])
     except AuthoringError:

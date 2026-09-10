@@ -51,6 +51,8 @@ def base_defs():
     result['side'] = enum('left', 'right', 'midline', 'unknown')
     result['quantity'] = obj(dict(value=N, unit=enum('scene', 'mm', 'cm', 'm', 'ratio', 'scene2', 'scene3'), evidence=ref('evidence')))
     result['source'] = ref('native_source')
+    for key in ('native_station', 'native_loop_anchor'):
+        result[key]['required'].remove('offset')
     return result
 
 
@@ -75,7 +77,7 @@ def frame_schema():
 
 
 def query_defs(d):
-    d['surface_patch'] = obj(dict(triangle=I, polygon=array(ref('xyz'), 3, 128)))
+    d['surface_patch'] = choice(obj(dict(triangle=I, polygon=array(ref('xyz'), 3, 128))), obj(dict(tri_vidx=array(I, 3, 3), face_vidx=array(I, 3, 4096), polygon=array(ref('xyz'), 3, 128), occurrence=I), ['tri_vidx', 'polygon']))
     d['selector'] = choice(tagged('box', dict(low=ref('xyz'), high=ref('xyz'))), tagged('ellipsoid', dict(center=ref('xyz'), radii=ref('xyz'), depth={'type': 'integer', 'minimum': 1, 'maximum': 8})))
     booleans = [tagged(k, dict(operands=array(ref('query'), 2, 16))) for k in ('union', 'intersection', 'difference')]
     d['query'] = choice(tagged('region', dict(ref=ref('reference'))), tagged('selector', dict(selector=ref('selector'))), *booleans,
@@ -118,8 +120,16 @@ def shape_defs(d):
 
 def route_defs(d):
     d['instance']['properties']['evaluation_profile'] = ref('reference')
-    d['route_anchor'] = obj(dict(region=ref('reference'), seed=ref('xyz'), offset=N))
+    weights = array(dict(type='number', minimum=-1e-8, maximum=1.00000001), 3, 3)
+    d['surface_binding'] = obj(dict(tri_vidx=array(I, 3, 3), tri_weights=weights))
+    guessed = obj(dict(region=ref('reference'), seed=ref('xyz'), offset=N), ['region', 'seed'])
+    bound = obj(dict(region=ref('reference'), seed=ref('xyz'), offset=N, surface_binding=ref('surface_binding')), ['region', 'surface_binding'])
+    d['route_anchor'] = choice(guessed, bound)
     d['instance']['properties']['route_overrides'] = mapping(obj(dict(anchors=array(ref('route_anchor'), 2, 128), evidence=ref('evidence'))))
+    explicit = obj(dict(mode=enum('explicit')))
+    mirror = obj(dict(mode=enum('native_mirror'), plane_frame=ref('reference'), plane_axis=enum('x', 'y', 'z'), plane_coordinate=dict(type='number', minimum=0, maximum=1)))
+    d['instance_symmetry'] = choice(explicit, mirror)
+    d['instance']['properties']['symmetry'] = ref('instance_symmetry')
 
 
 def authoring():
@@ -148,7 +158,7 @@ def protocol(definitions):
     ident = dict(document_id=S)
     mutation = dict(**ident, expected_draft_revision=I, expected_scene_revision=S)
     patch = array(obj(dict(op=enum('add', 'replace', 'remove'), path=S, value=ref('patch_value')), ['op', 'path']))
-    operations = basic_operations(ident, mutation, patch) + candidate_operations(mutation) + visual_operations() + [snap_points_operation()]
+    operations = basic_operations(ident, mutation, patch) + candidate_operations(mutation) + visual_operations() + [snap_points_operation(), catalog_operation()]
     definitions['patch_value'] = choice({'type': 'string'}, N, B, array(ref('patch_value')), dict(type='object', additionalProperties=ref('patch_value')))
     definitions['document'] = {k: v for k, v in authoring().items() if k != '$defs'}
     return {'$schema': 'https://json-schema.org/draft/2020-12/schema', '$id': 'urn:anthroforge:protocol:0.4.0', '$defs': definitions, 'oneOf': operations+[response()]}
@@ -160,6 +170,7 @@ def response():
     names = 'draft_revision normalized_patch affected receipt evaluation unsupported replayed recovery root_id initialized inventory capabilities operations document state dependencies provenance purpose anatomical_review first second comparison_assets search_state missing candidates ranking candidate native_ids generation recovered_copy generation_id draft restored_active_scene comparison authored_changed scenarios normalized_overrides views view hits selection coverage'
     fields.update({k: ref('patch_value') for k in names.split()})
     fields['matches'] = array(ref('patch_value'))
+    fields['catalog'] = ref('patch_value')
     return obj(fields, required)
 
 
@@ -168,7 +179,7 @@ def basic_operations(ident, mutation, patch):
     operations += [operation('anatomy.initialize', dict(expected_scene_revision=S), ['expected_scene_revision'])]
     operations += [operation('anatomy.draft', dict(**mutation, document=ref('document')), list(mutation) + ['document'])]
     operations += [operation('anatomy.patch', dict(**mutation, patch=patch), list(mutation) + ['patch'])]
-    operations += [operation('anatomy.' + op, mutation, list(mutation)) for op in ('compile', 'resume', 'publish', 'checkpoint')]
+    operations += [operation('anatomy.' + op, mutation, list(mutation)) for op in ('compile', 'resume', 'publish', 'checkpoint', 'upgrade_regions')]
     operations += [operation('anatomy.reconcile', dict(**mutation, mode=enum('inspect', 'restore', 'adopt')), list(mutation) + ['mode'])]
     operations += [operation('anatomy.compare', dict(**ident, other_document_id=S), ['document_id', 'other_document_id'])]
     operations += [operation('anatomy.recover', dict(generation_id=S, output_path=S), ['generation_id', 'output_path'])]
@@ -192,6 +203,12 @@ def snap_points_operation():
     fields = dict(instance_id=S, expected_scene_revision=S, points=array(ref('xyz'), 1, 256))
     fields.update(max_distance={'type': 'number', 'minimum': 0}, collision_radius={'type': 'number', 'minimum': 0})
     return operation('anatomy.snap_points', fields, ['instance_id', 'expected_scene_revision', 'points'])
+
+
+def catalog_operation():
+    fields = dict(document_id=S, profile=ref('reference'), scp_id=S, instance_id=S, side=ref('side'), text=S, sampling_available=B)
+    fields.update(offset=I, limit=dict(type='integer', minimum=1, maximum=200))
+    return operation('anatomy.catalog', fields, [])
 
 
 def visual_operations():

@@ -2,14 +2,15 @@
 import numpy as np
 from .errors import require
 from . import clipping, substrate, visual_mesh, visual_selection
+from .indexed_patches import resolve
 
 
 def partition(polygons, query, chart, budget):
-    require(visual_mesh.topology(chart['geometry']) == query['topology_digest'], 'SURFACE_PATCH_REBIND_REQUIRED')
-    visual_selection.world_polygons(chart['geometry'], query['patches'])
+    patches = resolve(chart['geometry'], query)
+    visual_selection.world_polygons(chart['geometry'], patches)
     triangles = substrate.surface(chart)
     masks = {}
-    for row in query['patches']:
+    for row in patches:
         masks.setdefault(row['triangle'], []).append(np.asarray(row['polygon'])[:, [1, 2, 0]])
     inside, outside = [], []
     for index, coordinates in correspondences(triangles, polygons, budget):

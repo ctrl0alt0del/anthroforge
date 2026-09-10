@@ -6,6 +6,15 @@ from .nearest import nearest
 from .visual_mesh import barycentric
 
 
+def nearest_binding(geometry, point):
+    from .visual_camera import vertices
+    faces = np.asarray(geometry['triangles'], dtype=int)
+    require(len(faces) > 0, 'SURFACE_UNAVAILABLE')
+    triangles = vertices(geometry)[faces]
+    closest, index = nearest(triangles, np.asarray(point))
+    return dict(tri_vidx=faces[index].tolist(), tri_weights=barycentric(triangles[index], closest).tolist())
+
+
 def capture(geometry, point, normal):
     matrix = np.asarray(geometry['matrix']); faces = np.asarray(geometry['triangles'], dtype=int)
     vertices = np.asarray(geometry['vertices']) @ matrix[:3, :3].T + matrix[:3, 3]

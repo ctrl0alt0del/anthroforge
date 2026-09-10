@@ -25,6 +25,8 @@ def empty(document, pose):
 
 
 def compile_document(document, inventory):
+    from .anchor_contract import validate
+    validate(document)
     output, domains = empty(document, inventory['reference_pose']), {}
     instances = deepcopy(document.get('instances', {}))
     for key, assembly in document.get('assemblies', {}).items():

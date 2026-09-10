@@ -35,6 +35,14 @@ def patch(service, request):
     return commit(service, request, document, old, params['patch'])
 
 
+def upgrade_regions(service, request):
+    from ...core.authoring.region_upgrade import upgrade
+    old = service.load(request['params'])
+    service.check(request['params'], old)
+    document, changes = upgrade(old['document'], service.inventory)
+    return commit(service, request, validate_document(document), old, changes)
+
+
 def commit(service, request, document, old=None, patch_value=None, extra=None):
     params = request['params']
     metadata = retained(old)

@@ -14,7 +14,7 @@ def planes(polygon):
 
 
 def edge_plane(a, b):
-    normal = np.array([b[1]-a[1], a[0]-b[0], 0])
+    normal = np.array([b[1]-a[1], a[0]-b[0], 0], dtype=float)
     normal /= np.linalg.norm(normal)
     return normal, float(normal[:2] @ a[:2])
 

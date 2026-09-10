@@ -14,7 +14,7 @@ from ...core.authoring.fitting import fit
 from . import queries
 from .resources import EvaluationGuard, GuardedSolver
 
-BACKEND = 'native-fibers-loft-inflation-0.4.0.4'
+BACKEND = 'native-fibers-loft-inflation-0.4.0.5'
 
 
 def compile(service, request):
@@ -51,7 +51,7 @@ def evaluation_context(service, document, ir):
     guard = EvaluationGuard(service, document)
     guard.check()
     snapshot = service.scene.capture(service.inventory['scene_id'])
-    resolver = DomainResolver(ir, document, snapshot, service.inventory)
+    resolver = DomainResolver(ir, document, snapshot, service.inventory, getattr(service.scene, 'snap_binding', None))
     return guard, snapshot, resolver
 
 

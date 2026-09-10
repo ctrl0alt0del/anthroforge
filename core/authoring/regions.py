@@ -151,7 +151,7 @@ class RegionEvaluator:
         self.budget.check()
         if query['kind'] == 'surface_patch':
             from .surface_patch import partition
-            self.limitations.add('Visual patch follows triangle correspondence; changed topology requires rebinding and changed geometry invalidates anatomical review.')
+            self.limitations.add('Indexed patches follow mesh vertices; polygon bindings survive retessellation. Changed mesh connectivity requires rebinding; changed geometry invalidates anatomical review.')
             return partition(polygons, query, chart, self.budget)
         return self.operators.get(query['kind']+'.v1')(polygons, query, chart)
 

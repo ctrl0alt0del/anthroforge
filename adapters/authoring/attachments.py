@@ -2,11 +2,36 @@
 from ...core.authoring.errors import require
 from ...core.vcp.attachment_backend import resolve_attachment_world
 from ...core.scp_runtime.common import find_geometry_mesh_scp_obj
-from ...core.attachment_codec import encode_fiber_surface_param
+from ...core.attachment_codec import encode_fiber_surface_param, fiber_surface_param
 from ...core.authoring.attachment_binding import capture as capture_binding
 from .inventory import geometry_for
 from ...core.authoring.attachment_binding import resolve as resolve_binding
 import numpy as np
+
+
+def native_owner(root, scene, owner):
+    obj = find_geometry_mesh_scp_obj(scene, root.name, owner)
+    require(obj is not None, 'NATIVE_ATTACHMENT_OWNER_UNRESOLVED', owner)
+    identity = str(obj.get('af_scp_id', ''))
+    require(find_geometry_mesh_scp_obj(scene, root.name, identity) == obj, 'NATIVE_ATTACHMENT_OWNER_UNRESOLVED', obj.name)
+    return identity
+
+
+def authoring_owner(root, scene, owner):
+    obj = find_geometry_mesh_scp_obj(scene, root.name, owner)
+    require(obj is not None, 'NATIVE_ATTACHMENT_OWNER_UNRESOLVED', owner)
+    identity = 'AFI_' + obj['af_authoring_id'] if obj.get('af_authoring_id') else owner
+    require(find_geometry_mesh_scp_obj(scene, root.name, identity) == obj, 'NATIVE_ATTACHMENT_OWNER_UNRESOLVED', obj.name)
+    return identity
+
+
+def snap_binding(root, scene, owner, point):
+    from mathutils import Vector
+    from ...core.vcp.attachment_backend import capture_attachment_from_world
+    raw = capture_attachment_from_world(root, scene, owner, Vector(point))
+    value = fiber_surface_param(raw) if raw else None
+    require(value is not None, 'SURFACE_PICK_FAILED', owner)
+    return {key: list(row) for key, row in value.items()}
 
 
 def capture(root, scene, anchor):
@@ -46,4 +71,8 @@ def resolve(root, scene, row):
     point = resolve_attachment_world(root, scene, row['parent_id'], row['attach_param'])
     require(point is not None, 'NATIVE_ATTACHMENT_UNRESOLVED')
     offset = normal_offset(root, scene, row['parent_id'], row.get('normal_offset', 0.))
-    return dict(owner=row['parent_id'], point=list(point), offset=offset)
+    result = dict(owner=authoring_owner(root, scene, row['parent_id']), point=list(point), offset=offset)
+    value = fiber_surface_param(row['attach_param'])
+    if value:
+        result['surface_binding'] = {k: list(v) for k, v in value.items()}
+    return result

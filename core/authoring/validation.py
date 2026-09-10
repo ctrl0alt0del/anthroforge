@@ -1,10 +1,11 @@
 """Versioned structural and semantic validation entry points."""
-from . import schema, semantics, trims, extensions
+from . import schema, semantics, trims, extensions, anchor_contract
 from .errors import AuthoringError, require
 
 
 def document(data):
     schema.validate(data)
+    anchor_contract.validate(data)
     if data.get("version") == "0.4.0":
         return data
     return legacy_document(data)

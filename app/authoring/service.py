@@ -52,7 +52,7 @@ class AuthoringService:
 
 def operations():
     result = {'anatomy.'+name: getattr(queries, name) for name in ('discover', 'query', 'requirements', 'export', 'inspect', 'explain', 'validate', 'compare')}
-    result.update({'anatomy.'+name: getattr(drafts, name) for name in ('initialize', 'draft', 'patch')})
+    result.update({'anatomy.'+name: getattr(drafts, name) for name in ('initialize', 'draft', 'patch', 'upgrade_regions')})
     result.update({'anatomy.'+name: getattr(bindings, name) for name in ('propose_binding', 'inspect_candidate', 'revise_candidate', 'adopt_binding')})
     from . import construction, persistence, reconciliation, visual
     result.update({'anatomy.'+name: getattr(construction, name) for name in ('compile', 'publish')})
@@ -60,7 +60,8 @@ def operations():
     result['anatomy.reconcile'] = reconciliation.reconcile
     from .resources import cancel
     from .surface_points import snap_points
-    result.update({'anatomy.cancel': cancel, 'anatomy.resume': construction.compile, 'anatomy.snap_points': snap_points})
+    from .catalog import catalog
+    result.update({'anatomy.cancel': cancel, 'anatomy.resume': construction.compile, 'anatomy.snap_points': snap_points, 'anatomy.catalog': catalog})
     result.update(visual.operations())
     return result
 
@@ -70,7 +71,7 @@ def capabilities():
 
 
 def remember_journal(service, request):
-    mutations = {'initialize', 'draft', 'patch', 'adopt_binding', 'publish', 'reconcile', 'checkpoint'}
+    mutations = {'initialize', 'draft', 'patch', 'upgrade_regions', 'adopt_binding', 'publish', 'reconcile', 'checkpoint'}
     if request['op'].split('.')[-1] in mutations:
         service.identities.remember_journal(service.store.directory)
 

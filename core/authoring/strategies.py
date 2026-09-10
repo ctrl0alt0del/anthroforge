@@ -3,6 +3,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from .errors import require
 from .model import Registry
+from .anchor_contract import defaults
 
 
 @dataclass(frozen=True)
@@ -12,7 +13,7 @@ class ConstructionStrategy:
     def compile(self, recipe):
         result = deepcopy(recipe['construction'])
         require(result['kind'] == self.topology, 'STRATEGY_TOPOLOGY_MISMATCH')
-        return result
+        return defaults(result)
 
 
 def construction_strategies():
