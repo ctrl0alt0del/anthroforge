@@ -14,12 +14,13 @@ from .collision import (V2OwnerContact, build_triangle_snapshot,
                         validate_static_clearance)
 from .contracts import V2Request, V2Termination, V2Topology
 from .collision_native import native_mesh_shortest_path
+from .planner_anchor_access import anchor_access_candidates, append_access_neighbors, append_access_points
 
 
 V2_PLANNER_VERSION = "fiber-v2-planner-1"
 V2_PLANNER_41_VERSION = "fiber-v2-planner-1.1"
 V2_PLANNER_42_VERSION = "fiber-v2-planner-1.2"
-V2_PLANNER_43_VERSION = "fiber-v2-planner-1.4"
+V2_PLANNER_43_VERSION = "fiber-v2-planner-1.5"
 _SPARSE_LIMIT = 96
 _DENSE_LIMIT = 240
 _SPARSE_NEIGHBORS = 24
@@ -634,7 +635,34 @@ def _roadmap_route(state, start, end):
 
 
 def _roadmap_route_v41(state, start, end):
-    return _roadmap_route_with(state, start, end, _search_compatibility_v41, _search_roadmap_v41)
+    route = _roadmap_route_with(state, start, end, _search_compatibility_v41, _search_roadmap_v41)
+    return route if route is not None else _anchor_access_route(state, start, end)
+
+
+def _anchor_access_route(state, start, end):
+    if state.native_world is None: return None
+    base = _roadmap_candidates(state, start, end, True); neighbors = _neighbor_rows(np.asarray(base), True)
+    for oblique in (False, True):
+        exits = anchor_access_candidates(state, start, end, _batch_edge_states, oblique)
+        points = append_access_points(base, exits)
+        if len(points) == len(base): continue
+        graph = append_access_neighbors(points, neighbors, _DENSE_NEIGHBORS)
+        graph = _checked_anchor_neighbors(state, points, graph, start, end)
+        state.candidate_nodes = max(state.candidate_nodes, len(points))
+        route = _search_batched_lazy(state, points, np.asarray(points), graph, start.owner_id, end.owner_id)
+        if route is not None and _route_clear(state, route, start.owner_id, end.owner_id):
+            return _shortcut_route(state, route, start.owner_id, end.owner_id)
+    return None
+
+
+def _checked_anchor_neighbors(state, points, graph, start, end):
+    pairs = sorted({tuple(sorted((i, j))) for i, row in enumerate(graph)
+                    for j in row if i != j and (i < 2 or j < 2)})
+    owners = tuple(_graph_owners(i, j, start.owner_id, end.owner_id) for i, j in pairs)
+    clear = _batch_edge_states(state, np.asarray(points), pairs, owners)
+    blocked = {edge for edge, allowed in zip(pairs, clear) if not allowed}
+    return tuple(tuple(j for j in row if tuple(sorted((i, j))) not in blocked)
+                 for i, row in enumerate(graph))
 
 
 def _roadmap_route_with(state, start, end, compatibility_search, roadmap_search):

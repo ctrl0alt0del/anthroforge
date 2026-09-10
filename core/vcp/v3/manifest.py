@@ -14,6 +14,7 @@ V3_ACCEPTED_FEATURES = (
     "resumable-native-sqp-default", "explicit-python-controller-fallback",
     "dynamic-indexed-ccd", "topology-shared-world-space-bvh-refit",
     "session-local-warm-continuation", "global-cyclic-hard-anchor-cut",
+    "validated-surface-anchor-roadmap-access",
 )
 
 
