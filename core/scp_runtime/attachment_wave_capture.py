@@ -13,7 +13,7 @@ from ..vcp.attachment_wave import (ATTACHMENT_WAVE_VERSION, AttachmentPropagatio
                                    AttachmentSurfaceSnapshot, FiberNodeAttachmentOperation,
                                    SCPAttachmentOperation)
 from ..vcp.fiber_modes import is_loop_fiber
-from ..vcp.fiber_node_attachment_codec import decode_node_attachments
+from ..vcp.fiber_node_attachment_codec import decode_node_attachments, node_influences
 from .attachment_session import follow_rotation_enabled, tangent_strategy
 from .common import (as_id, indexed_geometry_mesh_scp_obj, indexed_transform_scp_obj,
                      scp_object_maps, instance_geometry_objects)
@@ -199,11 +199,14 @@ class _WaveCapture:
     def _fiber_nodes(self, fiber_id, nodes):
         values = []
         for index, node in enumerate(nodes):
-            param = fiber_surface_param(node.attach_raw) or {}
-            owner = self.lookup.get(node.target_id, -1); surface = self._surface(node.target_id)
-            values.append(FiberNodeAttachmentOperation(fiber_id, index, owner, surface,
-                                                       _tri(param), _weights(param), _vec(node.offset_local)))
+            values.extend(self._fiber_influence(fiber_id, index, row) for row in node_influences(node))
         return tuple(values)
+
+    def _fiber_influence(self, fiber_id, index, node):
+        param = fiber_surface_param(node.attach_raw) or {}
+        owner = self.lookup.get(node.target_id, -1); surface = self._surface(node.target_id)
+        return FiberNodeAttachmentOperation(fiber_id, index, owner, surface,
+            _tri(param), _weights(param), _vec(node.offset_local), node.weight)
 
     def _fail_scp(self, sid, reason):
         index = self.lookup.get(sid)

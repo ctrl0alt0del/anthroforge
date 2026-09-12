@@ -4,8 +4,8 @@ from ..utils import depsgraph_for_scene
 from ..vcp.attachment_backend import attachment_runtime
 from ..vcp.fiber_modes import is_loop_fiber
 from ..vcp.fiber_node_attachment import (capture_fiber_node_attachments,
-                                         resolve_fiber_node_attachments)
-from ..vcp.fiber_node_attachment_codec import decode_node_attachments
+                                         resolve_fiber_node_attachments, upgrade_fiber_node_attachments)
+from ..vcp.fiber_node_attachment_codec import NODE_ATTACHMENT_VERSION, decode_node_attachments
 from ..vcp.runtime_state import (fiber_recompute_status, set_fiber_invalid_reason,
                                  set_fiber_recompute_status)
 from .fiber_sync import register_fiber_sync
@@ -33,13 +33,14 @@ def _apply_fiber_node_attachments_serial(root, scene, fiber_ids):
 
 def capture_missing_fiber_node_attachments(root, scene, fiber_ids=None):
     fibers = _selected_fibers(root, fiber_ids); depsgraph = depsgraph_for_scene(scene)
-    captured = set()
-    for fiber in fibers:
-        if _binding_current(fiber): continue
-        points = persisted_fiber_points(scene, root.name, fiber.id) or ()
-        result = capture_fiber_node_attachments(root, scene, fiber, points, depsgraph)
-        if result.ok: captured.add(fiber.id)
-    return captured
+    return {fiber.id for fiber in fibers if _capture_missing_one(root, scene, fiber, depsgraph)}
+
+
+def _capture_missing_one(root, scene, fiber, depsgraph):
+    if _binding_current(fiber): return False
+    if _binding_version_matches(fiber, 1): return upgrade_fiber_node_attachments(root, scene, fiber, depsgraph)
+    points = persisted_fiber_points(scene, root.name, fiber.id) or ()
+    return capture_fiber_node_attachments(root, scene, fiber, points, depsgraph).ok
 
 
 def capture_committed_fiber_node_attachments(root, scene, fiber, points):
@@ -54,8 +55,12 @@ def _selected_fibers(root, fiber_ids):
 
 
 def _binding_current(fiber):
+    return _binding_version_matches(fiber, NODE_ATTACHMENT_VERSION)
+
+
+def _binding_version_matches(fiber, version):
     payload = decode_node_attachments(getattr(fiber, "node_attachments_json", ""))
-    return bool(payload is not None and payload.point_count == int(fiber.node_count)
+    return bool(payload is not None and payload.version == version and payload.point_count == int(fiber.node_count)
                 and payload.cyclic == is_loop_fiber(fiber))
 
 

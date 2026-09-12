@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 
 import numpy as np
 
@@ -32,6 +33,39 @@ def _request(node_count=300):
 
 
 class AttachmentWaveNativeTests(unittest.TestCase):
+    def test_blended_contributions_have_independent_outputs(self):
+        request = _request(300); first, *remaining = request.fiber_operations
+        extra = replace(first, owner_index=0, surface_index=0, influence_weight=.75)
+        request = replace(request, fiber_operations=(replace(first, influence_weight=.25), extra, *remaining))
+        serial = execute_attachment_wave(request, AttachmentExecutorKind.SERIAL_REFERENCE)
+        parallel = execute_attachment_wave(request)
+        np.testing.assert_array_equal(serial.fiber_points, parallel.fiber_points)
+        self.assertAlmostEqual(serial.fiber_points[0][0, 2], .75)
+        self.assertAlmostEqual(serial.fiber_points[0][1, 2], 3.01)
+        self.assertEqual(serial.fiber_status, (0,))
+
+    def test_secondary_failure_does_not_poison_another_fiber(self):
+        request = _request(2); first, second = request.fiber_operations
+        good = replace(first, fiber_id='OTHER')
+        bad = replace(first, surface_index=-1, influence_weight=.5)
+        request = replace(request, fiber_ids=('F', 'OTHER'), fiber_counts=(2, 1),
+                          fiber_operations=(good, replace(first, influence_weight=.5), second, bad))
+        result = execute_attachment_wave(request)
+        self.assertEqual(result.fiber_status, (1, 0))
+        self.assertEqual(len(result.fiber_points[1]), 1)
+        self.assertAlmostEqual(result.fiber_points[1][0, 2], 3)
+
+    def test_failed_secondary_contribution_fails_only_its_fiber(self):
+        request = _request(2); first, second = request.fiber_operations
+        extra = replace(first, surface_index=-1, influence_weight=.5)
+        request = replace(request, fiber_operations=(replace(first, influence_weight=.5), extra, second))
+        self.assertEqual(execute_attachment_wave(request).fiber_status, (1,))
+
+    def test_missing_or_invalid_weight_cannot_enter_native_kernel(self):
+        request = _request(2)
+        for operations in ((request.fiber_operations[0],), (replace(request.fiber_operations[0], influence_weight=.5),)):
+            with self.assertRaises(ValueError): execute_attachment_wave(replace(request, fiber_operations=operations))
+
     def test_parallel_matches_serial_with_stable_indexed_output(self):
         request = _request(); self.assertTrue(attachment_wave_status())
         serial = execute_attachment_wave(request, AttachmentExecutorKind.SERIAL_REFERENCE)

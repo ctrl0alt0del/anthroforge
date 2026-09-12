@@ -6,7 +6,7 @@ from enum import Enum
 import numpy as np
 
 
-ATTACHMENT_WAVE_VERSION = "attachment-wave-2"
+ATTACHMENT_WAVE_VERSION = "attachment-wave-3"
 
 
 class AttachmentExecutorKind(str, Enum):
@@ -60,6 +60,7 @@ class FiberNodeAttachmentOperation:
     triangle: tuple
     weights: tuple
     offset: tuple
+    influence_weight: float = 1.0
 
 
 @dataclass(frozen=True)

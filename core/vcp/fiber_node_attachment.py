@@ -1,6 +1,6 @@
 """Capture and resolve Fiber nodes through the existing SCP surface attachment model."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isfinite
 from time import perf_counter
 
@@ -14,7 +14,8 @@ from .fiber_collision import CollisionOracle
 from .fiber_modes import fiber_parent_ids, is_loop_fiber, loop_anchor_specs
 from .fiber_node_attachment_codec import (FiberNodeAttachment, FiberNodeAttachmentPayload,
                                           NODE_ATTACHMENT_VERSION, decode_node_attachments,
-                                          encode_node_attachments)
+                                          encode_node_attachments, FiberNodeInfluence, node_influences)
+from .fiber_node_attachment_weights import attachment_owner_weights
 from .prop_update_guard import suppress_vcp_prop_updates
 
 
@@ -60,6 +61,8 @@ def _capture_payload(root, scene, fiber, points, depsgraph):
     nodes = tuple(_capture_node(point, forced.get(index), objects, runtime, scene)
                   for index, point in enumerate(points))
     if any(row is None for row in nodes): return None, "A Fiber node could not attach to an SCP surface."
+    nodes = _blend_nodes(points, nodes, forced, objects, runtime, scene, is_loop_fiber(fiber))
+    if nodes is None: return None, "A blended Fiber attachment frame could not be captured."
     return FiberNodeAttachmentPayload(NODE_ATTACHMENT_VERSION, len(nodes),
                                       is_loop_fiber(fiber), nodes), ""
 
@@ -182,8 +185,52 @@ def _payload_issue(payload, fiber):
 
 
 def _resolve_node(node, objects, runtime, scene):
+    points = tuple((_resolve_influence(row, objects, runtime, scene), row.weight) for row in node_influences(node))
+    if any(point is None for point, _weight in points): return None
+    return sum((point * weight for point, weight in points), Vector())
+
+
+def _resolve_influence(node, objects, runtime, scene):
     frame = resolve_surface_frame(objects.get(node.target_id), node.attach_raw, runtime, scene)
     return None if frame is None else frame["point_world"] + frame["basis_world"] @ Vector(node.offset_local)
+
+
+def _blend_nodes(points, nodes, pins, objects, runtime, scene, cyclic):
+    try: weights = attachment_owner_weights(points, [row.target_id for row in nodes], pins, cyclic)
+    except ValueError: return None
+    values = tuple(_blend_node(point, node, row, objects, runtime, scene)
+                   for point, node, row in zip(points, nodes, weights))
+    return values if all(row is not None for row in values) else None
+
+
+def _blend_node(point, node, weights, objects, runtime, scene):
+    if weights == ((node.target_id, 1.0),): return node
+    influences = []
+    for sid, weight in weights:
+        binding = node if sid == node.target_id else _secondary_node(point, sid, objects, runtime, scene)
+        if binding is None: return None
+        influences.append(FiberNodeInfluence(sid, binding.attach_raw, binding.offset_local, weight))
+    return replace(node, influences=tuple(influences))
+
+
+def _secondary_node(point, sid, objects, runtime, scene):
+    obj = objects.get(sid)
+    if obj is None: return None
+    row = _node_from_object(point, sid, obj, runtime, scene)
+    return None if row is None else row[1]
+
+
+def upgrade_fiber_node_attachments(root, scene, fiber, depsgraph=None):
+    payload = decode_node_attachments(fiber.node_attachments_json)
+    if payload is None or payload.version != 1 or _payload_issue(payload, fiber): return False
+    runtime = attachment_runtime(scene, depsgraph); resolved = resolve_fiber_node_attachments(root, scene, fiber, runtime)
+    if not resolved.ok: return False
+    points = resolved.points; pins = _forced_nodes(root, scene, fiber, points, runtime)
+    nodes = _blend_nodes(points, payload.nodes, pins, _surface_objects(scene, root), runtime, scene, payload.cyclic)
+    if nodes is None: return False
+    with suppress_vcp_prop_updates():
+        fiber.node_attachments_json = encode_node_attachments(replace(payload, version=NODE_ATTACHMENT_VERSION, nodes=nodes))
+    return True
 
 
 def _resolved_issue(points):

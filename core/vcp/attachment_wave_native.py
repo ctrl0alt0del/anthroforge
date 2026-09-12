@@ -60,14 +60,15 @@ class _PackedRequest:
         self.scp_ops = _pack_scp_ops(request.scp_operations)
         self.wave_offsets = _wave_offsets(request.waves)
         self.fiber_ops = _pack_fiber_ops(request.fiber_operations, request.fiber_ids)
-        self.points = np.zeros((sum(request.fiber_counts), 3), dtype=np.float64)
+        self.layout = _contribution_layout(request)
+        self.points = np.zeros((len(request.fiber_operations), 3), dtype=np.float64)
         self.scp_status = np.ascontiguousarray(request.initial_scp_status, dtype=np.int32)
         self.node_status = np.zeros(len(request.fiber_operations), dtype=np.int32)
         self.stats = _Stats()
 
     def result(self):
-        status = _fiber_status(self.request, self.node_status)
-        points = _fiber_points(self.request, self.points)
+        status = _fiber_status(self.request, self.node_status, self.layout)
+        points = _fiber_points(self.request, _reduce_contributions(self.request, self.points, self.layout))
         telemetry = tuple(_stats_dict(self.stats).items())
         return AttachmentPropagationResult(self.matrices, self.rotations,
             tuple(map(int, self.scp_status)), points, status, telemetry)
@@ -133,11 +134,30 @@ def _wave_offsets(waves):
     return np.ascontiguousarray(values, dtype=np.int32)
 
 
-def _fiber_status(request, node_status):
-    failed, cursor = [], 0
-    for count in request.fiber_counts:
-        failed.append(int(np.any(node_status[cursor:cursor + count]))); cursor += count
-    return tuple(failed)
+def _fiber_status(request, node_status, layout):
+    failed = np.zeros(len(request.fiber_ids), dtype=np.int32)
+    np.maximum.at(failed, layout[2], np.asarray(node_status) != 0)
+    return tuple(map(int, failed))
+
+
+def _contribution_layout(request):
+    lookup = {fiber_id: index for index, fiber_id in enumerate(request.fiber_ids)}
+    offsets = np.cumsum((0,) + request.fiber_counts); nodes, fibers, weights = [], [], []
+    for row in request.fiber_operations:
+        index = lookup.get(row.fiber_id, -1)
+        if index < 0 or not 0 <= row.node_index < request.fiber_counts[index]: raise ValueError('Invalid attachment node')
+        nodes.append(offsets[index] + row.node_index); fibers.append(index); weights.append(row.influence_weight)
+    nodes, fibers, weights = np.asarray(nodes, dtype=np.int64), np.asarray(fibers, dtype=np.int64), np.asarray(weights)
+    totals = np.bincount(nodes, weights=weights, minlength=int(offsets[-1]))
+    if not np.isfinite(weights).all() or np.any(weights <= 0) or not np.allclose(totals, 1, rtol=0, atol=1e-9):
+        raise ValueError('Invalid attachment influence weights')
+    return nodes, weights, fibers
+
+
+def _reduce_contributions(request, points, layout):
+    result = np.zeros((sum(request.fiber_counts), 3), dtype=np.float64)
+    np.add.at(result, layout[0], points * layout[1][:, None])
+    return result
 
 
 def _fiber_points(request, points):
