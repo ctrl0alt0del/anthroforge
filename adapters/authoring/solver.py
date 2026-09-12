@@ -61,7 +61,7 @@ def request_for(plan, snapshot):
     roles = ["LOOP"] * len(plan.anchors) if plan.closed else ["ENDPOINT_A"] + ["TOUCH"] * (len(plan.anchors)-2) + ["ENDPOINT_B"]
     anchors = tuple(V2Anchor(a.point, a.owner, role, i) for i,(a,role) in enumerate(zip(plan.anchors, roles)))
     colliders = tuple(V2ArrayColliderSnapshot(m.id, m.id, world_vertices(m), m.triangles) for m in snapshot.meshes)
-    policy = V2CollisionPolicy()
+    policy = V2CollisionPolicy(collision_radius=plan.collision_radius)
     tolerances = resolve_tolerances(colliders, policy.collision_radius, settings.quality)
     return V2Request(1, snapshot.id, snapshot.id, snapshot.revision, settings, tolerances, policy, anchors, colliders)
 

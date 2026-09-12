@@ -50,6 +50,7 @@ class FiberPlan:
     stations: tuple
     count: int
     closed: bool
+    collision_radius: float = .002
 
 
 class ScenePort(Protocol):

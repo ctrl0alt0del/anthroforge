@@ -6142,6 +6142,139 @@
             "anthroforge.authoring.protocol"
           ]
         },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.plan_fibers"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "document_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_draft_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "region": {
+              "$ref": "#/$defs/reference"
+            },
+            "boundary_landmarks": {
+              "type": "object",
+              "properties": {
+                "start_left": {
+                  "$ref": "#/$defs/surface_binding"
+                },
+                "start_right": {
+                  "$ref": "#/$defs/surface_binding"
+                },
+                "end_right": {
+                  "$ref": "#/$defs/surface_binding"
+                },
+                "end_left": {
+                  "$ref": "#/$defs/surface_binding"
+                }
+              },
+              "required": [
+                "start_left",
+                "start_right",
+                "end_right",
+                "end_left"
+              ],
+              "additionalProperties": false
+            },
+            "tolerance": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "candidate_count": {
+              "type": "integer",
+              "minimum": 3,
+              "maximum": 65
+            },
+            "samples_per_fiber": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 129
+            },
+            "max_fibers": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 65
+            },
+            "max_points_per_fiber": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 128
+            },
+            "collision_radius": {
+              "type": "number",
+              "minimum": 0
+            },
+            "max_solver_calls": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 256
+            },
+            "solver_budget_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          "required": [
+            "scene_id",
+            "document_id",
+            "expected_draft_revision",
+            "expected_scene_revision",
+            "region",
+            "boundary_landmarks",
+            "tolerance"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
         "version": {
           "enum": [
             "0.4.0"
@@ -6329,6 +6462,9 @@
           "$ref": "#/$defs/patch_value"
         },
         "coverage": {
+          "$ref": "#/$defs/patch_value"
+        },
+        "plan": {
           "$ref": "#/$defs/patch_value"
         },
         "matches": {

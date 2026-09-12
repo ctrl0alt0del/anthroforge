@@ -27,8 +27,7 @@ class AuthoringService:
         return self.dispatch(request, started)
 
     def dispatch(self, request, started):
-        if request['op'] == 'anatomy.snap_points':
-            self.check(request['params'])
+        check_live_preview(self, request)
         cached = replay_response(self, request)
         if cached:
             return cached
@@ -59,15 +58,28 @@ def operations():
     result.update({'anatomy.'+name: getattr(persistence, name) for name in ('checkpoint', 'recover')})
     result['anatomy.reconcile'] = reconciliation.reconcile
     from .resources import cancel
-    from .surface_points import snap_points
     from .catalog import catalog
-    result.update({'anatomy.cancel': cancel, 'anatomy.resume': construction.compile, 'anatomy.snap_points': snap_points, 'anatomy.catalog': catalog})
+    result.update({'anatomy.cancel': cancel, 'anatomy.resume': construction.compile, 'anatomy.catalog': catalog})
+    result.update(point_operations())
     result.update(visual.operations())
     return result
 
 
 def capabilities():
-    return ['static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1']
+    return ['static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1', 'fiber_layout_planner.v1']
+
+
+def point_operations():
+    from .surface_points import snap_points
+    from .fiber_plans import plan_fibers
+    return {'anatomy.snap_points': snap_points, 'anatomy.plan_fibers': plan_fibers}
+
+
+def check_live_preview(service, request):
+    if request['op'] == 'anatomy.snap_points':
+        service.check(request['params'])
+    elif request['op'] == 'anatomy.plan_fibers':
+        service.check(request['params'], service.load(request['params']))
 
 
 def remember_journal(service, request):
@@ -87,7 +99,7 @@ def finish_response(service, request, result, started):
 def replay_response(service, request):
     from ...core.authoring.codec import digest
     key = [service.inventory['root_id'] or service.inventory['scene_id'], request['request_id']]
-    cached = service.store.get('v04_requests', key)
+    cached = current_preview_cache(service.store.get('v04_requests', key), request)
     if cached:
         require(cached['digest'] == digest(request), 'REQUEST_ID_REUSED')
         return dict(cached['response'], replayed=True)
@@ -98,3 +110,13 @@ def replay_response(service, request):
         result.update(receipt['response'], replayed=True)
         return result
     return None
+
+
+def current_preview_cache(cached, request):
+    if cached and request['op'] == 'anatomy.plan_fibers':
+        plan = cached['response'].get('plan', {})
+        if plan.get('version') != 'fiber_layout.v2' or not plan.get('native_solver_validated'):
+            from ...core.authoring.codec import digest
+            require(cached['digest'] == digest(request), 'REQUEST_ID_REUSED')
+            return None
+    return cached

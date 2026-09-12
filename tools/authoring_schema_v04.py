@@ -158,7 +158,7 @@ def protocol(definitions):
     ident = dict(document_id=S)
     mutation = dict(**ident, expected_draft_revision=I, expected_scene_revision=S)
     patch = array(obj(dict(op=enum('add', 'replace', 'remove'), path=S, value=ref('patch_value')), ['op', 'path']))
-    operations = basic_operations(ident, mutation, patch) + candidate_operations(mutation) + visual_operations() + [snap_points_operation(), catalog_operation()]
+    operations = basic_operations(ident, mutation, patch) + candidate_operations(mutation) + visual_operations() + [snap_points_operation(), catalog_operation(), plan_fibers_operation()]
     definitions['patch_value'] = choice({'type': 'string'}, N, B, array(ref('patch_value')), dict(type='object', additionalProperties=ref('patch_value')))
     definitions['document'] = {k: v for k, v in authoring().items() if k != '$defs'}
     return {'$schema': 'https://json-schema.org/draft/2020-12/schema', '$id': 'urn:anthroforge:protocol:0.4.0', '$defs': definitions, 'oneOf': operations+[response()]}
@@ -167,7 +167,7 @@ def protocol(definitions):
 def response():
     fields = dict(dsl=enum('anthroforge.authoring.protocol'), version=enum('0.4.0'), message_type=enum('response'), request_id=S, op=S, status=enum('success', 'unresolved', 'failed'), scene_id=S, scene_revision=S, published=B, entities=array(ref('patch_value')), diagnostics=array(ref('patch_value')), assets=array(ref('patch_value')), cost=ref('patch_value'))
     required = list(fields)
-    names = 'draft_revision normalized_patch affected receipt evaluation unsupported replayed recovery root_id initialized inventory capabilities operations document state dependencies provenance purpose anatomical_review first second comparison_assets search_state missing candidates ranking candidate native_ids generation recovered_copy generation_id draft restored_active_scene comparison authored_changed scenarios normalized_overrides views view hits selection coverage'
+    names = 'draft_revision normalized_patch affected receipt evaluation unsupported replayed recovery root_id initialized inventory capabilities operations document state dependencies provenance purpose anatomical_review first second comparison_assets search_state missing candidates ranking candidate native_ids generation recovered_copy generation_id draft restored_active_scene comparison authored_changed scenarios normalized_overrides views view hits selection coverage plan'
     fields.update({k: ref('patch_value') for k in names.split()})
     fields['matches'] = array(ref('patch_value'))
     fields['catalog'] = ref('patch_value')
@@ -209,6 +209,17 @@ def catalog_operation():
     fields = dict(document_id=S, profile=ref('reference'), scp_id=S, instance_id=S, side=ref('side'), text=S, sampling_available=B)
     fields.update(offset=I, limit=dict(type='integer', minimum=1, maximum=200))
     return operation('anatomy.catalog', fields, [])
+
+
+def plan_fibers_operation():
+    landmarks = obj({key: ref('surface_binding') for key in ('start_left', 'start_right', 'end_right', 'end_left')})
+    fields = dict(document_id=S, expected_draft_revision=I, expected_scene_revision=S, region=ref('reference'), boundary_landmarks=landmarks, tolerance=dict(type='number', exclusiveMinimum=0))
+    required = list(fields)
+    fields.update(candidate_count=dict(type='integer', minimum=3, maximum=65), samples_per_fiber=dict(type='integer', minimum=5, maximum=129))
+    fields.update(max_fibers=dict(type='integer', minimum=2, maximum=65), max_points_per_fiber=dict(type='integer', minimum=2, maximum=128))
+    fields['collision_radius'] = dict(type='number', minimum=0)
+    fields.update(max_solver_calls=dict(type='integer', minimum=1, maximum=256), solver_budget_ms=dict(type='integer', minimum=1, maximum=10000))
+    return operation('anatomy.plan_fibers', fields, required)
 
 
 def visual_operations():
