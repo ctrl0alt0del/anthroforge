@@ -398,6 +398,7 @@ class NativeCollisionWorld:
         return value, closed
 
     def add(self, vertices, triangles, owner, collider, closed, matrix=None):
+        self._require_mutable_geometry()
         points, faces = _world_mesh(vertices, triangles); transform, inverse = _matrices(matrix)
         args = (self.handle, _double(points), _integer(faces), len(faces), int(owner),
                 int(collider), int(bool(closed)), _double(transform), _double(inverse))
@@ -407,10 +408,12 @@ class NativeCollisionWorld:
         return index
 
     def commit(self):
+        self._require_mutable_geometry()
         if self.library.af_world_commit(self.handle):
             raise RuntimeError("native collision-world commit failed")
 
     def update_transform(self, index, matrix):
+        self._require_mutable_geometry()
         transform, inverse = _matrices(matrix)
         code = self.library.af_world_update_transform(self.handle, int(index),
                                                        _double(transform), _double(inverse))
@@ -418,11 +421,16 @@ class NativeCollisionWorld:
             raise ValueError("invalid native collision-world transform")
 
     def update_vertices(self, indices, vertices):
+        self._require_mutable_geometry()
         rows = tuple(np.ascontiguousarray(value, dtype=np.float64) for value in vertices)
         index = np.ascontiguousarray(indices, dtype=np.int32); counts = _counts(rows)
         if self.library.af_world_update_vertices(self.handle, _plain(index), len(index),
                                                   _double_rows(rows), _plain(counts)):
             raise ValueError("invalid native collision-world vertex batch")
+
+    def _require_mutable_geometry(self):
+        if self._sessions:
+            raise RuntimeError("native collision geometry is retained by an active session")
 
     def validate(self, points, edges, first, second, span, threshold):
         values, links, owners = _world_validation_inputs(points, edges, first, second)
@@ -512,6 +520,7 @@ class NativeCollisionWorld:
         return count
 
     def close(self):
+        if self._sessions: raise RuntimeError("cannot close native world with active sessions")
         if self.handle:
             self.library.af_world_destroy(self.handle); self.handle = None
 

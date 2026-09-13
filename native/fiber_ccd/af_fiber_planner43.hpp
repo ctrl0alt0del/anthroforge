@@ -144,7 +144,7 @@ static AfValidationRow af_instance_validation_row(const AfInstance& item,Vec a,V
 static void af_store_validation(const AfValidationRow& row,int index,int* clear,int* blockers,
                                 double* minima,AfBatchResult& result) {
     af_merge_batch(result,row.result);result.rejected+=!row.clear;clear[index]=row.clear;
-    blockers[index]=row.blocker;minima[index]=row.result.tested?result.minimum:INFINITY;
+    blockers[index]=row.blocker;minima[index]=row.result.tested?row.result.minimum:INFINITY;
 }
 
 static int af_validate_world(const AfWorld& world,const double* points,const int64_t* edges,
