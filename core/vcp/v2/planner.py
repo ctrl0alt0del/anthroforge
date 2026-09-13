@@ -113,6 +113,7 @@ class _PlannerState:
     native_search_ms: float = 0.0
     native_collision_ms: float = 0.0
     owner_contact_factor: float = 2.5
+    fixed_pin_indices: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -139,25 +140,38 @@ def plan_reference_v42(request, snapshot=None):
     return _plan_reference(request, snapshot, _plan_segments_v42)
 
 
-def plan_reference_v43(request, snapshot=None, owner_contact_factor=2.5, native_world=None):
-    """Return a Package 4.3 fused-native exact-count planner reference."""
-    started = perf_counter(); issue = _configuration_issue(request)
+def plan_reference_v43(request, snapshot=None, owner_contact_factor=2.5, native_world=None, pin_indices=()):
+    """Plan with optional fixed pin indices; omitted indices retain the default layout."""
+    pin_indices = tuple(pin_indices)
+    started = perf_counter(); issue = _configuration_issue(request) or _pin_layout_issue(request, pin_indices)
     if issue:
         return _failed(V2Termination.INVALID_CONFIGURATION, issue, started)
     if not collision_backend_status().available:
         return _failed(V2Termination.BACKEND_UNAVAILABLE, "native collision backend unavailable", started)
-    state = _v43_state(request, snapshot, owner_contact_factor, native_world)
+    state = _v43_state(request, snapshot, owner_contact_factor, native_world, pin_indices)
     invalid = _invalid_anchor(state)
     if invalid:
         return _failed_with_state(state, V2Termination.INVALID_ATTACHMENT, invalid, started)
     return _finish_plan(state, _plan_segments_v41(state), started)
 
 
-def _v43_state(request, snapshot, owner_contact_factor, native_world=None):
+def _v43_state(request, snapshot, owner_contact_factor, native_world=None, pin_indices=()):
     triangle = snapshot or build_triangle_snapshot(request.colliders)
     world = native_world or cached_native_collision_world(request.colliders)
     return _PlannerState(request, triangle, {}, {}, native_world=world,
-                         owner_contact_factor=float(owner_contact_factor))
+                         owner_contact_factor=float(owner_contact_factor), fixed_pin_indices=tuple(pin_indices))
+
+
+def _pin_layout_issue(request, indices):
+    values = tuple(indices)
+    if not values: return ""
+    if any(not isinstance(value, (int, np.integer)) or isinstance(value, bool) for value in values):
+        return "fixed pin indices must be integers"
+    last = request.settings.node_count - 1
+    valid = len(values) == len(request.anchors) and values[0] == 0
+    valid = valid and all(a < b for a, b in zip(values[:-1], values[1:]))
+    valid = valid and (values[-1] <= last if _cyclic(request) else values[-1] == last)
+    return "" if valid else "fixed pin indices do not fit the authored topology and node count"
 
 
 def _invalid_anchor(state):
@@ -1231,6 +1245,7 @@ def _failed_with_state(state, reason, message, started):
 
 
 def _exact_handoff(state, routes):
+    if state.fixed_pin_indices: return _fixed_pin_handoff(state, routes)
     cyclic = _cyclic(state.request); edge_budget = state.request.settings.node_count - int(not cyclic)
     corridor_edges = sum(len(route.points) - 1 for route in routes)
     if corridor_edges > edge_budget:
@@ -1239,6 +1254,18 @@ def _exact_handoff(state, routes):
         return None
     allocations = _edge_allocations(routes, edge_budget)
     return _subdivide_routes(routes, allocations, cyclic)
+
+
+def _fixed_pin_handoff(state, routes):
+    indices = state.fixed_pin_indices
+    if _cyclic(state.request): indices += (state.request.settings.node_count,)
+    if len(routes) != len(indices) - 1: return None
+    prepared, allocations = [], []
+    for route, first, last in zip(routes, indices[:-1], indices[1:]):
+        reduced = _reduce_routes(state, (route,), last - first)
+        if reduced is None: return None
+        prepared.extend(reduced); allocations.extend(_edge_allocations(reduced, last - first))
+    return _subdivide_routes(prepared, allocations, _cyclic(state.request))
 
 
 def _reduce_routes(state, routes, edge_budget):
