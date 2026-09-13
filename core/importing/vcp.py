@@ -344,6 +344,9 @@ def _has_dirty(dirty):
 
 
 def _schedule_imported_sync(state):
+    from ..visualization.warning_runtime import structural_change, notify_action
+    structural_change(state.root)
+    notify_action(state.root, state.scene, full=True, event_type="IMPORT")
     dirty = _dirty_for_imported(state)
     if _has_dirty(dirty):
         payload = {"soft_tissue_force": True} if state.soft_tissues else None

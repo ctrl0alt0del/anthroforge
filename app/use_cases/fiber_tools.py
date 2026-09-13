@@ -234,6 +234,7 @@ def remove_fiber_touch_point(context, fiber_id="", touch_index=-1):
     if index < 0 or index >= len(fiber.mid_touches):
         return failure("Invalid touch index.")
     fiber.mid_touches.remove(index)
+    _retire_warning_pins(root, fiber)
     _set_prefer_bake(fiber, False)
     _fiber_sync().clear_solver_cache(fiber.id)
     _clear_v3_warm(context, root, fiber)
@@ -308,11 +309,20 @@ def _append_touch_result(context, root, fiber, touch_specs):
 
 
 def _touch_order_changed(context, root, fiber):
+    _retire_warning_pins(root, fiber)
     _set_prefer_bake(fiber, False)
     _fiber_sync().clear_solver_cache(fiber.id)
     _clear_v3_warm(context, root, fiber)
     _sync_entity(root, context.scene, "FIBER", {fiber.id}, bake=False)
     return success(value=fiber)
+
+
+def _retire_warning_pins(root, fiber):
+    try:
+        from ...core.visualization.warning_runtime import structural_change
+    except ImportError:
+        from core.visualization.warning_runtime import structural_change
+    structural_change(root, {fiber.id})
 
 
 def _valid_touch_move(fiber, index, target):

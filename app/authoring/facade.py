@@ -8,34 +8,43 @@ from . import native_queries as queries, commands, native_drafts as drafts
 
 
 class AuthoringInterpreter:
-    def __init__(self, scene, solver, store, contacts=None):
+    def __init__(self, scene, solver, store, contacts=None, warnings=None):
+        from ...core.warnings.query import WarningQuery
         self.scene, self.solver, self.store = scene, solver, store
+        self.warnings, self.replayed = warnings or WarningQuery(), False
         self.contacts = contacts
         self.snapshot, self.last_job = None, None
 
     def execute(self, payload):
+        self.replayed = False
+        request, result = self._respond(payload)
+        return self.warnings.feedback(request, result, self.replayed)
+
+    def _respond(self, payload):
         request = {}
         try:
             request = validate_request(decode(payload))
-            return self._execute(request)
+            return request, self._execute(request)
         except AuthoringError as error:
-            return self._unresolved(request, error)
+            return request, self._unresolved(request, error)
         except Exception:
             logging.getLogger(__name__).exception("Authoring request failed")
             result = response(request)
             result.update(status="failed",diagnostics=[AuthoringError("INTERNAL_ERROR","See the addon log; the request did not complete.").diagnostic()])
-            return result
+            return request, result
 
     def _execute(self, request):
+        if request['op'] == 'warnings.list':
+            return dict(response(request, "unavailable"), warnings=self.warnings.list(request['params']))
         if request['version'] == '0.4.0':
             return execute_anatomy(self, request)
         return self._execute_compatibility(request)
 
     def _execute_compatibility(self, request):
-        snapshot = self.scene.capture(request["params"]["scene_id"])
-        self.snapshot = snapshot
+        snapshot = self.snapshot = self.scene.capture(request["params"]["scene_id"])
         cached = receipt(self,request) or self.store.get("requests",[snapshot.id,request["request_id"]])
         if cached:
+            self.replayed = True
             require(cached["digest"] == digest(request),"REQUEST_ID_REUSED")
             require(cached["response"]["scene_revision"] == snapshot.revision,"STALE_REVISION")
             return cached["response"]

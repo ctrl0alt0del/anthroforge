@@ -1,5 +1,10 @@
 """Composition root. Call execute(request, root, scene, journal_directory).
 
+warnings.list (all protocol versions) reads the transient file-wide warning store.
+It bypasses scene capture, solver and request replay. See docs/warnings.md for
+filters, bounded pagination, check tokens and mutation/poll/correction examples.
+All final authoring responses carry live warning state outside saved receipts.
+
 Read-only point picker (DSL 0.4): use op='anatomy.snap_points', with params
 scene_id, instance_id, expected_scene_revision, and points=[[world_x, y, z], ...].
 Get instance IDs and the current revision from anatomy.discover; initialize IDs
@@ -101,9 +106,12 @@ def execute(request, root, scene, journal_directory=None):
     from ...adapters.authoring.native_scene import BlenderScene
     from ...adapters.authoring.solver import NativeFiberSolver
     from ...adapters.authoring.cached_solver import CachedFiberSolver
+    from ...adapters.authoring.warnings import BlenderWarnings
     directory = journal_directory or default_directory(root)
     store = FileStore(directory)
-    return AuthoringInterpreter(BlenderScene(root, scene), CachedFiberSolver(NativeFiberSolver(), store), store).execute(request)
+    service = AuthoringInterpreter(BlenderScene(root, scene), CachedFiberSolver(NativeFiberSolver(), store),
+                                   store, warnings=BlenderWarnings(root, scene))
+    return service.execute(request)
 
 
 def default_directory(root):

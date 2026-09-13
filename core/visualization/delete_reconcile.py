@@ -174,6 +174,8 @@ def cleanup_scp_dependents(root):
 
 
 def reconcile_deleted_entities(root, scene, removed_keys, explicit=False):
+    from .warning_runtime import structural_change
+    structural_change(root)
     _ = explicit
     with suppress_vcp_prop_updates(), suppress_scp_prop_updates():
         changed = _reconcile_removed(root, removed_keys)

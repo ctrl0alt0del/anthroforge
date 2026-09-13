@@ -80,6 +80,15 @@ def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=
     _, expand_ms = timed_call(expand_constraint_impacts, build.graph, impacted, c_impacts, gate_meta)
     _, sync_ms = timed_call(run_sync_drivers, root, scene, build.is_full, impacted, bake, gate_meta, trace.profile)
     emit_trace_report(trace, gate_meta, build, impacted, c_impacts, build_ms, impact_ms, c_ms, expand_ms, sync_ms)
+    _notify_warnings(root, scene, build, impacted, gate_meta)
+
+
+def _notify_warnings(root, scene, build, impacted, meta):
+    from ..visualization.warning_runtime import notify_action
+    dirty = {key: set(values) for key, values in build.dirty.items()}
+    for key, values in impacted.items():
+        dirty.setdefault(key, set()).update(values)
+    notify_action(root, scene, dirty, meta.get("event_type", ""), build.is_full)
 
 
 def _with_dirty_provenance(meta, dirty):

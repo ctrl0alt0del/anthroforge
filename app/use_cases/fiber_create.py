@@ -409,8 +409,11 @@ def _activate(vcp, kind, entity_id):
 def _invalidate_fiber_runtime(root, fiber_id):
     try:
         from ...core.visualization.fiber_cache_lifecycle import invalidate_fiber_caches
+        from ...core.visualization.warning_runtime import structural_change
     except ImportError:
         from core.visualization.fiber_cache_lifecycle import invalidate_fiber_caches
+        from core.visualization.warning_runtime import structural_change
+    structural_change(root, {fiber_id})
     invalidate_fiber_caches(root=root, fiber_ids={fiber_id})
 
 

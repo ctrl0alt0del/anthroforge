@@ -260,11 +260,10 @@ def _on_load_post(_dummy):
     _remove_transient_controls(should_remove_control_object_on_load)
     if _CONTROL_RUNTIME is not None:
         _CONTROL_RUNTIME.reset()
-    scene = _load_scene()
-    root, current = _root_and_current(scene)
-    if root is None:
-        return
-    _hydrate_load_state(root, scene, current)
+    for scene in bpy.data.scenes:
+        for root in scene.objects:
+            if root.get("anthroforge_root"):
+                _hydrate_load_state(root, scene, resolve_active_entity(root, scene))
 
 
 def _root_and_current(scene, active_object=None):

@@ -67,7 +67,8 @@ def stable_probe(root, scene, fiber):
 class FiberAnchorPreflightTests(unittest.TestCase):
     def setUp(self):
         preflight._CACHE.clear()
-        preflight._CURRENT.clear()
+        from core.warnings.session import reset
+        reset()
 
     def test_exact_owner_skip_keeps_ancestor_and_unrelated_active(self):
         rows = (anchor(),)
@@ -152,8 +153,7 @@ class FiberAnchorPreflightTests(unittest.TestCase):
     def test_recreated_fiber_identity_cannot_read_deleted_diagnostics(self):
         scene, root, old, fresh = Pointer(1), Pointer(2), Pointer(3), Pointer(4)
         old.id = fresh.id = "F1"
-        scope = preflight.fiber_anchor_scope(scene, root, old)
-        preflight._CURRENT[scope] = preflight.FiberAnchorPreflightResult(False, (), (), 0, 0)
+        preflight._publish(root, scene, old, preflight.FiberAnchorPreflightResult(False, (), (), 0, 0))
         self.assertIsNone(preflight.current_fiber_anchor_preflight(scene, root, fresh))
 
 
