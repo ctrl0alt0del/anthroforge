@@ -119,5 +119,8 @@ def sort_key(row):
 
 
 def scope_matches(scope, filters):
+    """Include ancestor check coverage even before a filtered entity is discovered."""
     values = dict(scene=scope[1], root=scope[2], kind=scope[3], entity=scope[4])
-    return all(str(value) == values[key] for key, value in (filters or {}).items() if key in values)
+    keys = {"FILE": (), "SCENE": ("scene",), "ROOT": ("scene", "root")}.get(scope[3], tuple(values))
+    return all(str(value) == values[key] for key, value in (filters or {}).items()
+               if key in keys and value is not None)

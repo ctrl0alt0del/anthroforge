@@ -29,8 +29,8 @@ class InvalidAnchorProvider:
         if scene is None or root is None:
             self.check_all(None)
             return
-        dirty = event.get("dirty", {})
-        ids = None if event.get("full") or dirty.get("SCP") or not dirty else set(dirty.get("FIBER", ()))
+        dirty = event.get("dirty") or {}
+        ids = None if event.get("full") or dirty.get("SCP") or not dirty else set(dirty.get("FIBER") or ())
         if ids is None or ids:
             schedule_root(scene, root, ids)
             session.COORDINATOR.metrics["incremental_checks"] += 1

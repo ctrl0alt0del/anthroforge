@@ -54,7 +54,8 @@ def result_for_scope(scope):
     metadata = REPOSITORY.metadata.get((scope, PROVIDER))
     if metadata is None:
         return None
-    rows = [dict(REPOSITORY.records[key].evidence) for key in sorted(REPOSITORY.scopes.get(scope, ()))]
+    records = (REPOSITORY.records[key] for key in sorted(REPOSITORY.scopes.get(scope, ())))
+    rows = [dict(row.evidence) for row in records if row.provider == PROVIDER and row.code == CODE]
     violations = tuple(FiberAnchorViolation(**dict(row, role=V2AnchorRole(row["role"]))) for row in rows)
     violations = tuple(sorted(violations, key=lambda row: (row.authored_index, row.role.value, row.blocker_id)))
     key, candidates, tested, anchors = metadata[:4]

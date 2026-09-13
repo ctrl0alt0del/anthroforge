@@ -197,5 +197,51 @@ class IdentityAndProtocolTests(unittest.TestCase):
         self.assertNotEqual(first["warnings"]["check_token"], second["warnings"]["check_token"])
 
 
+class CoverageQueryTests(unittest.TestCase):
+    def setUp(self):
+        session.reset(); session.REPOSITORY.discovery = "COMPLETE"
+        self.scope = (session.EPOCH, "scene", "root", "ROOT", "", 0)
+        self.filters = dict(scene="scene", root="root", entity="new", kind="FIBER")
+
+    def test_filtered_query_includes_all_nonclean_ancestor_states(self):
+        for state in ("UNSCANNED", "PENDING", "CHECKING", "FAILED", "CANCELLED"):
+            session.REPOSITORY.state(self.scope, state, generation=17, error="capture failed")
+            result = WarningQuery().list(self.filters)
+            self.assertEqual(result["total"], 0); self.assertFalse(result["complete"], state)
+            self.assertEqual(result["counts"][state], 1)
+            self.assertEqual(result["source_generations"][0]["generation"], 17)
+        session.REPOSITORY.state(self.scope, "COMPLETE")
+        self.assertTrue(WarningQuery().list(self.filters)["complete"])
+
+    def test_filtered_query_excludes_unrelated_roots_and_scenes(self):
+        session.REPOSITORY.state(self.scope, "COMPLETE")
+        session.REPOSITORY.state((session.EPOCH, "scene", "other", "ROOT", "", 0), "FAILED")
+        session.REPOSITORY.state((session.EPOCH, "other", "root", "ROOT", "", 0), "PENDING")
+        result = WarningQuery().list(self.filters)
+        self.assertTrue(result["complete"], result); self.assertEqual(result["failures"], [])
+        self.assertEqual([row["scope"] for row in result["source_generations"]], [self.scope])
+        self.assertFalse(WarningQuery().list()["complete"])
+
+    def test_global_failed_coverage_reaches_filtered_query(self):
+        scope = (session.EPOCH, "", "", "FILE", "", 0)
+        session.REPOSITORY.state(scope, "FAILED", error="file discovery failed")
+        result = WarningQuery().list(self.filters)
+        self.assertFalse(result["complete"], result)
+        self.assertEqual(result["failures"][0]["error"], "file discovery failed")
+        self.assertEqual(result["source_generations"][0]["scope"], scope)
+
+    def test_scene_coverage_applies_only_to_its_descendants(self):
+        scope = (session.EPOCH, "scene", "", "SCENE", "", 0)
+        session.REPOSITORY.state(scope, "PENDING")
+        self.assertFalse(WarningQuery().list(self.filters)["complete"])
+        self.assertTrue(WarningQuery().list(dict(self.filters, scene="other"))["complete"])
+
+    def test_null_filters_do_not_hide_check_coverage(self):
+        session.REPOSITORY.state(self.scope, "PENDING")
+        result = WarningQuery().list(dict(scene=None, root=None, entity=None, kind=None))
+        self.assertFalse(result["complete"], result)
+        self.assertEqual(result["counts"]["PENDING"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
