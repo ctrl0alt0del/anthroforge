@@ -9,6 +9,7 @@ _HANDLER = None
 _CONTEXT_PROVIDER = None
 _COLOR = (1.0, 0.08, 0.02, 1.0)
 _POINT_SIZE = 14.0
+_UNSUBSCRIBE = None
 
 
 def cache_fiber_anchor_overlay(scope, result):
@@ -37,6 +38,7 @@ def invalidate_fiber_anchor_overlay(scopes=None):
 
 def register_fiber_anchor_overlay(context_provider=None):
     global _HANDLER, _CONTEXT_PROVIDER
+    _subscribe_repository()
     _CONTEXT_PROVIDER = context_provider or _CONTEXT_PROVIDER
     if _HANDLER is None:
         if _shader() is None:
@@ -46,7 +48,9 @@ def register_fiber_anchor_overlay(context_provider=None):
 
 
 def unregister_fiber_anchor_overlay():
-    global _HANDLER, _SHADER, _CONTEXT_PROVIDER
+    global _HANDLER, _SHADER, _CONTEXT_PROVIDER, _UNSUBSCRIBE
+    if _UNSUBSCRIBE is not None:
+        _UNSUBSCRIBE(); _UNSUBSCRIBE = None
     invalidate_fiber_anchor_overlay()
     if _HANDLER is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_HANDLER, "WINDOW")
@@ -108,6 +112,23 @@ def _active_scope():
         return None
     from ..vcp.fiber_anchor_preflight import fiber_anchor_scope
     return fiber_anchor_scope(scene, root, fiber)
+
+
+def _subscribe_repository():
+    global _UNSUBSCRIBE
+    from ..warnings.session import REPOSITORY
+    if _UNSUBSCRIBE is None:
+        _UNSUBSCRIBE = REPOSITORY.subscribe(_repository_changed)
+
+
+def _repository_changed(repository):
+    from ..warnings.anchors import result_for_scope
+    invalidate_fiber_anchor_overlay()
+    for scope in repository.scopes:
+        if repository.states[scope]["status"] == "COMPLETE":
+            result = result_for_scope(scope)
+            if result is not None:
+                cache_fiber_anchor_overlay(scope, result)
 
 
 def _fiber_visible(context, scene, root, fiber):

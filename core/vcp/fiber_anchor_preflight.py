@@ -17,7 +17,6 @@ from .v2.contracts import V2AnchorRole
 _CACHE_LIMIT = 128
 _OWNER_CONTACT_MODE = "AUTHORED_LOCAL"
 _CACHE = OrderedDict()
-_CURRENT = {}
 
 
 @dataclass(frozen=True)
@@ -91,12 +90,13 @@ def evaluate_anchor_preflight(anchors, colliders, hierarchy, configured, slack, 
 
 
 def current_fiber_anchor_preflight(scene, root, fiber):
-    return _CURRENT.get(fiber_anchor_scope(scene, root, fiber))
+    from ..warnings.anchors import current
+    return current(scene, root, fiber)
 
 
 def fiber_anchor_scope(scene, root, fiber):
-    return (_id_token(scene), _id_token(root), _id_token(fiber),
-            str(getattr(fiber, "id", "") or ""))
+    from ..warnings.session import entity_reference
+    return entity_reference(scene, root, fiber).scope
 
 
 def anchor_preflight_summary(result):
@@ -107,14 +107,13 @@ def anchor_preflight_summary(result):
 
 
 def invalidate_fiber_anchor_preflight(scene=None, root=None, fiber_ids=None):
+    from ..warnings.anchors import invalidate
     ids = _normalized_ids(fiber_ids)
-    scopes = tuple(key for key in _CURRENT if _scope_matches(key, scene, root, ids))
     probes = tuple(key for key in _CACHE if _scope_matches(key[0], scene, root, ids))
-    for key in scopes:
-        _CURRENT.pop(key, None)
     for key in probes:
         _CACHE.pop(key, None)
-    _invalidate_overlay(scopes if any((scene, root, ids)) else None)
+    invalidate(scene, root, ids)
+    _invalidate_overlay(None)
 
 
 def clear_transient_fiber_attachment_statuses(root=None, fiber_ids=None):
@@ -125,7 +124,8 @@ def clear_transient_fiber_attachment_statuses(root=None, fiber_ids=None):
 
 
 def fiber_anchor_cache_stats():
-    return {"entries": len(_CACHE), "current": len(_CURRENT), "limit": _CACHE_LIMIT}
+    from ..warnings.session import REPOSITORY
+    return {"entries": len(_CACHE), "current": len(REPOSITORY.metadata), "limit": _CACHE_LIMIT}
 
 
 def _compute_preflight(root, scene, fiber, depsgraph, quality, probe, anchors):
@@ -329,10 +329,8 @@ def _store(probe, result):
 
 
 def _publish(root, scene, fiber, result):
-    scope = fiber_anchor_scope(scene, root, fiber)
-    _CURRENT[scope] = result
-    from ..visualization.fiber_anchor_overlay import cache_fiber_anchor_overlay
-    cache_fiber_anchor_overlay(scope, result)
+    from ..warnings.anchors import publish
+    publish(scene, root, fiber, result)
 
 
 def _invalidate_overlay(scopes):
@@ -344,11 +342,12 @@ def _invalidate_overlay(scopes):
 
 
 def _scope_matches(scope, scene, root, ids):
-    if scene is not None and scope[0] != _id_token(scene):
+    from ..warnings.session import id_token
+    if scene is not None and scope[1] != id_token(scene):
         return False
-    if root is not None and scope[1] != _id_token(root):
+    if root is not None and scope[2] != id_token(root):
         return False
-    return ids is None or scope[3] in ids
+    return ids is None or scope[4] in ids
 
 
 def _normalized_ids(values):

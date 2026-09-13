@@ -155,12 +155,17 @@ def operation(op, fields, required):
 
 
 def protocol(definitions):
+    try:
+        from tools.authoring_warning_schema import extend
+    except ModuleNotFoundError:
+        from authoring_warning_schema import extend
     ident = dict(document_id=S)
     mutation = dict(**ident, expected_draft_revision=I, expected_scene_revision=S)
     patch = array(obj(dict(op=enum('add', 'replace', 'remove'), path=S, value=ref('patch_value')), ['op', 'path']))
     operations = basic_operations(ident, mutation, patch) + candidate_operations(mutation) + visual_operations() + [snap_points_operation(), catalog_operation(), plan_fibers_operation()]
     definitions['patch_value'] = choice({'type': 'string'}, N, B, array(ref('patch_value')), dict(type='object', additionalProperties=ref('patch_value')))
     definitions['document'] = {k: v for k, v in authoring().items() if k != '$defs'}
+    extend(definitions, operations, '0.4.0')
     return {'$schema': 'https://json-schema.org/draft/2020-12/schema', '$id': 'urn:anthroforge:protocol:0.4.0', '$defs': definitions, 'oneOf': operations+[response()]}
 
 
@@ -171,6 +176,7 @@ def response():
     fields.update({k: ref('patch_value') for k in names.split()})
     fields['matches'] = array(ref('patch_value'))
     fields['catalog'] = ref('patch_value')
+    fields['warnings'] = ref('warning_state')
     return obj(fields, required)
 
 

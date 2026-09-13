@@ -2,6 +2,157 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:anthroforge:protocol:0.4.0",
   "$defs": {
+    "warning_request": {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "warnings.list"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 200
+            },
+            "scene": {
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            },
+            "entity": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "authoring_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "scene_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "version",
+        "message_type",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "warning_state": {
+      "type": "object",
+      "properties": {
+        "epoch": {
+          "type": "string"
+        },
+        "repository_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scope": {
+          "type": "object"
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "records": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object"
+          }
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "discovery": {
+          "enum": [
+            "UNSCANNED",
+            "PENDING",
+            "CHECKING",
+            "COMPLETE",
+            "FAILED",
+            "CANCELLED"
+          ]
+        },
+        "counts": {
+          "type": "object"
+        },
+        "failures": {
+          "type": "array"
+        },
+        "source_scene_revision": {
+          "type": "string"
+        },
+        "source_generations": {
+          "type": "array"
+        },
+        "check_token": {
+          "type": "string"
+        },
+        "telemetry": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "epoch",
+        "repository_revision",
+        "scope",
+        "total",
+        "records",
+        "complete",
+        "discovery",
+        "counts",
+        "source_scene_revision",
+        "source_generations",
+        "check_token"
+      ],
+      "additionalProperties": false
+    },
     "native_id": {
       "type": "string",
       "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"
@@ -3806,6 +3957,7 @@
     }
   },
   "oneOf": [
+    {"$ref": "#/$defs/warning_request"},
     {
       "type": "object",
       "properties": {
@@ -6335,6 +6487,7 @@
           "minItems": 0,
           "maxItems": 100000
         },
+        "warnings": {"$ref": "#/$defs/warning_state"},
         "cost": {
           "$ref": "#/$defs/patch_value"
         },

@@ -22,6 +22,7 @@ def write_fiber(root, scene, row, existing=None):
     set_anchors(fiber, row, specs, root, scene)
     fiber.node_count, fiber.solver_version = len(row["points"]), 3
     fiber.name = row["id"]
+    fiber["af_authoring_id"] = row["id"]
     fiber["af_authoring_symmetry"] = "explicit"
     points = [Vector(p) for p in row["points"]]
     register_fiber_sync().apply_points(root, scene, fiber, points, commit=True)
@@ -35,6 +36,8 @@ def open_args(specs):
 
 
 def set_anchors(fiber, row, specs, root, scene):
+    from ...core.visualization.warning_runtime import structural_change
+    structural_change(root, {fiber.id})
     fiber.loop_anchors.clear()
     fiber.mid_touches.clear()
     fiber.topology_mode = "LOOP" if row["closed"] else "OPEN"

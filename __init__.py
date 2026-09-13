@@ -409,8 +409,15 @@ def _register_runtime_hooks():
     register_soft_tissue_sync()
     register_sync_runner_runtime()
     register_control_runtime()
-    register_delete_reconcile()
-    register_proxy_session_runtime()
+    register_delete_reconcile(); register_proxy_session_runtime()
+    _register_warnings()
+
+
+def _register_warnings():
+    from .ui import warnings
+    from .core.visualization import warning_runtime
+    warnings.register()
+    warning_runtime.register()
 
 
 def _unregister_runtime_hooks():
@@ -430,6 +437,10 @@ def _unregister_runtime_hooks():
 
 
 def _unregister_fiber_attachment_runtime():
+    from .ui import warnings
+    from .core.visualization import warning_runtime
+    warning_runtime.unregister()
+    warnings.unregister()
     unregister_fiber_repair_runtime()
     unregister_fiber_cache_lifecycle()
     unregister_fiber_anchor_overlay()

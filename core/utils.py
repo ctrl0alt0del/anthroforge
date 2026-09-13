@@ -9,6 +9,7 @@ _SCENE_CACHE = {}
 _BOUNDED_SCENE_CACHE = {}
 _GEOMETRY_GENERATIONS = {}
 _DEFORMATION_GENERATIONS = {}
+_ACTIVE_ROOT_IDS = {}
 DEFAULT_BOUNDED_CACHE_ENTRIES = 128
 DEFAULT_BOUNDED_CACHE_BYTES = 256 * 1024 * 1024
 
@@ -208,11 +209,27 @@ def _valid_root(scene, obj):
 def get_af_root(scene=None):
     if scene is None:
         return None
+    chosen = _ACTIVE_ROOT_IDS.get(_pointer_id(scene))
+    if chosen is not None:
+        explicit = next((obj for obj in scene.objects if _pointer_id(obj) == chosen), None)
+        if _valid_root(scene, explicit):
+            return explicit
     root = scene_cache_get(scene, "af_root")
     if _valid_root(scene, root):
         return root
     root = next((obj for obj in scene.objects if obj.get("anthroforge_root")), None)
     return scene_cache_set(scene, "af_root", root)
+
+
+def set_active_af_root(scene, root):
+    if not _valid_root(scene, root):
+        raise ValueError("Root does not belong to the scene")
+    _ACTIVE_ROOT_IDS[_pointer_id(scene)] = _pointer_id(root)
+    scene_cache_set(scene, "af_root", root)
+
+
+def clear_active_af_roots():
+    _ACTIVE_ROOT_IDS.clear()
 
 
 def scene_for_id(owner):

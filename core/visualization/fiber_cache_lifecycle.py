@@ -24,6 +24,12 @@ def invalidate_fiber_caches(scene=None, root=None, fiber_ids=None):
     clear_collider_generations() if ids is None else None
     clear_geometry_generations() if ids is None else None
     _invalidate_anchor_caches(scene, root, ids)
+    _notify_warnings(scene, root, ids)
+
+
+def _notify_warnings(scene, root, ids=None):
+    from .warning_runtime import notify_action
+    notify_action(root, scene, None if ids is None else {"FIBER": ids})
 
 
 def _clear_global_caches(ids):
@@ -91,6 +97,8 @@ def _on_lifecycle_event(_dummy):
 
 @persistent
 def _on_depsgraph_update(scene, depsgraph):
+    from .warning_runtime import reconcile_membership
+    reconcile_membership(scene)
     note_geometry_updates(depsgraph)
     note_collider_updates(depsgraph)
     _invalidate_anchor_geometry(scene, depsgraph)
@@ -100,6 +108,7 @@ def _invalidate_anchor_geometry(scene, depsgraph):
     updates = tuple(getattr(depsgraph, "updates", ()) or ())
     if any(_relevant_anchor_update(scene, update) for update in updates):
         _invalidate_anchor_caches(scene, None, None)
+        _notify_warnings(scene, None)
 
 
 def _relevant_anchor_update(scene, update):

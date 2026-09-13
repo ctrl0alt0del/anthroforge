@@ -19,6 +19,8 @@ class AF_PT_MainPanel(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
+        from .warnings import draw
+        draw(layout, context)
         root = get_af_root(context.scene)
         layout.operator("af.import_package", icon="IMPORT")
         layout.operator("af.import_scp_diff", icon="IMPORT")
