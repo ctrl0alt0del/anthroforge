@@ -222,7 +222,7 @@ class FiberV3ProductionTests(unittest.TestCase):
     def test_warm_seed_skips_planner_and_takes_precedence(self):
         request = _bent_request(8)
         warm = tuple((index / 16.0, 0.2, 0.0) for index in range(33))
-        with patch("core.vcp.v3.solver.plan_reference_v43") as planner:
+        with patch("core.vcp.v3.solver.begin_plan_reference_v43") as planner:
             session = begin_v3(replace(request, warm_seed=warm), use_planner=True)
             while session.phase != "SPANS": session.step()
         planner.assert_not_called()
@@ -277,6 +277,16 @@ class FiberV3ProductionTests(unittest.TestCase):
             while not session.done: session.step()
         self.assertEqual(session.package.result.termination.value, "BACKEND_UNAVAILABLE")
         self.assertFalse(session.package.result.validated)
+
+    def test_missing_collision_capability_returns_backend_failure_before_planning(self):
+        session = begin_v3(_bent_request(8))
+        from types import SimpleNamespace
+        with patch("core.vcp.v3.solver.collision_backend_status",
+                   return_value=SimpleNamespace(available=False, message="missing roadmap capability")):
+            session.step()
+        self.assertEqual(session.package.result.termination.value, "BACKEND_UNAVAILABLE")
+        self.assertFalse(session.package.result.validated)
+        self.assertIsNone(session.planner_session)
 
     def test_shadow_and_off_have_identical_solver_output(self):
         request = _bent_request(12)

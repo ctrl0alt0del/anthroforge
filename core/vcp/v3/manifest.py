@@ -15,6 +15,7 @@ V3_ACCEPTED_FEATURES = (
     "dynamic-indexed-ccd", "topology-shared-world-space-bvh-refit",
     "session-local-warm-continuation", "global-cyclic-hard-anchor-cut",
     "validated-surface-anchor-roadmap-access",
+    "conditional-expanded-roadmap-1", "native-exact-roadmap-preparation",
 )
 
 

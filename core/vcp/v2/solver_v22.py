@@ -14,6 +14,7 @@ from .collision import (build_triangle_snapshot, cached_native_collision_world,
 from .contracts import (V2Diagnostics, V2Quality, V2Result, V2Termination,
                         V2Topology, stable_contract_signature)
 from .planner import V2PlannerDiagnostics, plan_reference_v43
+from .planner_search import ROADMAP_POLICY_VERSION
 
 
 V2_SOLVER_V22_VERSION = "fiber-v2.2-solver-1"
@@ -59,11 +60,12 @@ def _collider_key(collider):
 
 def v22_request_signature(request):
     key = v22_snapshot_key(request)
-    return stable_contract_signature(_signature_payload(request, key)) if key else request.signature()
+    payload = _signature_payload(request, key) if key else (ROADMAP_POLICY_VERSION, request.signature())
+    return stable_contract_signature(payload)
 
 
 def _signature_payload(request, key):
-    return {"contract": request.contract_version, "engine": request.engine_version,
+    return {"contract": request.contract_version, "engine": request.engine_version, "planner": ROADMAP_POLICY_VERSION,
             "scene": request.scene_id, "root": request.root_id, "source": request.source_revision,
             "settings": request.settings, "tolerances": request.tolerances,
             "collision": request.collision_policy, "anchors": request.anchors,

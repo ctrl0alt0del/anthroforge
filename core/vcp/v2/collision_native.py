@@ -8,7 +8,8 @@ import numpy as np
 
 
 V2_NATIVE_ABI = 3
-V2_NATIVE_CAPABILITIES = 3276799
+ROADMAP_PREPARATION_CAPABILITY = 134217728
+V2_NATIVE_CAPABILITIES = 3276799 | ROADMAP_PREPARATION_CAPABILITY
 V2_NATIVE_BATCH_CAPABILITY = 1024
 V3_NATIVE_SESSION_CAPABILITY = 32768
 V3_NATIVE_MULTI_SESSION_CAPABILITY = 65536
@@ -78,7 +79,7 @@ class _NativeV3BatchStats(Structure):
 
 _REASONS = ("CLEAR", "AABB_CLEAR", "INVALID_START", "POSSIBLE_COLLISION", "BUDGET_EXHAUSTED")
 _LIBRARIES = {}
-_DEFAULT_NATIVE_PATH = Path(__file__).resolve().parents[3] / "native" / "fiber_ccd" / "af_fiber_ccd_v3_11.dll"
+_DEFAULT_NATIVE_PATH = Path(__file__).resolve().parents[3] / "native" / "fiber_ccd" / "af_fiber_ccd_v3_12.dll"
 
 
 def native_path():
@@ -299,12 +300,39 @@ def _configure_contact_query(library, double, integer, plain):
 
 
 def _configure_graph_queries(library, double, integer):
+    _configure_roadmap_preparation(library, double, integer)
     library.af_graph_shortest_path.argtypes = [double, c_int, integer, integer, c_int, c_int,
                                                 integer, c_int, POINTER(_NativeWorldSearch)]
     library.af_graph_shortest_path.restype = c_int
     library.af_mesh_shortest_path.argtypes = [double, c_int, integer, c_int, c_int, c_int,
                                                integer, c_int, POINTER(_NativeWorldSearch)]
     library.af_mesh_shortest_path.restype = c_int
+
+
+def _configure_roadmap_preparation(library, double, integer):
+    library.af_roadmap_neighbors.argtypes = [double, c_int64, c_int64, c_int64,
+        integer, integer, c_int64, integer, integer, c_int64]
+    library.af_roadmap_neighbors.restype = c_int64
+
+
+def native_roadmap_neighbors(points, offsets, links, limit=48):
+    values, starts, rows = _roadmap_inputs(points, offsets, links)
+    old = len(starts) - 1; count = len(values)
+    capacity = len(rows) + 2 * (count-old) * (min(limit, count-1) + 2)
+    output = np.empty(max(1, capacity), np.int64); indices = np.empty(count+1, np.int64)
+    used = load_native().af_roadmap_neighbors(_double(values), count, old, int(limit),
+        _integer(starts), _integer(rows), len(rows), _integer(indices), _integer(output), capacity)
+    if used < 0: raise ValueError(f"native roadmap preparation failed: {used}")
+    return indices, output[:used]
+
+
+def _roadmap_inputs(points, offsets, links):
+    values = np.ascontiguousarray(points, dtype=np.float64)
+    starts = np.ascontiguousarray(offsets, dtype=np.int64); rows = np.ascontiguousarray(links, dtype=np.int64)
+    if values.ndim != 2 or values.shape[1:] != (3,) or starts.ndim != 1 or rows.ndim != 1:
+        raise ValueError("invalid roadmap preparation arrays")
+    if not 3 <= len(starts) <= len(values)+1: raise ValueError("invalid original roadmap size")
+    return values, starts, rows
 
 
 def load_native(path=None):

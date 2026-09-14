@@ -121,7 +121,9 @@ def _package5_planner(request, snapshot):
 def _merged_planner_diagnostics(first, second):
     a, b = first.diagnostics, second.diagnostics
     return replace(b, planner_ms=a.planner_ms + b.planner_ms,
-                   handoff_ms=a.handoff_ms + b.handoff_ms)
+                   handoff_ms=a.handoff_ms + b.handoff_ms,
+                   attempts=a.attempts+b.attempts, recoveries=a.recoveries+b.recoveries,
+                   phase_timings=a.phase_timings+b.phase_timings)
 
 
 def _solver_state(request, planner, snapshot, contact_weight, optimized=False):

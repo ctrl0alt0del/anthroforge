@@ -1110,7 +1110,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
             _root_obj, fiber, _origin, _insert = _fiber_setup()
         proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
         self.assertEqual((fiber.solver_version, proxy.get("af_fiber_output_engine")), (2, "V2"))
-        self.assertEqual(proxy.get("af_fiber_output_engine_version"), "fiber-v2-production-3")
+        self.assertEqual(proxy.get("af_fiber_output_engine_version"), "fiber-v2-production-4")
 
     def test_bake_iteration_policy_edit_does_not_trigger_runtime(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup()

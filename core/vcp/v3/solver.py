@@ -5,11 +5,12 @@ from time import perf_counter
 
 import numpy as np
 
-from ..v2.collision import build_triangle_snapshot_known, cached_native_collision_world_batch
+from ..v2.collision import build_triangle_snapshot_known, cached_native_collision_world_batch, collision_backend_status
 from ..v2.contact_core import (_finish_contact_session, _spacing_weight,
                                begin_contact_core, _planner_seed)
 from ..fiber_numeric_contracts import FiberNumericTermination
-from ..v2.planner import plan_reference_v43
+from ..v2.planner import begin_plan_reference_v43
+from ..v2.planner_search import ROADMAP_POLICY_VERSION
 from ..v2.trust_sqp import _spacing_energy
 from .contracts import v3_diagnostics
 from .cyclic import (cyclic_lengths, cyclic_planner_seed, is_cyclic_request,
@@ -19,7 +20,7 @@ from .shortcut import V3ShortcutTrace, apply_v3_shortcut
 from .spans import aggregate_spans, prepare_span_request, synchronize_owner_spans
 
 
-V3_SOLVER_VERSION = "fiber-v3-production-10"
+V3_SOLVER_VERSION = "fiber-v3-production-11"
 
 
 @dataclass
@@ -51,12 +52,15 @@ class V3SolveSession:
     native_infeasible: object = None
     native_trial_batch: int = 1
     cyclic: bool = False
+    planner_session: object = None
+    planner_policy: object = None
 
     def step(self):
         _advance_v3(self)
         return self.package
 
     def cancel(self):
+        if self.planner_session is not None: self.planner_session.cancel(); self.planner_session = None
         if self.native_run is not None: self.native_run.cancel(); self.native_run = None
         for row in self.spans:
             cancel = getattr(row, "cancel", None)
@@ -80,21 +84,22 @@ class V3SolveSession:
 
 def begin_v3_session(request, snapshot=None, preview=False, checkpoint_steps=0,
                      use_planner=True, policy=V3_PRODUCTION_POLICY, native_session=True,
-                     native_controller=False):
-    version = f"{V3_SOLVER_VERSION}:{policy.fingerprint()[:12]}"
+                     native_controller=False, *, planner_policy=None):
+    version = f"{V3_SOLVER_VERSION}:{policy.fingerprint()[:12]}:{ROADMAP_POLICY_VERSION}"
     accepted = replace(accepted_v3_request(request, policy), engine_version=version)
     value = V3SolveSession(accepted, snapshot, preview, max(0, int(checkpoint_steps)),
                            bool(use_planner), policy)
     value.native_session = bool(native_session); value.native_controller = bool(native_controller)
     value.cyclic = is_cyclic_request(accepted)
+    value.planner_policy = planner_policy
     return value
 
 
 def solve_v3_session(request, snapshot=None, preview=False, checkpoint_steps=0,
                      use_planner=True, policy=V3_PRODUCTION_POLICY, native_session=True,
-                     native_controller=False):
+                     native_controller=False, *, planner_policy=None):
     session = begin_v3_session(request, snapshot, preview, checkpoint_steps, use_planner,
-                               policy, native_session, native_controller)
+                               policy, native_session, native_controller, planner_policy=planner_policy)
     if native_controller: session.native_trial_batch = 64
     while not session.done: session.step()
     return session.package
@@ -110,18 +115,38 @@ def _advance_v3(session):
 
 
 def _prepare_world(session):
+    status = collision_backend_status()
+    if not status.available: _world_unavailable(session, status.message); return
     session.world = cached_native_collision_world_batch(session.request.colliders)
     if session.snapshot is None:
         session.snapshot = build_triangle_snapshot_known(session.request.colliders, session.world.closed_flags)
     session.phase = "PLAN"
 
 
+def _world_unavailable(session, message):
+    from ..v2.contact_core import _failed_package
+    package = _failed_package(session.request, FiberNumericTermination.BACKEND_UNAVAILABLE, message, session.started)
+    session.planner = replace(package.planner, failure_reason="BACKEND_UNAVAILABLE")
+    result = replace(package.result, engine_version=V3_SOLVER_VERSION)
+    session.package = replace(package, planner=session.planner, result=result)
+    session.done, session.phase = True, "DONE"
+
+
 def _prepare_plan(session):
-    if _prepare_warm_plan(session): session.phase = "SEED"; return
-    if session.use_planner:
-        session.planner = plan_reference_v43(session.request, session.snapshot, native_world=session.world)
+    if session.planner_session is None and _prepare_warm_plan(session): session.phase = "SEED"; return
+    if session.use_planner and not _advance_plan(session): return
     session.seed, session.pins = _initial_seed(session)
     session.phase = "SEED"
+
+
+def _advance_plan(session):
+    if session.planner_session is None:
+        session.planner_session = begin_plan_reference_v43(session.request, session.snapshot,
+            native_world=session.world, policy=session.planner_policy)
+    session.planner_session.step()
+    if not session.planner_session.done: return False
+    session.planner = session.planner_session.result; session.planner_session = None
+    return True
 
 
 def _prepare_warm_plan(session):

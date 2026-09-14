@@ -20,7 +20,7 @@ from .planner_anchor_access import anchor_access_candidates, append_access_neigh
 V2_PLANNER_VERSION = "fiber-v2-planner-1"
 V2_PLANNER_41_VERSION = "fiber-v2-planner-1.1"
 V2_PLANNER_42_VERSION = "fiber-v2-planner-1.2"
-V2_PLANNER_43_VERSION = "fiber-v2-planner-1.5"
+V2_PLANNER_43_VERSION = "fiber-v2-planner-1.6"
 _SPARSE_LIMIT = 96
 _DENSE_LIMIT = 240
 _SPARSE_NEIGHBORS = 24
@@ -71,6 +71,9 @@ class V2PlannerDiagnostics:
     shared_candidates: int = 0
     native_search_ms: float = 0.0
     native_collision_ms: float = 0.0
+    attempts: tuple = ()
+    recoveries: tuple = ()
+    phase_timings: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -85,6 +88,7 @@ class V2PlannerResult:
     diagnostics: V2PlannerDiagnostics = V2PlannerDiagnostics()
     message: str = ""
     spans: tuple = ()
+    failure_reason: str = ""
 
     @property
     def succeeded(self):
@@ -114,6 +118,7 @@ class _PlannerState:
     native_collision_ms: float = 0.0
     owner_contact_factor: float = 2.5
     fixed_pin_indices: tuple = ()
+    search_context: object = None
 
 
 @dataclass(frozen=True)
@@ -140,19 +145,18 @@ def plan_reference_v42(request, snapshot=None):
     return _plan_reference(request, snapshot, _plan_segments_v42)
 
 
-def plan_reference_v43(request, snapshot=None, owner_contact_factor=2.5, native_world=None, pin_indices=()):
-    """Plan with optional fixed pin indices; omitted indices retain the default layout."""
-    pin_indices = tuple(pin_indices)
-    started = perf_counter(); issue = _configuration_issue(request) or _pin_layout_issue(request, pin_indices)
-    if issue:
-        return _failed(V2Termination.INVALID_CONFIGURATION, issue, started)
-    if not collision_backend_status().available:
-        return _failed(V2Termination.BACKEND_UNAVAILABLE, "native collision backend unavailable", started)
-    state = _v43_state(request, snapshot, owner_contact_factor, native_world, pin_indices)
-    invalid = _invalid_anchor(state)
-    if invalid:
-        return _failed_with_state(state, V2Termination.INVALID_ATTACHMENT, invalid, started)
-    return _finish_plan(state, _plan_segments_v41(state), started)
+def plan_reference_v43(request, snapshot=None, owner_contact_factor=2.5, native_world=None, pin_indices=(), *, policy=None):
+    """Drain the same request-local planner used by progressive V3 sessions."""
+    session = begin_plan_reference_v43(request, snapshot, owner_contact_factor, native_world, pin_indices, policy=policy)
+    while not session.done: session.step()
+    return session.result
+
+
+def begin_plan_reference_v43(request, snapshot=None, owner_contact_factor=2.5, native_world=None, pin_indices=(), *, policy=None):
+    from .planner_session import PlannerSession
+    from .planner_search import PRODUCTION_ROADMAP_POLICY
+    return PlannerSession(request, snapshot, owner_contact_factor, native_world, tuple(pin_indices),
+                           PRODUCTION_ROADMAP_POLICY if policy is None else policy)
 
 
 def _v43_state(request, snapshot, owner_contact_factor, native_world=None, pin_indices=()):

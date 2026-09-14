@@ -66,7 +66,9 @@ class FiberV3NativeOperationExperimentTests(unittest.TestCase):
     def test_experimental_backend_is_isolated_and_available(self):
         self.assertNotEqual(EXPERIMENT_DLL.name, "af_fiber_ccd_v3.dll")
         available, version, message = native_status(EXPERIMENT_DLL)
-        self.assertTrue(available, message); self.assertIn("4194303", version)
+        self.assertTrue(available, message)
+        capabilities = int(version.split('.')[1])
+        self.assertEqual(capabilities & 4194303, 4194303)
 
     def test_cpp_coordinator_preserves_indexed_kernel_outputs(self):
         with experimental_backend():

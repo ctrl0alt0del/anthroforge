@@ -11,14 +11,14 @@ from .collision import (V2OwnerContact, build_triangle_snapshot_known,
 from .collision_native import native_contact_block_solve
 from .contracts import V2Diagnostics, V2Result, V2Termination, V2Topology
 from .planner import (V2PlannerDiagnostics, V2PlannerMode, V2PlannerResult,
-                      plan_reference_v43)
+                      plan_reference_v43, begin_plan_reference_v43)
 from .structural import _base_bands, _static_settings
 from .trust_sqp import (actual_reduction, model_reduction, solve_trust_sqp,
                          objective_diagonal, objective_energy, objective_gradient,
                          update_trust_radius)
 
 
-V2_CONTACT_CORE_VERSION = "fiber-v2-production-3"
+V2_CONTACT_CORE_VERSION = "fiber-v2-production-4"
 
 
 @dataclass(frozen=True)
@@ -133,11 +133,13 @@ class V2ContactCoreSession:
     diagnostic_trace: bool = False
     policy: object = None
     native_session_enabled: bool = True
+    planner_session: object = None
 
     def step(self):
         return _advance_contact_session(self)
 
     def cancel(self):
+        if self.planner_session is not None: self.planner_session.cancel(); self.planner_session = None
         _close_native_session(self.state)
         self.done = True
 
@@ -342,9 +344,20 @@ def _prepare_snapshot(session):
 
 def _prepare_planner(session):
     state = session.state
-    state.planner = _optional_planner(session.request, state.snapshot, state.world, session.use_planner)
+    if session.use_planner and not _advance_planner(session): return
+    if not session.use_planner: state.planner = _planner_unavailable("planner disabled for solver qualification")
     session.seed_candidates = _seed_candidates(state)
     session.phase = "SEED"
+
+
+def _advance_planner(session):
+    if session.planner_session is None:
+        state = session.state
+        session.planner_session = begin_plan_reference_v43(session.request, state.snapshot, native_world=state.world)
+    session.planner_session.step()
+    if not session.planner_session.done: return False
+    session.state.planner = session.planner_session.result; session.planner_session = None
+    return True
 
 
 def _prepare_seed(session):

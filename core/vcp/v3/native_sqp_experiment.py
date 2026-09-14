@@ -32,6 +32,9 @@ class _SqpConfig(Structure):
 class _SqpResult(Structure):
     _fields_ = [(name, c_int) for name in ("termination", "accepted", "rejected", "trials",
         "contacts", "ccd_pairs", "ccd_tests", "spacing_enabled", "validated", "trace_count")]
+    _fields_ += [(name, c_int) for name in ("feasibility_iterations", "multiplier_updates",
+        "regularization_increases", "regularization_decreases", "injected_contacts",
+        "limiting_contacts", "contact_groups")]
     _fields_ += [(name, c_double) for name in ("energy", "fixed_residual", "stationarity",
         "regularization", "trust_radius", "maximum_violation", "elapsed_ms")]
 

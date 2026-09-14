@@ -19,6 +19,7 @@
 #endif
 
 #define AF_EXPORT extern "C" __declspec(dllexport)
+#include "af_roadmap_preparation.hpp"
 
 constexpr int AF_V3_CCD_JOB_PAIRS=128;
 constexpr int AF_V3_INDEXED_CLEAR_STREAK=4;
@@ -253,7 +254,7 @@ static Context context(const double* start, const double* end, const double* tri
 AF_EXPORT int af_fiber_ccd_version() { return 3; }
 
 AF_EXPORT int af_fiber_ccd_capabilities() {
-    return 8191|af_parallel_capability()|af_llvm_openmp_capability()|
+    return 8191|134217728|af_parallel_capability()|af_llvm_openmp_capability()|
            af_v3_session_capability()|af_v3_batch_capability()|af_v3_indexed_ccd_capability()|af_v3_native_world_capability()|af_v3_operations_capability()|
            af_v3_coordinator_capability()|af_v3_native_sqp_capability()|af_v3_resumable_sqp_capability()|af_v3_multi_sqp_capability()|af_v3_async_sqp_capability()|af_attachment_wave_capability()|af_muscle_numeric_capability();
 }
