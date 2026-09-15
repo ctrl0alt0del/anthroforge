@@ -213,15 +213,15 @@ def _with_point(specs, points):
 def _mesh_loop_specs(context, root):
     obj = getattr(context, "active_object", None)
     indices = _selected_mesh_indices(obj)
-    return (None, "Select at least three mesh vertices.") if len(indices) < 3 else (_mesh_specs(root, context.scene, obj, indices), "")
+    if len(indices) < 3: return None, "Select at least three mesh vertices."
+    specs = _mesh_specs(root, context.scene, obj, indices)
+    if len(specs) != len(indices): return None, "No usable collision-clear pin was found for every selected vertex."
+    return specs, ""
 
 
 def _mesh_loop_point_specs(context, root):
-    obj = getattr(context, "active_object", None)
-    indices = _selected_mesh_indices(obj)
-    if len(indices) < 3:
-        return None, "Select at least three mesh vertices."
-    return _point_specs(root, context.scene, _mesh_specs(root, context.scene, obj, indices))
+    specs, error = _mesh_loop_specs(context, root)
+    return (None, error) if error else _point_specs(root, context.scene, specs)
 
 
 def _common_mirror_rule(root, scp_ids):
@@ -572,25 +572,25 @@ def _selected_proxy_vertices():
 
 def _capture_attachment_from_world():
     try:
-        from ...core.vcp.attachment_backend import capture_attachment_from_world
+        from ...core.vcp.fiber_pin_snapping import capture_attachment_from_world
     except ImportError:
-        from core.vcp.attachment_backend import capture_attachment_from_world
+        from core.vcp.fiber_pin_snapping import capture_attachment_from_world
     return capture_attachment_from_world
 
 
 def _capture_attachment_from_mesh_vertex():
     try:
-        from ...core.vcp.attachment_backend import capture_attachment_from_mesh_vertex
+        from ...core.vcp.fiber_pin_snapping import capture_attachment_from_mesh_vertex
     except ImportError:
-        from core.vcp.attachment_backend import capture_attachment_from_mesh_vertex
+        from core.vcp.fiber_pin_snapping import capture_attachment_from_mesh_vertex
     return capture_attachment_from_mesh_vertex
 
 
 def _capture_attachment_from_proxy_vertex():
     try:
-        from ...core.vcp.attachment_backend import capture_attachment_from_proxy_vertex
+        from ...core.vcp.fiber_pin_snapping import capture_attachment_from_proxy_vertex
     except ImportError:
-        from core.vcp.attachment_backend import capture_attachment_from_proxy_vertex
+        from core.vcp.fiber_pin_snapping import capture_attachment_from_proxy_vertex
     return capture_attachment_from_proxy_vertex
 
 

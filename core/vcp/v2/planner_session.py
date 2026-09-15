@@ -54,7 +54,8 @@ def _fail(session, reason, message):
 def _complete(session):
     context = None if session.state is None else session.state.search_context
     diag = replace(session.result.diagnostics, phase_timings=tuple(session.timings),
-        attempts=tuple(context.attempts) if context else (), recoveries=tuple(context.recoveries) if context else ())
+        attempts=tuple(context.attempts) if context else (), recoveries=tuple(context.recoveries) if context else (),
+        pin_recoveries=tuple(context.pin_recoveries) if context else ())
     session.result = replace(session.result, diagnostics=diag)
     if context: context.release()
     session.state = session.iterator = session.snapshot = session.native_world = session.request = None
@@ -89,10 +90,16 @@ def _finish(session, routes):
     result = p._finish_plan(session.state, routes, session.started)
     if routes is None:
         return replace(result, failure_reason=session.state.search_context.outcome.value,
-            message="no route found in the searched candidate graph")
+            message=_route_failure_message(session.state.search_context))
     reason = "" if result.succeeded else (RoadmapOutcome.HANDOFF_COUNT_FAILED.value
         if "cannot fit" in result.message else RoadmapOutcome.HANDOFF_VALIDATION_FAILED.value)
     return replace(result, failure_reason=reason)
+
+
+def _route_failure_message(context):
+    if context.pin_recoveries and context.pin_recoveries[-1].span == context.span:
+        return "no connection found within pin-exit recovery bounds: " + context.outcome.value.lower()
+    return "no route found in the searched candidate graph"
 
 
 def _span_steps(session):
@@ -117,8 +124,16 @@ def _pair_steps(session, start, end):
     if surface is None: surface = p._surface_route(state, start, end)
     yield "SURFACE_MESH"
     if surface is not None: return surface
-    route = yield from _roadmap_steps(session, start, end)
+    route = yield from _roadmap_with_recovery(session, start, end)
     return p._roadmap_segment(route) if route is not None else None
+
+
+def _roadmap_with_recovery(session, start, end):
+    route = yield from _roadmap_steps(session, start, end)
+    if route is None and session.policy.pin_recovery:
+        from .planner_pin_recovery import recover_steps
+        route = yield from recover_steps(session, start, end)
+    return route
 
 
 def _roadmap_steps(session, start, end):

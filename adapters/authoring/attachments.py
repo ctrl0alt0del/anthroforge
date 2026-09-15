@@ -27,10 +27,13 @@ def authoring_owner(root, scene, owner):
 
 def snap_binding(root, scene, owner, point):
     from mathutils import Vector
-    from ...core.vcp.attachment_backend import capture_attachment_from_world
-    raw = capture_attachment_from_world(root, scene, owner, Vector(point))
+    from ...core.vcp.attachment_backend import attachment_runtime
+    from ...core.vcp.fiber_pin_snapping import capture_attachment_from_world
+    runtime = attachment_runtime(scene)
+    raw = capture_attachment_from_world(root, scene, owner, Vector(point), runtime)
     value = fiber_surface_param(raw) if raw else None
-    require(value is not None, 'SURFACE_PICK_FAILED', owner)
+    result = runtime.get('pin_snap_last_result')
+    require(value is not None, 'SURFACE_PICK_FAILED', f"{owner}: {getattr(result, 'reason', '')}")
     return {key: list(row) for key, row in value.items()}
 
 

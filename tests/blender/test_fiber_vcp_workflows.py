@@ -1110,7 +1110,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
             _root_obj, fiber, _origin, _insert = _fiber_setup()
         proxy = find_flagged("af_fiber_proxy", fiber.id, "af_fiber_id")
         self.assertEqual((fiber.solver_version, proxy.get("af_fiber_output_engine")), (2, "V2"))
-        self.assertEqual(proxy.get("af_fiber_output_engine_version"), "fiber-v2-production-4")
+        self.assertEqual(proxy.get("af_fiber_output_engine_version"), "fiber-v2-production-5")
 
     def test_bake_iteration_policy_edit_does_not_trigger_runtime(self):
         _root_obj, fiber, _origin, _insert = _fiber_setup()
@@ -1256,6 +1256,8 @@ class FiberVcpWorkflowTests(BlenderTestCase):
             changed = fiber_runtime.apply_fiber_control_update(register_fiber_sync(), root_obj, bpy.context.scene, handle, bpy.context.evaluated_depsgraph_get())
         self.assertIsNone(changed)
         self.assertEqual((fiber.a_parent_id, fiber.a_attach_param), (origin.id, before))
+        expected = endpoint_world(root_obj, bpy.context.scene, {}, origin.id, before)
+        self.assertLess((handle.location - expected).length, 1e-6)
 
     def test_fiber_update_projects_endpoint_handle_to_surface(self):
         root_obj, fiber, _origin, _insert = _fiber_setup()
@@ -1324,6 +1326,7 @@ class FiberVcpWorkflowTests(BlenderTestCase):
 
     def test_recompute_fiber_rejects_legacy_attach_payloads(self):
         for raw in (encode_fiber_shape_param(0.25), encode_fiber_mesh_anchor(Vector((0.0, 0.0, 0.0))), encode_fiber_vertex_index(0, "sig")):
+            self.setUp()  # Independent legacy cases must not add coincident SCP blockers.
             _root_obj, fiber, _origin, _insert = _fiber_setup()
             fiber.a_attach_param = raw
             result = recompute_fiber_action(bpy.context, fiber.id)

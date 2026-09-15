@@ -414,8 +414,26 @@ def _apply_attachment_target(sync, fiber, changed_ids, setters, owner, raw, targ
     return True
 
 
-def _changed_attachment(sync, root, scene, parent_id, location, depsgraph):
-    return capture_attachment_target(sync, root, scene, parent_id, location, depsgraph)
+def _changed_attachment(sync, root, scene, parent_id, obj, depsgraph, fiber, raw, offset=0.):
+    target = capture_attachment_target(sync, root, scene, parent_id, obj.location.copy(), depsgraph,
+                                       float(fiber.collision_radius), offset)
+    if target is None: _restore_pin_handle(root, scene, obj, parent_id, raw, depsgraph)
+    return target
+
+
+def _restore_pin_handle(root, scene, obj, owner, raw, depsgraph):
+    from ..vcp.attachment_backend import attachment_runtime, resolve_attachment_world
+    point = resolve_attachment_world(root, scene, owner, raw, attachment_runtime(scene, depsgraph))
+    if point is not None: _place_handle_world(obj, point)
+
+
+def _apply_handle_target(sync, fiber, changed_ids, setters, owner, raw, target, context):
+    changed = _apply_attachment_target(sync, fiber, changed_ids, setters, owner, raw, target)
+    if context is not None:
+        root, scene, obj, depsgraph = context
+        final_owner, final_raw = (target.owner_id, target.raw) if changed else (owner, raw)
+        _restore_pin_handle(root, scene, obj, final_owner, final_raw, depsgraph)
+    return changed
 
 
 def _endpoint_parts(fiber, endpoint):
@@ -430,14 +448,14 @@ def _update_endpoint_handle(sync, root, scene, obj, changed_ids, depsgraph=None)
     if fiber is None:
         return False
     parent_id, current, slot = _endpoint_parts(fiber, endpoint)
-    target = _changed_attachment(sync, root, scene, parent_id, obj.location.copy(), depsgraph)
+    target = _changed_attachment(sync, root, scene, parent_id, obj, depsgraph, fiber, current)
     if target is None: return False
     aspect = f"attachment.{str(endpoint).lower()}.param"
     payload = {"endpoint": str(endpoint or "")}
     target = _resolved_attachment(fiber, aspect, parent_id, current, target, payload)
     setters = (lambda value: setattr(fiber, f"{str(endpoint).lower()}_parent_id", value),
                lambda value: setattr(fiber, slot, value))
-    return _apply_attachment_target(sync, fiber, changed_ids, setters, parent_id, current, target)
+    return _apply_handle_target(sync, fiber, changed_ids, setters, parent_id, current, target, (root, scene, obj, depsgraph))
 
 
 def _touch_at(fiber, touch_index):
@@ -453,14 +471,14 @@ def _update_touch_handle(sync, root, scene, obj, changed_ids, depsgraph=None):
     if tp is None:
         return False
     current = str(tp.attach_param or "")
-    target = _changed_attachment(sync, root, scene, tp.parent_id, obj.location.copy(), depsgraph)
+    target = _changed_attachment(sync, root, scene, tp.parent_id, obj, depsgraph, fiber, current, tp.normal_offset)
     if target is None: return False
     aspect = f"attachment.touch[{int(touch_index)}].param"
     target = _resolved_attachment(fiber, aspect, tp.parent_id, current, target,
                                   {"touch_index": int(touch_index)})
     setters = (lambda value: setattr(tp, "parent_id", value),
                lambda value: setattr(tp, "attach_param", value))
-    return _apply_attachment_target(sync, fiber, changed_ids, setters, tp.parent_id, current, target)
+    return _apply_handle_target(sync, fiber, changed_ids, setters, tp.parent_id, current, target, (root, scene, obj, depsgraph))
 
 
 def _update_loop_anchor_handle(sync, root, scene, obj, changed_ids, depsgraph=None):
@@ -469,19 +487,18 @@ def _update_loop_anchor_handle(sync, root, scene, obj, changed_ids, depsgraph=No
     if fiber is None or anchor_index < 0 or anchor_index >= len(fiber.loop_anchors):
         return False
     anchor = fiber.loop_anchors[anchor_index]
-    target = _changed_attachment(sync, root, scene, anchor.parent_id, obj.location.copy(), depsgraph)
-    return _apply_loop_anchor_target(sync, fiber, anchor, anchor_index, target, changed_ids)
+    target = _changed_attachment(sync, root, scene, anchor.parent_id, obj, depsgraph, fiber, anchor.attach_param)
+    return _apply_loop_anchor_target(sync, fiber, anchor, anchor_index, target, changed_ids, (root, scene, obj, depsgraph))
 
 
-def _apply_loop_anchor_target(sync, fiber, anchor, index, target, changed_ids):
+def _apply_loop_anchor_target(sync, fiber, anchor, index, target, changed_ids, context=None):
     if target is None: return False
     current = str(anchor.attach_param or ""); payload = {"loop_anchor_index": int(index)}
     aspect = f"attachment.loop_anchor[{int(index)}].param"
     target = _resolved_attachment(fiber, aspect, anchor.parent_id, current, target, payload)
     setters = (lambda value: setattr(anchor, "parent_id", value),
                lambda value: setattr(anchor, "attach_param", value))
-    return _apply_attachment_target(sync, fiber, changed_ids, setters,
-                                    anchor.parent_id, current, target)
+    return _apply_handle_target(sync, fiber, changed_ids, setters, anchor.parent_id, current, target, context)
 
 
 def _is_relevant_update_obj(sync, root, vis_col, obj):

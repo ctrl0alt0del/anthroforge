@@ -305,7 +305,7 @@ class VcpUseCaseTests(unittest.TestCase):
         fiber = Bag(id="F1", mid_touches=FakeCollection())
         root_obj = root(fibers=[fiber], active_type="FIBER", active_id="F1")
         ctx = context(scene(root_obj))
-        with patch("app.use_cases.fiber_tools._capture_attachment_from_world", return_value=lambda *_args: "RAW"):
+        with patch("app.use_cases.fiber_tools._capture_attachment_from_world", return_value=lambda *_args, **_kwargs: "RAW"):
             with patch("app.use_cases.fiber_tools._fiber_sync", return_value=SimpleNamespace(clear_solver_cache=lambda *_a: None)):
                 with patch("app.use_cases.fiber_tools._sync_entity", return_value=None):
                     result = add_fiber_touch_point_at_world(ctx, "F1", "S1", (1.0, 2.0, 3.0))

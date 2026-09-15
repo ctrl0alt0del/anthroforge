@@ -62,3 +62,18 @@ AF_EXPORT int64_t af_roadmap_neighbors(const double* p, int64_t n, int64_t old, 
         return af_roadmap::emit(graph,out_offsets,out_links,capacity);
     } catch (...) { return -3; }
 }
+
+AF_EXPORT int af_roadmap_nearest_batch(const double* p, int64_t n, int64_t first,
+    int64_t count, int64_t k, int64_t* output) {
+    try {
+        if (!p || !output || n<2 || first<0 || count<0 || count>64 || first>n-count || k<0 || k>=n) return -1;
+        if (n>std::numeric_limits<int64_t>::max()/3) return -1;
+        for (int64_t i=0;i<3*n;++i) if (!std::isfinite(p[i])) return -1;
+        std::vector<af_roadmap::Item> work;
+        for (int64_t i=0;i<count;++i) {
+            af_roadmap::nearest(p,n,first+i,k,work);
+            for (int64_t j=0;j<k;++j) output[i*k+j]=work[j].second;
+        }
+        return 0;
+    } catch (...) { return -3; }
+}

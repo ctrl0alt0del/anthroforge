@@ -1,11 +1,12 @@
-"""Use the endpoint tools' evaluated-surface snapping and hard-anchor preflight.
+"""Use the endpoint tools' qualified surface snapping and hard-anchor preflight.
 
 Inputs and distances are world-space scene units. Valid hits include an `anchor`
 record for publication and an `attachment` for native endpoint/touch RNA. The latter
 contains the exact snapping payload; use it unchanged with zero touch offset.
 `normal` follows authoring's outward convention; `native_normal` preserves the
-native winding convention (different on reflected objects). Blocked/distant hits
-expose the nearest location for review, but no attachment that can be published.
+native winding convention (different on reflected objects). `snapping` reports
+fallback mode, initial rejection reason, displacement and work. Failed/distant
+hits have no publishable attachment. Qualification is local, not a route guarantee.
 """
 from dataclasses import asdict
 from mathutils import Vector
@@ -15,6 +16,7 @@ from ...core.authoring.geometry import world_vertices
 from ...core.attachment_codec import fiber_surface_param
 from ...core.scp_runtime.common import find_geometry_mesh_scp_obj
 from ...core.vcp import attachment_backend as backend
+from ...core.vcp.fiber_pin_snapping import qualify_attachment
 from ...core.vcp.fiber_anchor_preflight import FiberHardAnchor, evaluate_anchor_preflight
 from ...core.vcp.v2.contracts import V2AnchorRole, V2ArrayColliderSnapshot, V2CollisionPolicy, V2Quality
 from ...core.vcp.v2.scales import resolve_tolerances
@@ -29,7 +31,7 @@ def snap_points(root, scene, params, inventory):
     runtime = backend.attachment_runtime(scene)
     topology = backend.surface_binding_topology(obj, runtime, scene)
     require(bool(topology), 'SURFACE_UNAVAILABLE', owner)
-    hits = [snap_one(root, scene, obj, runtime, owner, point, i) for i, point in enumerate(params['points'])]
+    hits = [snap_one(root, scene, obj, runtime, owner, point, i, params) for i, point in enumerate(params['points'])]
     preflight(hits, params, inventory)
     for hit in hits:
         validate_binding(hit, inventory['geometry'][owner])
@@ -37,8 +39,17 @@ def snap_points(root, scene, params, inventory):
     return hits
 
 
-def snap_one(root, scene, obj, runtime, owner, guess, index):
+def snap_one(root, scene, obj, runtime, owner, guess, index, params=None):
     raw = backend.capture_attachment_from_world(root, scene, owner, Vector(guess), runtime)
+    result = qualify_attachment(root, scene, owner, raw, runtime, (params or {}).get('collision_radius', .002), origin=guess)
+    hit = _raw_hit(root, scene, obj, runtime, owner, guess, index, result.raw if result.valid else raw)
+    hit['snapping'] = dict(mode=result.mode, reason=result.reason, displacement=result.displacement,
+                           tests=result.tests, elapsed_ms=result.elapsed_ms)
+    if not result.valid: reject(hit, 'PIN_SNAP_UNRESOLVED', result.reason)
+    return hit
+
+
+def _raw_hit(root, scene, obj, runtime, owner, guess, index, raw):
     frame = backend.resolve_surface_frame(obj, raw, runtime, scene) if raw else None
     hit = dict(index=index, input_point=list(guess), owner=owner, hit=frame is not None, diagnostics=[])
     if frame is None:

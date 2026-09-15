@@ -7,7 +7,7 @@ from .contact_core import begin_contact_core, solve_contact_core
 from .structural import clear_structural_cache, structural_cache_stats
 
 
-V2_PRODUCTION_VERSION = "fiber-v2-production-4"
+V2_PRODUCTION_VERSION = "fiber-v2-production-5"
 V2_ACCEPTED_FEATURES = (
     "package-1-contracts", "package-2-banded-structural", "package-3-native-collision",
     "package-4.3-native-planner", "package-5.1-fused-contacts", "package-6.1-dispatch",
@@ -17,6 +17,7 @@ V2_ACCEPTED_FEATURES = (
     "augmented-unilateral-contact", "infeasible-start-filter",
     "native-block-pentadiagonal", "limiting-contact-injection",
     "conditional-expanded-roadmap-1", "native-roadmap-preparation",
+    "conditional-pin-exit-sampling", "bounded-bidirectional-pin-connection",
 )
 
 

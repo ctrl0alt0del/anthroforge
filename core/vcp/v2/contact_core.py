@@ -18,7 +18,7 @@ from .trust_sqp import (actual_reduction, model_reduction, solve_trust_sqp,
                          update_trust_radius)
 
 
-V2_CONTACT_CORE_VERSION = "fiber-v2-production-4"
+V2_CONTACT_CORE_VERSION = "fiber-v2-production-5"
 
 
 @dataclass(frozen=True)

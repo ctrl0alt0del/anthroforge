@@ -1,4 +1,4 @@
-param([string]$OutputName = "af_fiber_ccd_v3_12.dll")
+param([string]$OutputName = "af_fiber_ccd_v3_13.dll")
 $ErrorActionPreference = "Stop"
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $VsWhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"

@@ -21,8 +21,11 @@ nearest point on that SCP, bounded by the sampling projection's search_distance.
 Explicit curve/patch sampling retains its directional projection. All results
 must lie inside the chosen region. Offset defaults to zero; only open-fiber middle
 touches allow an explicit offset. Endpoints and loop anchors require zero.
-Blocked/distant hits are unresolved and require a new guess; anatomical region
-membership and the route between anchors still require separate authoring review.
+Snapping keeps a qualified nearest hit unchanged. Otherwise it searches the same
+SCP for an exposed, collision-clear attachment with a usable local exit. Each hit's
+snapping record reports mode, reason, displacement, tests and elapsed_ms. Failed
+searches or hits beyond max_distance remain unresolved. This is not a complete
+route guarantee; anatomical region membership and routing still require review.
 
 anatomy.discover includes saved profile counts and journal location. anatomy.catalog
 searches the current root's saved regions by document_id, profile, scp_id,

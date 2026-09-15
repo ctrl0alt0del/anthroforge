@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from ..vcp.attachment_backend import (attachment_runtime, capture_attachment_from_object,
                                       capture_attachment_from_object_ray, resolve_surface_frame)
 from . import fiber_view_capture
+from ..vcp.fiber_pin_snapping import qualify_attachment
 
 
 @dataclass(frozen=True)
@@ -12,14 +13,18 @@ class FiberAttachmentTarget:
     owner_id: str
     raw: str
     score: float
+    snapping: object = None
 
 
-def capture_attachment_target(sync, root, scene, owner_id, moved_world, depsgraph=None):
+def capture_attachment_target(sync, root, scene, owner_id, moved_world, depsgraph=None, radius=.002, offset=0.):
     runtime = attachment_runtime(scene, depsgraph)
     ray = sync._view_ray_for_world_point(moved_world)
     rows = _surface_rows(sync, root, scene)
     candidates = _capture_candidates(rows, moved_world, ray, runtime, scene)
-    return _preferred_target(candidates, str(owner_id or ""))
+    target = _preferred_target(candidates, str(owner_id or ""))
+    if target is None: return None
+    result = qualify_attachment(root, scene, target.owner_id, target.raw, runtime, radius, offset)
+    return replace(target, raw=result.raw, snapping=result) if result.valid else None
 
 
 def with_attachment_raw(target, raw):

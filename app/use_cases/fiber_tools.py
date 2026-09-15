@@ -219,7 +219,7 @@ def add_fiber_touch_point_at_world(context, fiber_id, scp_id, point):
     fiber, error = _resolved_fiber(root, fiber_id)
     if fiber is None:
         return failure(error)
-    spec = _world_touch_spec(root, context.scene, scp_id, point)
+    spec = _world_touch_spec(root, context.scene, scp_id, point, float(getattr(fiber, 'collision_radius', .002)))
     if spec is None:
         return failure("Click a valid SCP geometry surface.")
     return _append_touch_result(context, root, fiber, (spec,))
@@ -288,10 +288,11 @@ def _resolved_touches(context, root, fiber_id):
     fiber, _error = _resolved_fiber(root, fiber_id)
     if fiber is None:
         return None, "No active fiber."
-    touch_specs, error = _selected_touch_specs(context, root)
+    radius = float(getattr(fiber, 'collision_radius', .002))
+    touch_specs, error = _selected_touch_specs(context, root, radius)
     if error:
         return None, error
-    touch_specs = touch_specs or _default_touch_specs(context, root)
+    touch_specs = touch_specs or _default_touch_specs(context, root, radius)
     return (None, "Select a fiber and a valid SCP geometry object.") if not touch_specs else ((fiber, touch_specs), "")
 
 
@@ -354,21 +355,23 @@ def _append_touch(fiber, scp_id, attach_param):
     touch.parent_id, touch.attach_param = scp_id, attach_param
 
 
-def _selected_touch_specs(context, root):
+def _selected_touch_specs(context, root, radius=.002):
     if _proxy_edit_target(context):
-        return _proxy_touch_specs(context, root)
+        return _proxy_touch_specs(context, root, radius)
     if _geometry_edit_target(context, root.name):
-        return _mesh_touch_specs(context, root)
+        return _mesh_touch_specs(context, root, radius)
     return (), ""
 
 
-def _proxy_touch_specs(context, root):
+def _proxy_touch_specs(context, root, radius=.002):
     picks, error = _selected_proxy_vertices()(context)
-    return ((), error) if error else (_proxy_specs_from_picks(root, context.scene, picks), "")
+    if error: return (), error
+    specs = _proxy_specs_from_picks(root, context.scene, picks, radius)
+    return _complete_touch_selection(specs, len(picks))
 
 
-def _proxy_specs_from_picks(root, scene, picks):
-    return tuple(spec for spec in (_proxy_spec(root, scene, pick) for pick in tuple(picks or ())) if spec is not None)
+def _proxy_specs_from_picks(root, scene, picks, radius=.002):
+    return tuple(spec for spec in (_proxy_spec(root, scene, pick, radius) for pick in tuple(picks or ())) if spec is not None)
 
 
 def _proxy_edit_target(context):
@@ -386,10 +389,16 @@ def _single_edit_target(context, obj):
     return len(tuple(getattr(context, "objects_in_mode", ()) or (obj,))) == 1
 
 
-def _mesh_touch_specs(context, root):
+def _mesh_touch_specs(context, root, radius=.002):
     obj = getattr(context, "active_object", None)
     indices = _selected_mesh_indices(obj)
-    return ((), "Select one or more mesh vertices.") if not indices else (_mesh_specs(root, context.scene, obj, indices), "")
+    if not indices: return (), "Select one or more mesh vertices."
+    return _complete_touch_selection(_mesh_specs(root, context.scene, obj, indices, radius), len(indices))
+
+
+def _complete_touch_selection(specs, count):
+    if len(specs) != count: return (), "No usable collision-clear pin was found for every selected vertex."
+    return specs, ""
 
 
 def _selected_mesh_indices(obj):
@@ -412,13 +421,13 @@ def _history_mesh_indices(bm):
     return [elem.index for elem in bm.select_history if isinstance(elem, bmesh.types.BMVert) and elem.select]
 
 
-def _mesh_specs(root, scene, obj, indices):
-    return tuple(spec for spec in (_mesh_spec(root, scene, obj, index) for index in tuple(indices or ())) if spec is not None)
+def _mesh_specs(root, scene, obj, indices, radius=.002):
+    return tuple(spec for spec in (_mesh_spec(root, scene, obj, index, radius) for index in tuple(indices or ())) if spec is not None)
 
 
-def _default_touch_specs(context, root):
+def _default_touch_specs(context, root, radius=.002):
     scp_id = _touch_parent_id(context, root)
-    attach_param = None if not scp_id else _first_attach_param(context.scene, root, scp_id)
+    attach_param = None if not scp_id else _first_attach_param(context.scene, root, scp_id, radius)
     return () if not attach_param else ((scp_id, attach_param),)
 
 
@@ -431,26 +440,26 @@ def _touch_parent_id(context, root):
     return scps[index].id if 0 <= index < len(scps) else ""
 
 
-def _first_attach_param(scene, root, scp_id):
+def _first_attach_param(scene, root, scp_id, radius=.002):
     parent_obj = _find_geometry_mesh_scp_obj()(scene, root.name, scp_id)
     point = None if parent_obj is None else parent_obj.matrix_world.translation.copy()
-    return None if point is None else _capture_attachment_from_world()(root, scene, scp_id, point)
+    return None if point is None else _capture_attachment_from_world()(root, scene, scp_id, point, radius=radius)
 
 
-def _mesh_spec(root, scene, obj, index):
+def _mesh_spec(root, scene, obj, index, radius=.002):
     scp_id = str(obj.get("af_scp_id", "") or "")
-    raw = None if not scp_id else _capture_attachment_from_mesh_vertex()(root, scene, scp_id, index)
+    raw = None if not scp_id else _capture_attachment_from_mesh_vertex()(root, scene, scp_id, index, radius=radius)
     return None if raw is None else (scp_id, raw)
 
 
-def _world_touch_spec(root, scene, scp_id, point):
+def _world_touch_spec(root, scene, scp_id, point, radius=.002):
     sid = str(scp_id or "")
-    raw = None if not sid else _capture_attachment_from_world()(root, scene, sid, point)
+    raw = None if not sid else _capture_attachment_from_world()(root, scene, sid, point, radius=radius)
     return None if raw is None else (sid, raw)
 
 
-def _proxy_spec(root, scene, pick):
-    raw = _capture_attachment_from_proxy_vertex()(root, scene, pick.scp_id, pick.vertex_index, pick.signature)
+def _proxy_spec(root, scene, pick, radius=.002):
+    raw = _capture_attachment_from_proxy_vertex()(root, scene, pick.scp_id, pick.vertex_index, pick.signature, radius=radius)
     return None if raw is None else (pick.scp_id, raw)
 
 
@@ -517,25 +526,25 @@ def _selected_proxy_vertices():
 
 def _capture_attachment_from_world():
     try:
-        from ...core.vcp.attachment_backend import capture_attachment_from_world
+        from ...core.vcp.fiber_pin_snapping import capture_attachment_from_world
     except ImportError:
-        from core.vcp.attachment_backend import capture_attachment_from_world
+        from core.vcp.fiber_pin_snapping import capture_attachment_from_world
     return capture_attachment_from_world
 
 
 def _capture_attachment_from_mesh_vertex():
     try:
-        from ...core.vcp.attachment_backend import capture_attachment_from_mesh_vertex
+        from ...core.vcp.fiber_pin_snapping import capture_attachment_from_mesh_vertex
     except ImportError:
-        from core.vcp.attachment_backend import capture_attachment_from_mesh_vertex
+        from core.vcp.fiber_pin_snapping import capture_attachment_from_mesh_vertex
     return capture_attachment_from_mesh_vertex
 
 
 def _capture_attachment_from_proxy_vertex():
     try:
-        from ...core.vcp.attachment_backend import capture_attachment_from_proxy_vertex
+        from ...core.vcp.fiber_pin_snapping import capture_attachment_from_proxy_vertex
     except ImportError:
-        from core.vcp.attachment_backend import capture_attachment_from_proxy_vertex
+        from core.vcp.fiber_pin_snapping import capture_attachment_from_proxy_vertex
     return capture_attachment_from_proxy_vertex
 
 

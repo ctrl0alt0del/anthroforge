@@ -9,7 +9,8 @@ import numpy as np
 
 V2_NATIVE_ABI = 3
 ROADMAP_PREPARATION_CAPABILITY = 134217728
-V2_NATIVE_CAPABILITIES = 3276799 | ROADMAP_PREPARATION_CAPABILITY
+PIN_EXIT_PREPARATION_CAPABILITY = 268435456
+V2_NATIVE_CAPABILITIES = 3276799 | ROADMAP_PREPARATION_CAPABILITY | PIN_EXIT_PREPARATION_CAPABILITY
 V2_NATIVE_BATCH_CAPABILITY = 1024
 V3_NATIVE_SESSION_CAPABILITY = 32768
 V3_NATIVE_MULTI_SESSION_CAPABILITY = 65536
@@ -79,7 +80,7 @@ class _NativeV3BatchStats(Structure):
 
 _REASONS = ("CLEAR", "AABB_CLEAR", "INVALID_START", "POSSIBLE_COLLISION", "BUDGET_EXHAUSTED")
 _LIBRARIES = {}
-_DEFAULT_NATIVE_PATH = Path(__file__).resolve().parents[3] / "native" / "fiber_ccd" / "af_fiber_ccd_v3_12.dll"
+_DEFAULT_NATIVE_PATH = Path(__file__).resolve().parents[3] / "native" / "fiber_ccd" / "af_fiber_ccd_v3_13.dll"
 
 
 def native_path():
@@ -313,6 +314,20 @@ def _configure_roadmap_preparation(library, double, integer):
     library.af_roadmap_neighbors.argtypes = [double, c_int64, c_int64, c_int64,
         integer, integer, c_int64, integer, integer, c_int64]
     library.af_roadmap_neighbors.restype = c_int64
+    library.af_roadmap_nearest_batch.argtypes = [double, c_int64, c_int64, c_int64, c_int64, integer]
+    library.af_roadmap_nearest_batch.restype = c_int
+
+
+def native_roadmap_nearest_batch(points, first, count, limit=48):
+    values = np.ascontiguousarray(points, dtype=np.float64)
+    if values.ndim != 2 or values.shape[1:] != (3,): raise ValueError('invalid nearest-neighbor points')
+    k = min(int(limit), len(values)-1)
+    if not 0 <= count <= 64 or not 0 <= first <= len(values)-count or k < 0:
+        raise ValueError('invalid nearest-neighbor batch')
+    output = np.empty((count, k), dtype=np.int64)
+    status = load_native().af_roadmap_nearest_batch(_double(values), len(values), first, count, k, _integer(output))
+    if status: raise ValueError(f'native nearest-neighbor batch failed: {status}')
+    return output
 
 
 def native_roadmap_neighbors(points, offsets, links, limit=48):

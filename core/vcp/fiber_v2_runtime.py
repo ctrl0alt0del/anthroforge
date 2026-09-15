@@ -68,7 +68,7 @@ class V2RuntimeSession:
         if not self.done and self.capture_index < len(self.source_colliders):
             _advance_capture(self, deadline)
         if not self.done and self.capture_index >= len(self.source_colliders):
-            _solve(self)
+            _advance_solve(self, deadline)
         elapsed = _elapsed(started); self.elapsed_ms += elapsed
         telemetry_slice(elapsed, self.phase, self.telemetry)
         telemetry_timing(f"progressive.{self.phase}", elapsed, self.telemetry)
@@ -264,6 +264,17 @@ def clear_v2_runtime_capture_cache():
 def v2_runtime_capture_cache_stats():
     return {"entries": len(_CAPTURE_CACHE), "bytes": _capture_bytes(),
             "entry_limit": _CAPTURE_LIMIT, "byte_limit": _CAPTURE_BYTES_LIMIT}
+
+
+def _advance_solve(session, deadline):
+    _solve(session)
+    while not session.done and perf_counter() < deadline and _planner_batches_pending(session):
+        _solve(session)
+
+
+def _planner_batches_pending(session):
+    planner = getattr(session.core_session, "planner_session", None)
+    return planner is not None and not planner.done
 
 
 def _solve(session):

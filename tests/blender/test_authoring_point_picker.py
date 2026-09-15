@@ -71,19 +71,37 @@ class SurfacePointPickerTests(BlenderTestCase):
         resolved = backend.resolve_attachment_world(self.root, bpy.context.scene, self.owner, hit['attachment']['attach_param'])
         np.testing.assert_array_equal(hit['point'], resolved)
 
-    def test_blocked_closest_point_has_no_usable_attachment(self):
+    def test_blocked_closest_point_falls_back_on_same_owner(self):
         blocker = cube(self.root, (0, 0, 1.5))
         data = self.scene.initialize()
         blocker_id = next(r['instance_id'] for r in data['instances'] if r['locator'] == blocker.name)
         result = self.execute(self.request([[.2, .1, .9], [.2, .1, -1.1]]))
-        self.assertEqual(result['status'], 'unresolved', result)
+        self.assertEqual(result['status'], 'success', result)
         bad, good = result['hits']
-        self.assertFalse(bad['valid'])
+        self.assertTrue(bad['valid'])
         self.assertTrue(good['valid'])
-        self.assertTrue(any(r['blocker_id'] == blocker_id and r['contained'] for r in bad['blockers']))
-        self.assertNotIn('attachment', bad)
-        self.assertNotIn('anchor', bad)
-        np.testing.assert_allclose(bad['point'], [.2, .1, 1], atol=1e-6)
+        self.assertEqual(bad['snapping']['reason'], 'ANCHOR_BLOCKED')
+        self.assertEqual(bad['attachment']['parent_id'], self.obj['af_scp_id'])
+        self.assertEqual(bad['snapping']['mode'], 'SUBDIVISION_4')
+        self.assertLess(bad['point'][2], .5)
+        self.assertEqual(good['snapping']['mode'], 'NEAREST')
+
+    def test_fallback_still_obeys_authoring_distance_limit(self):
+        cube(self.root, (0, 0, 1.5)); self.scene.initialize()
+        result = self.execute(self.request([[.2, .1, .9]], max_distance=.15))
+        hit = result['hits'][0]
+        self.assertEqual(result['status'], 'unresolved')
+        self.assertIn('SNAP_DISTANCE_EXCEEDED', [d['code'] for d in hit['diagnostics']])
+        self.assertNotIn('attachment', hit)
+
+    def test_fully_enclosed_owner_returns_no_usable_attachment(self):
+        blocker = cube(self.root); blocker.scale = (2, 2, 2); self.scene.initialize()
+        result = self.execute(self.request([[.2, .1, .9]]))
+        hit = result['hits'][0]
+        self.assertEqual(result['status'], 'unresolved')
+        self.assertEqual(hit['snapping']['mode'], 'FAILED')
+        self.assertNotIn('attachment', hit)
+        self.assertNotIn('anchor', hit)
 
     def test_distance_limit_preserves_nearest_point_for_review(self):
         result = self.execute(self.request([[.2, .1, 4]], max_distance=.1))

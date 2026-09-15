@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
-ROADMAP_POLICY_VERSION = "conditional-expanded-roadmap-1"
+ROADMAP_POLICY_VERSION = "conditional-expanded-roadmap-pin-exits-2"
 
 
 class RoadmapOutcome(str, Enum):
@@ -19,6 +19,9 @@ class RoadmapOutcome(str, Enum):
     BACKEND_UNAVAILABLE = "BACKEND_UNAVAILABLE"
     CANCELLED = "CANCELLED"
     SUPERSEDED = "SUPERSEDED"
+    PIN_EXIT_SAMPLES_EXHAUSTED = "PIN_EXIT_SAMPLES_EXHAUSTED"
+    NO_OPPOSITE_COMPONENT = "NO_OPPOSITE_COMPONENT"
+    LOCAL_CONNECTION_BUDGET_EXHAUSTED = "LOCAL_CONNECTION_BUDGET_EXHAUSTED"
 
 
 @dataclass(frozen=True)
@@ -26,9 +29,10 @@ class RoadmapPolicy:
     expanded: bool = False
     preparation: object = None
     observe_graph: object = None
+    pin_recovery: bool = False
 
 
-PRODUCTION_ROADMAP_POLICY = RoadmapPolicy(expanded=True)
+PRODUCTION_ROADMAP_POLICY = RoadmapPolicy(expanded=True, pin_recovery=True)
 
 
 @dataclass(frozen=True)
@@ -61,6 +65,7 @@ class RoadmapSearchContext:
     last_graph: object = None
     attempts: list = field(default_factory=list)
     recoveries: list = field(default_factory=list)
+    pin_recoveries: list = field(default_factory=list)
 
     def start_span(self, index):
         self.span, self.last_graph = index, None

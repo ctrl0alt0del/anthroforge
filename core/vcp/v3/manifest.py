@@ -16,6 +16,7 @@ V3_ACCEPTED_FEATURES = (
     "session-local-warm-continuation", "global-cyclic-hard-anchor-cut",
     "validated-surface-anchor-roadmap-access",
     "conditional-expanded-roadmap-1", "native-exact-roadmap-preparation",
+    "conditional-pin-exit-sampling", "bounded-bidirectional-pin-connection",
 )
 
 

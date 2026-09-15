@@ -20,7 +20,7 @@ from .planner_anchor_access import anchor_access_candidates, append_access_neigh
 V2_PLANNER_VERSION = "fiber-v2-planner-1"
 V2_PLANNER_41_VERSION = "fiber-v2-planner-1.1"
 V2_PLANNER_42_VERSION = "fiber-v2-planner-1.2"
-V2_PLANNER_43_VERSION = "fiber-v2-planner-1.6"
+V2_PLANNER_43_VERSION = "fiber-v2-planner-1.7"
 _SPARSE_LIMIT = 96
 _DENSE_LIMIT = 240
 _SPARSE_NEIGHBORS = 24
@@ -74,6 +74,7 @@ class V2PlannerDiagnostics:
     attempts: tuple = ()
     recoveries: tuple = ()
     phase_timings: tuple = ()
+    pin_recoveries: tuple = ()
 
 
 @dataclass(frozen=True)

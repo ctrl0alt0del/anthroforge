@@ -9,12 +9,14 @@ from .results import failure, success
 
 try:
     from ...core.scp_runtime.viewport_picker import pick_candidates
-    from ...core.vcp.attachment_backend import capture_attachment_from_world
+    from ...core.vcp.attachment_backend import attachment_runtime
+    from ...core.vcp.fiber_pin_snapping import capture_attachment_from_world
     from ...core.vcp.prop_update_guard import suppress_vcp_prop_updates
     from ...core.visualization.fiber_refinement import request_fiber_refinement
 except ImportError:
     from core.scp_runtime.viewport_picker import pick_candidates
-    from core.vcp.attachment_backend import capture_attachment_from_world
+    from core.vcp.attachment_backend import attachment_runtime
+    from core.vcp.fiber_pin_snapping import capture_attachment_from_world
     from core.vcp.prop_update_guard import suppress_vcp_prop_updates
     from core.visualization.fiber_refinement import request_fiber_refinement
 
@@ -51,11 +53,20 @@ def capture_quick_fiber_point(context, hit):
     if root is None or hit is None:
         return None, "Click a valid SCP geometry surface."
     scp_id, attach_world, visual_world = hit
-    raw = capture_attachment_from_world(root, context.scene, scp_id, attach_world)
+    runtime = attachment_runtime(context.scene)
+    raw = capture_attachment_from_world(root, context.scene, scp_id, attach_world, runtime)
     if raw is None:
-        return None, "The selected surface attachment could not be captured."
+        return None, "No collision-clear surface attachment with a usable exit was found on this SCP."
+    snapped = runtime.get('pin_snap_last_result')
+    if snapped is not None: attach_world, visual_world = _snapped_preview(snapped, attach_world, visual_world)
     point = QuickFiberPoint(scp_id, raw, attach_world.copy(), visual_world.copy(), scp_label(root, scp_id))
     return point, ""
+
+
+def _snapped_preview(result, attach_world, visual_world):
+    from mathutils import Vector
+    surface = Vector(result.surface)
+    return surface, visual_world + surface - attach_world
 
 
 def commit_quick_fiber(context, points):
