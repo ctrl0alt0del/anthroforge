@@ -1573,6 +1573,9 @@
         },
         {
           "$ref": "#/$defs/native_distributed"
+        },
+        {
+          "$ref": "#/$defs/native_section_profile"
         }
       ]
     },
@@ -1926,6 +1929,97 @@
         "max_error",
         "blend_span",
         "max_samples"
+      ],
+      "additionalProperties": false
+    },
+    "native_section_profile": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": [
+            "section_profile"
+          ]
+        },
+        "profile_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "flip_normals": {
+          "type": "boolean"
+        },
+        "depths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/native_length"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "peaks": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 0.9
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "roundness": {
+          "type": "number",
+          "minimum": 0.25,
+          "maximum": 4
+        },
+        "direction": {
+          "enum": [
+            "local",
+            "smooth",
+            "section"
+          ]
+        },
+        "applies_to": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "calibration": {
+          "enum": [
+            "candidate",
+            "reviewed"
+          ]
+        },
+        "shape_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/native_shape_check"
+          },
+          "minItems": 1
+        },
+        "evidence": {
+          "$ref": "#/$defs/native_evidence"
+        }
+      },
+      "required": [
+        "mode",
+        "profile_version",
+        "enabled",
+        "flip_normals",
+        "depths",
+        "peaks",
+        "roundness",
+        "direction",
+        "applies_to",
+        "calibration",
+        "shape_checks",
+        "evidence"
       ],
       "additionalProperties": false
     },

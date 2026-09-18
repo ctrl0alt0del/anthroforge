@@ -19,7 +19,11 @@ def scalar_dict(prop, skip=()):
     return {key: _json_value(getattr(prop, key)) for key in _scalar_keys(prop, skip)}
 
 
-def apply_scalar_dict(prop, values):
-    for key, value in dict(values or {}).items():
+def apply_scalar_dict(prop, values, *, geometry_scale=1):
+    if values and "section_profile_version" in values:
+        from .muscle_profile import prepared_properties
+        values = prepared_properties(values, geometry_scale)
+    values = dict(values or {})
+    for key, value in sorted(values.items(), key=lambda row: row[0] == "inflation_mode"):
         if hasattr(prop, key):
             setattr(prop, key, value)

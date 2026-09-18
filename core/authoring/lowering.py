@@ -89,6 +89,7 @@ def compile_symmetry(document, inventory, output, instance):
 def compile_shape(document, instance):
     shape = lookup(document, instance['shape'])
     volume = native_values(shape['native'], instance['profile'])
+    require(volume["mode"] != "section_profile" or not shape.get("fitting", {}).get("enabled"), "PROFILE_FITTING_UNSUPPORTED")
     shape_intent(volume, shape.get('intent', {}))
     return volume
 
@@ -101,6 +102,8 @@ def role_bindings(instance):
 
 
 def shape_intent(volume, intent):
+    if volume["mode"] == "section_profile":
+        return section_intent(volume, intent)
     for field, scale in [('amount', intent.get('height_scale', 1)), ('radius', intent.get('width_scale', 1))]:
         if field in volume:
             quantity = volume[field]
@@ -189,3 +192,10 @@ def native_values(value, profile):
     if 'frame' in result:
         result['frame'] = identity(profile+'/frames/'+result['frame'])
     return result
+
+
+def section_intent(volume, intent):
+    require(not (set(intent) - {'height_scale'}), 'PROFILE_INTENT_UNSUPPORTED')
+    for depth in volume['depths']:
+        key = 'value' if 'value' in depth else 'fraction'
+        depth[key] *= intent.get('height_scale', 1)

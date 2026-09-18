@@ -228,8 +228,10 @@ class MuscleSceneSync:
                 continue
             self._remove_ctrl_obj(obj)
 
-    def _control_muscle_ids(self, vcp):
-        return {muscle.id for muscle in vcp.muscles if self._uses_inflation_control(muscle)}
+    def _control_muscle_ids(self, vcp, root=None):
+        from .branch_control import selected_part
+        return {muscle.id for muscle in vcp.muscles
+                if self._uses_inflation_control(selected_part(root, muscle)[0] if root else muscle)}
 
     def _sync_target_muscles(self, vis_col, root, scene, vcp, muscle_ids_to_sync):
         muscles = tuple(muscle for muscle in vcp.muscles if muscle.id in muscle_ids_to_sync)
@@ -247,7 +249,7 @@ class MuscleSceneSync:
         vcp = root.af_vcp_system
         all_ids, target_ids = self._muscle_ids_to_sync(vcp, target_muscle_ids)
         active_id = self._selected_muscle_id(vcp, root, scene)
-        control_ids = self._control_muscle_ids(vcp)
+        control_ids = self._control_muscle_ids(vcp, root)
         self._sync_target_muscles(vis_col, root, scene, vcp, target_ids)
         self._cleanup_after_sync(vis_col, root, all_ids, active_id, control_ids)
 

@@ -51,6 +51,7 @@ def evaluate(output, config, targets):
 def fit(output, shape, budget=None):
     budget = budget or Budget()
     spec = shape['fitting']
+    require(output["config"]["mode"] != "section_profile" or not spec["enabled"], "PROFILE_FITTING_UNSUPPORTED")
     best, rows = evaluate(output, deepcopy(output['config']), shape['targets'])
     count, step = 1, spec['step']
     if spec['enabled']:

@@ -117,7 +117,8 @@ def _fiber_snapshot(fiber):
 
 
 def _muscle_snapshot(muscle):
-    migrate_inflation_control(muscle)
+    if muscle.inflation_mode in ("CTRL_POINT", "DISTRIBUTED"):
+        migrate_inflation_control(muscle)
     ids = [str(ref.fiber_id or "") for ref in muscle.fiber_refs if str(ref.fiber_id or "")]
     return MuscleSnapshot(str(muscle.id or ""), str(muscle.name or ""), scalar_dict(muscle, _MUSCLE_SKIP), ids,
                           str(getattr(muscle, "fiber_surface_id", "") or ""))

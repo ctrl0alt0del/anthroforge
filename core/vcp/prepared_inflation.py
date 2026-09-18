@@ -82,7 +82,15 @@ class PreparedAdapter(_InflationAdapter):
         self.boundary_weights, self.length_weights = edge, fade
 
 
+def validate_prepared_mode(mode):
+    if mode == "SECTION_PROFILE":
+        raise ValueError("PROFILE_DOMAIN_UNSUPPORTED: Section Profile requires an ordinary open loft.")
+    if mode not in ("CTRL_POINT", "DISTRIBUTED"):
+        raise ValueError("PROFILE_MODE_UNSUPPORTED: " + str(mode))
+
+
 def inflate_prepared(grid, fixed, spec, backend="NATIVE", branch=False):
+    validate_prepared_mode(spec.inflation_mode)
     edge, fade = weights(grid, fixed, spec, branch)
     if backend == "NATIVE":
         from .prepared_inflation_native import inflate_native
@@ -100,6 +108,7 @@ def inflate_prepared(grid, fixed, spec, backend="NATIVE", branch=False):
 def inflate_assembly(assembly, specs, backend="NATIVE"):
     if len(specs) != len(assembly.branches)+1:
         raise ValueError("Each prepared part needs inflation settings")
+    for spec in specs: validate_prepared_mode(spec.inflation_mode)
     grids = (assembly.main, *(b.grid for b in assembly.branches))
     reversals = (assembly.flip, *(assembly.flip != (b.connection.boundary == -1) for b in assembly.branches))
     values = []

@@ -125,6 +125,7 @@ from .operators.draft_skin import (
 from .operators.topology import AF_OT_CancelTopology, AF_OT_GenerateTopology
 from .operators.warm_update import AF_OT_CancelWarmUpdate, AF_OT_UpdateSkinTopology
 
+from .operators.muscle_profile import CLASSES as PROFILE_CLASSES
 from .ui.main_panel import AF_PT_MainPanel
 from .ui.panels.create_panel import AF_PT_CreatePanel
 from .ui.panels.tree_panel import AF_PT_TreePanel
@@ -352,6 +353,9 @@ classes = (
     AF_PT_ActionLibraryPanel,
     AFPTControlObjectsPanel,
 )
+
+
+classes += PROFILE_CLASSES
 
 
 def _already_registered(error):

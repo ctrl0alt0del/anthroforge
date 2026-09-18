@@ -7,7 +7,7 @@ from ...core.vcp.runtime_state import set_muscle_inflation_ctrl_world
 def configure(muscle, output):
     native = output if 'native_properties' in output else rebuild(output, output['config'])
     muscle.pop('af_authoring_material', None)
-    for key, value in native['native_properties'].items():
+    for key, value in sorted(native['native_properties'].items(), key=lambda row: row[0] == 'inflation_mode'):
         if isinstance(value, (str, bool)):
             setattr(muscle, key, value)
         else:
@@ -17,5 +17,5 @@ def configure(muscle, output):
 
 
 def assign_checked(item, key, value):
-    setattr(item, key, value)
-    require(abs(getattr(item, key)-value) <= max(1e-7, abs(value)*1e-6), "NATIVE_PARAMETER_RANGE", key)
+    from ...core.authoring.native_assignment import assign_checked as assign
+    assign(item, key, value)

@@ -85,6 +85,8 @@ def _pack_requests(requests):
 
 def _input_row(request, offset):
     spec, shape = request.spec, request.points.shape
+    if spec.inflation_mode not in ("CTRL_POINT", "DISTRIBUTED") or request.orientation_parity != 1:
+        raise ValueError("PROFILE_NATIVE_PACKING_UNSUPPORTED")
     ints = (offset, shape[0], shape[1], spec.target_count, int(spec.densify), int(spec.closed_u),
             int(spec.close_across_fibers), int(spec.topology_flip_normals),
             int(spec.inflation_mode == "DISTRIBUTED"), int(spec.inflation_enabled),

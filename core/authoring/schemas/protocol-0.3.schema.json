@@ -2,7 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:anthroforge:authoring-protocol:0.3.0",
   "oneOf": [
-    {"$ref": "#/$defs/warning_request"},
+    {
+      "$ref": "#/$defs/warning_request"
+    },
     {
       "$ref": "#/$defs/request"
     },
@@ -396,7 +398,7 @@
       "additionalProperties": false
     },
     "length": {
-  "oneOf": [
+      "oneOf": [
         {
           "type": "object",
           "properties": {
@@ -1582,6 +1584,9 @@
         },
         {
           "$ref": "#/$defs/distributed"
+        },
+        {
+          "$ref": "#/$defs/section_profile"
         }
       ]
     },
@@ -3165,7 +3170,9 @@
         "job": {
           "$ref": "#/$defs/job"
         },
-        "warnings": {"$ref": "#/$defs/warning_state"},
+        "warnings": {
+          "$ref": "#/$defs/warning_state"
+        },
         "cost": {
           "type": "object",
           "propertyNames": {
@@ -3227,6 +3234,97 @@
         "max_error",
         "blend_span",
         "max_samples"
+      ],
+      "additionalProperties": false
+    },
+    "section_profile": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": [
+            "section_profile"
+          ]
+        },
+        "profile_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "flip_normals": {
+          "type": "boolean"
+        },
+        "depths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/length"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "peaks": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 0.9
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "roundness": {
+          "type": "number",
+          "minimum": 0.25,
+          "maximum": 4
+        },
+        "direction": {
+          "enum": [
+            "local",
+            "smooth",
+            "section"
+          ]
+        },
+        "applies_to": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "calibration": {
+          "enum": [
+            "candidate",
+            "reviewed"
+          ]
+        },
+        "shape_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/shape_check"
+          },
+          "minItems": 1
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        }
+      },
+      "required": [
+        "mode",
+        "profile_version",
+        "enabled",
+        "flip_normals",
+        "depths",
+        "peaks",
+        "roundness",
+        "direction",
+        "applies_to",
+        "calibration",
+        "shape_checks",
+        "evidence"
       ],
       "additionalProperties": false
     }

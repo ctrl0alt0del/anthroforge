@@ -1292,6 +1292,9 @@
         },
         {
           "$ref": "#/$defs/native_distributed"
+        },
+        {
+          "$ref": "#/$defs/native_section_profile"
         }
       ]
     },
@@ -1645,6 +1648,97 @@
         "max_error",
         "blend_span",
         "max_samples"
+      ],
+      "additionalProperties": false
+    },
+    "native_section_profile": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": [
+            "section_profile"
+          ]
+        },
+        "profile_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "flip_normals": {
+          "type": "boolean"
+        },
+        "depths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/native_length"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "peaks": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 0.9
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "roundness": {
+          "type": "number",
+          "minimum": 0.25,
+          "maximum": 4
+        },
+        "direction": {
+          "enum": [
+            "local",
+            "smooth",
+            "section"
+          ]
+        },
+        "applies_to": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "calibration": {
+          "enum": [
+            "candidate",
+            "reviewed"
+          ]
+        },
+        "shape_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/native_shape_check"
+          },
+          "minItems": 1
+        },
+        "evidence": {
+          "$ref": "#/$defs/native_evidence"
+        }
+      },
+      "required": [
+        "mode",
+        "profile_version",
+        "enabled",
+        "flip_normals",
+        "depths",
+        "peaks",
+        "roundness",
+        "direction",
+        "applies_to",
+        "calibration",
+        "shape_checks",
+        "evidence"
       ],
       "additionalProperties": false
     },
@@ -3578,6 +3672,135 @@
         "branches"
       ],
       "additionalProperties": false
+    },
+    "profile_configuration": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "section_profile"
+              ]
+            },
+            "profile_version": {
+              "type": "integer",
+              "enum": [
+                1
+              ]
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "flip_normals": {
+              "type": "boolean"
+            },
+            "depths": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 10
+                  },
+                  "unit": {
+                    "enum": [
+                      "scene"
+                    ]
+                  }
+                },
+                "required": [
+                  "value",
+                  "unit"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 4,
+              "maxItems": 4
+            },
+            "peaks": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0.1,
+                "maximum": 0.9
+              },
+              "minItems": 4,
+              "maxItems": 4
+            },
+            "roundness": {
+              "type": "number",
+              "minimum": 0.25,
+              "maximum": 4
+            },
+            "direction": {
+              "enum": [
+                "local",
+                "smooth",
+                "section"
+              ]
+            }
+          },
+          "required": [
+            "mode",
+            "profile_version",
+            "enabled",
+            "flip_normals",
+            "depths",
+            "peaks",
+            "roundness",
+            "direction"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "control_point",
+                "distributed"
+              ]
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "profile_target": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "muscle_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "muscle_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "fiber_surface_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "fiber_surface_id"
+          ],
+          "additionalProperties": false
+        }
+      ]
     },
     "patch_value": {
       "oneOf": [
@@ -7388,6 +7611,353 @@
       "required": [
         "message_type",
         "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "muscles.profile_inspect"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "target": {
+              "$ref": "#/$defs/profile_target"
+            }
+          },
+          "required": [
+            "scene_id",
+            "target"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "dsl",
+        "version",
+        "message_type",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "muscles.profile_preview"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "target": {
+              "$ref": "#/$defs/profile_target"
+            },
+            "configuration": {
+              "$ref": "#/$defs/profile_configuration"
+            },
+            "include_geometry": {
+              "type": "boolean"
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_base_revision": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "target",
+            "configuration",
+            "expected_scene_revision",
+            "expected_base_revision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "dsl",
+        "version",
+        "message_type",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "muscles.profile_configure"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "muscle_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "configuration": {
+              "$ref": "#/$defs/profile_configuration"
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_base_revision": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "muscle_id",
+            "configuration",
+            "expected_scene_revision",
+            "expected_base_revision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "dsl",
+        "version",
+        "message_type",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "muscles.create_from_surface"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "surface_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "initial_configuration": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "section_profile"
+                  ]
+                },
+                "profile_version": {
+                  "type": "integer",
+                  "enum": [
+                    1
+                  ]
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "flip_normals": {
+                  "type": "boolean"
+                },
+                "depths": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "value": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 10
+                      },
+                      "unit": {
+                        "enum": [
+                          "scene"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "unit"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 4,
+                  "maxItems": 4
+                },
+                "peaks": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "minimum": 0.1,
+                    "maximum": 0.9
+                  },
+                  "minItems": 4,
+                  "maxItems": 4
+                },
+                "roundness": {
+                  "type": "number",
+                  "minimum": 0.25,
+                  "maximum": 4
+                },
+                "direction": {
+                  "enum": [
+                    "local",
+                    "smooth",
+                    "section"
+                  ]
+                }
+              },
+              "required": [
+                "mode",
+                "profile_version",
+                "enabled",
+                "flip_normals",
+                "depths",
+                "peaks",
+                "roundness",
+                "direction"
+              ],
+              "additionalProperties": false
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_base_revision": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "surface_id",
+            "expected_scene_revision",
+            "expected_base_revision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "dsl",
+        "version",
+        "message_type",
         "request_id",
         "op",
         "params"

@@ -14,6 +14,26 @@ class StaticScene(BlenderScene):
     def capture_authoring(self):
         return inventory.capture(self.root, self.scene)
 
+    def profile_inspect(self, target):
+        from .native_profiles import inspect
+        return inspect(self, target)
+
+    def profile_preview(self, target, configuration):
+        from .native_profiles import preview
+        return preview(self, target, configuration)
+
+    def profile_mutation(self, target, configuration, create=False, name=""):
+        from .native_profiles import mutation
+        return mutation(self, target, configuration, create, name)
+
+    def profile_marker(self, muscle_id, kind, receipt=None):
+        from .native_profiles import marker
+        return marker(self, muscle_id, kind, receipt)
+
+    def profile_recover_marker(self, request_id, kind):
+        from .native_profiles import recover_marker
+        return recover_marker(self, request_id, kind)
+
     def transfer_sources(self, names):
         from .transfer import capture
         return capture(self.scene, names)

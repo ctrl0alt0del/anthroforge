@@ -34,12 +34,9 @@ class AuthoringInterpreter:
             return request, result
 
     def _execute(self, request):
-        from . import native_branches
-        if request['op'] in native_branches.OPERATIONS:
-            return native_branches.execute(self.scene, request)
-        from . import native_fibers
-        if request['op'] in native_fibers.OPERATIONS:
-            return native_fibers.execute(self.scene, request)
+        from . import native_branches, native_fibers
+        if request['op'] in (*native_branches.OPERATIONS, *native_fibers.OPERATIONS):
+            return execute_native(self, request, native_branches, native_fibers)
         if request['op'] == 'warnings.list':
             return dict(response(request, "unavailable"), warnings=self.warnings.list(request['params']))
         if request['version'] == '0.4.0':
@@ -82,6 +79,18 @@ def cache_response(service, request, result):
     except OSError:
         logging.getLogger(__name__).exception("Could not persist request replay receipt")
         result["diagnostics"].append(dict(code="RECEIPT_WRITE_FAILED", severity="warning", message="Request completed; replay receipt unavailable."))
+
+
+def execute_native(service, request, branches, fibers):
+    """Reserve identity before native work; handlers retain their live replay."""
+    root = service.scene.root
+    key = [root.get('af_authoring_id') or root.name, request['request_id']]
+    saved = service.store.get('v04_requests', key)
+    require(not saved or saved['digest'] == digest(request), 'REQUEST_ID_REUSED')
+    if not saved:
+        service.store.put('v04_requests', key, dict(digest=digest(request), response={}, native_live_dispatch=True))
+    handler = branches if request['op'] in branches.OPERATIONS else fibers
+    return handler.execute(service.scene, request)
 
 
 def receipt(service, request):

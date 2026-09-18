@@ -68,6 +68,10 @@ def boundary(u, s, spec, closed):
 
 
 def inflate(grid, u, s, config, closed=False):
+    from .errors import require
+    require(config['mode'] in ('section_profile', 'control_point', 'distributed'), 'PROFILE_MODE_UNSUPPORTED')
+    if config['mode'] == 'section_profile':
+        return _section_profile(grid, config, closed)
     if not config["enabled"]:
         return np.array(grid, copy=True)
     normal = normals(grid, closed)
@@ -99,7 +103,18 @@ def faces(rows, columns, closed=False):
 
 def resolved_preset(preset, resolver, references):
     config = dict(preset)
+    if config["mode"] == "section_profile":
+        config["depths"] = [resolver.measure(row, references) for row in config["depths"]]
     for key in ("amount", "radius", "direction_depth"):
         if key in config:
             config[key] = resolver.measure(config[key], references)
     return config
+
+
+def _section_profile(grid, config, closed):
+    from .errors import require
+    from ..vcp.muscle_section_profile import SectionProfileSpec, apply_profile
+    require(not closed, 'PROFILE_DOMAIN_UNSUPPORTED')
+    spec = SectionProfileSpec(config['profile_version'], tuple(config['depths']), tuple(config['peaks']),
+                              config['roundness'], config['direction'].upper())
+    return apply_profile(grid, spec, config['enabled'], config['flip_normals'])

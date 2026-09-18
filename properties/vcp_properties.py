@@ -36,7 +36,14 @@ def _prop_pointer(item):
 def _on_muscle_prop_update(self, context):
     if vcp_prop_updates_suppressed():
         return
+    if self.inflation_mode not in ("CTRL_POINT", "DISTRIBUTED"):
+        from ..core.visualization.muscle_profile_publish import refresh
+        return refresh(self.id_data, context.scene, self.id)
     sync_context(context, dirty_hints=dirty_hints_for("MUSCLE", {self.id}))
+
+
+def _on_muscle_mode_update(self, context):
+    _on_muscle_prop_update(self, context)
 
 
 def _on_inflation_ctrl_update(self, context):
@@ -229,10 +236,23 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
         items=(
             ("CTRL_POINT", "Control Point", ""),
             ("DISTRIBUTED", "Distributed", ""),
+            ("SECTION_PROFILE", "Section Profile", "World-distance depth stations on an open loft"),
         ),
         default="CTRL_POINT",
-        update=_on_muscle_prop_update,
+        update=_on_muscle_mode_update,
     )
+    section_profile_version: bpy.props.IntProperty(default=0, update=_on_muscle_prop_update)
+    section_depths: bpy.props.FloatVectorProperty(name="Depth", size=4, default=(.025, .05, .05, .025), min=0, max=10,
+        description="Displacement from the current base at this station's peak in world units; ends and outer fibers stay fixed",
+        update=_on_muscle_prop_update)
+    section_peaks: bpy.props.FloatVectorProperty(name="Peak", size=4, default=(.5,)*4, min=.1, max=.9,
+        description="0.5 is centered; lower values move toward the first outer fiber", update=_on_muscle_prop_update)
+    section_roundness: bpy.props.FloatProperty(name="Roundness", default=1, min=.25, max=4,
+        description="1 is parabolic; lower values fill shoulders; higher values narrow the peak", update=_on_muscle_prop_update)
+    section_direction: bpy.props.EnumProperty(name="Direction", default="SMOOTH",
+        items=(("LOCAL", "Local Surface", "Local chart normal"), ("SMOOTH", "Smoothed Surface", "Smoothed chart normals"),
+               ("SECTION", "Section Wide", "Area-weighted section direction")),
+        description="Chart directions; none is a world or anatomical axis", update=_on_muscle_prop_update)
     inflation_max_value: bpy.props.FloatProperty(
         name="Max Inflation",
         default=0.05,

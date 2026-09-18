@@ -99,12 +99,19 @@ def _configure(root, params):
     for name, value in params.get('connector', {}).items():
         require(name in ('width', 'fullness'), 'INVALID_PARAMETER')
         setattr(connection, name, value)
-    for name, value in params.get('inflation', {}).items():
-        require(name in SETTINGS, 'INVALID_PARAMETER')
-        setattr(connection.settings, name, value)
-    if 'inflation_ctrl_world' in params.get('inflation', {}):
-        connection.settings.inflation_ctrl_initialized = True
+    _configure_inflation(connection.settings, params.get('inflation', {}))
     return dict(connection_id=connection.id, muscle_id=params['muscle_id'])
+
+
+def _configure_inflation(settings, values):
+    mode = values.get('inflation_mode', settings.inflation_mode)
+    require(mode != 'SECTION_PROFILE', 'PROFILE_DOMAIN_UNSUPPORTED')
+    require(mode in ('CTRL_POINT', 'DISTRIBUTED'), 'PROFILE_MODE_UNSUPPORTED')
+    for name, value in values.items():
+        require(name in SETTINGS, 'INVALID_PARAMETER')
+        setattr(settings, name, value)
+    if 'inflation_ctrl_world' in values:
+        settings.inflation_ctrl_initialized = True
 
 
 def _point_mutation(root, op, params):

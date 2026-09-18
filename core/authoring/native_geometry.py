@@ -26,6 +26,9 @@ def boundary_band(config, shape):
 
 
 def properties(config, shape):
+    require(config['mode'] in ('section_profile', 'control_point', 'distributed'), 'PROFILE_MODE_UNSUPPORTED')
+    if config['mode'] == 'section_profile':
+        return section_properties(config)
     return dict(inflation_enabled=config['enabled'], inflation_mode='CTRL_POINT' if config['mode'] == 'control_point' else 'DISTRIBUTED',
         inflation_max_value=config['amount'], inflation_falloff_type=config.get('falloff', 'gaussian').upper(),
         inflation_falloff_radius=config.get('radius', .2), inflation_direction_depth=config.get('direction_depth', .05),
@@ -36,12 +39,12 @@ def properties(config, shape):
 
 def evaluate(grid, u, s, config, closed):
     from .inflation import sample
-    point = config.get('control_world')
+    point = (0, 0, 0) if config["mode"] == "section_profile" else config.get('control_world')
     if point is None:
         point = sample(grid, u, s, *config.get('control', [.5, .5]), closed)
     values = properties(config, grid.shape)
     spec = MuscleNumericSpec(target_count=len(grid[0]), densify=False, closed_u=closed,
-        close_across_fibers=False, topology_flip_normals=False, closed_v=False, control_world=tuple(point), **values)
+        close_across_fibers=False, topology_flip_normals=False, closed_v=False, control_world=tuple(point), **numeric_properties(values))
     result = execute_muscle_batch([make_muscle_request('authoring', grid, spec)]).results[0]
     require(not result.error, 'NATIVE_GEOMETRY_FAILED', result.error)
     return result, values, list(point)
@@ -62,3 +65,22 @@ def rebuild(output, config):
     grid = np.asarray(output['base']).reshape(len(output['u']), len(output['s']), 3)
     result, native, point = evaluate(grid, output['u'], output['s'], config, fibers[0]['closed'])
     return dict(inflated=result.inflated_vertices.tolist(), native_properties=native, native_control_world=point)
+
+
+def section_properties(config):
+    from ..vcp.muscle_section_profile import SectionProfileSpec, profile_properties
+    spec = SectionProfileSpec(config['profile_version'], tuple(config['depths']), tuple(config['peaks']),
+                              config['roundness'], config['direction'].upper())
+    return dict(profile_properties(spec), inflation_enabled=config['enabled'], flip_normals=config['flip_normals'], inflation_mode='SECTION_PROFILE')
+
+
+def numeric_properties(values):
+    from ..vcp.muscle_section_profile import PROFILE_FIELDS, SectionProfileSpec
+    if values['inflation_mode'] != 'SECTION_PROFILE':
+        return values
+    numeric = dict(inflation_max_value=0., inflation_falloff_type='GAUSSIAN', inflation_falloff_radius=.2,
+        inflation_direction_depth=.05, inflation_boundary_strength=.7, inflation_boundary_band=2.,
+        inflation_boundary_power=1.5, inflation_length_taper_band=.2)
+    numeric.update({key: value for key, value in values.items() if key not in PROFILE_FIELDS})
+    numeric['section_profile'] = SectionProfileSpec(*(values[key] for key in PROFILE_FIELDS))
+    return numeric

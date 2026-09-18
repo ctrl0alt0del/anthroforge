@@ -19,9 +19,21 @@ class MuscleNumericWork:
     infl_obj: object
     request: object = None
     stale: bool = False
+    error: str = ""
 
 
 def capture_muscle_work(sync, vis_col, root, scene, vcp, muscle):
+    error = _branched_mode_error(root, muscle)
+    if error:
+        return _invalid_mode_work(sync, vis_col, root, muscle, error)
+    if muscle.inflation_mode == "SECTION_PROFILE":
+        return _capture_profile_work(sync, vis_col, root, scene, muscle)
+    if muscle.inflation_mode not in ("CTRL_POINT", "DISTRIBUTED"):
+        return _invalid_mode_work(sync, vis_col, root, muscle)
+    return _capture_legacy_work(sync, vis_col, root, scene, muscle)
+
+
+def _capture_legacy_work(sync, vis_col, root, scene, muscle):
     migrate_inflation_control(muscle)
     base, inflated = sync._ensure_muscle_meshes(vis_col, root, muscle.id)
     branched = _safe_branched_request(root, scene, muscle)
@@ -31,6 +43,25 @@ def capture_muscle_work(sync, vis_col, root, scene, vcp, muscle):
     try: request = branched if branched is not None else (None if payload is None else _make_request(muscle, payload, initialize))
     except (TypeError, ValueError): request = None
     return MuscleNumericWork(muscle, base, inflated, request, stale)
+
+
+def _invalid_mode_work(sync, vis_col, root, muscle, error=""):
+    base = sync._find_muscle_proxy(vis_col, root.name, muscle.id)
+    inflated = sync._find_muscle_proxy(vis_col, root.name, muscle.id, "INFL")
+    return MuscleNumericWork(muscle, base, inflated, error=error or "PROFILE_MODE_UNSUPPORTED: " + muscle.inflation_mode)
+
+
+def _branched_mode_error(root, muscle):
+    from .branch_control import branch_surface
+    from ..vcp.prepared_inflation import validate_prepared_mode
+    surface = branch_surface(root, muscle)
+    if surface is not None:
+        try:
+            for settings in (muscle, *(b.settings for b in surface.branches)):
+                validate_prepared_mode(settings.inflation_mode)
+        except ValueError as error:
+            return str(error)
+    return ""
 
 
 def _safe_branched_request(root, scene, muscle):
@@ -47,9 +78,15 @@ def _branched_request(root, scene, muscle):
     if surface is None or surface.construction_mode != "BRANCHED_LOFT":
         return None
     from .branched_surface_capture import capture_assembly
-    from ..vcp.branched_numeric import BranchedMuscleRequest
     assembly = capture_assembly(root, scene, surface)
+    return _make_branched_request(muscle, surface, assembly)
+
+
+def _make_branched_request(muscle, surface, assembly):
+    from ..vcp.branched_numeric import BranchedMuscleRequest
+    from ..vcp.prepared_inflation import validate_prepared_mode
     settings = (muscle, *(b.settings for b in surface.branches))
+    for part in settings: validate_prepared_mode(part.inflation_mode)
     grids = (assembly.main, *(b.grid for b in assembly.branches))
     specs = tuple(_numeric_spec(s, surface, g.shape[1], False, False, _initialize_control(s))
                   for s, g in zip(settings, grids))
@@ -105,6 +142,9 @@ def _numeric_spec(muscle, config, target, densify, closed_u, initialize=False):
     values = _topology_values(config, target, densify, closed_u)
     values.update(_inflation_values(muscle))
     values["initialize_control"] = bool(initialize)
+    if muscle.inflation_mode == "SECTION_PROFILE":
+        from ..vcp.muscle_section_profile import profile_from_muscle
+        values["section_profile"] = profile_from_muscle(muscle)
     return MuscleNumericSpec(**values)
 
 
@@ -120,7 +160,7 @@ def _inflation_values(muscle):
         inflation_falloff_radius=float(muscle.inflation_falloff_radius), inflation_direction_depth=float(muscle.inflation_direction_depth),
         inflation_boundary_strength=float(muscle.inflation_boundary_strength), inflation_boundary_band=float(muscle.inflation_boundary_band),
         inflation_boundary_power=float(muscle.inflation_boundary_power), inflation_length_taper_band=float(muscle.inflation_length_taper_band),
-        closed_v=bool(muscle.closed_v), flip_normals=bool(muscle.flip_normals), control_world=muscle_inflation_ctrl_world(muscle))
+        closed_v=bool(muscle.closed_v), flip_normals=bool(muscle.flip_normals), control_world=(0., 0., 0.) if muscle.inflation_mode == "SECTION_PROFILE" else muscle_inflation_ctrl_world(muscle))
 
 
 def _initialize_control(muscle):
@@ -128,11 +168,36 @@ def _initialize_control(muscle):
 
 
 def _publish_one(sync, vis_col, root, scene, vcp, work, result, batch):
+    error = work.error or (result.error if result else "")
+    work.muscle["_af_rt_section_profile_error"] = error
+    if work.muscle.inflation_mode == "SECTION_PROFILE" or error.startswith("PROFILE_"):
+        sync._remove_inflation_ctrl_for_muscle(vis_col, root.name, work.muscle.id)
+    if error:
+        return _publish_error(sync, vcp, work, error)
     if work.request is None:
         return _publish_missing(sync, vcp, work)
     if result is None or result.error:
         return sync._clear_muscle_meshes(vcp, work.muscle.id, work.base_obj, work.infl_obj)
+    if _profile_unchanged(sync, vis_col, root, work, result):
+        return
     _publish_valid(sync, vis_col, root, scene, vcp, work, result, batch)
+
+
+def _profile_unchanged(sync, vis_col, root, work, result):
+    if work.muscle.inflation_mode != "SECTION_PROFILE" or sync._find_inflation_ctrl(vis_col, root.name, work.muscle.id):
+        return False
+    for obj, values in ((work.base_obj, result.base_vertices), (work.infl_obj, result.inflated_vertices)):
+        if obj is None or obj.get("af_muscle_output_state") != "CURRENT" or not mesh_matches(obj, values, result.faces):
+            return False
+    return True
+
+
+def mesh_matches(obj, values, faces):
+    import numpy as np
+    actual = np.empty(len(obj.data.vertices)*3, dtype=np.float32)
+    obj.data.vertices.foreach_get("co", actual)
+    return (np.array_equal(actual.reshape(-1, 3), np.asarray(values, dtype=np.float32)) and
+            np.array_equal([tuple(face.vertices) for face in obj.data.polygons], faces))
 
 
 def _publish_missing(sync, vcp, work):
@@ -142,6 +207,10 @@ def _publish_missing(sync, vcp, work):
 
 
 def _publish_valid(sync, vis_col, root, scene, vcp, work, result, batch):
+    from dataclasses import replace
+    if work.base_obj is None or work.infl_obj is None:
+        base, inflated = sync._ensure_muscle_meshes(vis_col, root, work.muscle.id)
+        work = replace(work, base_obj=base, infl_obj=inflated)
     sync._update_mesh(work.base_obj, result.base_vertices, result.faces)
     _sync_control(sync, vis_col, root, scene, vcp, work, result)
     sync._update_mesh(work.infl_obj, result.inflated_vertices, result.faces)
@@ -154,7 +223,7 @@ def _sync_control(sync, vis_col, root, scene, vcp, work, result):
     settings, key, index = selected_part(root, work.muscle)
     rows, spec = _part_control(work.request, result, index)
     if spec.initialize_control: _store_initial_control(settings, rows)
-    points = [[Vector(point) for point in row] for row in rows] if ensure else ()
+    points = [[Vector(point) for point in row] for row in rows] if ensure and settings.inflation_mode == "CTRL_POINT" else ()
     ctrl = sync._sync_inflation_control(vis_col, root, settings, work.base_obj, points, ensure)
     if ctrl is not None: ctrl['af_muscle_branch_id'] = key
 
@@ -184,3 +253,27 @@ def _mark_valid(sync, vcp, work, batch):
     for obj in objects:
         obj["af_muscle_numeric_backend"] = batch.backend
         obj["af_muscle_numeric_batch_ms"] = float(batch.elapsed_ms)
+
+
+def _capture_profile_work(sync, vis_col, root, scene, muscle):
+    from .muscle_profile_capture import capture_target
+    from ..vcp.muscle_section_profile import profile_from_muscle
+    base, inflated = sync._find_muscle_proxy(vis_col, root.name, muscle.id), sync._find_muscle_proxy(vis_col, root.name, muscle.id, "INFL")
+    try:
+        profile_from_muscle(muscle)
+        target = capture_target(root, scene, muscle.id)
+        if not target.eligible:
+            raise ValueError("; ".join(target.reasons))
+        request = _make_request(muscle, target.payload)
+        return MuscleNumericWork(muscle, base, inflated, request)
+    except (ValueError, TypeError) as error:
+        return MuscleNumericWork(muscle, base, inflated, error=str(error))
+
+
+def _publish_error(sync, vcp, work, error):
+    if "PROFILE_BASE_NOT_CURRENT" in error:
+        return sync._retain_stale_muscle(work.base_obj, work.infl_obj)
+    for obj in (work.base_obj, work.infl_obj):
+        if obj is not None:
+            sync._update_mesh(obj, [], [])
+    sync._set_output_state((work.base_obj, work.infl_obj), "INVALID")

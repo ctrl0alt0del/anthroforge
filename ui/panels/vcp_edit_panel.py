@@ -29,9 +29,12 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
 
     def _draw_inflation(self, layout, muscle):
         infl = layout.box()
-        infl.label(text="Inflation")
-        infl.prop(muscle, "inflation_enabled", text="Enabled")
-        infl.prop(muscle, "inflation_mode", text="Mode")
+        infl.label(text="Inflation"); infl.prop(muscle, "inflation_enabled", text="Enabled")
+        from .muscle_profile import mode_menu, draw_profile
+        mode_menu(infl, muscle)
+        if muscle.inflation_mode == "SECTION_PROFILE":
+            draw_profile(infl, muscle)
+            return infl
         col = infl.column()
         col.enabled = muscle.inflation_enabled
         self._draw_shared_inflation(col, muscle)
@@ -41,7 +44,8 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
         return infl
 
     def _draw_actions(self, layout, infl, muscle):
-        op = layout.operator("af.flip_muscle_normals", icon="ARROW_LEFTRIGHT")
+        action = "af.muscle_profile_side" if muscle.inflation_mode == "SECTION_PROFILE" else "af.flip_muscle_normals"
+        op = layout.operator(action, icon="ARROW_LEFTRIGHT")
         op.muscle_id = muscle.id
         if str(getattr(muscle, "surface_source_mode", "LEGACY_FIBERS")) == "LEGACY_FIBERS":
             convert = layout.operator("af.convert_muscle_to_fiber_surface", icon="MESH_GRID")

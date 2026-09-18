@@ -13,6 +13,8 @@ from ..vcp.muscle_numeric import MuscleNumericSpec
 
 
 def evaluate(document, name, construction, resolver, solver, main_transform=None):
+    preset = document['volume_presets'][document['muscles'][name]['volume_preset']]
+    require(preset['mode'] != 'section_profile', 'PROFILE_DOMAIN_UNSUPPORTED')
     main = _evaluate_part(document, name, resolver, solver, main_transform)
     parts = {'main': main}
     connections = {}
@@ -107,6 +109,7 @@ def _input(key, data, main, child, rows):
 
 
 def _spec(part, grid):
+    require(part['native_properties']['inflation_mode'] != 'SECTION_PROFILE', 'PROFILE_DOMAIN_UNSUPPORTED')
     return MuscleNumericSpec(target_count=grid.shape[1], densify=False, closed_u=False,
         close_across_fibers=False, topology_flip_normals=False, closed_v=False,
         control_world=tuple(part['native_control_world']), **part['native_properties'])

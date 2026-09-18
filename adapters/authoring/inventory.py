@@ -38,9 +38,35 @@ def capture(root, scene):
     geometry = {r['instance_id'] or r['locator']: geometry_for(scene.objects[r['label']]) for r in rows if r['has_surface']}
     controls = [control_for(scene.objects[r['label']], r) for r in rows if r['control_kind']]
     instances = [r for r in rows if r['has_surface'] or r['control_kind'] == 'hook']
-    native = native_records(root)
+    native = _inventory_native(root)
     revision = digest([root.get('af_authoring_id', ''), stable(rows), geometry, stable(controls), native])
     return dict(root_id=root.get('af_authoring_id', ''), scene_id=root.name, revision=revision, reference_pose=str(root.get('af_authoring_pose', 'rest')), instances=instances, controls=controls, geometry=geometry, native=native)
+
+
+def _inventory_native(root):
+    native = native_records(root)
+    for records in native.values():
+        for row in records:
+            _profile_record(row)
+    return native
+
+
+def _profile_record(row):
+    for key in ('section_depths', 'section_peaks', 'section_roundness'):
+        if key in row['values']:
+            row['values'][key] = _profile_number(row['values'][key])
+    for records in row.get('collections', {}).values():
+        for child in records:
+            _profile_record(child)
+    for child in row.get('pointers', {}).values():
+        _profile_record(child)
+
+
+def _profile_number(value):
+    from math import isfinite
+    if isinstance(value, list):
+        return [_profile_number(item) for item in value]
+    return value if isfinite(value) else str(value)
 
 
 def stable(rows):

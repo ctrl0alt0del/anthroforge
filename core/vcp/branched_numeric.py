@@ -22,10 +22,11 @@ def execute_mixed(requests, backend):
     from .muscle_numeric import execute_muscle_batch
     started = perf_counter()
     ordinary = tuple(r for r in requests if not isinstance(r, BranchedMuscleRequest))
-    regular = iter(execute_muscle_batch(ordinary, backend).results)
+    batch = execute_muscle_batch(ordinary, backend)
+    regular = iter(batch.results)
     results = tuple(evaluate(request, backend) if isinstance(request, BranchedMuscleRequest)
                     else next(regular) for request in requests)
-    return MuscleNumericBatchResult(results, backend, (perf_counter()-started)*1000)
+    return MuscleNumericBatchResult(results, batch.backend, (perf_counter()-started)*1000, batch.workers, batch.parallel)
 
 
 def evaluate(request, backend):

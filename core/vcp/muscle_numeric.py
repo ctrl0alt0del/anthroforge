@@ -40,6 +40,7 @@ class MuscleNumericSpec:
     flip_normals: bool
     control_world: tuple
     initialize_control: bool = False
+    section_profile: object = None
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ class MuscleNumericRequest:
     muscle_id: str
     points: np.ndarray
     spec: MuscleNumericSpec
+    orientation_parity: int = 1
 
 
 @dataclass(frozen=True)
@@ -69,12 +71,14 @@ class MuscleNumericBatchResult:
     parallel: bool = False
 
 
-def make_muscle_request(muscle_id, points, spec):
-    array = np.ascontiguousarray(points, dtype=np.float64)
+def make_muscle_request(muscle_id, points, spec, *, orientation_parity=1):
+    if type(orientation_parity) is not int or orientation_parity not in (-1, 1):
+        raise ValueError("PROFILE_PARITY_INVALID: orientation parity must be +1 or -1.")
+    array = np.array(points, dtype=np.float64, copy=True, order="C")
     if array.ndim != 3 or array.shape[0] < 2 or array.shape[1] < 2 or array.shape[2] != 3:
         raise ValueError("Muscle input must be a rectangular MxNx3 grid.")
     array.flags.writeable = False
-    return MuscleNumericRequest(str(muscle_id), array, spec)
+    return MuscleNumericRequest(str(muscle_id), array, spec, orientation_parity)
 
 
 def resolve_muscle_backend(explicit=None, environment=None):
@@ -85,16 +89,24 @@ def resolve_muscle_backend(explicit=None, environment=None):
 
 def execute_muscle_batch(requests, backend=None):
     from .branched_numeric import BranchedMuscleRequest, execute_mixed
-    kind = resolve_muscle_backend(backend)
-    requests = tuple(requests)
+    kind, requests = resolve_muscle_backend(backend), tuple(requests)
     if any(isinstance(r, BranchedMuscleRequest) for r in requests):
         return execute_mixed(requests, kind.value)
     if not requests:
         return MuscleNumericBatchResult((), kind.value, 0.0)
+    return _execute_ordinary(requests, kind)
+
+
+def _execute_ordinary(requests, kind):
+    from .muscle_profile_numeric import LEGACY_MODES, execute_partitioned, request_error
     if kind == MuscleNumericBackend.NATIVE:
         from .muscle_numeric_native import execute_native_muscle_batch
-        return execute_native_muscle_batch(requests)
-    return execute_python_muscle_batch(requests)
+        execute = execute_native_muscle_batch
+    else:
+        execute = execute_python_muscle_batch
+    if any(request_error(row) or row.spec.inflation_mode not in LEGACY_MODES for row in requests):
+        return execute_partitioned(requests, kind.value, execute)
+    return execute(requests)
 
 
 def execute_python_muscle_batch(requests):
@@ -140,7 +152,9 @@ def _inflate_grid(grid, spec):
     adapter = _InflationAdapter(spec)
     if str(spec.inflation_mode) == "DISTRIBUTED":
         return apply_inflation_distributed(grid, adapter)
-    return apply_inflation_from_ctrl(grid, adapter)
+    if str(spec.inflation_mode) == "CTRL_POINT":
+        return apply_inflation_from_ctrl(grid, adapter)
+    raise ValueError("PROFILE_MODE_UNSUPPORTED: " + str(spec.inflation_mode))
 
 
 def _valid_result(muscle_id, base, inflated, faces):

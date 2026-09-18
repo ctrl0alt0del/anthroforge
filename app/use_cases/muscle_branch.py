@@ -2,6 +2,7 @@
 from uuid import uuid4
 from ...core.vcp.prop_update_guard import suppress_vcp_prop_updates, vcp_prop_updates_suppressed
 from ...core.vcp.shared_point_storage import slots, ensure_point
+from ...core.vcp.prepared_inflation import validate_prepared_mode
 from ...core.visualization.branched_surface_capture import source_surface, source_fibers, _boundary
 from .fiber_surface_create import _new_surface
 
@@ -18,6 +19,7 @@ def muscle_surface(root, muscle):
 
 def add_branch(root, muscle_id, branch_surface_id, boundary_id, point_ids):
     muscle = find_muscle(root, muscle_id)
+    validate_prepared_mode(muscle.inflation_mode)
     current = muscle_surface(root, muscle)
     main_id = current.main_surface_id if current.construction_mode == "BRANCHED_LOFT" else current.id
     main, branch = source_surface(root, main_id), source_surface(root, branch_surface_id)

@@ -115,3 +115,15 @@ def ensure_inflation_ctrl(vis_col, root, muscle, find_inflation_ctrl_fn, create_
     ctrl.show_in_front = True
     ctrl.hide_render = True
     return ctrl
+
+
+def expanded_rows_with_provenance(root, source, rows, fibers):
+    tagged = [(row, dict(fiber_id=fiber.id, name=fiber.name, mirrored=False)) for row, fiber in zip(rows, fibers)]
+    rule = _mirror_rule(root, source)
+    if not _use_mirrored_rows(source) or not rows or rule is None or _rows_span_plane(rows, *rule):
+        return rows, tuple(tag for _, tag in tagged)
+    tagged.sort(key=lambda item: abs(_row_signed_distance(item[0], *rule)))
+    mirrors = [(_mirror_row(row, *rule), dict(tag, mirrored=True)) for row, tag in tagged
+               if abs(_row_signed_distance(row, *rule)) > 1e-6]
+    combined = list(reversed(mirrors)) + tagged
+    return [row for row, _ in combined], tuple(tag for _, tag in combined)
