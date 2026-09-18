@@ -2944,7 +2944,8 @@
             "fusiform.v1",
             "fan.v1",
             "strap.v1",
-            "loop.v1"
+            "loop.v1",
+            "branched_loft.v1"
           ]
         },
         "concept": {
@@ -2967,6 +2968,9 @@
             },
             {
               "$ref": "#/$defs/native_closed_loft"
+            },
+            {
+              "$ref": "#/$defs/branched_loft"
             }
           ]
         },
@@ -3489,6 +3493,89 @@
         "baseline_digest",
         "value",
         "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "branched_loft": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "branched_loft"
+          ]
+        },
+        "main": {
+          "$ref": "#/$defs/native_open_loft"
+        },
+        "branches": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "construction": {
+                "$ref": "#/$defs/native_open_loft"
+              },
+              "boundary": {
+                "enum": [
+                  "first",
+                  "last"
+                ]
+              },
+              "root_anchor_indices": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "minItems": 2,
+                "maxItems": 128
+              },
+              "width": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "exclusiveMaximum": 0.5
+              },
+              "fullness": {
+                "type": "number"
+              },
+              "inflation": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "DISTRIBUTED",
+                      "CTRL_POINT"
+                    ]
+                  },
+                  "amount": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "control": {
+                    "$ref": "#/$defs/xyz"
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "construction",
+              "boundary",
+              "root_anchor_indices"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "main",
+        "branches"
       ],
       "additionalProperties": false
     },
@@ -6445,6 +6532,670 @@
         },
         "op": {
           "enum": [
+            "fibers.recompute"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fiber_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1,
+              "maxItems": 4096
+            },
+            "cold_start": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "fibers.recompute_status"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "token": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "token"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "muscles.branch_inspect"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "muscle_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "muscle_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "muscles.branch_add"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "muscle_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "branch_surface_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "boundary_fiber_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "point_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 2,
+              "maxItems": 128
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "muscle_id",
+            "branch_surface_id",
+            "boundary_fiber_id",
+            "point_ids"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "muscles.branch_remove"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "muscle_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "connection_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "muscle_id",
+            "connection_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "muscles.branch_configure"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "muscle_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "connection_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "connector": {
+              "type": "object",
+              "properties": {
+                "width": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "exclusiveMaximum": 0.5
+                },
+                "fullness": {
+                  "type": "number"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "inflation": {
+              "$ref": "#/$defs/patch_value"
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "muscle_id",
+            "connection_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "points.inspect"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "point_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "points.edit"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "point_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "position": {
+              "$ref": "#/$defs/xyz"
+            },
+            "scp_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "offset": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "point_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "points.detach"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fiber_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "fiber_id",
+            "index"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "points.link"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fiber_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "point_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "fiber_id",
+            "index",
+            "point_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
             "anatomy.prepare_base"
           ]
         },
@@ -7847,6 +8598,9 @@
           "$ref": "#/$defs/patch_value"
         },
         "plan": {
+          "$ref": "#/$defs/patch_value"
+        },
+        "recompute": {
           "$ref": "#/$defs/patch_value"
         },
         "matches": {

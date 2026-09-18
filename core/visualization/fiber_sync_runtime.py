@@ -406,19 +406,51 @@ def _resolved_attachment(fiber, aspect, owner, raw, target, payload):
 def _apply_attachment_target(sync, fiber, changed_ids, setters, owner, raw, target):
     if target is None: return False
     if (str(owner or ""), str(raw or "")) == (target.owner_id, target.raw): return False
-    sync.clear_solver_cache(fiber.id)
+    before = _shared_bindings(fiber)
     with suppress_vcp_prop_updates():
         setters[0](target.owner_id); setters[1](target.raw)
-    sync._set_fiber_prefer_bake(fiber, False)
-    changed_ids.add(fiber.id)
+    _invalidate_shared_edit(sync, fiber, before, changed_ids)
     return True
 
 
-def _changed_attachment(sync, root, scene, parent_id, obj, depsgraph, fiber, raw, offset=0.):
+def _shared_bindings(fiber):
+    from ..vcp.shared_point_storage import slots, point_record
+    points = [point_record(owner, slot) for owner, slot, _ in slots(fiber)]
+    return {p.id: (p.parent_id, p.attach_param, p.normal_offset) for p in points if p is not None}
+
+
+def _invalidate_shared_edit(sync, fiber, before, changed_ids):
+    from ..vcp.shared_point_storage import point_users
+    after = _shared_bindings(fiber)
+    users = {fiber.id: fiber}
+    for key, value in after.items():
+        if before.get(key) != value:
+            users.update({f.id: f for f, _, _ in point_users(fiber.id_data, key)})
+    for f in users.values():
+        sync.clear_solver_cache(f.id)
+        sync._set_fiber_prefer_bake(f, False)
+        changed_ids.add(f.id)
+
+
+def _changed_attachment(sync, root, scene, parent_id, obj, depsgraph, fiber, raw, offset=0., point_id=''):
     target = capture_attachment_target(sync, root, scene, parent_id, obj.location.copy(), depsgraph,
-                                       float(fiber.collision_radius), offset)
+                                       _point_snap_radius(root, point_id, fiber.collision_radius), offset)
     if target is None: _restore_pin_handle(root, scene, obj, parent_id, raw, depsgraph)
     return target
+
+
+def _point_snap_radius(root, point_id, fallback):
+    from ..vcp.shared_point_storage import point_users
+    users = point_users(root, point_id) if point_id else ()
+    return max((float(f.collision_radius) for f, _, _ in users), default=float(fallback))
+
+
+def _endpoint_target(sync, root, scene, obj, depsgraph, fiber, endpoint):
+    from ..vcp.shared_point_storage import endpoint_record
+    side = str(endpoint).lower()
+    point = endpoint_record(fiber, side)
+    return _changed_attachment(sync, root, scene, point.parent_id, obj, depsgraph, fiber,
+                               point.attach_param, point.normal_offset, getattr(fiber, side+'_point_id', ''))
 
 
 def _restore_pin_handle(root, scene, obj, owner, raw, depsgraph):
@@ -448,7 +480,7 @@ def _update_endpoint_handle(sync, root, scene, obj, changed_ids, depsgraph=None)
     if fiber is None:
         return False
     parent_id, current, slot = _endpoint_parts(fiber, endpoint)
-    target = _changed_attachment(sync, root, scene, parent_id, obj, depsgraph, fiber, current)
+    target = _endpoint_target(sync, root, scene, obj, depsgraph, fiber, endpoint)
     if target is None: return False
     aspect = f"attachment.{str(endpoint).lower()}.param"
     payload = {"endpoint": str(endpoint or "")}
@@ -471,7 +503,7 @@ def _update_touch_handle(sync, root, scene, obj, changed_ids, depsgraph=None):
     if tp is None:
         return False
     current = str(tp.attach_param or "")
-    target = _changed_attachment(sync, root, scene, tp.parent_id, obj, depsgraph, fiber, current, tp.normal_offset)
+    target = _changed_attachment(sync, root, scene, tp.parent_id, obj, depsgraph, fiber, current, tp.normal_offset, getattr(tp, 'point_id', ''))
     if target is None: return False
     aspect = f"attachment.touch[{int(touch_index)}].param"
     target = _resolved_attachment(fiber, aspect, tp.parent_id, current, target,

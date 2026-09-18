@@ -15,6 +15,21 @@ It bypasses scene capture, solver and request replay. See docs/warnings.md for
 filters, bounded pagination, check tokens and mutation/poll/correction examples.
 All final authoring responses carry live warning state outside saved receipts.
 
+Native recompute (DSL 0.4): fibers.recompute takes scene_id and
+expected_scene_revision from anatomy.discover. Optional fiber_ids selects native
+Fibers on this root; omission selects all. cold_start defaults to true and clears
+runtime solver caches so the current planner runs again. Native settings, anchors,
+and region definitions remain as authored. Resnap changed geometry before starting.
+The operation enqueues ordinary FINAL native refinement and returns recompute.token.
+Poll fibers.recompute_status with scene_id and token until recompute.done is true.
+Progress includes pending, committed, failures and per-fiber statuses. A successful
+start response means accepted work; completed failures yield status='unresolved'.
+Only validated native results commit and update dependent surfaces/muscles/mirrors.
+Polling and identical start-request replay read live progress without another solve.
+Tokens are scoped to the loaded scene/root session and expire on reload/unregister.
+In background Blender scripts, advance the ordinary refinement queue with
+drain_fiber_refinements(max_slices=...) between polls; GUI timers do this normally.
+
 Read-only point picker (DSL 0.4): use op='anatomy.snap_points', with params
 scene_id, instance_id, expected_scene_revision, and points=[[world_x, y, z], ...].
 Get instance IDs and the current revision from anatomy.discover; initialize IDs

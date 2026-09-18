@@ -3225,7 +3225,8 @@
             "fusiform.v1",
             "fan.v1",
             "strap.v1",
-            "loop.v1"
+            "loop.v1",
+            "branched_loft.v1"
           ]
         },
         "concept": {
@@ -3248,6 +3249,9 @@
             },
             {
               "$ref": "#/$defs/native_closed_loft"
+            },
+            {
+              "$ref": "#/$defs/branched_loft"
             }
           ]
         },
@@ -3770,6 +3774,89 @@
         "baseline_digest",
         "value",
         "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "branched_loft": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "branched_loft"
+          ]
+        },
+        "main": {
+          "$ref": "#/$defs/native_open_loft"
+        },
+        "branches": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "construction": {
+                "$ref": "#/$defs/native_open_loft"
+              },
+              "boundary": {
+                "enum": [
+                  "first",
+                  "last"
+                ]
+              },
+              "root_anchor_indices": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "minItems": 2,
+                "maxItems": 128
+              },
+              "width": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "exclusiveMaximum": 0.5
+              },
+              "fullness": {
+                "type": "number"
+              },
+              "inflation": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "DISTRIBUTED",
+                      "CTRL_POINT"
+                    ]
+                  },
+                  "amount": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "control": {
+                    "$ref": "#/$defs/xyz"
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "construction",
+              "boundary",
+              "root_anchor_indices"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "main",
+        "branches"
       ],
       "additionalProperties": false
     }

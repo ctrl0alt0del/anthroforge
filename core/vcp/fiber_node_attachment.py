@@ -127,10 +127,11 @@ def _forced_nodes(root, scene, fiber, points, runtime):
 
 
 def _anchor_specs(root, scene, fiber, runtime):
+    from .shared_point_storage import endpoint_record
     if is_loop_fiber(fiber): return _loop_specs(root, scene, fiber, runtime)
-    first = _anchor_spec(root, scene, runtime, fiber.a_parent_id, fiber.a_attach_param)
+    first = _touch_spec(root, scene, runtime, endpoint_record(fiber, "a"))
     mids = tuple(_touch_spec(root, scene, runtime, row) for row in fiber.mid_touches)
-    last = _anchor_spec(root, scene, runtime, fiber.b_parent_id, fiber.b_attach_param)
+    last = _touch_spec(root, scene, runtime, endpoint_record(fiber, "b"))
     return tuple(row for row in (first, *mids, last) if row is not None)
 
 

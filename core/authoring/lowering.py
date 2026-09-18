@@ -63,7 +63,7 @@ def compile_instance(document, inventory, output, key, instance, domains):
         domains[identity(reference)] = reference
     output['volume_presets'][key] = compile_shape(document, instance)
     output['policies'][key] = native_values(lookup(document, instance['policy']), instance['profile'])
-    output['recipes'][key] = dict(concept=lookup(document, recipe['concept'])['label'], architecture=recipe['strategy'].split('.')[0].replace('loop', 'ring'), region_roles=deepcopy(recipe['roles']), construction=construction, evidence=evidence(recipe['evidence']))
+    output['recipes'][key] = dict(concept=lookup(document, recipe['concept'])['label'], architecture=recipe['strategy'].split('.')[0].replace('loop', 'ring').replace('branched_loft', 'fan'), region_roles=deepcopy(recipe['roles']), construction=construction, evidence=evidence(recipe['evidence']))
     output['muscles'][key] = dict(recipe=key, side=instance['side'], region_bindings=role_bindings(instance), volume_preset=key, policy=key, symmetry=compile_symmetry(document, inventory, output, instance))
     output['roster'][key] = dict(state='included', instances=[key], reason='Representative static volume; not anatomically reviewed.')
 

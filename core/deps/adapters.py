@@ -130,12 +130,23 @@ def _add_fiber_surface_entities(root, graph, entity_sets):
 
 
 def _add_surface_fiber_edges(graph, surface, target_port):
+    _add_branch_surface_edges(graph, surface, target_port)
     for ref in surface.fiber_refs:
         if not ref.fiber_id:
             continue
         probe = graph.add_port(PortRef("FIBER", ref.fiber_id, "probe", PHASE_PROBES, MUT_PROBE))
         graph.add_edge(Edge(probe, target_port, EDGE_EVAL))
         _add_dependency_edge(graph, ("FIBER", ref.fiber_id), ("FIBER_SURFACE", str(surface.id)))
+
+
+def _add_branch_surface_edges(graph, surface, target_port):
+    if str(getattr(surface, "construction_mode", "")) != "BRANCHED_LOFT":
+        return
+    ids = (surface.main_surface_id, *(b.surface_id for b in surface.branches))
+    for sid in ids:
+        probe = graph.add_port(PortRef("FIBER_SURFACE", sid, "probe", PHASE_PROBES, MUT_PROBE))
+        graph.add_edge(Edge(probe, target_port, EDGE_EVAL))
+        _add_dependency_edge(graph, ("FIBER_SURFACE", sid), ("FIBER_SURFACE", str(surface.id)))
 
 
 def _add_blob_entities(root, graph, entity_sets):

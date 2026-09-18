@@ -1,5 +1,7 @@
 import bpy
 
+from ..core.vcp.shared_point_storage import binding_getter, binding_setter, point_updated, clear_indexes
+
 from ..app.runtime_api import schedule_context, sync_context
 from ..core.deps.dirty_hints import dirty_hints_for
 from ..core.vcp.prop_update_guard import suppress_vcp_prop_updates, vcp_prop_updates_suppressed
@@ -37,10 +39,22 @@ def _on_muscle_prop_update(self, context):
     sync_context(context, dirty_hints=dirty_hints_for("MUSCLE", {self.id}))
 
 
+def _on_inflation_ctrl_update(self, context):
+    if vcp_prop_updates_suppressed():
+        return
+    self.inflation_ctrl_initialized = True
+    _on_muscle_prop_update(self, context)
+
+
 def _on_fiber_surface_prop_update(self, context):
     if vcp_prop_updates_suppressed():
         return
     sync_context(context, dirty_hints=dirty_hints_for("FIBER_SURFACE", {self.id}))
+
+
+def _branch_update(self, context):
+    if not vcp_prop_updates_suppressed():
+        _on_muscle_prop_update(self.settings, context)
 
 
 def _on_blob_prop_update(self, context):
@@ -189,22 +203,6 @@ class AF_FiberSurfaceFiberRef_Property(bpy.types.PropertyGroup):
     fiber_id: bpy.props.StringProperty(name="Fiber ID", default="")
 
 
-class AF_FiberSurfaceVCP_Property(bpy.types.PropertyGroup):
-    id: bpy.props.StringProperty(name="ID")
-    name: bpy.props.StringProperty(name="Name", default="Fiber Surface", update=_on_fiber_surface_prop_update)
-    schema_version: bpy.props.IntProperty(name="Schema", default=1, min=1)
-    construction_mode: bpy.props.EnumProperty(
-        name="Construction", items=(("LOFT", "Loft", ""), ("LOOP_PATCH", "Loop Patch", "")),
-        default="LOFT", update=_on_fiber_surface_prop_update,
-    )
-    fiber_refs: bpy.props.CollectionProperty(type=AF_FiberSurfaceFiberRef_Property)
-    active_fiber_ref_index: bpy.props.IntProperty(name="Active Fiber Ref", default=-1)
-    close_across_fibers: bpy.props.BoolProperty(name="Close Across Fibers", default=False, update=_on_fiber_surface_prop_update)
-    use_mirrored_rows: bpy.props.BoolProperty(name="Use Mirrored Rows", default=False, update=_on_fiber_surface_prop_update)
-    flip_normals: bpy.props.BoolProperty(name="Flip Normals", default=False, update=_on_fiber_surface_prop_update)
-    patch_resolution: bpy.props.IntProperty(name="Patch Resolution", default=4, min=1, max=64, update=_on_fiber_surface_prop_update)
-
-
 class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="Muscle", update=_on_muscle_prop_update)
@@ -223,7 +221,7 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
     inflation_enabled: bpy.props.BoolProperty(name="Inflation Enabled", default=True, update=_on_muscle_prop_update)
     inflation_ctrl_world: bpy.props.FloatVectorProperty(
         name="Inflation Control Position", size=3, default=(0.0, 0.0, 0.0),
-        options={"HIDDEN"}, update=_on_muscle_prop_update,
+        options={"HIDDEN"}, update=_on_inflation_ctrl_update,
     )
     inflation_ctrl_initialized: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
     inflation_mode: bpy.props.EnumProperty(
@@ -298,15 +296,64 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
     )
 
 
+class AF_BranchPointRef_Property(bpy.types.PropertyGroup):
+    point_id: bpy.props.StringProperty(name="Shared Root Point")
+
+
+class AF_BranchConnection_Property(bpy.types.PropertyGroup):
+    id: bpy.props.StringProperty(name="Connection ID")
+    surface_id: bpy.props.StringProperty(name="Branch Surface")
+    boundary_fiber_id: bpy.props.StringProperty(name="Main Boundary Fiber")
+    roots: bpy.props.CollectionProperty(type=AF_BranchPointRef_Property)
+    settings: bpy.props.PointerProperty(type=AF_MuscleVCP_Property)
+    width: bpy.props.FloatProperty(name="Connector Width", default=.25, min=.01, max=.49, update=_branch_update)
+    fullness: bpy.props.FloatProperty(name="Connector Fullness", default=0., update=_branch_update)
+
+
+class AF_FiberSurfaceVCP_Property(bpy.types.PropertyGroup):
+    main_surface_id: bpy.props.StringProperty(name="Main Surface")
+    branches: bpy.props.CollectionProperty(type=AF_BranchConnection_Property)
+    active_branch_index: bpy.props.IntProperty(default=-1)
+    id: bpy.props.StringProperty(name="ID")
+    name: bpy.props.StringProperty(name="Name", default="Fiber Surface", update=_on_fiber_surface_prop_update)
+    schema_version: bpy.props.IntProperty(name="Schema", default=1, min=1)
+    construction_mode: bpy.props.EnumProperty(
+        name="Construction", items=(("LOFT", "Loft", ""), ("LOOP_PATCH", "Loop Patch", ""), ("BRANCHED_LOFT", "Branched Loft", "")),
+        default="LOFT", update=_on_fiber_surface_prop_update,
+    )
+    fiber_refs: bpy.props.CollectionProperty(type=AF_FiberSurfaceFiberRef_Property)
+    active_fiber_ref_index: bpy.props.IntProperty(name="Active Fiber Ref", default=-1)
+    close_across_fibers: bpy.props.BoolProperty(name="Close Across Fibers", default=False, update=_on_fiber_surface_prop_update)
+    use_mirrored_rows: bpy.props.BoolProperty(name="Use Mirrored Rows", default=False, update=_on_fiber_surface_prop_update)
+    flip_normals: bpy.props.BoolProperty(name="Flip Normals", default=False, update=_on_fiber_surface_prop_update)
+    patch_resolution: bpy.props.IntProperty(name="Patch Resolution", default=4, min=1, max=64, update=_on_fiber_surface_prop_update)
+
+
+class AF_AuthoredPoint_Property(bpy.types.PropertyGroup):
+    id: bpy.props.StringProperty(name="Point ID", update=clear_indexes)
+    parent_id: bpy.props.StringProperty(name="SCP ID", update=point_updated)
+    attach_param: bpy.props.StringProperty(name="Indexed binding", default="0.0", update=point_updated)
+    normal_offset: bpy.props.FloatProperty(name="Normal Offset", update=point_updated)
+
+
+def _binding_string(slot, field, legacy, label, default=""):
+    return bpy.props.StringProperty(name=label, get=binding_getter(slot, field, legacy, default),
+                                    set=binding_setter(slot, field))
+
+
 class AF_FiberTouchPoint_Property(bpy.types.PropertyGroup):
-    parent_id: bpy.props.StringProperty(name="Touch SCP ID", default="", update=_sync_vcp_scene)
-    attach_param: bpy.props.StringProperty(name="Touch Attach Param JSON", default="0.0", update=_sync_vcp_scene)
-    normal_offset: bpy.props.FloatProperty(name="Normal Offset", default=0.0, update=_sync_vcp_scene)
+    point_id: bpy.props.StringProperty(name="Shared Point ID")
+    parent_id: _binding_string("point_id", "parent_id", "parent_id", "Touch SCP ID")
+    attach_param: _binding_string("point_id", "attach_param", "attach_param", "Touch Attach Param JSON", "0.0")
+    normal_offset: bpy.props.FloatProperty(name="Normal Offset",
+        get=binding_getter("point_id", "normal_offset", "normal_offset", 0.0),
+        set=binding_setter("point_id", "normal_offset"))
 
 
 class AF_FiberLoopAnchor_Property(bpy.types.PropertyGroup):
-    parent_id: bpy.props.StringProperty(name="Loop SCP ID", default="", update=_sync_vcp_scene)
-    attach_param: bpy.props.StringProperty(name="Loop Attach Param JSON", default="0.0", update=_sync_vcp_scene)
+    point_id: bpy.props.StringProperty(name="Shared Point ID")
+    parent_id: _binding_string("point_id", "parent_id", "parent_id", "Loop SCP ID")
+    attach_param: _binding_string("point_id", "attach_param", "attach_param", "Loop Attach Param JSON", "0.0")
 
 
 class AF_FiberVCP_Property(bpy.types.PropertyGroup):
@@ -338,10 +385,12 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
         default=(0.0, 0.0, 0.0),
         update=_on_fiber_topology_update,
     )
-    a_parent_id: bpy.props.StringProperty(name="Origin SCP ID", update=_on_fiber_topology_update)
-    a_attach_param: bpy.props.StringProperty(name="Origin Attach Param JSON", update=_on_fiber_attachment_update)
-    b_parent_id: bpy.props.StringProperty(name="Insertion SCP ID", update=_on_fiber_topology_update)
-    b_attach_param: bpy.props.StringProperty(name="Insertion Attach Param JSON", update=_on_fiber_attachment_update)
+    a_point_id: bpy.props.StringProperty(name="Origin Point ID")
+    b_point_id: bpy.props.StringProperty(name="Insertion Point ID")
+    a_parent_id: _binding_string("a_point_id", "parent_id", "a_parent_id", "Origin parent_id")
+    a_attach_param: _binding_string("a_point_id", "attach_param", "a_attach_param", "Origin attach_param")
+    b_parent_id: _binding_string("b_point_id", "parent_id", "b_parent_id", "Insertion parent_id")
+    b_attach_param: _binding_string("b_point_id", "attach_param", "b_attach_param", "Insertion attach_param")
 
     mid_touches: bpy.props.CollectionProperty(type=AF_FiberTouchPoint_Property)
     loop_anchors: bpy.props.CollectionProperty(type=AF_FiberLoopAnchor_Property)
@@ -524,6 +573,8 @@ class AF_SoftTissueVCP_Property(bpy.types.PropertyGroup):
 
 
 class AF_VCP_System_Property(bpy.types.PropertyGroup):
+    authored_points: bpy.props.CollectionProperty(type=AF_AuthoredPoint_Property)
+    point_schema_version: bpy.props.IntProperty(default=0)
     muscles: bpy.props.CollectionProperty(type=AF_MuscleVCP_Property)
     fibers: bpy.props.CollectionProperty(type=AF_FiberVCP_Property)
     fiber_surfaces: bpy.props.CollectionProperty(type=AF_FiberSurfaceVCP_Property)

@@ -34,6 +34,12 @@ class AuthoringInterpreter:
             return request, result
 
     def _execute(self, request):
+        from . import native_branches
+        if request['op'] in native_branches.OPERATIONS:
+            return native_branches.execute(self.scene, request)
+        from . import native_fibers
+        if request['op'] in native_fibers.OPERATIONS:
+            return native_fibers.execute(self.scene, request)
         if request['op'] == 'warnings.list':
             return dict(response(request, "unavailable"), warnings=self.warnings.list(request['params']))
         if request['version'] == '0.4.0':

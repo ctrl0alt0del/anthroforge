@@ -38,6 +38,9 @@ def select_muscle_inflation_ctrl(context, muscle_id=""):
 
 
 def _selected_ctrl_for_mode(context, root, vcp, muscle):
+    if any(getattr(s, 'construction_mode', '') == 'BRANCHED_LOFT' for s in getattr(vcp, 'fiber_surfaces', ())):
+        from ...core.visualization.branch_control import selected_part
+        muscle = selected_part(root, muscle)[0]
     control = muscle_inflation_behavior(muscle).control
     return control.select_control(context, root, vcp, muscle, _resolved_ctrl)
 

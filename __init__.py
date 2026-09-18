@@ -152,8 +152,11 @@ from .properties.scp_properties import (
 from .properties.vcp_properties import (
     AF_MuscleFiberRef_Property,
     AF_FiberSurfaceFiberRef_Property,
-    AF_FiberSurfaceVCP_Property,
     AF_MuscleVCP_Property,
+    AF_BranchPointRef_Property,
+    AF_BranchConnection_Property,
+    AF_FiberSurfaceVCP_Property,
+    AF_AuthoredPoint_Property,
     AF_FiberTouchPoint_Property,
     AF_FiberLoopAnchor_Property,
     AF_FiberVCP_Property,
@@ -275,8 +278,11 @@ classes = (
 
     AF_MuscleFiberRef_Property,
     AF_FiberSurfaceFiberRef_Property,
-    AF_FiberSurfaceVCP_Property,
     AF_MuscleVCP_Property,
+    AF_BranchPointRef_Property,
+    AF_BranchConnection_Property,
+    AF_FiberSurfaceVCP_Property,
+    AF_AuthoredPoint_Property,
     AF_FiberTouchPoint_Property,
     AF_FiberLoopAnchor_Property,
     AF_FiberVCP_Property,
@@ -414,6 +420,10 @@ def _register_runtime_hooks():
 
 
 def _register_warnings():
+    from .ui import muscle_branches
+    muscle_branches.register()
+    from .core.vcp import shared_point_storage
+    shared_point_storage.register()
     from .ui import warnings
     from .core.visualization import warning_runtime
     warnings.register()
@@ -437,6 +447,10 @@ def _unregister_runtime_hooks():
 
 
 def _unregister_fiber_attachment_runtime():
+    from .ui import muscle_branches
+    muscle_branches.unregister()
+    from .core.vcp import shared_point_storage
+    shared_point_storage.unregister()
     from .ui import warnings
     from .core.visualization import warning_runtime
     warning_runtime.unregister()

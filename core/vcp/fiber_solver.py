@@ -569,9 +569,10 @@ class FiberSolver:
         return "Invalid attachment payload."
 
     def _route_anchors(self, root, scene, runtime_registry, fiber_prop):
-        anchors = [self._route_anchor(root, scene, runtime_registry, fiber_prop.a_parent_id, fiber_prop.a_attach_param)]
+        from .shared_point_storage import endpoint_record
+        anchors = [self._touch_anchor(root, scene, runtime_registry, endpoint_record(fiber_prop, "a"))]
         anchors.extend(self._touch_anchor(root, scene, runtime_registry, tp) for tp in getattr(fiber_prop, "mid_touches", ()))
-        anchors.append(self._route_anchor(root, scene, runtime_registry, fiber_prop.b_parent_id, fiber_prop.b_attach_param))
+        anchors.append(self._touch_anchor(root, scene, runtime_registry, endpoint_record(fiber_prop, "b")))
         return None if any(anchor is None for anchor in anchors) else anchors
 
     def _touch_anchor(self, root, scene, runtime_registry, touch):

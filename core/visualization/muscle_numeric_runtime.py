@@ -24,12 +24,36 @@ class MuscleNumericWork:
 def capture_muscle_work(sync, vis_col, root, scene, vcp, muscle):
     migrate_inflation_control(muscle)
     base, inflated = sync._ensure_muscle_meshes(vis_col, root, muscle.id)
-    payload = _numeric_input(sync, root, scene, muscle)
+    branched = _safe_branched_request(root, scene, muscle)
+    payload = None if branched is not None else _numeric_input(sync, root, scene, muscle)
     stale = payload is None and sync._source_output_stale(root, scene, muscle)
     initialize = _initialize_control(muscle)
-    try: request = None if payload is None else _make_request(muscle, payload, initialize)
+    try: request = branched if branched is not None else (None if payload is None else _make_request(muscle, payload, initialize))
     except (TypeError, ValueError): request = None
     return MuscleNumericWork(muscle, base, inflated, request, stale)
+
+
+def _safe_branched_request(root, scene, muscle):
+    try:
+        return _branched_request(root, scene, muscle)
+    except (ValueError, StopIteration):
+        return None
+
+
+def _branched_request(root, scene, muscle):
+    if muscle.surface_source_mode != "FIBER_SURFACE":
+        return None
+    surface = next((s for s in root.af_vcp_system.fiber_surfaces if s.id == muscle.fiber_surface_id), None)
+    if surface is None or surface.construction_mode != "BRANCHED_LOFT":
+        return None
+    from .branched_surface_capture import capture_assembly
+    from ..vcp.branched_numeric import BranchedMuscleRequest
+    assembly = capture_assembly(root, scene, surface)
+    settings = (muscle, *(b.settings for b in surface.branches))
+    grids = (assembly.main, *(b.grid for b in assembly.branches))
+    specs = tuple(_numeric_spec(s, surface, g.shape[1], False, False, _initialize_control(s))
+                  for s, g in zip(settings, grids))
+    return BranchedMuscleRequest(muscle.id, assembly, specs)
 
 
 def execute_muscle_work(scene, work):
@@ -125,11 +149,27 @@ def _publish_valid(sync, vis_col, root, scene, vcp, work, result, batch):
 
 
 def _sync_control(sync, vis_col, root, scene, vcp, work, result):
+    from .branch_control import selected_part
     ensure = sync._selected_muscle_id(vcp, root, scene) == work.muscle.id
-    rows = result.base_vertices.reshape((result.row_count, result.column_count, 3))
-    if work.request.spec.initialize_control: _store_initial_control(work.muscle, rows)
+    settings, key, index = selected_part(root, work.muscle)
+    rows, spec = _part_control(work.request, result, index)
+    if spec.initialize_control: _store_initial_control(settings, rows)
     points = [[Vector(point) for point in row] for row in rows] if ensure else ()
-    sync._sync_inflation_control(vis_col, root, work.muscle, work.base_obj, points, ensure)
+    ctrl = sync._sync_inflation_control(vis_col, root, settings, work.base_obj, points, ensure)
+    if ctrl is not None: ctrl['af_muscle_branch_id'] = key
+
+
+def _part_control(request, result, index):
+    if hasattr(request, 'assembly'):
+        rows = request.assembly.main if index == 0 else request.assembly.branches[index-1].grid
+        return rows, request.part_specs[index]
+    return _control_rows(request, result), request.spec
+
+
+def _control_rows(request, result):
+    if hasattr(request, "assembly"):
+        return request.assembly.main
+    return result.base_vertices.reshape((result.row_count, result.column_count, 3))
 
 
 def _store_initial_control(muscle, rows):

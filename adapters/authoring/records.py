@@ -7,7 +7,10 @@ def record(item):
     collections = {p.identifier: [record(x) for x in getattr(item, p.identifier)]
                    for p in item.bl_rna.properties if p.type == "COLLECTION"}
     custom = {k: plain(item[k]) for k in item.keys() if k.startswith("af_authoring")}
-    return dict(values=values, collections=collections, custom=custom)
+    result = dict(values=values, collections=collections, custom=custom)
+    if hasattr(item, "settings") and item.bl_rna.identifier == "AF_BranchConnection_Property":
+        result["pointers"] = {"settings": record(item.settings)}
+    return result
 
 
 def plain(value):
@@ -20,6 +23,8 @@ def plain(value):
 
 def restore(item, value):
     apply_scalar_dict(item, value["values"])
+    for name, row in value.get("pointers", {}).items():
+        restore(getattr(item, name), row)
     for name, rows in value["collections"].items():
         collection = getattr(item, name)
         collection.clear()

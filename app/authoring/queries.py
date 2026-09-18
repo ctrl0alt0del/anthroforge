@@ -13,9 +13,11 @@ def resolved_document(service, record):
 
 def discover(service, request):
     from .service import operations, capabilities
+    from .native_fibers import OPERATIONS
+    from .native_branches import OPERATIONS as BRANCH_OPERATIONS
     from .catalog import summary
     inventory = {k: v for k, v in service.inventory.items() if k not in ('geometry', 'native')}
-    return dict(inventory=inventory, catalog=summary(service), capabilities=capabilities(), operations=sorted(operations()), assets=[service.store.asset(service.inventory)], unsupported=['feature_detection', 'automatic_anatomical_correspondence', 'motion_simulation', 'automatic_inflation_fitting', 'automatic_head_discovery'])
+    return dict(inventory=inventory, catalog=summary(service), capabilities=capabilities()+['native_fiber_recompute.v1'], operations=sorted([*operations(), *OPERATIONS, *BRANCH_OPERATIONS]), assets=[service.store.asset(service.inventory)], unsupported=['feature_detection', 'automatic_anatomical_correspondence', 'motion_simulation', 'automatic_inflation_fitting', 'automatic_head_discovery'])
 
 
 def query(service, request):

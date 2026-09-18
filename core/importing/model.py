@@ -199,6 +199,7 @@ class PackageSnapshot:
     shortcuts: list[ShortcutSnapshot] = field(default_factory=list)
     draft_skin_settings: dict = field(default_factory=_default_draft_skin_settings)
     topology_settings: dict = field(default_factory=default_topology_settings)
+    branching: dict = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data):

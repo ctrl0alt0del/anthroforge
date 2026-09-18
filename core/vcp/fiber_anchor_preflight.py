@@ -288,10 +288,11 @@ def _full_key(probe, anchors, sources, hierarchy, slack):
 
 
 def _raw_anchor_specs(fiber):
+    from .shared_point_storage import endpoint_record
     if is_loop_fiber(fiber):
         return tuple((row.parent_id, row.attach_param) for row in fiber.loop_anchors)
     mids = tuple((row.parent_id, row.attach_param, float(row.normal_offset)) for row in fiber.mid_touches)
-    ends = ((fiber.a_parent_id, fiber.a_attach_param), (fiber.b_parent_id, fiber.b_attach_param))
+    ends = tuple((p.parent_id, p.attach_param, p.normal_offset) for p in (endpoint_record(fiber, "a"), endpoint_record(fiber, "b")))
     return ends[0], mids, ends[1]
 
 

@@ -317,12 +317,13 @@ class MuscleSceneSync:
         return True
 
     def _inflation_target(self, root, vis_col, obj):
+        from .branch_control import control_part
         muscle_id = self._ctrl_prop(obj, "af_muscle_id")
         muscle = self._find_muscle(root, muscle_id)
         if muscle is None:
             return None, None, None
         base_obj = self._find_muscle_proxy(vis_col, root.name, muscle_id, "BASE")
-        return muscle_id, muscle, base_obj
+        return muscle_id, control_part(root, muscle, obj), base_obj
 
     def _snapped_ctrl_location(self, base_obj, obj):
         target = self._ctrl_location(obj)
@@ -342,25 +343,42 @@ class MuscleSceneSync:
 
     def _process_ctrl_point_update(self, root, vis_col, obj, changed_muscle_ids):
         muscle_id, muscle, base_obj = self._inflation_target(root, vis_col, obj)
-        if base_obj is None:
+        if base_obj is None or muscle is None:
             return False
-        snapped = self._snapped_ctrl_location(base_obj, obj)
+        previous = muscle_inflation_ctrl_world(muscle)
+        snapped = self._snapped_part_control(root, muscle_id, base_obj, obj)
         if snapped is None:
             return False
         new_loc = self._resolved_ctrl_world(muscle_id, muscle, (snapped.x, snapped.y, snapped.z))
-        if muscle_inflation_ctrl_world(muscle) == tuple(new_loc):
+        if previous == tuple(new_loc):
             return False
         set_muscle_inflation_ctrl_world(muscle, tuple(new_loc))
         changed_muscle_ids.add(muscle_id)
         return True
 
     def _process_inflation_ctrl_update(self, root, vis_col, obj, changed_muscle_ids):
-        muscle_id = self._ctrl_prop(obj, "af_muscle_id")
-        muscle = self._find_muscle(root, muscle_id)
+        if self._syncing:
+            return False
+        muscle_id, muscle, _ = self._inflation_target(root, vis_col, obj)
         if muscle is None:
             return False
         control = self._inflation_behavior(muscle).control
-        return control.process_control_update(self, root, vis_col, obj, changed_muscle_ids)
+        previous, self._syncing = self._syncing, True
+        try:
+            return control.process_control_update(self, root, vis_col, obj, changed_muscle_ids)
+        finally:
+            self._syncing = previous
+
+    def _snapped_part_control(self, root, muscle_id, base_obj, obj):
+        from .branch_control import branch_surface, snapped_control
+        muscle = self._find_muscle(root, muscle_id)
+        if branch_surface(root, muscle) is None:
+            return self._snapped_ctrl_location(base_obj, obj)
+        try:
+            point = snapped_control(root, root.users_scene[0], muscle, obj, self._ctrl_location(obj))
+        except (ValueError, StopIteration, TypeError):
+            return None
+        return point if point is not None and self._set_ctrl_location(obj, point) else None
 
     def _depsgraph_ready(self, scene):
         root = get_af_root(scene)

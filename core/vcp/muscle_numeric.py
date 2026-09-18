@@ -84,8 +84,11 @@ def resolve_muscle_backend(explicit=None, environment=None):
 
 
 def execute_muscle_batch(requests, backend=None):
+    from .branched_numeric import BranchedMuscleRequest, execute_mixed
     kind = resolve_muscle_backend(backend)
     requests = tuple(requests)
+    if any(isinstance(r, BranchedMuscleRequest) for r in requests):
+        return execute_mixed(requests, kind.value)
     if not requests:
         return MuscleNumericBatchResult((), kind.value, 0.0)
     if kind == MuscleNumericBackend.NATIVE:

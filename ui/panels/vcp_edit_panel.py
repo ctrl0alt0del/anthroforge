@@ -85,5 +85,8 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
             return
 
         self._draw_identity(layout, muscle)
-        infl = self._draw_inflation(layout, muscle)
+        from ...core.visualization.branch_control import selected_part
+        settings, branch_id, _ = selected_part(root_for_context(context), muscle)
+        layout.label(text='Editing branch inflation' if branch_id else 'Editing main inflation')
+        infl = self._draw_inflation(layout, settings)
         self._draw_actions(layout, infl, muscle)

@@ -11,7 +11,7 @@ struct AfMuscleInput {
 };
 
 struct AfMuscleStats { int workers,parallel,muscles,input_points,output_points;double elapsed_ms; };
-struct AfMuscleOutput { std::vector<Vec> base,inflated;std::vector<int64_t> faces;int rows=0,cols=0,status=0; };
+struct AfMuscleOutput { std::vector<double> boundary_weights,length_weights;std::vector<Vec> base,inflated;std::vector<int64_t> faces;int rows=0,cols=0,status=0; };
 struct AfMuscleBatch { std::vector<AfMuscleOutput> outputs; };
 
 static Vec af_muscle_lerp(Vec a,Vec b,double t) { return add(a,mul(sub(b,a),t)); }
@@ -129,7 +129,8 @@ static std::vector<Vec> af_muscle_normals(const std::vector<Vec>& points,int row
     return out;
 }
 
-static double af_muscle_edge_alpha(int i,int j,int rows,int cols,const AfMuscleInput& input) {
+static double af_muscle_edge_alpha(int i,int j,int rows,int cols,const AfMuscleInput& input,const AfMuscleOutput* output=nullptr) {
+    if(output&&!output->boundary_weights.empty())return output->boundary_weights[i*cols+j];
     bool on_u=j==0||j==cols-1;bool on_v=!input.inflation_closed_v&&(i==0||i==rows-1);if(on_u||on_v)return 0.0;
     int du=cols>1?std::min(j,cols-1-j):0;int dv=input.inflation_closed_v?1000000000:(rows>1?std::min(i,rows-1-i):0);
     double edge=std::clamp(std::min(du,dv)/input.b_band,0.0,1.0);double smooth=edge*edge*(3.0-2.0*edge);
@@ -156,7 +157,8 @@ static double af_muscle_support(const std::vector<Vec>& points,int i,int j,int r
 }
 
 static double af_muscle_distributed_amount(const AfMuscleOutput& out,const std::vector<Vec>& normals,const AfMuscleInput& input,int i,int j) {
-    double raw=input.amount*af_muscle_edge_alpha(i,j,out.rows,out.cols,input)*af_muscle_length_fade(j,out.cols,input.taper);
+    double fade=out.length_weights.empty()?af_muscle_length_fade(j,out.cols,input.taper):out.length_weights[i*out.cols+j];
+    double raw=input.amount*af_muscle_edge_alpha(i,j,out.rows,out.cols,input,&out)*fade;
     double stable=af_muscle_stability(normals,i,j,out.rows,out.cols);if(raw<=0.0||stable>=0.85)return std::max(0.0,raw);
     double radius=af_muscle_support(out.base,i,j,out.rows,out.cols);double limit=radius>1.0e-8?radius*2.5:0.0;
     return std::min(raw,limit)+(raw-std::min(raw,limit))*std::clamp(stable/0.85,0.0,1.0);
@@ -192,7 +194,7 @@ static void af_muscle_inflate_control(AfMuscleOutput& out,const AfMuscleInput& i
 }
 
 static void af_muscle_control_point(AfMuscleOutput& out,const AfMuscleInput& input,Vec control,Vec n0,Vec center,int i,int j) {
-    int index=i*out.cols+j;double edge=af_muscle_edge_alpha(i,j,out.rows,out.cols,input);Vec delta=sub(out.base[index],control);
+    int index=i*out.cols+j;double edge=af_muscle_edge_alpha(i,j,out.rows,out.cols,input,&out);Vec delta=sub(out.base[index],control);
     double ratio=edge>0.0?norm(delta)/input.radius:2.0;if(edge<=0.0||(input.falloff!=0&&ratio>1.0))return;
     double weight=af_muscle_falloff(ratio,input.falloff);if(weight<=1.0e-8)return;Vec direction=sub(out.base[index],center);
     direction=norm(direction)>1.0e-10?af_muscle_unit(direction):n0;out.inflated[index]=add(out.base[index],mul(direction,input.amount*weight*edge));
@@ -237,4 +239,14 @@ AF_EXPORT void af_muscle_batch_destroy(void* handle) { delete static_cast<AfMusc
 
 AF_EXPORT int af_muscle_set_parallel_threshold(int value) {
     if(value<0)return 1;af_muscle_parallel_points=value;return 0;
+}
+
+
+AF_EXPORT void* af_muscle_prepared_create(const double* points,const AfMuscleInput* input,const double* edge,const double* fade) {
+    if(!points||!input||!edge||!fade||input->input_rows<2||input->input_cols<2)return nullptr;
+    auto* batch=new AfMuscleBatch();batch->outputs.resize(1);auto& out=batch->outputs[0];
+    out.rows=input->input_rows;out.cols=input->input_cols;size_t count=size_t(out.rows)*out.cols;
+    auto* source=reinterpret_cast<const Vec*>(points);out.base.assign(source,source+count);
+    out.boundary_weights.assign(edge,edge+count);out.length_weights.assign(fade,fade+count);
+    af_muscle_faces(out,*input);af_muscle_inflate(out,*input);return batch;
 }

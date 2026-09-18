@@ -111,9 +111,9 @@ def _scp_snapshot(scp):
 
 
 def _fiber_snapshot(fiber):
-    touches = [FiberTouchSnapshot(str(tp.parent_id or ""), scalar_dict(tp, {"parent_id"})) for tp in fiber.mid_touches]
-    anchors = [FiberLoopAnchorSnapshot(str(item.parent_id or ""), scalar_dict(item, {"parent_id"})) for item in getattr(fiber, "loop_anchors", ())]
-    return FiberSnapshot(str(fiber.id or ""), str(fiber.name or ""), scalar_dict(fiber, _FIBER_SKIP), str(fiber.a_parent_id or ""), str(fiber.b_parent_id or ""), str(fiber.muscle_id or ""), touches, anchors)
+    touches = [FiberTouchSnapshot(str(tp.parent_id or ""), scalar_dict(tp, {"parent_id", "point_id"})) for tp in fiber.mid_touches]
+    anchors = [FiberLoopAnchorSnapshot(str(item.parent_id or ""), scalar_dict(item, {"parent_id", "point_id"})) for item in getattr(fiber, "loop_anchors", ())]
+    return FiberSnapshot(str(fiber.id or ""), str(fiber.name or ""), scalar_dict(fiber, _FIBER_SKIP | {'a_point_id', 'b_point_id'}), str(fiber.a_parent_id or ""), str(fiber.b_parent_id or ""), str(fiber.muscle_id or ""), touches, anchors)
 
 
 def _muscle_snapshot(muscle):
@@ -156,9 +156,9 @@ def _shortcut_overrides(shortcut):
 
 
 def root_snapshot(root):
-    vcp = root.af_vcp_system
+    from .branching import capture_graph; vcp = root.af_vcp_system
     return PackageSnapshot(
-        root_name=str(root.name or "AF_ROOT"),
+        root_name=str(root.name or "AF_ROOT"), branching=capture_graph(root),
         unit_contract=unit_contract_payload(root),
         draft_skin_settings=scalar_dict(root.af_draft_skin_settings),
         topology_settings=scalar_dict(root.af_topology_settings),
