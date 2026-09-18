@@ -14,7 +14,7 @@ from ...core.authoring.fitting import fit
 from . import queries
 from .resources import EvaluationGuard, GuardedSolver
 
-BACKEND = 'native-fibers-loft-inflation-0.4.0.5'
+BACKEND = 'native-fibers-loft-inflation-0.4.0.6-branches'
 
 
 def compile(service, request):
@@ -56,7 +56,7 @@ def evaluation_context(service, document, ir):
 
 
 def evaluate_one(service, document, ir, name, resolver, guard):
-    key = digest([evaluation_key(service, ir, name), instance_shape(document, name), instance_value(document, name).get('route_overrides'), domain_inputs(ir, name, resolver)])
+    key = digest([evaluation_key(service, ir, name), instance_shape(document, name), instance_value(document, name).get('route_overrides'), domain_inputs(ir, name, resolver), lookup(document, instance_value(document, name)['recipe'])])
     cached = service.store.get('v04_evaluations', key)
     if cached:
         guard.fiber(len((cached.get('output') or {}).get('fibers', [])))
@@ -64,17 +64,33 @@ def evaluate_one(service, document, ir, name, resolver, guard):
     try:
         output = native_evaluation(service, document, ir, name, resolver, guard)
         output = fit_checked(output, instance_shape(document, name), ir, name, resolver, guard)
-        row = dict(state='success', output=output, diagnostics=[])
+        row = dict(state='success', output=output, diagnostics=_output_diagnostics(output))
     except AuthoringError as error:
         row = evaluation_failure(error, locals().get('output'))
     service.store.put('v04_evaluations', key, row)
     return row
 
 
+def _output_diagnostics(output):
+    if 'branch_parts' not in output:
+        return []
+    diagnostic = AuthoringError('ASSEMBLY_CONTACT_NOT_CHECKED',
+        'Branch surface contacts are diagnostic; assembled contact and global shape fitting are not certified.').diagnostic()
+    rows = [dict(diagnostic, severity='warning')]
+    for key, part in output['branch_parts'].items():
+        if 'branch_contact_diagnostic' in part:
+            rows.append(dict(part['branch_contact_diagnostic'], severity='warning', related_ids=[key]))
+    return rows
+
+
 def native_evaluation(service, document, ir, name, resolver, guard):
     from ...core.authoring.routes import transform
     instance = instance_value(document, name)
     apply = (lambda plans: transform(instance, resolver, plans)) if instance.get('route_overrides') else None
+    recipe = lookup(document, instance['recipe'])
+    if recipe['strategy'] == 'branched_loft.v1':
+        from ...core.authoring.branched_evaluation import evaluate
+        return evaluate(ir['document'], name, _branch_construction(recipe, instance), resolver, GuardedSolver(service.solver, guard), apply)
     return evaluate_muscle(ir['document'], name, resolver, GuardedSolver(service.solver, guard), plan_transform=apply)
 
 
@@ -86,6 +102,11 @@ def evaluation_failure(error, output):
 
 
 def fit_checked(output, shape, ir, name, resolver, guard=None):
+    if 'branch_parts' in output:
+        require(not shape['targets'] and not shape['fitting']['enabled'], 'BRANCHED_GLOBAL_FITTING_UNSUPPORTED',
+                'Configure per-part inflation; global compound shape targets are not supported yet.')
+        output['fitting'] = dict(state='not_requested', scope='assembly', evaluations=0)
+        return output
     result = checked_result(fit(output, shape, guard), ir['document'], name, resolver)
     try:
         require(result['fitting']['state'] == 'resolved', 'SHAPE_TARGETS_UNRESOLVED')
@@ -93,6 +114,15 @@ def fit_checked(output, shape, ir, name, resolver, guard=None):
     except AuthoringError as error:
         error.preview = result
         raise
+    return result
+
+
+def _branch_construction(recipe, instance):
+    from ...core.authoring.lowering import strategy
+    result = deepcopy(recipe['construction'])
+    for branch in result['branches'].values():
+        part = dict(recipe, strategy='fan.v1', construction=branch['construction'])
+        branch['construction'] = strategy(part, instance)
     return result
 
 

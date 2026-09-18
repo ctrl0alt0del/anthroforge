@@ -45,11 +45,21 @@ def capture(root, scene):
 
 def _inventory_native(root):
     native = native_records(root)
-    for row in native['muscles']:
-        for key in ('section_depths', 'section_peaks', 'section_roundness'):
-            if key in row['values']:
-                row['values'][key] = _profile_number(row['values'][key])
+    for records in native.values():
+        for row in records:
+            _profile_record(row)
     return native
+
+
+def _profile_record(row):
+    for key in ('section_depths', 'section_peaks', 'section_roundness'):
+        if key in row['values']:
+            row['values'][key] = _profile_number(row['values'][key])
+    for records in row.get('collections', {}).values():
+        for child in records:
+            _profile_record(child)
+    for child in row.get('pointers', {}).values():
+        _profile_record(child)
 
 
 def _profile_number(value):

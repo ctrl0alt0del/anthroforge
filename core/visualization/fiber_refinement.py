@@ -1018,13 +1018,14 @@ def _by_uid(values, uid):
 
 
 def _fiber_signature(fiber):
+    from ..vcp.shared_point_storage import endpoint_record
     fields = ("a_parent_id", "a_attach_param", "b_parent_id", "b_attach_param", "node_count",
               "iterations_bake", "use_surface_routing", "use_segment_collisions",
               "bend_stiffness", "stretch_stiffness", "topology_mode", "solver_version",
               "collision_radius", "symmetry_mode", "symmetry_axis", "use_warm_start",
               "preview_planner_route")
     values = tuple(_signature_value(getattr(fiber, name, None)) for name in fields)
-    values += (tuple(float(value) for value in fiber.symmetry_origin),)
+    values += (tuple(float(value) for value in fiber.symmetry_origin), tuple(endpoint_record(fiber, s).normal_offset for s in ("a", "b")))
     touches = tuple((item.parent_id, item.attach_param, float(item.normal_offset)) for item in fiber.mid_touches)
     anchors = tuple((item.parent_id, item.attach_param) for item in fiber.loop_anchors)
     return values, touches, anchors

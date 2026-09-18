@@ -21,4 +21,11 @@ def construction_strategies():
     for name in ('fusiform.v1', 'fan.v1', 'strap.v1'):
         registry.add(name, ConstructionStrategy('open_loft'))
     registry.add('loop.v1', ConstructionStrategy('closed_loft'))
+    registry.add('branched_loft.v1', BranchedConstructionStrategy())
     return registry
+
+
+class BranchedConstructionStrategy:
+    def compile(self, recipe):
+        require(recipe['construction']['kind'] == 'branched_loft', 'STRATEGY_TOPOLOGY_MISMATCH')
+        return defaults(deepcopy(recipe['construction']['main']))

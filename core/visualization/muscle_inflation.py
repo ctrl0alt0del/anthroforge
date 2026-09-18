@@ -74,6 +74,9 @@ def _closest_ctrl_index(points, ctrl):
 
 
 def _edge_alpha(i, j, m, n, muscle, b_strength, b_band, b_power):
+    prepared = getattr(muscle, "boundary_weights", None)
+    if prepared is not None:
+        return float(prepared[i, j])
     on_u = (j == 0 or j == n - 1)
     on_v = (not bool(muscle.closed_v)) and (i == 0 or i == m - 1)
     if on_u or on_v:
@@ -195,7 +198,8 @@ def _distributed_point(base_points, normals, i, j, m, n, muscle, params):
 
 def _distributed_amount(base_points, normals, i, j, m, n, muscle, params):
     edge = _edge_alpha(i, j, m, n, muscle, params["b_strength"], params["b_band"], params["b_power"])
-    fade = _length_fade(j, n, params["length_taper_band"])
+    weights = getattr(muscle, "length_weights", None)
+    fade = _length_fade(j, n, params["length_taper_band"]) if weights is None else float(weights[i, j])
     raw = params["amount"] * edge * fade
     if raw <= 0.0 or _normal_stability(normals, i, j, m, n) >= 0.85:
         return max(0.0, raw)

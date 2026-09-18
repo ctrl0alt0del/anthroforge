@@ -23,24 +23,74 @@ class MuscleNumericWork:
 
 
 def capture_muscle_work(sync, vis_col, root, scene, vcp, muscle):
+    error = _branched_mode_error(root, muscle)
+    if error:
+        return _invalid_mode_work(sync, vis_col, root, muscle, error)
     if muscle.inflation_mode == "SECTION_PROFILE":
         return _capture_profile_work(sync, vis_col, root, scene, muscle)
     if muscle.inflation_mode not in ("CTRL_POINT", "DISTRIBUTED"):
         return _invalid_mode_work(sync, vis_col, root, muscle)
+    return _capture_legacy_work(sync, vis_col, root, scene, muscle)
+
+
+def _capture_legacy_work(sync, vis_col, root, scene, muscle):
     migrate_inflation_control(muscle)
     base, inflated = sync._ensure_muscle_meshes(vis_col, root, muscle.id)
-    payload = _numeric_input(sync, root, scene, muscle)
+    branched = _safe_branched_request(root, scene, muscle)
+    payload = None if branched is not None else _numeric_input(sync, root, scene, muscle)
     stale = payload is None and sync._source_output_stale(root, scene, muscle)
     initialize = _initialize_control(muscle)
-    try: request = None if payload is None else _make_request(muscle, payload, initialize)
+    try: request = branched if branched is not None else (None if payload is None else _make_request(muscle, payload, initialize))
     except (TypeError, ValueError): request = None
     return MuscleNumericWork(muscle, base, inflated, request, stale)
 
 
-def _invalid_mode_work(sync, vis_col, root, muscle):
+def _invalid_mode_work(sync, vis_col, root, muscle, error=""):
     base = sync._find_muscle_proxy(vis_col, root.name, muscle.id)
     inflated = sync._find_muscle_proxy(vis_col, root.name, muscle.id, "INFL")
-    return MuscleNumericWork(muscle, base, inflated, error="PROFILE_MODE_UNSUPPORTED: " + muscle.inflation_mode)
+    return MuscleNumericWork(muscle, base, inflated, error=error or "PROFILE_MODE_UNSUPPORTED: " + muscle.inflation_mode)
+
+
+def _branched_mode_error(root, muscle):
+    from .branch_control import branch_surface
+    from ..vcp.prepared_inflation import validate_prepared_mode
+    surface = branch_surface(root, muscle)
+    if surface is not None:
+        try:
+            for settings in (muscle, *(b.settings for b in surface.branches)):
+                validate_prepared_mode(settings.inflation_mode)
+        except ValueError as error:
+            return str(error)
+    return ""
+
+
+def _safe_branched_request(root, scene, muscle):
+    try:
+        return _branched_request(root, scene, muscle)
+    except (ValueError, StopIteration):
+        return None
+
+
+def _branched_request(root, scene, muscle):
+    if muscle.surface_source_mode != "FIBER_SURFACE":
+        return None
+    surface = next((s for s in root.af_vcp_system.fiber_surfaces if s.id == muscle.fiber_surface_id), None)
+    if surface is None or surface.construction_mode != "BRANCHED_LOFT":
+        return None
+    from .branched_surface_capture import capture_assembly
+    assembly = capture_assembly(root, scene, surface)
+    return _make_branched_request(muscle, surface, assembly)
+
+
+def _make_branched_request(muscle, surface, assembly):
+    from ..vcp.branched_numeric import BranchedMuscleRequest
+    from ..vcp.prepared_inflation import validate_prepared_mode
+    settings = (muscle, *(b.settings for b in surface.branches))
+    for part in settings: validate_prepared_mode(part.inflation_mode)
+    grids = (assembly.main, *(b.grid for b in assembly.branches))
+    specs = tuple(_numeric_spec(s, surface, g.shape[1], False, False, _initialize_control(s))
+                  for s, g in zip(settings, grids))
+    return BranchedMuscleRequest(muscle.id, assembly, specs)
 
 
 def execute_muscle_work(scene, work):
@@ -120,7 +170,7 @@ def _initialize_control(muscle):
 def _publish_one(sync, vis_col, root, scene, vcp, work, result, batch):
     error = work.error or (result.error if result else "")
     work.muscle["_af_rt_section_profile_error"] = error
-    if work.muscle.inflation_mode == "SECTION_PROFILE":
+    if work.muscle.inflation_mode == "SECTION_PROFILE" or error.startswith("PROFILE_"):
         sync._remove_inflation_ctrl_for_muscle(vis_col, root.name, work.muscle.id)
     if error:
         return _publish_error(sync, vcp, work, error)
@@ -168,11 +218,27 @@ def _publish_valid(sync, vis_col, root, scene, vcp, work, result, batch):
 
 
 def _sync_control(sync, vis_col, root, scene, vcp, work, result):
+    from .branch_control import selected_part
     ensure = sync._selected_muscle_id(vcp, root, scene) == work.muscle.id
-    rows = result.base_vertices.reshape((result.row_count, result.column_count, 3))
-    if work.request.spec.initialize_control: _store_initial_control(work.muscle, rows)
-    points = [[Vector(point) for point in row] for row in rows] if ensure and work.muscle.inflation_mode == "CTRL_POINT" else ()
-    sync._sync_inflation_control(vis_col, root, work.muscle, work.base_obj, points, ensure)
+    settings, key, index = selected_part(root, work.muscle)
+    rows, spec = _part_control(work.request, result, index)
+    if spec.initialize_control: _store_initial_control(settings, rows)
+    points = [[Vector(point) for point in row] for row in rows] if ensure and settings.inflation_mode == "CTRL_POINT" else ()
+    ctrl = sync._sync_inflation_control(vis_col, root, settings, work.base_obj, points, ensure)
+    if ctrl is not None: ctrl['af_muscle_branch_id'] = key
+
+
+def _part_control(request, result, index):
+    if hasattr(request, 'assembly'):
+        rows = request.assembly.main if index == 0 else request.assembly.branches[index-1].grid
+        return rows, request.part_specs[index]
+    return _control_rows(request, result), request.spec
+
+
+def _control_rows(request, result):
+    if hasattr(request, "assembly"):
+        return request.assembly.main
+    return result.base_vertices.reshape((result.row_count, result.column_count, 3))
 
 
 def _store_initial_control(muscle, rows):

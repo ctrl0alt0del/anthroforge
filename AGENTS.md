@@ -4,6 +4,7 @@
 - Keep every function at 15 lines of code or fewer.
 - Preserve unrelated local changes.
 - Do not push, fetch, pull, open a pull request, or otherwise contact a Git remote unless the user explicitly requests that action.
+- Deliver result `.blend` files with all current source and mirrored fibers visible in their normal curve display, and with native SCP colors shown in Solid/Object color mode. Preserve the manual debug presentation demonstrated by `E:/development/WIP_models/skull_muscles.blend`. Do not save render-only hiding, wire display, or uniform SCP recoloring into deliverables. Use `StaticScene.save_debug_copy` for authoring exports and verify visibility after reopening the saved file.
 
 ## Default: direct work
 

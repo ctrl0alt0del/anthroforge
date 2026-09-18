@@ -231,9 +231,13 @@ def remove_fiber_touch_point(context, fiber_id="", touch_index=-1):
     index = int(touch_index)
     if fiber is None:
         return failure(error)
-    if index < 0 or index >= len(fiber.mid_touches):
+    if index < 0 or index >= len(fiber.mid_touches) or (fiber.id, index+1) in _branch_protected(root):
         return failure("Invalid touch index.")
     fiber.mid_touches.remove(index)
+    return _removed_touch(context, root, fiber)
+
+
+def _removed_touch(context, root, fiber):
     _retire_warning_pins(root, fiber)
     _set_prefer_bake(fiber, False)
     _fiber_sync().clear_solver_cache(fiber.id)
@@ -248,7 +252,7 @@ def move_fiber_touch_point(context, fiber_id="", touch_index=-1, direction=0):
     index, target = int(touch_index), int(touch_index) + int(direction)
     if fiber is None:
         return failure(error)
-    if not _valid_touch_move(fiber, index, target):
+    if not _valid_touch_move(fiber, index, target) or any(f == fiber.id for f, _ in _branch_protected(root)):
         return failure("Invalid touch move.")
     _remove_fiber_touch_handles(context.scene, root.name, fiber.id)
     fiber.mid_touches.move(index, target)
@@ -554,3 +558,11 @@ def _is_geometry_scp_obj():
     except ImportError:
         from core.scp_runtime.common import is_geometry_scp_obj
     return is_geometry_scp_obj
+
+
+def _branch_protected(root):
+    surfaces = getattr(root.af_vcp_system, 'fiber_surfaces', ())
+    if not any(getattr(s, 'branches', ()) for s in surfaces):
+        return set()
+    from .muscle_branch import protected_references
+    return protected_references(root)

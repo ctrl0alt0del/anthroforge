@@ -355,11 +355,13 @@ def _schedule_imported_sync(state):
 
 
 def apply_vcp_snapshot(snapshot, root, context, stage_root=None):
+    from .branching import restore_graph
     state = VcpImportState(root, context.scene, snapshot, _compatible_scp_ids(snapshot, root), stage_root=stage_root)
     with suppress_vcp_prop_updates():
         _create_fibers(state)
         _create_fiber_surfaces(state)
         _create_muscles(state)
+        restore_graph(state)
         _create_blobs(state)
         _create_soft_tissues(state)
     cleanup_scp_dependents(root)

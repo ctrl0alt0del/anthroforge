@@ -10,13 +10,15 @@ def mode_menu(layout, muscle):
 
 def draw_mode_options(layout, context):
     from ...operators.muscle_profile import _muscle, MODE_ITEMS
+    from ...core.visualization.branch_control import selected_part
     root, muscle = _muscle(context, "")
+    _, branch_id, _ = selected_part(root, muscle)
     target, _ = inspect(root, context.scene, muscle.id)
     for mode, label, _ in MODE_ITEMS:
         row = layout.row()
         row.enabled = mode != "section_profile" or target.eligible
         op = row.operator("af.muscle_profile_mode", text=label)
-        op.mode, op.muscle_id = mode, muscle.id
+        op.mode, op.muscle_id, op.branch_id = mode, muscle.id, branch_id
     for reason in target.reasons:
         layout.label(text=reason, icon="ERROR")
 

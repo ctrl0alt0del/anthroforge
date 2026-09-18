@@ -55,6 +55,8 @@ class BlenderScene:
 
     def refresh(self, ids=None):
         targets = grouped(ids) if ids is not None else {}
+        if any(s.construction_mode == 'BRANCHED_LOFT' for s in self.root.af_vcp_system.fiber_surfaces):
+            targets = {}
         register_fiber_surface_sync().sync_root_to_scene(self.root, self.scene, targets.get("fiber_surfaces"))
         register_muscle_sync().sync_root_to_scene(self.root, self.scene, targets.get("muscles"))
         sync_vcp_mirrors(self.root,self.scene,targets.get("fibers"),targets.get("muscles"),(),())
@@ -62,16 +64,27 @@ class BlenderScene:
 
 def preflight(port, document, outputs, previous, captured):
     planes = mirror_planes(document, captured)
-    for output in outputs.values():
-        for row in output["fibers"]:
-            ends = row["anchors"] if row["closed"] else [row["anchors"][0], row["anchors"][-1]]
-            require(all(abs(a["offset"]) < 1e-10 for a in ends), "UNSUPPORTED_ANCHOR_OFFSET")
+    _validate_output_offsets(outputs)
     documents = root_documents(port.root)
     saved = documents.get(document["document_id"])
     require(bool(saved) == bool(previous), "DOCUMENT_JOURNAL_MISMATCH")
     if saved:
         require(saved["fingerprint"] == ownership(port.root, saved["ids"]), "EXTERNAL_EDIT_CONFLICT")
     return planes
+
+
+def _validate_output_offsets(outputs):
+    from .branched_native import junction_fibers
+    for output in outputs.values():
+        shared = junction_fibers(output)
+        for row in output['fibers']:
+            require(all(abs(a['offset']) < 1e-10 for a in _constrained_ends(row, shared)), 'UNSUPPORTED_ANCHOR_OFFSET')
+
+
+def _constrained_ends(row, junctions):
+    if row['closed']:
+        return row['anchors']
+    return [row['anchors'][-1]] if row['id'] in junctions else [row['anchors'][0], row['anchors'][-1]]
 
 
 def write_outputs(port, document, outputs, previous, planes):
@@ -84,13 +97,23 @@ def write_outputs(port, document, outputs, previous, planes):
 
 
 def grouped(ids):
-    return dict(muscles={r["muscle"] for r in ids.values()}, fiber_surfaces={r["surface"] for r in ids.values()},
+    surfaces = {sid for r in ids.values() for sid in (r['surface'], *r.get('parts', {}).values())}
+    return dict(muscles={r["muscle"] for r in ids.values()}, fiber_surfaces=surfaces,
                 fibers={f for r in ids.values() for f in r["fibers"].values()})
 
 
 def ownership(root, ids):
-    return digest({name: [owned_record(root, name, key) for key in sorted(keys)]
-                   for name, keys in grouped(ids).items()})
+    records = {name: [owned_record(root, name, key) for key in sorted(keys)]
+               for name, keys in grouped(ids).items()}
+    records['authored_points'] = owned_points(root, grouped(ids)['fibers'])
+    return digest(records)
+
+
+def owned_points(root, fiber_ids):
+    from ...core.vcp.shared_point_storage import slots
+    keys = {getattr(owner, slot) for fiber in root.af_vcp_system.fibers if fiber.id in fiber_ids
+            for owner, slot, _ in slots(fiber)}
+    return [record(point) for point in sorted(root.af_vcp_system.authored_points, key=lambda p: p.id) if point.id in keys]
 
 
 def owned_record(root, name, key):

@@ -20,6 +20,8 @@ def _muscle(context, identity):
 
 def _execute(operator, context, configuration):
     try:
+        if getattr(operator, 'branch_id', ''):
+            raise ValueError("PROFILE_DOMAIN_UNSUPPORTED: Section Profile requires an ordinary open loft.")
         root, muscle = _muscle(context, operator.muscle_id)
         commands.configure(root, context.scene, muscle.id, configuration(muscle))
         return {"FINISHED"}
@@ -33,6 +35,7 @@ class AF_OT_MuscleProfileMode(bpy.types.Operator):
     bl_label = "Inflation Mode"
     bl_options = {"REGISTER", "UNDO"}
     muscle_id: bpy.props.StringProperty(default="")
+    branch_id: bpy.props.StringProperty(default="")
     mode: bpy.props.EnumProperty(items=MODE_ITEMS)
 
     def execute(self, context):
@@ -46,13 +49,25 @@ def _legacy_mode(operator, context):
         from ..app.runtime_api import sync_context
         from ..core.deps.dirty_hints import dirty_hints_for
         root, muscle = _muscle(context, operator.muscle_id)
-        with commands.transaction(root, context.scene, muscle):
-            commands.write_configuration(muscle, {"mode": operator.mode})
+        settings = _part_settings(root, muscle, operator.branch_id)
+        with commands.transaction(root, context.scene, settings):
+            commands.write_configuration(settings, {"mode": operator.mode})
             sync_context(context, dirty_hints=dirty_hints_for("MUSCLE", {muscle.id}))
         return {"FINISHED"}
     except (ValueError, RuntimeError) as error:
         operator.report({"ERROR"}, str(error))
         return {"CANCELLED"}
+
+
+def _part_settings(root, muscle, branch_id):
+    if not branch_id:
+        return muscle
+    from ..core.visualization.branch_control import branch_surface
+    surface = branch_surface(root, muscle)
+    settings = next((b.settings for b in surface.branches if b.id == branch_id), None) if surface else None
+    if settings is None:
+        raise ValueError("Muscle branch not found.")
+    return settings
 
 
 class AF_OT_MuscleProfileReset(bpy.types.Operator):

@@ -51,12 +51,22 @@ def _target_surfaces(surfaces, target_ids):
 
 
 def evaluate_surface_record(root, scene, surface):
+    if surface.construction_mode == "BRANCHED_LOFT":
+        return _evaluate_branched(root, scene, surface)
     fibers = _source_fibers(root, surface)
     _validate_sources(surface, fibers)
     rows = collect_surface_rows(root, scene, surface, fibers)
     if not rows:
         raise ValueError("Fiber Surface source geometry is unavailable.")
     return evaluate_fiber_surface(rows, _surface_spec(surface, fibers))
+
+
+def _evaluate_branched(root, scene, surface):
+    from .branched_surface_capture import capture_assembly
+    from ..vcp.branched_surface import assemble
+    from ..vcp.fiber_surface import FiberSurfaceResult
+    vertices, faces = assemble(capture_assembly(root, scene, surface))
+    return FiberSurfaceResult(tuple(map(tuple, vertices)), tuple(map(tuple, faces)))
 
 
 def find_fiber_surface_proxy(scene, root_name, surface_id):

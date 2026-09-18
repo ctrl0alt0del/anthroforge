@@ -61,11 +61,18 @@ def preview(target, configuration):
     _validate_target(target, configuration)
     candidate = _candidate(target.muscle, configuration)
     initialize = candidate.inflation_mode == "CTRL_POINT" and not getattr(target.muscle, "inflation_ctrl_initialized", False)
-    request = _make_request(candidate, target.payload, initialize)
+    request = _preview_request(target, candidate, initialize)
     batch = execute_muscle_batch((request,))
     if batch.results[0].error:
         raise ValueError(batch.results[0].error)
     return configuration, request, batch
+
+
+def _preview_request(target, candidate, initialize):
+    if target.assembly is not None:
+        from ...core.visualization.muscle_numeric_runtime import _make_branched_request
+        return _make_branched_request(candidate, target.source, target.assembly)
+    return _make_request(candidate, target.payload, initialize)
 
 
 def _validate_target(target, configuration):
@@ -85,6 +92,7 @@ def _candidate(muscle, configuration):
                 setattr(candidate, key, getattr(muscle, key))
     for key, value in native_values(configuration).items():
         setattr(candidate, key, value)
+    candidate.get = lambda key, default=None: getattr(candidate, key, default)
     return candidate
 
 

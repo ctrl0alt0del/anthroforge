@@ -555,19 +555,23 @@ def _create_diff_shortcuts(state):
 
 
 def _create_vcps(state):
+    from .branching import restore_graph
     with suppress_vcp_prop_updates():
         _create_fibers(state)
         _create_fiber_surfaces(state)
         _create_muscles(state)
+        restore_graph(state)
         _create_blobs(state)
         _create_soft_tissues(state)
 
 
 def _create_diff_vcps(state):
+    from .branching import restore_graph
     with suppress_vcp_prop_updates():
         _create_diff_fibers(state)
         _create_diff_fiber_surfaces(state)
         _create_diff_muscles(state)
+        restore_graph(state)
         _create_diff_blobs(state)
         _create_diff_soft_tissues(state)
 

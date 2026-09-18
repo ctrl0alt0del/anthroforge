@@ -88,15 +88,22 @@ def resolve_muscle_backend(explicit=None, environment=None):
 
 
 def execute_muscle_batch(requests, backend=None):
-    from .muscle_profile_numeric import LEGACY_MODES, execute_partitioned, request_error
+    from .branched_numeric import BranchedMuscleRequest, execute_mixed
     kind, requests = resolve_muscle_backend(backend), tuple(requests)
+    if any(isinstance(r, BranchedMuscleRequest) for r in requests):
+        return execute_mixed(requests, kind.value)
+    if not requests:
+        return MuscleNumericBatchResult((), kind.value, 0.0)
+    return _execute_ordinary(requests, kind)
+
+
+def _execute_ordinary(requests, kind):
+    from .muscle_profile_numeric import LEGACY_MODES, execute_partitioned, request_error
     if kind == MuscleNumericBackend.NATIVE:
         from .muscle_numeric_native import execute_native_muscle_batch
         execute = execute_native_muscle_batch
     else:
         execute = execute_python_muscle_batch
-    if not requests:
-        return MuscleNumericBatchResult((), kind.value, 0.0)
     if any(request_error(row) or row.spec.inflation_mode not in LEGACY_MODES for row in requests):
         return execute_partitioned(requests, kind.value, execute)
     return execute(requests)

@@ -184,12 +184,19 @@ def reconcile_deleted_entities(root, scene, removed_keys, explicit=False):
 
 
 def _reconcile_removed(root, removed_keys):
+    protected = _protected_removed_fibers(root, removed_keys)
     changed = _remove_muscles(root, _removed_ids(removed_keys, "MUSCLE"))
     changed = _remove_blobs(root, _removed_ids(removed_keys, "BLOB")) or changed
-    changed = _remove_fibers(root, _removed_ids(removed_keys, "FIBER")) or changed
+    changed = _remove_fibers(root, _removed_ids(removed_keys, "FIBER") - protected) or changed or bool(protected)
     if _removed_ids(removed_keys, "SCP"):
         changed = _reconcile_scp_objects(root) or changed
     return _reconcile_scp_dependents(root) or changed
+
+
+def _protected_removed_fibers(root, removed_keys):
+    used = {r.fiber_id for s in getattr(root.af_vcp_system, 'fiber_surfaces', ())
+            if getattr(s, 'construction_mode', '') == 'BRANCHED_LOFT' for r in s.fiber_refs}
+    return used & _removed_ids(removed_keys, 'FIBER')
 
 
 def _reconcile_scp_objects(root):

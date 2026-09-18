@@ -107,7 +107,7 @@ def requirement_defs(d):
 
 def shape_defs(d):
     d['parameter'] = obj(dict(default=N, minimum=N, maximum=N, unit=enum('ratio', 'scene'), evidence=ref('evidence')))
-    fields = dict(strategy=enum('fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1'), concept=ref('reference'), roles=mapping(ref('native_role')), construction=choice(ref('native_open_loft'), ref('native_closed_loft')), parameters=mapping(ref('parameter')), shape=ref('reference'), evidence=ref('evidence'))
+    fields = dict(strategy=enum('fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'branched_loft.v1'), concept=ref('reference'), roles=mapping(ref('native_role')), construction=choice(ref('native_open_loft'), ref('native_closed_loft'), ref('branched_loft')), parameters=mapping(ref('parameter')), shape=ref('reference'), evidence=ref('evidence'))
     d['recipe'] = obj(fields)
     d['shape'] = obj(dict(native=ref('native_volume'), targets=array(ref('shape_target')), fitting=ref('fitting'), evidence=ref('evidence')))
     d['shape']['properties']['intent'] = obj(dict(width_scale={'type': 'number', 'exclusiveMinimum': 0}, height_scale={'type': 'number', 'minimum': 0}, belly_position={'type': 'number', 'minimum': 0, 'maximum': 1}, taper={'type': 'number', 'minimum': 0, 'maximum': .5}), [])
@@ -120,6 +120,14 @@ def shape_defs(d):
     d['evaluation_profile'] = obj(dict(purpose=enum('static_avatar'), reference_pose=S, checks=array(enum('attachments', 'shape', 'inflated_contacts', 'requirements')), required_capabilities=array(S)))
     d['scenario'] = obj(dict(profile=ref('reference'), evaluation_profile=ref('reference'), parameter_overrides=mapping(N), evidence=ref('evidence')))
     d['override'] = obj(dict(subject=ref('reference'), native_id=S, baseline_digest=S, value=ref('proposal'), evidence=ref('evidence')))
+
+
+def branch_defs(d):
+    fields = dict(construction=ref('native_open_loft'), boundary=enum('first', 'last'), root_anchor_indices=array(I, 2, 128))
+    required = list(fields)
+    fields.update(width=dict(type='number', exclusiveMinimum=0, exclusiveMaximum=.5), fullness=N)
+    fields['inflation'] = obj(dict(mode=enum('DISTRIBUTED', 'CTRL_POINT'), amount=dict(type='number', minimum=0), control=ref('xyz')), [])
+    d['branched_loft'] = obj(dict(kind=enum('branched_loft'), main=ref('native_open_loft'), branches=mapping(obj(fields, required))))
 
 
 def route_defs(d):
@@ -138,7 +146,7 @@ def route_defs(d):
 
 def authoring():
     d = base_defs()
-    for add in (anatomy_defs, query_defs, requirement_defs, shape_defs):
+    for add in (anatomy_defs, query_defs, requirement_defs, shape_defs, branch_defs):
         add(d)
     collections = {'concepts': 'concept', 'entities': 'entity', 'relations': 'relation', 'sources': 'source', 'claims': 'claim', 'reviews': 'review', 'skeleton_profiles': 'profile', 'requirements': 'requirement', 'recipes': 'recipe', 'assemblies': 'assembly', 'shape_presets': 'shape', 'evaluation_profiles': 'evaluation_profile', 'scenarios': 'scenario', 'instances': 'instance', 'policies': 'native_policy', 'overrides': 'override'}
     fields = {k: mapping(ref(v)) for k, v in collections.items()}
@@ -164,7 +172,7 @@ def protocol(definitions):
     mutation = dict(**ident, expected_draft_revision=I, expected_scene_revision=S)
     patch = array(obj(dict(op=enum('add', 'replace', 'remove'), path=S, value=ref('patch_value')), ['op', 'path']))
     operations = basic_operations(ident, mutation, patch) + candidate_operations(mutation) + visual_operations() + [snap_points_operation(), catalog_operation(), plan_fibers_operation()]
-    operations += [base_operation()] + profile_operations(definitions)
+    operations += recompute_operations() + branch_operations() + [base_operation()] + profile_operations(definitions)
     definitions['patch_value'] = choice({'type': 'string'}, N, B, array(ref('patch_value')), dict(type='object', additionalProperties=ref('patch_value')))
     definitions['document'] = {k: v for k, v in authoring().items() if k != '$defs'}
     extend(definitions, operations, '0.4.0')
@@ -188,7 +196,7 @@ def protocol_extensions():
 def response():
     fields = dict(dsl=enum('anthroforge.authoring.protocol'), version=enum('0.4.0'), message_type=enum('response'), request_id=S, op=S, status=enum('success', 'unresolved', 'failed'), scene_id=S, scene_revision=S, published=B, entities=array(ref('patch_value')), diagnostics=array(ref('patch_value')), assets=array(ref('patch_value')), cost=ref('patch_value'))
     required = list(fields)
-    names = 'draft_revision normalized_patch affected receipt evaluation unsupported replayed recovery root_id initialized inventory capabilities operations document state dependencies provenance purpose anatomical_review first second comparison_assets search_state missing candidates ranking candidate native_ids generation recovered_copy generation_id draft restored_active_scene comparison authored_changed scenarios normalized_overrides views view hits selection coverage plan'
+    names = 'draft_revision normalized_patch affected receipt evaluation unsupported replayed recovery root_id initialized inventory capabilities operations document state dependencies provenance purpose anatomical_review first second comparison_assets search_state missing candidates ranking candidate native_ids generation recovered_copy generation_id draft restored_active_scene comparison authored_changed scenarios normalized_overrides views view hits selection coverage plan recompute'
     fields.update({k: ref('patch_value') for k in names.split()})
     fields['matches'] = array(ref('patch_value'))
     fields.update(catalog=ref('patch_value'), transfer=ref('patch_value'), base_surface=ref('patch_value'), plan_id=S)
@@ -225,6 +233,29 @@ def snap_points_operation():
     fields = dict(instance_id=S, expected_scene_revision=S, points=array(ref('xyz'), 1, 256))
     fields.update(max_distance={'type': 'number', 'minimum': 0}, collision_radius={'type': 'number', 'minimum': 0})
     return operation('anatomy.snap_points', fields, ['instance_id', 'expected_scene_revision', 'points'])
+
+
+def recompute_operations():
+    fields = dict(expected_scene_revision=S, fiber_ids=array(S, 1, 4096), cold_start=B)
+    return [operation('fibers.recompute', fields, ['expected_scene_revision']),
+            operation('fibers.recompute_status', dict(token=S), ['token'])]
+
+
+def branch_operations():
+    revision = dict(expected_scene_revision=S)
+    muscle = dict(**revision, muscle_id=S)
+    rows = [operation('muscles.branch_inspect', dict(muscle_id=S), ['muscle_id'])]
+    fields = dict(**muscle, branch_surface_id=S, boundary_fiber_id=S, point_ids=array(S, 2, 128))
+    rows += [operation('muscles.branch_add', fields, list(fields))]
+    fields = dict(**muscle, connection_id=S)
+    rows += [operation('muscles.branch_remove', fields, list(fields))]
+    rows += [operation('muscles.branch_configure', dict(**fields, connector=obj(dict(width=dict(type='number', exclusiveMinimum=0, exclusiveMaximum=.5), fullness=N), []), inflation=ref('patch_value')), list(fields))]
+    rows += [operation('points.inspect', dict(point_id=S), [])]
+    fields = dict(**revision, point_id=S, position=ref('xyz'), scp_id=S, offset=N)
+    rows += [operation('points.edit', fields, ['expected_scene_revision', 'point_id'])]
+    fields = dict(**revision, fiber_id=S, index=I)
+    rows += [operation('points.detach', fields, list(fields))]
+    return rows + [operation('points.link', dict(**fields, point_id=S), list(fields)+['point_id'])]
 
 
 def catalog_operation():

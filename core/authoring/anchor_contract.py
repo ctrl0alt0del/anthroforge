@@ -10,6 +10,11 @@ def zero(value, pointer):
 
 
 def construction(build, pointer):
+    if build['kind'] == 'branched_loft':
+        construction(build['main'], pointer+'/main')
+        for key, branch in build['branches'].items():
+            construction(branch['construction'], pointer+'/branches/'+key+'/construction')
+        return
     if build['kind'] == 'open_loft':
         rows = build['stations']
         for index in (0, len(rows)-1):

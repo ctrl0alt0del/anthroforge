@@ -39,21 +39,41 @@ def open_args(specs):
 def set_anchors(fiber, row, specs, root, scene):
     from ...core.visualization.warning_runtime import structural_change
     structural_change(root, {fiber.id})
-    fiber.loop_anchors.clear()
-    fiber.mid_touches.clear()
+    collection = _anchor_collection(fiber, row)
     fiber.topology_mode = "LOOP" if row["closed"] else "OPEN"
     if not row["closed"]:
         fiber.a_parent_id, fiber.a_attach_param = specs[0]
         fiber.b_parent_id, fiber.b_attach_param = specs[-1]
     indices = range(len(specs)) if row["closed"] else range(1, len(specs)-1)
-    for index in indices:
-        item = (fiber.loop_anchors if row["closed"] else fiber.mid_touches).add()
+    for item, index in zip(collection, indices):
         item.parent_id, item.attach_param = specs[index]
         if not row["closed"]:
             item.normal_offset = normal_offset(root, scene, specs[index][0], row["anchors"][index]["offset"])
 
 
+def _anchor_collection(fiber, row):
+    from ...app.use_cases.muscle_branch import protected_references
+    count = len(row['anchors']) - (0 if row['closed'] else 2)
+    collection = fiber.loop_anchors if row['closed'] else fiber.mid_touches
+    protected = any(fid == fiber.id for fid, _ in protected_references(fiber.id_data))
+    require(not protected or (len(collection) == count and (fiber.topology_mode == 'LOOP') == row['closed']),
+            'SHARED_POINT_TOPOLOGY_CONFLICT', 'Remove branch connections before changing their point structure')
+    (fiber.mid_touches if row['closed'] else fiber.loop_anchors).clear()
+    while len(collection) > count:
+        collection.remove(len(collection)-1)
+    while len(collection) < count:
+        collection.add()
+    return collection
+
+
 def write_muscle(root, scene, name, output, previous, document=None):
+    if 'branch_parts' in output:
+        from .branched_native import write
+        return write(root, scene, name, output, previous)
+    return _write_single_muscle(root, scene, name, output, previous)
+
+
+def _write_single_muscle(root, scene, name, output, previous):
     vcp = root.af_vcp_system
     fibers = [str(write_fiber(root, scene, row, find(vcp.fibers, previous.get("fibers", {}).get(row["id"]))).id) for row in output["fibers"]]
     surface = find(vcp.fiber_surfaces, previous.get("surface")) or _new_surface(vcp, name, "LOFT", False, False)

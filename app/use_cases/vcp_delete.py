@@ -95,9 +95,11 @@ def target_tissue_consumers(root, kind, entity_id):
 
 
 def _surface_consumers(root, surface_id):
+    wrappers = [s.id for s in root.af_vcp_system.fiber_surfaces
+                if s.main_surface_id == surface_id or any(b.surface_id == surface_id for b in s.branches)]
     muscles = [muscle.id for muscle in root.af_vcp_system.muscles
                if str(getattr(muscle, "surface_source_mode", "")) == "FIBER_SURFACE"
-               and str(getattr(muscle, "fiber_surface_id", "")) == surface_id]
+               and str(getattr(muscle, "fiber_surface_id", "")) == surface_id] + wrappers
     tissues = [tissue.id for tissue in root.af_vcp_system.soft_tissues
                if str(getattr(tissue, "base_source_type", "")) == "FIBER_SURFACE"
                and str(getattr(tissue, "base_source_id", "")) == surface_id]

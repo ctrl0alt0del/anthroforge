@@ -39,4 +39,4 @@ def capture_mesh(root, scene, scp):
 
 def native_records(root):
     vcp = root.af_vcp_system
-    return {name: [record(item) for item in getattr(vcp, name)] for name in ("fibers", "fiber_surfaces", "muscles")}
+    return {name: [record(item) for item in getattr(vcp, name)] for name in ("authored_points", "fibers", "fiber_surfaces", "muscles")}

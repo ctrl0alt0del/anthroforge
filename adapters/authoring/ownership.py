@@ -12,6 +12,13 @@ def validate_removal(root, old, wanted):
                 continue
             require(not any(ref.fiber_id in fibers for ref in item.fiber_refs), "UNMANAGED_DEPENDENCY", item.id)
             require(getattr(item,"fiber_surface_id","") not in surfaces, "UNMANAGED_DEPENDENCY", item.id)
+            _validate_branch_sources(item, surfaces)
+
+
+def _validate_branch_sources(item, removed):
+    sources = [str(getattr(item, 'main_surface_id', ''))]
+    sources.extend(connection.surface_id for connection in getattr(item, 'branches', ()))
+    require(not set(sources) & removed, 'UNMANAGED_DEPENDENCY', item.id)
 
 
 def remove_proxies(root, old, wanted):

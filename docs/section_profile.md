@@ -28,6 +28,12 @@ Invalid parameters clear the target output and remain inspectable. A future
 profile version is preserved until an explicit reset. Profile editing never
 solves fibers, changes their hard-point counts, or fits anatomical thickness.
 
+Branched main and child parts keep Control Point and Distributed inflation.
+Their mode menu edits the selected part and disables Section Profile. Switch an
+ordinary profile to a legacy mode before adding a branch. Directly assigning
+Section Profile to either part reports `PROFILE_DOMAIN_UNSUPPORTED` and clears
+only that muscle's invalid output; it never uses Control Point as a fallback.
+
 ## Protocol 0.4
 
 `anatomy.discover` advertises `section_profile.v1` and `muscle_from_surface.v1`.
@@ -87,6 +93,13 @@ values. Omitting creation's initial configuration selects the existing default
 Control Point behavior. Unknown/partial fields and non-scene native depth units
 are rejected. Creation accepts only a complete Section Profile as its explicit
 initial configuration.
+
+Current branched muscles can be inspected and switched between their stored main
+legacy modes through these revision guards. Edit child settings through
+`muscles.branch_configure`; Section Profile remains unsupported on every part.
+Profile, branch, shared-point and recompute commands share the root-scoped request
+ID namespace. Native branch/recompute retries still run their live receipt or
+progress checks.
 
 Retries reuse the **identical entire request**, including its ID. Do not mint a new
 ID to retry an uncertain creation. Configure receipts recheck live profile,
