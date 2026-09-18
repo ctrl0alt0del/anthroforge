@@ -57,9 +57,8 @@ def _ownership(muscle):
 
 
 def preview(target, configuration):
-    if not target.eligible:
-        raise ValueError("; ".join(target.reasons))
     configuration = normalize(configuration)
+    _validate_target(target, configuration)
     candidate = _candidate(target.muscle, configuration)
     initialize = candidate.inflation_mode == "CTRL_POINT" and not getattr(target.muscle, "inflation_ctrl_initialized", False)
     request = _make_request(candidate, target.payload, initialize)
@@ -67,6 +66,14 @@ def preview(target, configuration):
     if batch.results[0].error:
         raise ValueError(batch.results[0].error)
     return configuration, request, batch
+
+
+def _validate_target(target, configuration):
+    if target.eligible:
+        return
+    if target.muscle is not None and configuration['mode'] != 'section_profile' and target.current:
+        return
+    raise ValueError('; '.join(target.reasons))
 
 
 def _candidate(muscle, configuration):

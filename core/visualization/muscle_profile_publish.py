@@ -6,22 +6,40 @@ from .muscle_sync import register_muscle_sync
 from .muscle_numeric_runtime import MuscleNumericWork, publish_muscle_work
 from .vcp_mirror_runtime import sync_vcp_mirrors
 
+OBJECT_FIELDS = ('empty_display_type', 'empty_display_size', 'display_type', 'display_bounds_type',
+    'show_in_front', 'show_wire', 'show_all_edges', 'show_name', 'show_axis', 'show_bounds',
+    'hide_render', 'hide_viewport', 'hide_select', 'color', 'lock_location', 'lock_rotation', 'lock_scale')
+
 
 def affected_objects(root, scene, muscle_id):
     return tuple(obj for obj in scene.objects if obj.get("af_root_name") == root.name and
         (obj.get("af_muscle_id") == muscle_id or obj.get("af_source_muscle_id") == muscle_id))
 
 
-def _snapshots(objects):
+def _snapshots(objects, scene):
     copies = {data: data.copy() for data in {obj.data for obj in objects if obj.data is not None}}
-    return tuple((obj.name, copies.get(obj.data), dict(obj.items()), obj.matrix_world.copy(), tuple(obj.users_collection)) for obj in objects)
+    return tuple((obj.name, copies.get(obj.data), obj.id_properties_ensure().to_dict(), obj.matrix_world.copy(), tuple(obj.users_collection),
+                  _object_state(obj, scene)) for obj in objects)
+
+
+def _object_state(obj, scene):
+    values = {key: getattr(obj, key) for key in OBJECT_FIELDS}
+    values = {key: tuple(value) if hasattr(value, '__len__') and not isinstance(value, str) else value for key, value in values.items()}
+    hidden = tuple((layer, obj.hide_get(view_layer=layer)) for layer in scene.view_layers if layer.objects.get(obj.name) == obj)
+    relations = tuple(_object_relation(item) for item in (obj, *obj.children))
+    return values, hidden, relations
+
+
+def _object_relation(obj):
+    return (obj.name, getattr(obj.parent, 'name', None), obj.parent_type, obj.parent_bone, tuple(obj.parent_vertices),
+            obj.matrix_parent_inverse.copy(), obj.matrix_basis.copy(), obj.rotation_mode)
 
 
 @contextmanager
 def transaction(root, scene, muscle=None):
     values = muscle.id_properties_ensure().to_dict() if muscle is not None else None
     muscle_ids, objects = {item.id for item in root.af_vcp_system.muscles}, set(bpy.data.objects)
-    saved = _snapshots(affected_objects(root, scene, muscle.id)) if muscle else ()
+    saved = _snapshots(affected_objects(root, scene, muscle.id), scene) if muscle else ()
     selection, journal = _selection(scene), root.get("af_authoring_journal")
     try:
         with suppress_vcp_prop_updates():
@@ -51,12 +69,11 @@ def _rollback(root, muscle, values, ids, objects, saved):
 
 
 def _restore_objects(saved):
-    for name, data, props, matrix, collections in saved:
+    for name, data, props, matrix, collections, state in saved:
         obj = bpy.data.objects.get(name)
         if obj is None:
             obj = bpy.data.objects.new(name, data)
-            for collection in collections:
-                collection.objects.link(obj)
+        _restore_collections(obj, collections)
         previous, obj.data = obj.data, data
         for key in tuple(obj.keys()):
             del obj[key]
@@ -64,6 +81,34 @@ def _restore_objects(saved):
             obj[key] = value
         obj.matrix_world = matrix
         _remove_data(previous)
+    _restore_object_states(saved)
+
+
+def _restore_collections(obj, collections):
+    for collection in set(obj.users_collection) - set(collections):
+        collection.objects.unlink(obj)
+    for collection in set(collections) - set(obj.users_collection):
+        collection.objects.link(obj)
+
+
+def _restore_object_states(saved):
+    for name, _, _, _, _, (values, hidden, relations) in saved:
+        obj = bpy.data.objects[name]
+        for key, value in values.items():
+            setattr(obj, key, value)
+        for layer, value in hidden:
+            obj.hide_set(value, view_layer=layer)
+        for relation in relations:
+            _restore_relation(relation)
+
+
+def _restore_relation(relation):
+    name, parent, kind, bone, vertices, inverse, basis, rotation = relation
+    obj = bpy.data.objects.get(name)
+    if obj is not None:
+        obj.parent = bpy.data.objects.get(parent) if parent else None
+        obj.parent_type, obj.parent_bone, obj.parent_vertices = kind, bone, vertices
+        obj.rotation_mode, obj.matrix_parent_inverse, obj.matrix_basis = rotation, inverse, basis
 
 
 def _remove_data(data):

@@ -120,6 +120,8 @@ def _initialize_control(muscle):
 def _publish_one(sync, vis_col, root, scene, vcp, work, result, batch):
     error = work.error or (result.error if result else "")
     work.muscle["_af_rt_section_profile_error"] = error
+    if work.muscle.inflation_mode == "SECTION_PROFILE":
+        sync._remove_inflation_ctrl_for_muscle(vis_col, root.name, work.muscle.id)
     if error:
         return _publish_error(sync, vcp, work, error)
     if work.request is None:

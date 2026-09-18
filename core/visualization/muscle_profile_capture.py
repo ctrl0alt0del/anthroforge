@@ -42,14 +42,28 @@ def find_target(root, muscle_id="", surface_id=""):
 
 def capture_target(root, scene, muscle_id="", surface_id=""):
     muscle, source = find_target(root, muscle_id, surface_id)
+    reasons = _domain_reasons(root, source)
     try:
         fibers, rows = current_rows(root, scene, source)
         rows, chart = expanded_rows_with_provenance(root, source, rows, fibers)
         payload = _payload(source, fibers, rows)
         revision = _revision(payload, chart, source)
-        return ProfileTarget(muscle, source, payload, chart, revision, True)
+        return ProfileTarget(muscle, source, payload, chart, revision, True, reasons)
     except (ValueError, TypeError) as error:
-        return ProfileTarget(muscle, source, reasons=(str(error),))
+        return ProfileTarget(muscle, source, reasons=reasons or (str(error),))
+
+
+def _source_fibers(root, source):
+    by_id = {item.id: item for item in root.af_vcp_system.fibers}
+    return tuple(by_id.get(ref.fiber_id) for ref in source.fiber_refs)
+
+
+def _domain_reasons(root, source):
+    try:
+        validate_domain(source, _source_fibers(root, source))
+    except (ValueError, TypeError) as error:
+        return (str(error),)
+    return ()
 
 
 def validate_domain(source, fibers):
@@ -63,9 +77,7 @@ def validate_domain(source, fibers):
 
 
 def current_rows(root, scene, source):
-    by_id = {item.id: item for item in root.af_vcp_system.fibers}
-    fibers = tuple(by_id.get(ref.fiber_id) for ref in source.fiber_refs)
-    validate_domain(source, fibers)
+    fibers = _source_fibers(root, source)
     if not fibers or any(item is None for item in fibers):
         raise ValueError("PROFILE_BASE_NOT_CURRENT: Update source fibers first.")
     _check_source_proxies(root, scene, source, fibers)
@@ -89,9 +101,12 @@ def _check_source_proxies(root, scene, source, fibers):
 
 def _payload(source, fibers, rows):
     target, densify = int(fibers[0].node_count), not hasattr(source, "construction_mode")
+    closed = bool(is_loop_fiber(fibers[0]))
     if not densify:
-        rows = evaluate_fiber_surface(rows, FiberSurfaceSpec(target_node_count=target)).rows
-    return np.asarray(rows, dtype=float), target, densify, False, source
+        from .fiber_surface_sync import _surface_spec, _validate_sources
+        _validate_sources(source, fibers)
+        rows = evaluate_fiber_surface(rows, _surface_spec(source, fibers)).rows
+    return np.asarray(rows, dtype=float), target, densify, closed, source
 
 
 def default_muscle():
