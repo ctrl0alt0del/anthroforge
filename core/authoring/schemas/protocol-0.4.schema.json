@@ -2,157 +2,6 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:anthroforge:protocol:0.4.0",
   "$defs": {
-    "warning_request": {
-      "type": "object",
-      "properties": {
-        "dsl": {
-          "enum": [
-            "anthroforge.authoring.protocol"
-          ]
-        },
-        "version": {
-          "enum": [
-            "0.4.0"
-          ]
-        },
-        "message_type": {
-          "enum": [
-            "request"
-          ]
-        },
-        "request_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "op": {
-          "enum": [
-            "warnings.list"
-          ]
-        },
-        "params": {
-          "type": "object",
-          "properties": {
-            "scene_id": {
-              "type": "string",
-              "minLength": 1
-            },
-            "offset": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "limit": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 200
-            },
-            "scene": {
-              "type": "string"
-            },
-            "root": {
-              "type": "string"
-            },
-            "entity": {
-              "type": "string"
-            },
-            "kind": {
-              "type": "string"
-            },
-            "code": {
-              "type": "string"
-            },
-            "type": {
-              "type": "string"
-            },
-            "authoring_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "scene_id"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "version",
-        "message_type",
-        "request_id",
-        "op",
-        "params"
-      ],
-      "additionalProperties": false
-    },
-    "warning_state": {
-      "type": "object",
-      "properties": {
-        "epoch": {
-          "type": "string"
-        },
-        "repository_revision": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "scope": {
-          "type": "object"
-        },
-        "total": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "records": {
-          "type": "array",
-          "maxItems": 200,
-          "items": {
-            "type": "object"
-          }
-        },
-        "complete": {
-          "type": "boolean"
-        },
-        "discovery": {
-          "enum": [
-            "UNSCANNED",
-            "PENDING",
-            "CHECKING",
-            "COMPLETE",
-            "FAILED",
-            "CANCELLED"
-          ]
-        },
-        "counts": {
-          "type": "object"
-        },
-        "failures": {
-          "type": "array"
-        },
-        "source_scene_revision": {
-          "type": "string"
-        },
-        "source_generations": {
-          "type": "array"
-        },
-        "check_token": {
-          "type": "string"
-        },
-        "telemetry": {
-          "type": "object"
-        }
-      },
-      "required": [
-        "epoch",
-        "repository_revision",
-        "scope",
-        "total",
-        "records",
-        "complete",
-        "discovery",
-        "counts",
-        "source_scene_revision",
-        "source_generations",
-        "check_token"
-      ],
-      "additionalProperties": false
-    },
     "native_id": {
       "type": "string",
       "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"
@@ -3954,10 +3803,163 @@
       "additionalProperties": false,
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "urn:anthroforge:authoring:0.4.0"
+    },
+    "warning_request": {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "warnings.list"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 200
+            },
+            "scene": {
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            },
+            "entity": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "authoring_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "scene_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "version",
+        "message_type",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "warning_state": {
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "object"
+        },
+        "counts": {
+          "type": "object"
+        },
+        "telemetry": {
+          "type": "object"
+        },
+        "epoch": {
+          "type": "string"
+        },
+        "source_scene_revision": {
+          "type": "string"
+        },
+        "check_token": {
+          "type": "string"
+        },
+        "repository_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "records": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object"
+          }
+        },
+        "failures": {
+          "type": "array"
+        },
+        "source_generations": {
+          "type": "array"
+        },
+        "discovery": {
+          "enum": [
+            "UNSCANNED",
+            "PENDING",
+            "CHECKING",
+            "COMPLETE",
+            "FAILED",
+            "CANCELLED"
+          ]
+        }
+      },
+      "required": [
+        "epoch",
+        "repository_revision",
+        "scope",
+        "total",
+        "records",
+        "complete",
+        "discovery",
+        "counts",
+        "source_scene_revision",
+        "source_generations",
+        "check_token"
+      ],
+      "additionalProperties": false
     }
   },
   "oneOf": [
-    {"$ref": "#/$defs/warning_request"},
+    {
+      "$ref": "#/$defs/warning_request"
+    },
     {
       "type": "object",
       "properties": {
@@ -6427,6 +6429,1234 @@
             "anthroforge.authoring.protocol"
           ]
         },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.prepare_base"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_object": {
+              "type": "string",
+              "minLength": 1
+            },
+            "topology_digest": {
+              "type": "string",
+              "minLength": 1
+            },
+            "geometry_digest": {
+              "type": "string",
+              "minLength": 1
+            },
+            "heads": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id",
+                  "label"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 32
+            },
+            "arcs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "vertex_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "minItems": 2,
+                    "maxItems": 2048
+                  },
+                  "role": {
+                    "enum": [
+                      "origin",
+                      "insertion",
+                      "side",
+                      "seam",
+                      "cleft",
+                      "crop"
+                    ]
+                  },
+                  "segments": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 64
+                  }
+                },
+                "required": [
+                  "id",
+                  "vertex_ids",
+                  "role"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 3,
+              "maxItems": 256
+            },
+            "patches": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "head_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1,
+                    "maxItems": 32
+                  },
+                  "source_triangles": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "minItems": 1,
+                    "maxItems": 50000
+                  },
+                  "boundary": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "arc": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "reverse": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "arc"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 3,
+                    "maxItems": 32
+                  }
+                },
+                "required": [
+                  "id",
+                  "head_ids",
+                  "source_triangles",
+                  "boundary"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 32
+            },
+            "settings": {
+              "type": "object",
+              "properties": {
+                "rings": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 6
+                },
+                "iterations": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 16
+                },
+                "regularization": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 100
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "source_object",
+            "topology_digest",
+            "geometry_digest",
+            "heads",
+            "arcs",
+            "patches"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.transfer_sources"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_objects": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1,
+              "maxItems": 128
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "source_objects"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.transfer_preview"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_objects": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "correspondences": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source": {
+                    "type": "object",
+                    "properties": {
+                      "object": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "topology_digest": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "surface_binding": {
+                        "$ref": "#/$defs/surface_binding"
+                      }
+                    },
+                    "required": [
+                      "object",
+                      "topology_digest",
+                      "surface_binding"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "target": {
+                    "type": "object",
+                    "properties": {
+                      "document_id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "expected_draft_revision": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "region": {
+                        "$ref": "#/$defs/reference"
+                      },
+                      "topology_digest": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "surface_binding": {
+                        "$ref": "#/$defs/surface_binding"
+                      }
+                    },
+                    "required": [
+                      "document_id",
+                      "expected_draft_revision",
+                      "region",
+                      "topology_digest",
+                      "surface_binding"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "source",
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 4,
+              "maxItems": 256
+            },
+            "settings": {
+              "type": "object",
+              "properties": {
+                "max_landmark_error": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "smoothing": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "allow_reflection": {
+                  "type": "boolean"
+                },
+                "max_axis_ratio": {
+                  "type": "number",
+                  "minimum": 1
+                },
+                "samples_per_mesh": {
+                  "type": "integer",
+                  "minimum": 32,
+                  "maximum": 4096
+                }
+              },
+              "required": [
+                "max_landmark_error"
+              ],
+              "additionalProperties": false
+            },
+            "annotations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source": {
+                    "type": "object",
+                    "properties": {
+                      "object": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "topology_digest": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "surface_binding": {
+                        "$ref": "#/$defs/surface_binding"
+                      }
+                    },
+                    "required": [
+                      "object",
+                      "topology_digest",
+                      "surface_binding"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "label",
+                  "source"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0,
+              "maxItems": 1024
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "source_objects",
+            "correspondences",
+            "settings"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.transfer_publish"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "preview_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "preview_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.define_base"
+          ]
+        },
+        "params": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "expected_scene_revision": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "heads": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 32
+                },
+                "patches": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "head_ids": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "minItems": 1,
+                        "maxItems": 32
+                      },
+                      "source_triangles": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "minItems": 1,
+                        "maxItems": 8192
+                      },
+                      "boundary_vertex_ids": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "minItems": 4,
+                        "maxItems": 4
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "head_ids",
+                      "source_triangles",
+                      "boundary_vertex_ids"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 16
+                },
+                "anatomical_note": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "scene_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "source_object": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "topology_digest": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "geometry_digest": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "expected_scene_revision",
+                "heads",
+                "patches",
+                "anatomical_note",
+                "scene_id",
+                "source_object",
+                "topology_digest",
+                "geometry_digest"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "expected_scene_revision": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "heads": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 32
+                },
+                "patches": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "head_ids": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "minItems": 1,
+                        "maxItems": 32
+                      },
+                      "source_triangles": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "minItems": 1,
+                        "maxItems": 8192
+                      },
+                      "boundary_vertex_ids": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "minItems": 4,
+                        "maxItems": 4
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "head_ids",
+                      "source_triangles",
+                      "boundary_vertex_ids"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 16
+                },
+                "anatomical_note": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "scene_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "prepared_base_id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "expected_scene_revision",
+                "heads",
+                "patches",
+                "anatomical_note",
+                "scene_id",
+                "prepared_base_id"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.plan_base_fibers"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "base_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tolerance": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "parts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "patch_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "bindings": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "role": {
+                          "enum": [
+                            "origin",
+                            "insertion",
+                            "route"
+                          ]
+                        },
+                        "document_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "expected_draft_revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "region": {
+                          "$ref": "#/$defs/reference"
+                        },
+                        "across": {
+                          "type": "array",
+                          "items": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "minItems": 2,
+                          "maxItems": 2
+                        },
+                        "max_distance": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "along": {
+                          "type": "array",
+                          "items": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "minItems": 2,
+                          "maxItems": 2
+                        },
+                        "facing": {
+                          "$ref": "#/$defs/xyz"
+                        },
+                        "minimum_facing_dot": {
+                          "type": "number",
+                          "minimum": -1,
+                          "maximum": 1
+                        }
+                      },
+                      "required": [
+                        "role",
+                        "document_id",
+                        "expected_draft_revision",
+                        "region",
+                        "across",
+                        "max_distance"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 2,
+                    "maxItems": 64
+                  }
+                },
+                "required": [
+                  "patch_id",
+                  "bindings"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 16
+            },
+            "max_middle_points": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8
+            },
+            "collision_radius": {
+              "type": "number",
+              "minimum": 0
+            },
+            "max_fibers": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 33
+            },
+            "candidate_count": {
+              "type": "integer",
+              "minimum": 3,
+              "maximum": 33
+            },
+            "samples_per_fiber": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 129
+            },
+            "max_solver_calls": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 256
+            },
+            "solver_budget_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "base_id",
+            "tolerance",
+            "parts"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.publish_base_fibers"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "plan_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "plan_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.base_candidates"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "support_instances": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "source_object": {
+              "type": "string",
+              "minLength": 1
+            },
+            "topology_digest": {
+              "type": "string",
+              "minLength": 1
+            },
+            "geometry_digest": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "support_instances",
+            "source_object",
+            "topology_digest",
+            "geometry_digest"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.repair_volume"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "source_object": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "topology_digest": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "geometry_digest": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "source_object",
+                  "topology_digest",
+                  "geometry_digest"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 32
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "sources"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
         "version": {
           "enum": [
             "0.4.0"
@@ -6487,7 +7717,6 @@
           "minItems": 0,
           "maxItems": 100000
         },
-        "warnings": {"$ref": "#/$defs/warning_state"},
         "cost": {
           "$ref": "#/$defs/patch_value"
         },
@@ -6630,6 +7859,19 @@
         },
         "catalog": {
           "$ref": "#/$defs/patch_value"
+        },
+        "transfer": {
+          "$ref": "#/$defs/patch_value"
+        },
+        "base_surface": {
+          "$ref": "#/$defs/patch_value"
+        },
+        "plan_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "warnings": {
+          "$ref": "#/$defs/warning_state"
         }
       },
       "required": [

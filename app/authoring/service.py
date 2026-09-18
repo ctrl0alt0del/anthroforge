@@ -60,19 +60,25 @@ def operations():
     from .resources import cancel
     from .catalog import catalog
     result.update({'anatomy.cancel': cancel, 'anatomy.resume': construction.compile, 'anatomy.catalog': catalog})
-    result.update(point_operations())
-    result.update(visual.operations())
-    return result
+    from .transfers import operations as transfer_operations
+    return dict(result, **point_operations(), **visual.operations(), **transfer_operations())
 
 
 def capabilities():
-    return ['static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1', 'fiber_layout_planner.v1']
+    return ['static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1', 'fiber_layout_planner.v1', 'skeleton_transfer.v1', 'muscle_base.v1', 'native_base.v1', 'skeleton_transfer.experimental.v1', 'muscle_base.experimental.v1']
 
 
 def point_operations():
     from .surface_points import snap_points
     from .fiber_plans import plan_fibers
-    return {'anatomy.snap_points': snap_points, 'anatomy.plan_fibers': plan_fibers}
+    from .base_surfaces import prepare_base
+    from .base_definitions import define_base
+    from .base_planning import plan_base_fibers
+    from .base_publication import publish_base_fibers
+    from .base_preparation import base_candidates, repair_volume
+    return {'anatomy.snap_points': snap_points, 'anatomy.plan_fibers': plan_fibers, 'anatomy.prepare_base': prepare_base,
+            'anatomy.base_candidates': base_candidates, 'anatomy.repair_volume': repair_volume,
+            'anatomy.define_base': define_base, 'anatomy.plan_base_fibers': plan_base_fibers, 'anatomy.publish_base_fibers': publish_base_fibers}
 
 
 def check_live_preview(service, request):
@@ -83,7 +89,7 @@ def check_live_preview(service, request):
 
 
 def remember_journal(service, request):
-    mutations = {'initialize', 'draft', 'patch', 'upgrade_regions', 'adopt_binding', 'publish', 'reconcile', 'checkpoint'}
+    mutations = {'initialize', 'draft', 'patch', 'upgrade_regions', 'adopt_binding', 'publish', 'reconcile', 'checkpoint', 'repair_volume'}
     if request['op'].split('.')[-1] in mutations:
         service.identities.remember_journal(service.store.directory)
 
@@ -98,6 +104,8 @@ def finish_response(service, request, result, started):
 
 def replay_response(service, request):
     from ...core.authoring.codec import digest
+    if request['op'].startswith('anatomy.transfer_') or request['op'] in ('anatomy.prepare_base', 'anatomy.define_base', 'anatomy.plan_base_fibers', 'anatomy.publish_base_fibers', 'anatomy.base_candidates', 'anatomy.repair_volume'):
+        return check_transfer_request(service, request)
     key = [service.inventory['root_id'] or service.inventory['scene_id'], request['request_id']]
     cached = current_preview_cache(service.store.get('v04_requests', key), request)
     if cached:
@@ -109,7 +117,13 @@ def replay_response(service, request):
         result = response(request, service.inventory['revision'])
         result.update(receipt['response'], replayed=True)
         return result
-    return None
+
+
+def check_transfer_request(service, request):
+    from ...core.authoring.codec import digest
+    key = [service.inventory['root_id'] or service.inventory['scene_id'], request['request_id']]
+    cached = service.store.get('v04_requests', key)
+    require(not cached or cached['digest'] == digest(request), 'REQUEST_ID_REUSED')
 
 
 def current_preview_cache(cached, request):

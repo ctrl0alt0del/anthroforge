@@ -15,7 +15,7 @@ def discover(service, request):
     from .service import operations, capabilities
     from .catalog import summary
     inventory = {k: v for k, v in service.inventory.items() if k not in ('geometry', 'native')}
-    return dict(inventory=inventory, catalog=summary(service), capabilities=capabilities(), operations=sorted(operations()), assets=[service.store.asset(service.inventory)], unsupported=['feature_detection', 'reference_transfer', 'motion_simulation', 'arbitrary_mesh_transfer'])
+    return dict(inventory=inventory, catalog=summary(service), capabilities=capabilities(), operations=sorted(operations()), assets=[service.store.asset(service.inventory)], unsupported=['feature_detection', 'automatic_anatomical_correspondence', 'motion_simulation', 'automatic_inflation_fitting', 'automatic_head_discovery'])
 
 
 def query(service, request):

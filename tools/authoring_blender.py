@@ -1,4 +1,7 @@
-"""Headless entry: blender -b model.blend -P this.py -- request.json response.json [output.blend]."""
+"""Run: blender -b model.blend -P this.py -- request.json response.json [output.blend].
+
+The optional output keeps native fibers and SCP colors visible for debugging.
+"""
 import json
 import sys
 from pathlib import Path
@@ -8,6 +11,7 @@ ADDON = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ADDON.parent))
 import anthroforge
 from anthroforge.app.authoring.api import execute
+from anthroforge.adapters.authoring.scene import StaticScene
 
 
 def main():
@@ -22,12 +26,12 @@ def main():
     Path(args[1]).write_text(json.dumps(response, indent=2), encoding="utf-8")
     if len(args) > 2 and response["published"]:
         require_copy(args[2])
-        bpy.ops.wm.save_as_mainfile(filepath=str(Path(args[2]).resolve()))
+        StaticScene(root, bpy.context.scene).save_debug_copy(Path(args[2]).resolve())
 
 
 def require_copy(path):
     if Path(path).resolve() == Path(bpy.data.filepath).resolve():
-        raise ValueError("Headless experiment output must be a copy")
+        raise ValueError("Authoring output must be saved as a separate copy")
 
 
 if __name__ == "__main__":

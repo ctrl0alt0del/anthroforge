@@ -21,6 +21,7 @@ def write_fiber(root, scene, row, existing=None):
     fiber = existing or (_new_loop_fiber(root, specs) if row["closed"] else _new_fiber(root, *open_args(specs)))
     set_anchors(fiber, row, specs, root, scene)
     fiber.node_count, fiber.solver_version = len(row["points"]), 3
+    fiber.collision_radius = row.get('collision_radius', fiber.collision_radius)
     fiber.name = row["id"]
     fiber["af_authoring_id"] = row["id"]
     fiber["af_authoring_symmetry"] = "explicit"

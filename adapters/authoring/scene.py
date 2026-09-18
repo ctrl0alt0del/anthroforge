@@ -14,6 +14,34 @@ class StaticScene(BlenderScene):
     def capture_authoring(self):
         return inventory.capture(self.root, self.scene)
 
+    def transfer_sources(self, names):
+        from .transfer import capture
+        return capture(self.scene, names)
+
+    def publish_transfer(self, record):
+        from .transfer import publish
+        return publish(self.root, self.scene, record)
+
+    def base_mesh_quality(self, vertices, triangles):
+        from .base_quality import inspect
+        return inspect(vertices, triangles)
+
+    def publish_native_base(self, plan):
+        from .base_native import publish
+        return publish(self.root, self.scene, plan)
+
+    def verify_native_base(self, receipt):
+        from .base_native import verify
+        return verify(self.root, self.scene, receipt)
+
+    def base_candidates(self, source, supports):
+        from .base_evidence import candidates
+        return candidates(source, supports)
+
+    def union_volume(self, sources):
+        from .volume_union import evaluate
+        return evaluate(self.scene, sources)
+
     def snap_points(self, params, captured):
         from .point_picker import snap_points
         return snap_points(self.root, self.scene, params, captured)
@@ -45,6 +73,11 @@ class StaticScene(BlenderScene):
     def save_copy(self, path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         bpy.ops.wm.save_as_mainfile(filepath=str(path), copy=True, check_existing=False)
+
+    def save_debug_copy(self, path):
+        from .presentation import prepare_debug_presentation
+        prepare_debug_presentation(self.root, self.scene)
+        self.save_copy(path)
 
     def save_checkpoint(self, path, generation):
         from ...core.authoring.codec import encode

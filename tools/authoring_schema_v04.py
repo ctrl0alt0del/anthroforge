@@ -155,18 +155,30 @@ def operation(op, fields, required):
 
 
 def protocol(definitions):
-    try:
-        from tools.authoring_warning_schema import extend
-    except ModuleNotFoundError:
-        from authoring_warning_schema import extend
+    extend, transfer_operations, base_operation, native_base_operations = protocol_extensions()
     ident = dict(document_id=S)
     mutation = dict(**ident, expected_draft_revision=I, expected_scene_revision=S)
     patch = array(obj(dict(op=enum('add', 'replace', 'remove'), path=S, value=ref('patch_value')), ['op', 'path']))
     operations = basic_operations(ident, mutation, patch) + candidate_operations(mutation) + visual_operations() + [snap_points_operation(), catalog_operation(), plan_fibers_operation()]
+    operations += [base_operation()]
     definitions['patch_value'] = choice({'type': 'string'}, N, B, array(ref('patch_value')), dict(type='object', additionalProperties=ref('patch_value')))
     definitions['document'] = {k: v for k, v in authoring().items() if k != '$defs'}
     extend(definitions, operations, '0.4.0')
-    return {'$schema': 'https://json-schema.org/draft/2020-12/schema', '$id': 'urn:anthroforge:protocol:0.4.0', '$defs': definitions, 'oneOf': operations+[response()]}
+    return {'$schema': 'https://json-schema.org/draft/2020-12/schema', '$id': 'urn:anthroforge:protocol:0.4.0', '$defs': definitions, 'oneOf': operations+transfer_operations()+native_base_operations()+[response()]}
+
+
+def protocol_extensions():
+    try:
+        from tools.authoring_warning_schema import extend
+        from tools.authoring_transfer_schema import operations as transfer_operations
+        from tools.authoring_base_schema import base_operation
+        from tools.authoring_native_base_schema import operations as native_base_operations
+    except ModuleNotFoundError:
+        from authoring_warning_schema import extend
+        from authoring_transfer_schema import operations as transfer_operations
+        from authoring_base_schema import base_operation
+        from authoring_native_base_schema import operations as native_base_operations
+    return extend, transfer_operations, base_operation, native_base_operations
 
 
 def response():
@@ -175,7 +187,7 @@ def response():
     names = 'draft_revision normalized_patch affected receipt evaluation unsupported replayed recovery root_id initialized inventory capabilities operations document state dependencies provenance purpose anatomical_review first second comparison_assets search_state missing candidates ranking candidate native_ids generation recovered_copy generation_id draft restored_active_scene comparison authored_changed scenarios normalized_overrides views view hits selection coverage plan'
     fields.update({k: ref('patch_value') for k in names.split()})
     fields['matches'] = array(ref('patch_value'))
-    fields['catalog'] = ref('patch_value')
+    fields.update(catalog=ref('patch_value'), transfer=ref('patch_value'), base_surface=ref('patch_value'), plan_id=S)
     fields['warnings'] = ref('warning_state')
     return obj(fields, required)
 

@@ -1,5 +1,15 @@
 """Composition root. Call execute(request, root, scene, journal_directory).
 
+Guided reconstruction (DSL 0.4): transfer_sources/transfer_preview/transfer_publish
+adapt reference volumes to indexed skeletal correspondences. repair_volume creates
+an audited Boolean-union copy. base_candidates supplies whole-underside evidence;
+define_base records explicit head-aware disk patches (optionally using a ready
+prepare_base completion). plan_base_fibers fits sparse native routes with qualified,
+zero-offset SCP pins, up to eight middle points, and independent loft checks.
+publish_base_fibers atomically creates editable fibers and uninflated Fiber Surfaces.
+Anatomical review and inflation fitting remain separate. See
+docs/authoring_muscle_reconstruction.md for parameters, limits and replay semantics.
+
 warnings.list (all protocol versions) reads the transient file-wide warning store.
 It bypasses scene capture, solver and request replay. See docs/warnings.md for
 filters, bounded pagination, check tokens and mutation/poll/correction examples.
