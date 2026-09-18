@@ -92,6 +92,8 @@ def _clear_solver_cache(fiber_ids):
 
 @persistent
 def _on_lifecycle_event(_dummy):
+    from ..vcp.muscle_profile_cache import clear_profile_cache
+    clear_profile_cache()
     invalidate_fiber_caches()
 
 
@@ -142,6 +144,8 @@ def register_fiber_cache_lifecycle():
 
 
 def unregister_fiber_cache_lifecycle():
+    from ..vcp.muscle_profile_cache import clear_profile_cache
+    clear_profile_cache()
     invalidate_fiber_caches()
     for handlers in _handler_lists():
         if _on_lifecycle_event in handlers:

@@ -101,11 +101,43 @@ def create_muscle_from_fiber_surface(context, surface_id="", name=""):
         return failure("Select a Fiber Surface.")
     if str(surface.construction_mode) != "LOFT":
         return failure("Muscle creation currently requires a LOFT Fiber Surface.")
+    try:
+        muscle = _manual_muscle(root, context.scene, surface, name)
+    except ValueError as error:
+        return failure(str(error))
+    return _select_created_muscle(context, root, muscle, surface)
+
+
+def _manual_muscle(root, scene, surface, name):
+    fibers = {item.id: item for item in root.af_vcp_system.fibers}
+    if any(ref.fiber_id not in fibers for ref in surface.fiber_refs):
+        raise ValueError("PROFILE_BASE_NOT_CURRENT: Update source fibers first.")
+    if not surface.close_across_fibers and not any(is_loop_fiber(fibers[ref.fiber_id]) for ref in surface.fiber_refs):
+        return create_native_muscle(root, scene, surface.id, name)
     muscle = _new_muscle(root.af_vcp_system, name, False, False)
     _commit_muscle_source(muscle, surface.id)
+    return muscle
+
+
+def _select_created_muscle(context, root, muscle, surface):
     root.af_vcp_system.active_vcp_type, root.af_vcp_system.active_vcp_id = "MUSCLE", muscle.id
     _sync_and_select_ctrl(context, root, muscle.id)
     return success(f"Created {muscle.id} from {surface.id}.", value=muscle)
+
+
+def create_native_muscle(root, scene, surface_id, name="", initial_configuration=None):
+    from dataclasses import replace
+    from .muscle_profile import inspect, preview, write_configuration, transaction, publish
+    target, _ = inspect(root, scene, surface_id=surface_id)
+    configuration, request, batch = preview(target, {"mode": "control_point"} if initial_configuration is None else initial_configuration)
+    with transaction(root, scene):
+        muscle = _new_muscle(root.af_vcp_system, name, False, False)
+        _commit_muscle_source(muscle, surface_id)
+        write_configuration(muscle, configuration)
+        request = replace(request, muscle_id=muscle.id)
+        batch = replace(batch, results=(replace(batch.results[0], muscle_id=muscle.id),))
+        publish(root, scene, muscle, request, batch)
+    return muscle
 
 
 def _resolved_surface(context, root, surface_id):

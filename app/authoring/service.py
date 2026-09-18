@@ -27,6 +27,9 @@ class AuthoringService:
         return self.dispatch(request, started)
 
     def dispatch(self, request, started):
+        from . import native_profiles
+        if request["op"] in native_profiles.OPS:
+            return native_profiles.dispatch(self, request, started)
         check_live_preview(self, request)
         cached = replay_response(self, request)
         if cached:
@@ -61,11 +64,12 @@ def operations():
     from .catalog import catalog
     result.update({'anatomy.cancel': cancel, 'anatomy.resume': construction.compile, 'anatomy.catalog': catalog})
     from .transfers import operations as transfer_operations
-    return dict(result, **point_operations(), **visual.operations(), **transfer_operations())
+    from .native_profiles import operations as profile_operations
+    return dict(result, **point_operations(), **visual.operations(), **transfer_operations(), **profile_operations())
 
 
 def capabilities():
-    return ['static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1', 'fiber_layout_planner.v1', 'skeleton_transfer.v1', 'muscle_base.v1', 'native_base.v1', 'skeleton_transfer.experimental.v1', 'muscle_base.experimental.v1']
+    return ['section_profile.v1', 'muscle_from_surface.v1', 'static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1', 'fiber_layout_planner.v1', 'skeleton_transfer.v1', 'muscle_base.v1', 'native_base.v1', 'skeleton_transfer.experimental.v1', 'muscle_base.experimental.v1']
 
 
 def point_operations():

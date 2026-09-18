@@ -2,6 +2,10 @@
 import json
 from copy import deepcopy
 from pathlib import Path
+try:
+    from tools.authoring_profile_schema import native_definition
+except ModuleNotFoundError:
+    from authoring_profile_schema import native_definition
 
 ROOT = Path(__file__).resolve().parents[1]/"core/authoring/schemas"
 REF = lambda name: {"$ref": "#/$defs/"+name}
@@ -29,6 +33,7 @@ def definitions(defs):
     defs["policy"]["properties"]["max_surface_vertices"] = dict(INTEGER,maximum=1000000)
     defs["policy"]["properties"]["total_budget_ms"] = dict(INTEGER,maximum=3600000)
     landmark_frame(defs)
+    native_definition(defs)
 
 
 def landmark_frame(defs):

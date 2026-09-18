@@ -12,6 +12,10 @@ def flip_muscle_normals(context, muscle_id=""):
     vcp, muscle, error = _resolved_muscle(root, muscle_id)
     if muscle is None:
         return failure(error)
+    if getattr(muscle, "inflation_mode", "CTRL_POINT") == "SECTION_PROFILE":
+        from .muscle_profile import configure, action_configuration
+        configure(root, context.scene, muscle.id, action_configuration(muscle, "side"))
+        return success(value=muscle)
     target, kind = _normal_target(vcp, muscle)
     target.flip_normals = not target.flip_normals
     _sync_entity(root, context.scene, kind, {target.id})

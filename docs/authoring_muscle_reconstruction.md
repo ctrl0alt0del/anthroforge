@@ -111,6 +111,11 @@ fibers and LOFT Fiber Surfaces with head associations. It creates no inflated
 muscles. The native Create Muscle from Fiber Surface action remains available for
 subsequent manual inflation configuration.
 
+The [Section Profile controls and native API](section_profile.md) provide an
+optional open-loft inflation workflow: inspect and preview a current surface,
+then create a muscle with an atomic initial configuration using
+`muscles.create_from_surface`. The same controls remain editable in Blender.
+
 Receipts make publication idempotent. Manual edits to published records or paths
 cause a conflict; a changed reference/support requires replanning. Keep the matching
 journal when saving/reloading. Repeated preview requests revalidate live inputs
