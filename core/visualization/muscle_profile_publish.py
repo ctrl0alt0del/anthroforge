@@ -37,7 +37,7 @@ def _object_relation(obj):
 
 @contextmanager
 def transaction(root, scene, muscle=None):
-    values = muscle.id_properties_ensure().to_dict() if muscle is not None else None
+    settings = _settings_snapshots(root, muscle)
     muscle_ids, objects = {item.id for item in root.af_vcp_system.muscles}, set(bpy.data.objects)
     saved = _snapshots(affected_objects(root, scene, muscle.id), scene) if muscle else ()
     selection, journal = _selection(scene), root.get("af_authoring_journal")
@@ -45,20 +45,34 @@ def transaction(root, scene, muscle=None):
         with suppress_vcp_prop_updates():
             yield
     except BaseException:
-        _rollback(root, muscle, values, muscle_ids, objects, saved)
+        _rollback(root, settings, muscle_ids, objects, saved)
         _restore_context(root, scene, selection, journal)
         raise
     finally:
         _discard_copies(saved)
 
 
-def _rollback(root, muscle, values, ids, objects, saved):
+def _settings_snapshots(root, muscle):
+    if muscle is None:
+        return ()
+    from .branch_control import branch_surface
+    owner = next((item for item in root.af_vcp_system.muscles if item.id == muscle.id), muscle)
+    surface = branch_surface(root, owner)
+    parts = (owner, *(branch.settings for branch in surface.branches)) if surface else (muscle,)
+    return tuple((part, part.id_properties_ensure().to_dict()) for part in parts)
+
+
+def _restore_settings(saved):
+    for settings, values in saved:
+        for key in tuple(settings.keys()):
+            del settings[key]
+        for key, value in values.items():
+            settings[key] = value
+
+
+def _rollback(root, settings, ids, objects, saved):
     with suppress_vcp_prop_updates():
-        if muscle is not None:
-            for key in tuple(muscle.keys()):
-                del muscle[key]
-            for key, value in values.items():
-                muscle[key] = value
+        _restore_settings(settings)
         for obj in set(bpy.data.objects) - objects:
             if obj.get("af_root_name") == root.name and obj.get("af_muscle_id"):
                 _remove_object(obj)
