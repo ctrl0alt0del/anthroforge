@@ -14,6 +14,8 @@ from .core.action_library_quick_hook import clear_quick_hook_sessions
 from .core.scp_runtime.visibility import restore_all_scp_isolations
 
 __addon_enabled__ = False
+# Blender clears its enabled flag before unregister(); own the hook state separately.
+_RUNTIME_REGISTERED = False
 
 from .operators.create_root import AF_OT_CreateRoot
 from .operators.authoring_dsl import AF_OT_ExecuteAuthoringDSL
@@ -489,23 +491,23 @@ def _retrofit_loaded_shortcuts():
 
 
 def register():
-    global __addon_enabled__
+    global _RUNTIME_REGISTERED
     for cls in classes:
         _safe_register_class(cls)
     _ensure_object_props()
     _ensure_scene_props()
-    if __addon_enabled__:
+    if _RUNTIME_REGISTERED:
         return
     _register_runtime_hooks()
     _retrofit_loaded_shortcuts()
-    __addon_enabled__ = True
+    _RUNTIME_REGISTERED = True
 
 
 def unregister():
-    global __addon_enabled__
-    if __addon_enabled__:
+    global _RUNTIME_REGISTERED
+    if _RUNTIME_REGISTERED:
         _unregister_runtime_hooks()
-        __addon_enabled__ = False
+        _RUNTIME_REGISTERED = False
     unregister_scene_props()
     _drop_object_prop("af_scp_system")
     _drop_object_prop("af_vcp_system")

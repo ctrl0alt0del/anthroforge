@@ -138,6 +138,22 @@ def migrate_loaded(_unused=None):
             migrate_root(root)
 
 
+def _migrate_when_ready():
+    import bpy
+    if not hasattr(bpy.data, "objects"):
+        return 0.05
+    migrate_loaded()
+
+
+def _initialize_loaded():
+    """Addon enable restricts bpy.data; migrate after registration or file loading."""
+    import bpy
+    if hasattr(bpy.data, "objects"):
+        return migrate_loaded()
+    if not bpy.app.timers.is_registered(_migrate_when_ready):
+        bpy.app.timers.register(_migrate_when_ready, first_interval=0.0)
+
+
 def register():
     import bpy
     from bpy.app.handlers import persistent
@@ -148,11 +164,13 @@ def register():
             handlers.insert(0, clear_indexes)
     if migrate_loaded not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.insert(0, migrate_loaded)
-    migrate_loaded()
+    _initialize_loaded()
 
 
 def unregister():
     import bpy
+    if bpy.app.timers.is_registered(_migrate_when_ready):
+        bpy.app.timers.unregister(_migrate_when_ready)
     if migrate_loaded in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(migrate_loaded)
     for handlers in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):

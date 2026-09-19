@@ -67,16 +67,42 @@ def status_label(status):
 
 def refresh(_repository=None):
     global _PROJECTING
+    if _defer_refresh():
+        return
     _PROJECTING = True
     try:
-        for manager in bpy.data.window_managers:
-            manager.af_warning_rows.clear()
-            for warning in sorted(REPOSITORY.records.values(), key=sort_key):
-                manager.af_warning_rows.add().token = warning.id
-            manager.af_warning_index = -1
+        _project_rows()
         redraw()
     finally:
         _PROJECTING = False
+
+
+def _defer_refresh():
+    """Repository notifications may arrive before Blender exposes its database."""
+    if hasattr(bpy.data, "window_managers"):
+        return False
+    if not bpy.app.timers.is_registered(_refresh_when_ready):
+        bpy.app.timers.register(_refresh_when_ready, first_interval=0.0)
+    return True
+
+
+def _refresh_when_ready():
+    if not hasattr(bpy.data, "window_managers"):
+        return 0.05
+    refresh()
+
+
+def _project_rows():
+    for manager in bpy.data.window_managers:
+        manager.af_warning_rows.clear()
+        for warning in sorted(REPOSITORY.records.values(), key=sort_key):
+            manager.af_warning_rows.add().token = warning.id
+        manager.af_warning_index = -1
+
+
+def _cancel_deferred_refresh():
+    if bpy.app.timers.is_registered(_refresh_when_ready):
+        bpy.app.timers.unregister(_refresh_when_ready)
 
 
 def redraw():
@@ -123,6 +149,7 @@ def unregister():
     global _UNSUBSCRIBE
     if _UNSUBSCRIBE is not None:
         _UNSUBSCRIBE(); _UNSUBSCRIBE = None
+    _cancel_deferred_refresh()
     clear_projection(None)
     for name, callback in projection_handlers():
         group = getattr(bpy.app.handlers, name)
