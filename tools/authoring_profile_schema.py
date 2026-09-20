@@ -30,10 +30,22 @@ def native_definition(defs, prefix=""):
         choices.append(reference)
 
 
+def legacy_configuration():
+    ranges = dict(inflation_max_value=(0., 10.), inflation_falloff_radius=(.001, 100.),
+        inflation_direction_depth=(.0001, 10.), inflation_boundary_strength=(0., 1.),
+        inflation_boundary_band=(.1, 16.), inflation_boundary_power=(.1, 8.), inflation_length_taper_band=(.01, .49))
+    fields = {key: dict(type="number", minimum=low, maximum=high) for key, (low, high) in ranges.items()}
+    fields.update(inflation_enabled=dict(type="boolean"), inflation_falloff_type=dict(enum=["GAUSSIAN", "LINEAR", "SMOOTHSTEP"]),
+        inflation_ctrl_world=dict(type="array", items=dict(type="number"), minItems=3, maxItems=3), flip_normals=dict(type="boolean"))
+    native = dict(type="object", properties=fields, additionalProperties=False)
+    return obj(dict(mode=dict(enum=["control_point", "distributed"]), native=native,
+                    surface_flip_normals=dict(type="boolean")), ["mode", "native"])
+
+
 def operations(defs):
     text = dict(type="string", minLength=1)
     depth = obj(dict(value=dict(type="number", minimum=0, maximum=10), unit=dict(enum=["scene"])))
-    defs["profile_configuration"] = dict(oneOf=[configuration(depth), obj(dict(mode=dict(enum=["control_point", "distributed"])))])
+    defs["profile_configuration"] = dict(oneOf=[configuration(depth), obj(dict(mode=dict(enum=["control_point", "distributed"]))), legacy_configuration()])
     defs["profile_target"] = dict(oneOf=[obj({key: text}) for key in ("muscle_id", "fiber_surface_id")])
     target, config = {"$ref": "#/$defs/profile_target"}, {"$ref": "#/$defs/profile_configuration"}
     guards = dict(expected_scene_revision=text, expected_base_revision=text)

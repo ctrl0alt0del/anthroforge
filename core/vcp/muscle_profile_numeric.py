@@ -44,7 +44,7 @@ def prepared_key(request, backend):
 def prepare_profile(request, backend, execute):
     spec = replace(request.spec, inflation_mode="CTRL_POINT", inflation_enabled=False, initialize_control=False,
                    section_profile=None)
-    plain = replace(request, spec=spec, orientation_parity=1)
+    plain = replace(request, spec=spec, orientation_parity=1, output_domain=None)
     return cached(prepared_key(request, backend), lambda: execute((plain,)).results[0])
 
 

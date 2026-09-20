@@ -36,4 +36,4 @@ def evidence(center, normal, muscle, bones, epsilon):
     if not visible and signed >= -epsilon*4:
         score = min(score, -.75)
     return dict(owner=owner, support_triangle=int(triangle), distance=float(distance), signed_distance=signed,
-                visible=visible, score=score)
+                visible=bool(visible), score=score)

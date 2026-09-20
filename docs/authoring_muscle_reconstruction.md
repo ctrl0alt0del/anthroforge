@@ -1,9 +1,12 @@
 # Guided muscle reconstruction in authoring 0.4
 
-**Transfer reference volumes → define the whole bone-facing underside → preview
-SCP-bound native fibers → publish native Fiber Surfaces.** Inflation fitting is
-deferred. Anatomical correspondences, head identities, attachment bands and review
-remain explicit inputs; successful execution does not certify anatomical accuracy.
+**Transfer reference volumes → define the retained bone-facing underside → preview
+SCP-bound native fibers → publish native Fiber Surfaces → configure inflation.**
+Guarded native inflation controls are described in [Section Profile and legacy
+authoring](section_profile.md); automated volume fitting is not part of these
+operations. Anatomical correspondences, head identities, attachment bands and
+review remain explicit inputs; successful execution does not certify anatomical
+accuracy.
 
 Use `app.authoring.api.execute(request, root, scene, journal_directory)` or
 `tools/authoring_blender.py`. `anatomy.discover` advertises `skeleton_transfer.v1`,
@@ -29,6 +32,55 @@ Exact Boolean is not guaranteed to resolve every source; there is no silent
 voxel or approximate repair fallback.
 
 ## Define the whole underside and heads
+
+The modeling target is an **approximate smooth anatomical underside**. Design
+clean borders from meaningful landmarks and broad shape evidence; do not trace
+every extracted vertex, projection kink or sampling artifact. Preserve complete
+attachment bands, belly width, all heads and intentional clefts. Inspect actual
+border/interior smoothness independently of residuals, topology and spatial
+checks before native fibers. See the [smooth-border construction and acceptance
+contract](muscle_base_preparation.md#anatomical-approximation-and-smooth-borders).
+The current API's geometry checks do not automatically certify that contract.
+
+Choose the modeled extent at this stage. Thin tendrils and tendon-like areas
+that add no useful inflated muscle volume may be omitted (user direction,
+September 20, 2026). Record excluded parts and the crop boundary with the base,
+then carry that same extent through native surfaces, inflation, measurements,
+mirroring and saved-scene regeneration. Preserve substantial heads, belly width
+and their shared structure; small thickness alone is not an automatic cutoff.
+A cropped edge is a modeling boundary, not an anatomical attachment. Qualified
+curves outside the retained extent may remain as visible construction controls,
+but must not regenerate excluded muscle tissue. Compare against the retained
+reference extent and disclose the omissions rather than claim a full-volume fit.
+
+For an end crop, persist the native muscle extent with `muscles.domain_configure`
+after defining the cropped base. `muscles.domain_inspect` takes `muscle_id` and
+returns the current `output_domain` and `base_revision`. Configuration requires
+`muscle_id`, `expected_scene_revision`, `expected_base_revision`, and:
+
+```json
+{
+  "configuration": {
+    "mode": "plane", "space": "root_local",
+    "origin": [0, 0, 0], "normal": [0, 0, 1], "keep_positive": true
+  }
+}
+```
+
+These coordinates illustrate the API, not an anatomical cut. The plane follows
+the avatar root. It selects retained material on the evaluated base and uses the
+same edge-interpolation weights on the inflated surface. Inflation is evaluated
+before cropping, so the cut does not create a new zero-depth perimeter pinch.
+The complete branched assembly is cropped once, preserving shared edge identity;
+mirrors use the cropped geometry. Source bindings, shared-point identities and
+qualified construction curves are unchanged. `{"mode":"full"}` restores the
+complete evaluated muscle. Invalid or wholly empty authoring cuts are rejected
+without publication. The edit panel exposes the same muscle-extent controls.
+
+The current native extent supports one plane per muscle. Omit separate fine
+continuation parts at the base/family level and remove their native dependents;
+do not keep their generated tissue merely hidden. A plane crop is not a general
+automatic detector for tendons or noninflating anatomy.
 
 `anatomy.base_candidates` takes the three source fields above plus
 `support_instances` (SCP authoring IDs). It returns per-face nearest-bone normal,
@@ -83,6 +135,11 @@ one `parts` entry per patch: `{patch_id, bindings}`. Every binding has:
 Bands may cover different SCPs. Where they overlap, the closest valid qualified
 candidate wins. Use facing constraints when a region also contains the opposite
 bone surface; collision qualification alone cannot identify anatomical side.
+Zero-area fragments from region clipping are ignored during nearest-point
+selection. If the closest region guess fails native qualification, the picker
+tries at most eight nearby interior triangle guesses. Each must still satisfy
+the original region, facing, distance and zero-offset constraints. This bounded
+search can remain unresolved; it is not a global nearest-qualified-point proof.
 
 The implementation parameterizes the disk, samples longitudinal underside curves,
 and selects a sparse set from fixed candidates using measured strip error. Native
@@ -126,3 +183,16 @@ normally to verify source/mirrored fibers visible as normal curves and native SC
 colors in Solid/Object mode. Report anatomical review, sampled base fit, native
 route clearance, base topology/spatial checks, persistence and visibility separately.
 A ready base does not certify muscle-surface collision clearance or inflation fit.
+See [draft volume-fitting practices](muscle_volume_fitting.md) for separate
+transfer, base-width, thickness-fit and visual review checks.
+
+For a previously qualified pick at a sharp SCP crease, `points.edit` can retain
+the selected native face exactly: provide `attachment: {parent_id, attach_param}`
+instead of `position`/`scp_id`, with an optional native `offset`. The raw attachment
+must name an actual evaluated `surface_param_v2` triangle with valid barycentrics.
+Both the underlying zero-offset point and final offset must qualify without
+replacement of the supplied binding; an occluded face or a changed fallback pick
+is rejected atomically. Indexed region membership, facing and bounded source
+distance still require the caller's anatomical qualification evidence. Existing
+world-point edits retain their normal snapping behavior. Ordinary endpoints stay
+at zero offset; shared-point changes invalidate all incident native geometry.

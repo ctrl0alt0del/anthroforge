@@ -225,6 +225,15 @@ class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
     fiber_refs: bpy.props.CollectionProperty(type=AF_MuscleFiberRef_Property)
     active_fiber_ref_index: bpy.props.IntProperty(name="Active Fiber Ref", default=-1)
 
+    output_domain_mode: bpy.props.EnumProperty(name="Muscle Extent", default="FULL",
+        items=(("FULL", "Full", "Complete evaluated muscle"), ("PLANE", "Plane Crop", "Crop both evaluated shells using base material coordinates")),
+        update=_on_muscle_prop_update)
+    output_domain_origin: bpy.props.FloatVectorProperty(name="Cut Origin", size=3, default=(0., 0., 0.),
+        description="Modeling boundary in avatar root-local coordinates; source attachments stay unchanged", update=_on_muscle_prop_update)
+    output_domain_normal: bpy.props.FloatVectorProperty(name="Cut Normal", size=3, default=(0., 0., 1.),
+        description="Retained half-space normal in avatar root-local coordinates", update=_on_muscle_prop_update)
+    output_domain_keep_positive: bpy.props.BoolProperty(name="Retain Positive Side", default=True, update=_on_muscle_prop_update)
+
     inflation_enabled: bpy.props.BoolProperty(name="Inflation Enabled", default=True, update=_on_muscle_prop_update)
     inflation_ctrl_world: bpy.props.FloatVectorProperty(
         name="Inflation Control Position", size=3, default=(0.0, 0.0, 0.0),

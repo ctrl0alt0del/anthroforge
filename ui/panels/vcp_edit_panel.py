@@ -81,6 +81,15 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
         pick = layout.operator("af.select_muscle_inflation_ctrl", icon="RESTRICT_SELECT_OFF")
         pick.muscle_id = muscle.id
 
+    def _draw_output_domain(self, layout, muscle):
+        box = layout.box()
+        box.prop(muscle, 'output_domain_mode')
+        if muscle.output_domain_mode == 'PLANE':
+            box.label(text='Modeling cut; root-local coordinates')
+            box.prop(muscle, 'output_domain_origin')
+            box.prop(muscle, 'output_domain_normal')
+            box.prop(muscle, 'output_domain_keep_positive')
+
     def draw(self, context):
         layout = self.layout
         muscle = active_muscle_from_context(context)
@@ -89,6 +98,7 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
             return
 
         self._draw_identity(layout, muscle)
+        self._draw_output_domain(layout, muscle)
         from ...core.visualization.branch_control import selected_part
         settings, branch_id, _ = selected_part(root_for_context(context), muscle)
         layout.label(text='Editing branch inflation' if branch_id else 'Editing main inflation')

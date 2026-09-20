@@ -1,0 +1,103 @@
+[
+  {
+    "id": "workflow-evidence-and-feedback",
+    "kind": "procedure",
+    "status": "requirement",
+    "stages": [
+      "all"
+    ],
+    "title": "Complete the final muscle through evidence-driven stage repairs",
+    "observation": "A successful intermediate API call or distance score does not establish a usable anatomical muscle.",
+    "action": "Inspect the original muscle and bones, obtain a librarian assessment, validate each actual output, and send observed failures with versioned evidence to the responsible stage. Preserve the best candidate. After 3-4 failed refinements change approach. Changed upstream inputs invalidate all affected downstream checks.",
+    "applicability": "Every muscle reconstruction, including simple muscles and cases with no diagnosed feature.",
+    "limitations": "This is the user-directed workflow, not evidence that automatic fitting or geometry recognition is solved.",
+    "evidence_source": "project:docs/muscle_volume_fitting.md"
+  },
+  {
+    "id": "transfer-anatomical-correspondence",
+    "kind": "procedure",
+    "status": "requirement",
+    "stages": [
+      "transfer"
+    ],
+    "title": "Validate anatomy independently of later fit scores",
+    "observation": "Source and simplified target bones can differ in topology, proportions and omitted landmarks.",
+    "action": "Inspect bone identities, laterality, transforms, attachment bands and neighbors; use indexed discovery correspondence and local anatomical frames. Preserve head identities and label proxies. Repair overlapping transferred solids before underside extraction, preserving originals and validating union geometry. Never distort the transfer simply to make downstream fitting pass.",
+    "applicability": "Transfer of reference muscle geometry to existing SCPs.",
+    "limitations": "Correspondence requires anatomical evidence; a whole-limb transform or region centroid alone is insufficient.",
+    "evidence_source": "project:docs/muscle_volume_fitting.md"
+  },
+  {
+    "id": "whole-underside-and-heads",
+    "kind": "procedure",
+    "status": "requirement",
+    "stages": [
+      "base"
+    ],
+    "title": "Preserve the whole bone-facing underside, including suspended spans",
+    "observation": "The requested base is the whole underside of the retained muscle extent, including suspended spans rather than only contacts or a projected outline.",
+    "action": "Choose and record the retained extent before fiber creation; noninflating thin extensions may be omitted explicitly. Declare heads, attachment bands, side boundaries and seams. Preserve useful existing underside geometry; complete holes while retaining boundaries and clefts. Design approximate smooth borders rather than tracing extraction kinks. Check prepared charts for spatial folds and missing retained head tissue. Put four corners across full retained start/end bands, distinguishing modeling cuts from physical attachments. Return transfer errors upstream with geometry evidence.",
+    "applicability": "Base selection/preparation for single- and multiheaded muscles.",
+    "limitations": "Connected components do not identify anatomical heads. A disk chart cannot represent arbitrary branching or overhangs; decompose explicitly.",
+    "evidence_source": "project:docs/muscle_volume_fitting.md"
+  },
+  {
+    "id": "native-base-width-before-depth",
+    "kind": "procedure",
+    "status": "requirement",
+    "stages": [
+      "fibers"
+    ],
+    "title": "Preserve belly width and boundaries in the actual native loft",
+    "observation": "Surface-bound pins and accepted routes can still yield a narrow or wrongly ordered loft.",
+    "action": "Start sparse and fit the selected retained underside. Use qualified SCP snapping and indexed persisted bindings; physical endpoints have zero offset. Explicit routing offsets default to zero and need a recorded purpose; shared starts inherit the same junction identity and offset. Allow at most eight routing corrections per fiber and count structural shared junctions separately. Persist any selected output extent and remove excluded continuation parts. Recompute, measure the actual loft at five interior width/depth stations and inspect calibrated views. Repair lost belly width here, before inflation.",
+    "applicability": "Every native fiber reconstruction; the width check is unconditional, so recognizing a belly is not a retrieval prerequisite.",
+    "limitations": "Fifteen percent station discrepancy triggers review, not automatic acceptance. Branch roots must be disjoint intervals on one outer main fiber, with shared point identities; unsupported layouts require coordinated parts.",
+    "evidence_source": "project:docs/muscle_volume_fitting.md"
+  },
+  {
+    "id": "inflation-on-validated-native-base",
+    "kind": "procedure",
+    "status": "requirement",
+    "stages": [
+      "inflation"
+    ],
+    "title": "Fit supported native inflation against the complete thickness target",
+    "observation": "Depth changes cannot correct a fixed open-loft perimeter or a wrong deep surface.",
+    "action": "Check native base width, orientation and deep gap first. Measure whole-underside-to-superficial thickness, distinguish missing/multiple ray intersections, evaluate supported Control Point/Distributed/Section Profile settings through native code, and validate held-out samples and views. Section Profile is for ordinary open LOFT only. Return width/boundary loss to fibers, omitted underside to base, and incorrect anatomical correspondence to transfer.",
+    "applicability": "Fitting muscle depth after native base reconstruction.",
+    "limitations": "A failed parameter fit does not prove representation impossibility. No universal inflation mode is established; branch inflation support differs from ordinary loft support.",
+    "evidence_source": "project:docs/muscle_volume_fitting.md"
+  },
+  {
+    "id": "final-review-and-debug-delivery",
+    "kind": "procedure",
+    "status": "requirement",
+    "stages": [
+      "review"
+    ],
+    "title": "Review actual anatomy and saved editability separately",
+    "observation": "Route acceptance, mesh persistence and visualization settings measure different properties.",
+    "action": "Review heads, ordering, belly/tendon proportions, attachments, neighbors and coverage in isolated and contextual views. Record anatomical, route/collision, persistence, indexed-discovery and visibility results separately. Use StaticScene.save_debug_copy and reopen normally. Verify every source and mirrored fiber visible in normal curve display and native SCP colors in Solid/Object mode; report proxy and cropped attachments.",
+    "applicability": "Final muscle and checkpoint delivery.",
+    "limitations": "A schema validator or renderer cannot certify anatomy. An open inflated patch is not a closed-volume match.",
+    "evidence_source": "project:docs/muscle_volume_fitting.md"
+  },
+  {
+    "id": "inflation-relevant-base-scope-20260920",
+    "kind": "procedure",
+    "status": "requirement",
+    "stages": [
+      "base",
+      "fibers",
+      "inflation",
+      "review"
+    ],
+    "title": "Choose useful muscle extent at the base and preserve it downstream",
+    "observation": "The user permits omission of fine tendrils and other thin regions that contribute no useful inflated muscle volume.",
+    "action": "Choose omissions at the base stage from source width, depth, area and branch anatomy. Record excluded parts and modeling boundaries; preserve meaningful belly, heads and shared structure. Apply the same retained extent to native meshes, inflation, mirrors, measurements and saved regeneration. Qualified construction curves may extend outside the output extent, but excluded tissue must not return. Review against the corresponding retained reference and disclose omissions.",
+    "applicability": "Every muscle reconstruction; this rule is included without requiring a semantic match.",
+    "limitations": "There is no universal thickness or station cutoff. A modeling cut is not a physical anatomical attachment. The rule does not justify discarding poorly fitted but meaningful muscle tissue.",
+    "evidence_source": "project:docs/authoring_muscle_reconstruction.md"
+  }
+]

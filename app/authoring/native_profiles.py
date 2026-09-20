@@ -7,7 +7,8 @@ from ...core.authoring.reports import response, entity
 from ...core.authoring.storage import atomic_write
 
 KINDS = {"muscles.profile_configure": "muscle_profile_configure.v1", "muscles.create_from_surface": "muscle_from_surface.v1"}
-OPS = ("muscles.profile_inspect", "muscles.profile_preview", *KINDS)
+KINDS['muscles.domain_configure'] = 'muscle_domain_configure.v1'
+OPS = ("muscles.profile_inspect", "muscles.profile_preview", "muscles.domain_inspect", *KINDS)
 
 
 def operations():
@@ -69,25 +70,37 @@ def _mutating(service, request, key, started):
         return _replay(service, request, key, record, started)
     state = service.scene.profile_inspect(_target(request))
     _guards(service, request, state)
-    params, create = request["params"], request["op"] == "muscles.create_from_surface"
-    config = params.get("initial_configuration") if create else params["configuration"]
     with _journal_transaction(service.store, key):
-        with service.scene.profile_mutation(_target(request), config, create, params.get("name", "")) as identity:
+        with _mutation(service, request) as identity:
             return _record_mutation(service, request, key, identity, started)
 
 
-def _postcondition(state, kind):
+def _mutation(service, request):
+    params, create = request['params'], request['op'] == 'muscles.create_from_surface'
+    config = params.get('initial_configuration') if create else params['configuration']
+    if request['op'] == 'muscles.domain_configure':
+        return service.scene.domain_mutation(_target(request), config)
+    return service.scene.profile_mutation(_target(request), config, create, params.get('name', ''))
+
+
+def _postcondition(state, kind, version=3):
     value = {name: state[name] for name in ("muscle_id", "source_id", "base_revision")}
     if kind == "muscle_profile_configure.v1":
         value["configuration"] = state["configuration"]
-        value["native_state"] = state["native_state"]
+        value["native_state"] = dict(state["native_state"])
+        if version == 1:
+            value['native_state'].pop('legacy', None)
+        else:
+            value["legacy_configuration"] = state["legacy_configuration"]
+    if version >= 3:
+        value['output_domain'] = state['output_domain']
     return digest(value)
 
 
 def _record_mutation(service, request, key, identity, started):
     state = service.scene.profile_inspect(dict(muscle_id=identity))
     kind = KINDS[request["op"]]
-    receipt = dict(kind=kind, version=1, request_id=request["request_id"], digest=digest(request), root_scope=key[0],
+    receipt = dict(kind=kind, version=3, request_id=request["request_id"], digest=digest(request), root_scope=key[0],
         muscle_id=identity, source_id=state["source_id"], base_revision=state["base_revision"], postcondition=_postcondition(state, kind))
     service.scene.profile_marker(identity, kind, receipt)
     service.identities.remember_journal(service.store.directory)
@@ -103,7 +116,7 @@ def _replay(service, request, key, receipt, started):
     marker = service.scene.profile_marker(receipt["muscle_id"], receipt["kind"])
     require(marker == receipt and receipt["root_scope"] == key[0], code)
     state = service.scene.profile_inspect(dict(muscle_id=receipt["muscle_id"]))
-    require(state["current"] and _postcondition(state, receipt["kind"]) == receipt["postcondition"], code)
+    require(state["current"] and _postcondition(state, receipt["kind"], receipt.get('version', 1)) == receipt["postcondition"], code)
     result = _response(service, request, state, started, replayed=True, receipt=_descriptor(receipt))
     with _journal_transaction(service.store, key):
         service.store.put("v04_profile_receipts", key, receipt)

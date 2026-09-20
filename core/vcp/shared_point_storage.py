@@ -12,6 +12,24 @@ def clear_indexes(_unused=None, _context=None):
     _USER_INDEX.clear()
 
 
+def referenced_point_ids(root):
+    system = root.af_vcp_system
+    used = {getattr(f, slot) for f in system.fibers for slot in ('a_point_id', 'b_point_id')}
+    used.update(p.point_id for f in system.fibers for p in (*f.mid_touches, *f.loop_anchors))
+    used.update(p.point_id for s in system.fiber_surfaces for b in s.branches for p in b.roots)
+    return used - {''}
+
+
+def prune_unused_points(root):
+    """Remove only unreferenced records, including protection for inactive topology slots."""
+    points, used = root.af_vcp_system.authored_points, referenced_point_ids(root)
+    unused = tuple((index, p.id) for index, p in enumerate(points) if p.id not in used)
+    with suppress_vcp_prop_updates():
+        for index, _key in reversed(unused): points.remove(index)
+    clear_indexes()
+    return tuple(key for _index, key in unused)
+
+
 def _point_index(owner, system):
     root = owner.id_data
     key = (int(root.as_pointer()), len(system.authored_points))

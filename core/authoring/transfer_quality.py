@@ -14,10 +14,21 @@ def sample_mesh(vertices, triangles, limit):
     return np.vstack((corners, vertices[faces].mean(axis=1)))
 
 
+def landmark_orientation(field, allow_reflection):
+    """Use skeletal correspondence, since the RBF polynomial tail omits nonlinear motion."""
+    if not allow_reflection:
+        return 1
+    source = field.centers*field.source_scale+field.source_origin
+    target = (evaluate(field, source)-field.target_origin)/field.target_scale
+    polynomial = np.column_stack((np.ones(len(source)), field.centers))
+    affine = np.linalg.lstsq(polynomial, target, rcond=None)[0][1:]
+    return -1 if np.linalg.det(affine) < 0 else 1
+
+
 def field_report(field, samples, allow_reflection=False):
     values = jacobians(field, samples)
     determinants, stretches = np.linalg.det(values), np.linalg.svd(values, compute_uv=False)
-    orientation = -1 if allow_reflection and np.linalg.det(field.affine[1:].T) < 0 else 1
+    orientation = landmark_orientation(field, allow_reflection)
     normalized = determinants*orientation/(field.target_scale/field.source_scale)**3
     ratios = stretches[:, 0]/np.maximum(stretches[:, -1], 1e-15)
     low, high = field.centers.min(axis=0), field.centers.max(axis=0)

@@ -10,6 +10,7 @@ from ..vcp.muscle_numeric import MuscleNumericSpec, execute_muscle_batch, make_m
 from ..vcp.muscle_surface import validate_anchor_structure
 from ..vcp.muscle_inflation_state import inflation_control_initialized, migrate_inflation_control
 from ..vcp.runtime_state import muscle_inflation_ctrl_world, set_muscle_inflation_ctrl_world
+from ..vcp.muscle_output_domain import capture as capture_domain
 
 
 @dataclass(frozen=True)
@@ -23,7 +24,7 @@ class MuscleNumericWork:
 
 
 def capture_muscle_work(sync, vis_col, root, scene, vcp, muscle):
-    error = _branched_mode_error(root, muscle)
+    error = _domain_error(muscle) or _branched_mode_error(root, muscle)
     if error:
         return _invalid_mode_work(sync, vis_col, root, muscle, error)
     if muscle.inflation_mode == "SECTION_PROFILE":
@@ -31,6 +32,14 @@ def capture_muscle_work(sync, vis_col, root, scene, vcp, muscle):
     if muscle.inflation_mode not in ("CTRL_POINT", "DISTRIBUTED"):
         return _invalid_mode_work(sync, vis_col, root, muscle)
     return _capture_legacy_work(sync, vis_col, root, scene, muscle)
+
+
+def _domain_error(muscle):
+    try:
+        capture_domain(muscle)
+        return ''
+    except (ValueError, np.linalg.LinAlgError) as error:
+        return 'DOMAIN_CONFIGURATION_INVALID: '+str(error)
 
 
 def _capture_legacy_work(sync, vis_col, root, scene, muscle):
@@ -90,7 +99,7 @@ def _make_branched_request(muscle, surface, assembly):
     grids = (assembly.main, *(b.grid for b in assembly.branches))
     specs = tuple(_numeric_spec(s, surface, g.shape[1], False, False, _initialize_control(s))
                   for s, g in zip(settings, grids))
-    return BranchedMuscleRequest(muscle.id, assembly, specs)
+    return BranchedMuscleRequest(muscle.id, assembly, specs, capture_domain(muscle))
 
 
 def execute_muscle_work(scene, work):
@@ -135,7 +144,7 @@ def _surface_input(sync, root, scene, muscle):
 def _make_request(muscle, payload, initialize=False):
     points, target, densify, closed_u, config = payload
     spec = _numeric_spec(muscle, config, target, densify, closed_u, initialize)
-    return make_muscle_request(muscle.id, np.asarray(points, dtype=np.float64), spec)
+    return make_muscle_request(muscle.id, np.asarray(points, dtype=np.float64), spec, output_domain=capture_domain(muscle))
 
 
 def _numeric_spec(muscle, config, target, densify, closed_u, initialize=False):
@@ -214,7 +223,21 @@ def _publish_valid(sync, vis_col, root, scene, vcp, work, result, batch):
     sync._update_mesh(work.base_obj, result.base_vertices, result.faces)
     _sync_control(sync, vis_col, root, scene, vcp, work, result)
     sync._update_mesh(work.infl_obj, result.inflated_vertices, result.faces)
+    _domain_metadata(work, result)
     _mark_valid(sync, vcp, work, batch)
+
+
+def _domain_metadata(work, result):
+    from ..authoring.codec import encode
+    for obj in (work.base_obj, work.infl_obj):
+        obj['af_muscle_domain_plane'] = encode(work.request.output_domain)
+        for name, values in (('af_source_face', result.source_faces), ('af_muscle_part', result.face_parts)):
+            old = obj.data.attributes.get(name)
+            if old is not None:
+                obj.data.attributes.remove(old)
+            if values is not None:
+                attribute = obj.data.attributes.new(name=name, type='INT', domain='FACE')
+                attribute.data.foreach_set('value', values)
 
 
 def _sync_control(sync, vis_col, root, scene, vcp, work, result):
@@ -238,6 +261,9 @@ def _part_control(request, result, index):
 def _control_rows(request, result):
     if hasattr(request, "assembly"):
         return request.assembly.main
+    if request.output_domain is not None:
+        from ..vcp.fiber_surface import prepare_loft_rows
+        return np.asarray(prepare_loft_rows(request.points, request.spec.target_count, request.spec.closed_u, request.spec.densify))
     return result.base_vertices.reshape((result.row_count, result.column_count, 3))
 
 
@@ -253,6 +279,7 @@ def _mark_valid(sync, vcp, work, batch):
     for obj in objects:
         obj["af_muscle_numeric_backend"] = batch.backend
         obj["af_muscle_numeric_batch_ms"] = float(batch.elapsed_ms)
+        obj['af_muscle_output_domain'] = str(work.muscle.output_domain_mode)
 
 
 def _capture_profile_work(sync, vis_col, root, scene, muscle):

@@ -95,7 +95,37 @@ are rejected. Creation accepts only a complete Section Profile as its explicit
 initial configuration.
 
 Current branched muscles can be inspected and switched between their stored main
-legacy modes through these revision guards. Edit child settings through
+legacy modes through these revision guards. A legacy configuration may also
+include a partial `native` object containing `inflation_enabled`, `flip_normals`,
+`inflation_max_value`, `inflation_falloff_type`, `inflation_falloff_radius`,
+`inflation_direction_depth`, `inflation_boundary_strength`,
+`inflation_boundary_band`, `inflation_boundary_power`,
+`inflation_length_taper_band`, and `inflation_ctrl_world`. For example,
+`{"mode":"control_point","native":{"inflation_max_value":0.2,"inflation_ctrl_world":[0,1,2]},"surface_flip_normals":false}`
+uses the existing native model with a durable world-space control. Native lengths
+use scene units. Values are finite, strictly range checked, and never rely on RNA
+clamping. Omitted native fields retain their saved values. `legacy_configuration`
+in inspection exposes the complete legacy values, including when Section Profile
+is currently selected; its mode then defaults to Distributed for restoration.
+An uninitialized control omits `inflation_ctrl_world` from this writable form so
+round trips preserve automatic initialization. `native_state.legacy` retains the
+raw coordinates and initialization flag for diagnostics.
+
+Optional `surface_flip_normals` follows the manual Swap Normals target: the source
+Fiber Surface, or the muscle for a legacy fiber-owned source. It affects every
+muscle using that same source. For an ordinary Fiber Surface this changes mesh
+winding only; set `native.flip_normals` to change ordinary inflation direction.
+For a branched assembly, `surface_flip_normals` controls the assembled inflation
+direction; a separate native flip is rejected because assembly orientation would
+override it. Preview evaluates the selected whole assembly
+without mutation; configuration synchronizes the source and its dependent outputs.
+Source side, dependent settings/meshes and journal state roll back together on
+failure. Explicit control coordinates also mark the control initialized, so
+reopening or preview initialization cannot silently replace them. New configuration
+receipts include all legacy parameters, shared source side and retained extent;
+unchanged older receipts retain their original version-specific replay checks.
+
+Edit child settings through
 `muscles.branch_configure`; Section Profile remains unsupported on every part.
 Profile, branch, shared-point and recompute commands share the root-scoped request
 ID namespace. Native branch/recompute retries still run their live receipt or
@@ -112,7 +142,9 @@ recover missing journal entries. Publication and journal persistence roll back
 together on failure. Keep the journal with the corresponding `.blend`.
 
 Base revisions hash the actual prepared geometry and ordered chart, excluding
-profile parameters. They deliberately do not round away source changes. An
+profile parameters. An enabled muscle extent also contributes its configuration
+and transformed plane; unchanged full-extent muscles retain their previous hash.
+They deliberately do not round away source changes. An
 unchanged file with stable source output replays after reopening; recomputed source
 geometry, including a floating-point change, requires a fresh inspection/request.
 Package/VCP import remaps source IDs and copies independent profile vectors without

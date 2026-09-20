@@ -6,6 +6,40 @@ underside** and calculating fiber curves. The selected mesh is evidence to fit;
 its holes, handles and disconnected scraps are not automatically the desired
 muscle topology. Contact with SCPs does not crop the base.
 
+## Anatomical approximation and smooth borders
+
+User requirement, September 20, 2026: this stage must produce an approximate,
+smooth anatomical underside suitable for sparse native reconstruction. Extracted
+faces, projection contours and mathematical fits are evidence and construction
+aids, not an outline that must be copied exactly. AI or human modeling decisions
+define the intended shape. A small fitting residual or valid topology cannot
+approve visibly kinked borders or a rippled interior.
+
+Design each origin, insertion, side, cleft and seam from a small set of meaningful
+anatomical landmarks. Use editable smooth curves to approximate noisy samples;
+do not force the border through every source vertex or slice intersection. Keep
+the broad belly width, complete attachment bands, head extents, taper and genuine
+clefts. A deliberate cleft tip may change direction sharply; incidental notches,
+zigzags and extraction artifacts must not propagate into native fibers.
+
+Build or fair the interior to those designed borders and the broad underside
+shape. Preserve suspended spans, thickness-side orientation and anatomical
+concavities. Define a shared seam once and reuse its geometry and identity in both
+patches; inspect tangent continuity where the anatomical surface is continuous.
+Do not shrink away a belly, close a cleft, flatten the underside onto bone, or
+use smooth shading to hide an unchanged jagged mesh.
+
+Before handing off to fibers, review isolated borders, shaded and wire geometry,
+and fixed-view cross-sections against the reference. Reject unexplained kinks,
+ripples, folds and abrupt seam changes even when distance/topology checks pass.
+Measurements constrain broad anatomical drift; they do not dictate a noisy
+perimeter. Record boundary regularity separately from coverage and topology.
+
+This is the construction and acceptance contract. The existing bounded
+`prepare_base` implementation below resamples supplied arcs; it does not yet
+guarantee these anatomical or smoothness criteria. A ready API result therefore
+still needs this review and, where necessary, explicit boundary redesign.
+
 ## Input from AI or a human
 
 Capture the repaired muscle mesh with `anatomy.transfer_sources`. The preparation
@@ -36,6 +70,8 @@ stage does not infer anatomical attachments from them or publish native branchin
 ## Reconstruction
 
 1. Resample each supplied boundary arc once. Keep its endpoints and seam identities.
+   The current implementation does not replace a jagged input with a designed
+   smooth border; regular resampling alone is not sufficient acceptance.
 2. Give each patch disk topology, which has one perimeter and no internal holes.
 3. Initialize the interior by a harmonic extension of the fixed 3D boundary.
 4. Fit interior vertices to area-weighted underside samples with a discrete fairing

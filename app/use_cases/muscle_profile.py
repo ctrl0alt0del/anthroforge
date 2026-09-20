@@ -9,6 +9,8 @@ try:
     from ...core.visualization.muscle_numeric_runtime import _make_request
     from ...core.visualization.muscle_profile_publish import transaction, publish
     from ...core.authoring.native_assignment import assign_checked
+    from ...core.authoring.legacy_config import legacy_state
+    from ...core.visualization.muscle_legacy_profile import configuration_state, oriented_request, publish_side
     from ...core.vcp.prop_update_guard import suppress_vcp_prop_updates
 except ImportError:
     from core.authoring.profile_config import current_configuration, native_values, normalize, wire
@@ -18,16 +20,20 @@ except ImportError:
     from core.visualization.muscle_numeric_runtime import _make_request
     from core.visualization.muscle_profile_publish import transaction, publish
     from core.authoring.native_assignment import assign_checked
+    from core.authoring.legacy_config import legacy_state
+    from core.visualization.muscle_legacy_profile import configuration_state, oriented_request, publish_side
     from core.vcp.prop_update_guard import suppress_vcp_prop_updates
 
 
 def inspect(root, scene, muscle_id="", surface_id=""):
+    from ...core.vcp.muscle_output_domain import configuration as domain_configuration
     target = capture_target(root, scene, muscle_id, surface_id)
     state, configuration, error = _profile_state(target.muscle)
     return target, dict(muscle_id=muscle_id or None, source_id=target.source.id, base_revision=target.base_revision,
         eligible=target.eligible, current=target.current, reasons=list(target.reasons), chart=list(target.chart),
-        configuration=configuration, profile_state=state, profile_error=error,
-        initialization_proposal=_proposal(target.muscle), ownership=_ownership(target.muscle), native_state=_native_state(target.muscle))
+        configuration=configuration, legacy_configuration=configuration_state(target), profile_state=state, profile_error=error,
+        initialization_proposal=_proposal(target.muscle), ownership=_ownership(target.muscle), native_state=_native_state(target.muscle),
+        output_domain=domain_configuration(target.muscle))
 
 
 def _profile_state(muscle):
@@ -60,8 +66,8 @@ def preview(target, configuration):
     configuration = normalize(configuration)
     _validate_target(target, configuration)
     candidate = _candidate(target.muscle, configuration)
-    initialize = candidate.inflation_mode == "CTRL_POINT" and not getattr(target.muscle, "inflation_ctrl_initialized", False)
-    request = _preview_request(target, candidate, initialize)
+    initialize = candidate.inflation_mode == "CTRL_POINT" and not candidate.inflation_ctrl_initialized
+    request = oriented_request(_preview_request(target, candidate, initialize), target, configuration)
     batch = execute_muscle_batch((request,))
     if batch.results[0].error:
         raise ValueError(batch.results[0].error)
@@ -76,6 +82,8 @@ def _preview_request(target, candidate, initialize):
 
 
 def _validate_target(target, configuration):
+    if target.assembly is not None and 'flip_normals' in configuration.get('native', {}):
+        raise ValueError('PROFILE_SIDE_UNSUPPORTED: use surface_flip_normals for the whole branched assembly')
     if target.eligible:
         return
     if target.muscle is not None and configuration['mode'] != 'section_profile' and target.current:
@@ -107,6 +115,7 @@ def configure(root, scene, muscle_id, configuration):
     configuration, request, batch = preview(target, configuration)
     with transaction(root, scene, target.muscle):
         write_configuration(target.muscle, configuration)
+        publish_side(root, scene, target, configuration)
         publish(root, scene, target.muscle, request, batch)
     return configuration
 
@@ -135,7 +144,7 @@ def _native_state(muscle):
     return dict(mode=muscle.inflation_mode, version=muscle.section_profile_version,
         depths=[_finite_value(v) for v in muscle.section_depths], peaks=[_finite_value(v) for v in muscle.section_peaks],
         roundness=_finite_value(muscle.section_roundness),
-        direction=muscle.section_direction, enabled=muscle.inflation_enabled, flip_normals=muscle.flip_normals)
+        direction=muscle.section_direction, enabled=muscle.inflation_enabled, flip_normals=muscle.flip_normals, legacy=legacy_state(muscle))
 
 
 def _finite_value(value):

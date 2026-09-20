@@ -23,6 +23,12 @@ def nonlinear_target():
     return target
 
 
+def nonlinear_reflection():
+    source = np.array(list(itertools.product([-2., -1., 0., 1., 2.], [-.2, .2], [-.2, .2])))
+    target = np.column_stack((-np.tanh(2*source[:, 0]), source[:, 1:]))
+    return fit(source, target)
+
+
 def mesh_row(matrix):
     geometry = dict(vertices=CORNERS.tolist(), triangles=[[0, 1, 2], [1, 2, 3]], matrix=matrix.tolist())
     return dict(geometry=geometry, topology_digest='same-topology', geometry_digest='geometry', color=[.8, .3, .2, 1])
@@ -82,6 +88,24 @@ class TransferFieldTests(unittest.TestCase):
         allowed = field_report(field, CORNERS, allow_reflection=True)
         self.assertEqual(allowed['foldover_samples'], 0)
         self.assertEqual(allowed['orientation'], -1)
+
+    def test_nonlinear_reflection_uses_landmarks_not_rbf_polynomial_tail(self):
+        field = nonlinear_reflection()
+        probes = CORNERS*np.array([.75, .1, .1])
+        self.assertGreater(np.linalg.det(field.affine[1:]), 0)
+        self.assertTrue(np.all(np.linalg.det(jacobians(field, probes)) < 0))
+        self.assertEqual(field_report(field, probes)['foldover_samples'], len(probes))
+        report = field_report(field, probes, allow_reflection=True)
+        self.assertEqual(report['orientation'], -1)
+        self.assertEqual(report['foldover_samples'], 0)
+
+    def test_reflection_reference_is_stable_across_separate_mesh_samples(self):
+        field = nonlinear_reflection()
+        inside, outside = CORNERS*np.array([.75, .1, .1]), CORNERS*np.array([5., .1, .1])
+        self.assertTrue(np.all(np.linalg.det(jacobians(field, outside)) > 0))
+        reports = [field_report(field, rows, True) for rows in (inside, outside)]
+        self.assertEqual([row['orientation'] for row in reports], [-1, -1])
+        self.assertEqual([row['foldover_samples'] for row in reports], [0, len(outside)])
 
     def test_collapsed_target_is_flagged(self):
         target = CORNERS.copy(); target[:, 2] = 0

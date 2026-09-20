@@ -26,6 +26,10 @@ class StaticScene(BlenderScene):
         from .native_profiles import mutation
         return mutation(self, target, configuration, create, name)
 
+    def domain_mutation(self, target, configuration):
+        from .native_profiles import domain_mutation
+        return domain_mutation(self, target, configuration)
+
     def profile_marker(self, muscle_id, kind, receipt=None):
         from .native_profiles import marker
         return marker(self, muscle_id, kind, receipt)

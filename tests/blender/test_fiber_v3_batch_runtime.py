@@ -2,7 +2,7 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 import os
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 TEST_ROOT = Path(__file__).resolve().parents[1]
 ADDON_ROOT = Path(__file__).resolve().parents[2]
@@ -14,6 +14,16 @@ from _helpers import BlenderTestCase
 
 
 class FiberV3BatchRuntimeTests(BlenderTestCase):
+    def test_auto_keeps_async_ownership_when_group_shrinks(self):
+        session = SimpleNamespace(engine="V3", done=False, params={"node_count": 64})
+        job = SimpleNamespace(key="a", session=session)
+        fiber_refinement._V3_BATCH.clear()
+        with patch.dict(os.environ, {"AF_FIBER_V3_BATCH": "AUTO"}), \
+             patch.object(type(fiber_refinement._V3_BATCH), "async_pending", new_callable=PropertyMock, return_value=True):
+            fiber_refinement._V3_BATCH.add("a", session)
+            self.assertTrue(fiber_refinement._batch_job_enabled(job))
+        fiber_refinement._V3_BATCH.clear()
+
     def tearDown(self):
         fiber_refinement._GROUPS.clear()
         super().tearDown()

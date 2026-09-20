@@ -3,8 +3,10 @@ import json
 from pathlib import Path
 try:
     from tools.authoring_profile_schema import operations as profile_operations
+    from tools.authoring_domain_schema import operations as domain_operations
 except ModuleNotFoundError:
     from authoring_profile_schema import operations as profile_operations
+    from authoring_domain_schema import operations as domain_operations
 
 ROOT = Path(__file__).resolve().parents[1] / 'core/authoring/schemas'
 S = {'type': 'string', 'minLength': 1}
@@ -173,6 +175,7 @@ def protocol(definitions):
     patch = array(obj(dict(op=enum('add', 'replace', 'remove'), path=S, value=ref('patch_value')), ['op', 'path']))
     operations = basic_operations(ident, mutation, patch) + candidate_operations(mutation) + visual_operations() + [snap_points_operation(), catalog_operation(), plan_fibers_operation()]
     operations += recompute_operations() + branch_operations() + [base_operation()] + profile_operations(definitions)
+    operations += domain_operations(definitions)
     definitions['patch_value'] = choice({'type': 'string'}, N, B, array(ref('patch_value')), dict(type='object', additionalProperties=ref('patch_value')))
     definitions['document'] = {k: v for k, v in authoring().items() if k != '$defs'}
     extend(definitions, operations, '0.4.0')
@@ -251,11 +254,20 @@ def branch_operations():
     rows += [operation('muscles.branch_remove', fields, list(fields))]
     rows += [operation('muscles.branch_configure', dict(**fields, connector=obj(dict(width=dict(type='number', exclusiveMinimum=0, exclusiveMaximum=.5), fullness=N), []), inflation=ref('patch_value')), list(fields))]
     rows += [operation('points.inspect', dict(point_id=S), [])]
-    fields = dict(**revision, point_id=S, position=ref('xyz'), scp_id=S, offset=N)
-    rows += [operation('points.edit', fields, ['expected_scene_revision', 'point_id'])]
+    rows += [point_edit_operation()]
     fields = dict(**revision, fiber_id=S, index=I)
     rows += [operation('points.detach', fields, list(fields))]
     return rows + [operation('points.link', dict(**fields, point_id=S), list(fields)+['point_id'])]
+
+
+def point_edit_operation():
+    fields = dict(expected_scene_revision=S, point_id=S, position=ref('xyz'), scp_id=S, offset=N)
+    result = operation('points.edit', fields, ['expected_scene_revision', 'point_id'])
+    retained = dict(scene_id=S, expected_scene_revision=S, point_id=S, offset=N,
+                    attachment=obj(dict(parent_id=S, attach_param=S)))
+    variants = [result['properties']['params'], obj(retained, ['scene_id', 'expected_scene_revision', 'point_id', 'attachment'])]
+    result['properties']['params'] = dict(oneOf=variants)
+    return result
 
 
 def catalog_operation():

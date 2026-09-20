@@ -49,6 +49,7 @@ class MuscleNumericRequest:
     points: np.ndarray
     spec: MuscleNumericSpec
     orientation_parity: int = 1
+    output_domain: object = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,8 @@ class MuscleNumericResult:
     row_count: int
     column_count: int
     error: str = ""
+    source_faces: object = None
+    face_parts: object = None
 
 
 @dataclass(frozen=True)
@@ -71,14 +74,14 @@ class MuscleNumericBatchResult:
     parallel: bool = False
 
 
-def make_muscle_request(muscle_id, points, spec, *, orientation_parity=1):
+def make_muscle_request(muscle_id, points, spec, *, orientation_parity=1, output_domain=None):
     if type(orientation_parity) is not int or orientation_parity not in (-1, 1):
         raise ValueError("PROFILE_PARITY_INVALID: orientation parity must be +1 or -1.")
     array = np.array(points, dtype=np.float64, copy=True, order="C")
     if array.ndim != 3 or array.shape[0] < 2 or array.shape[1] < 2 or array.shape[2] != 3:
         raise ValueError("Muscle input must be a rectangular MxNx3 grid.")
     array.flags.writeable = False
-    return MuscleNumericRequest(str(muscle_id), array, spec, orientation_parity)
+    return MuscleNumericRequest(str(muscle_id), array, spec, orientation_parity, output_domain)
 
 
 def resolve_muscle_backend(explicit=None, environment=None):
@@ -99,14 +102,15 @@ def execute_muscle_batch(requests, backend=None):
 
 def _execute_ordinary(requests, kind):
     from .muscle_profile_numeric import LEGACY_MODES, execute_partitioned, request_error
+    from .muscle_output_domain import apply_batch
     if kind == MuscleNumericBackend.NATIVE:
         from .muscle_numeric_native import execute_native_muscle_batch
         execute = execute_native_muscle_batch
     else:
         execute = execute_python_muscle_batch
     if any(request_error(row) or row.spec.inflation_mode not in LEGACY_MODES for row in requests):
-        return execute_partitioned(requests, kind.value, execute)
-    return execute(requests)
+        return apply_batch(requests, execute_partitioned(requests, kind.value, execute))
+    return apply_batch(requests, execute(requests))
 
 
 def execute_python_muscle_batch(requests):

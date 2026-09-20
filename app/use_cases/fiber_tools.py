@@ -252,7 +252,7 @@ def move_fiber_touch_point(context, fiber_id="", touch_index=-1, direction=0):
     index, target = int(touch_index), int(touch_index) + int(direction)
     if fiber is None:
         return failure(error)
-    if not _valid_touch_move(fiber, index, target) or any(f == fiber.id for f, _ in _branch_protected(root)):
+    if not _valid_touch_move(fiber, index, target) or not _routing_touch_move(root, fiber, index, target):
         return failure("Invalid touch move.")
     _remove_fiber_touch_handles(context.scene, root.name, fiber.id)
     fiber.mid_touches.move(index, target)
@@ -333,6 +333,38 @@ def _retire_warning_pins(root, fiber):
 def _valid_touch_move(fiber, index, target):
     count = len(fiber.mid_touches)
     return 0 <= index < count and 0 <= target < count and index != target
+
+
+def _routing_touch_move(root, fiber, index, target):
+    protected = {i for key, i in _branch_protected(root) if key == fiber.id}
+    if index+1 in protected:
+        return False
+    surfaces = getattr(root.af_vcp_system, 'fiber_surfaces', ())
+    if not protected and not any(c.boundary_fiber_id == fiber.id for s in surfaces for c in s.branches):
+        return True
+    keys = [fiber.a_point_id, *(p.point_id for p in fiber.mid_touches), fiber.b_point_id]
+    if not _branch_touch_order(root, fiber.id, keys):
+        return False
+    before = [keys[i] for i in sorted(protected)]
+    keys.insert(target+1, keys.pop(index+1))
+    return before == [key for key in keys if key in before] and _branch_touch_order(root, fiber.id, keys)
+
+
+def _branch_touch_order(root, fiber_id, keys):
+    intervals = []
+    for surface in root.af_vcp_system.fiber_surfaces:
+        for connection in surface.branches:
+            if connection.boundary_fiber_id != fiber_id:
+                continue
+            roots = [ref.point_id for ref in connection.roots]
+            if len(roots) < 2 or len(set(roots)) != len(roots) or any(keys.count(key) != 1 for key in roots):
+                return False
+            positions = [keys.index(key) for key in roots]
+            if positions != sorted(positions) or positions[0] == 0 or positions[-1] == len(keys)-1:
+                return False
+            intervals.append((positions[0], positions[-1]))
+    intervals.sort()
+    return all(a[1] < b[0] for a, b in zip(intervals, intervals[1:]))
 
 
 def _remove_fiber_touch_handles(scene, root_name, fiber_id):

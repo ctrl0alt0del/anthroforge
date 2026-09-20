@@ -5,6 +5,7 @@ from ..vcp.prop_update_guard import suppress_vcp_prop_updates
 from .muscle_sync import register_muscle_sync
 from .muscle_numeric_runtime import MuscleNumericWork, publish_muscle_work
 from .vcp_mirror_runtime import sync_vcp_mirrors
+from .muscle_legacy_profile import related_muscles, related_entities, related_tissues, normal_snapshot
 
 OBJECT_FIELDS = ('empty_display_type', 'empty_display_size', 'display_type', 'display_bounds_type',
     'show_in_front', 'show_wire', 'show_all_edges', 'show_name', 'show_axis', 'show_bounds',
@@ -14,6 +15,13 @@ OBJECT_FIELDS = ('empty_display_type', 'empty_display_size', 'display_type', 'di
 def affected_objects(root, scene, muscle_id):
     return tuple(obj for obj in scene.objects if obj.get("af_root_name") == root.name and
         (obj.get("af_muscle_id") == muscle_id or obj.get("af_source_muscle_id") == muscle_id))
+
+
+def transaction_objects(root, scene, muscle):
+    affected = related_entities(root, muscle)
+    return tuple(obj for obj in scene.objects if obj.get('af_root_name') == root.name and any(
+        str(obj.get(key, '')) == identity for kind, identity in affected for key in
+        (f'af_{kind.lower()}_id', f'af_source_{kind.lower()}_id')))
 
 
 def _snapshots(objects, scene):
@@ -39,14 +47,14 @@ def _object_relation(obj):
 def transaction(root, scene, muscle=None):
     settings = _settings_snapshots(root, muscle)
     muscle_ids, objects = {item.id for item in root.af_vcp_system.muscles}, set(bpy.data.objects)
-    saved = _snapshots(affected_objects(root, scene, muscle.id), scene) if muscle else ()
-    selection, journal = _selection(scene), root.get("af_authoring_journal")
+    saved = _snapshots(transaction_objects(root, scene, muscle), scene) if muscle else ()
+    selection, journal, normal = _selection(scene), root.get("af_authoring_journal"), normal_snapshot(root, muscle)
     try:
         with suppress_vcp_prop_updates():
             yield
     except BaseException:
         _rollback(root, settings, muscle_ids, objects, saved)
-        _restore_context(root, scene, selection, journal)
+        _restore_context(root, scene, selection, journal, normal)
         raise
     finally:
         _discard_copies(saved)
@@ -56,9 +64,9 @@ def _settings_snapshots(root, muscle):
     if muscle is None:
         return ()
     from .branch_control import branch_surface
-    owner = next((item for item in root.af_vcp_system.muscles if item.id == muscle.id), muscle)
-    surface = branch_surface(root, owner)
-    parts = (owner, *(branch.settings for branch in surface.branches)) if surface else (muscle,)
+    owners = related_muscles(root, muscle)
+    surfaces = tuple(filter(None, (branch_surface(root, owner) for owner in owners)))
+    parts = (*owners, *(branch.settings for surface in surfaces for branch in surface.branches), *related_tissues(root, muscle))
     return tuple((part, part.id_properties_ensure().to_dict()) for part in parts)
 
 
@@ -74,7 +82,7 @@ def _rollback(root, settings, ids, objects, saved):
     with suppress_vcp_prop_updates():
         _restore_settings(settings)
         for obj in set(bpy.data.objects) - objects:
-            if obj.get("af_root_name") == root.name and obj.get("af_muscle_id"):
+            if obj.get("af_root_name") == root.name and any(obj.get(k) for k in ('af_muscle_id', 'af_fiber_surface_id', 'af_blob_id', 'af_soft_tissue_id')):
                 _remove_object(obj)
         for index in reversed(range(len(root.af_vcp_system.muscles))):
             if root.af_vcp_system.muscles[index].id not in ids:
@@ -153,7 +161,10 @@ def _restore_selection(scene, selection):
         layer.objects.active = bpy.data.objects.get(active) if active else None
 
 
-def _restore_context(root, scene, selection, journal):
+def _restore_context(root, scene, selection, journal, normal):
+    if normal:
+        with suppress_vcp_prop_updates():
+            normal[0].flip_normals = normal[1]
     _restore_selection(scene, selection)
     if journal is None:
         if "af_authoring_journal" in root:

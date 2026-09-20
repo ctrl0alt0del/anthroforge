@@ -5,6 +5,7 @@ from ...app.use_cases.fiber_surface_create import create_native_muscle
 from ...core.authoring.codec import encode, decode
 
 MARKERS = {"muscle_profile_configure.v1": "af_authoring_profile_receipt", "muscle_from_surface.v1": "af_authoring_muscle_creation"}
+MARKERS['muscle_domain_configure.v1'] = 'af_authoring_domain_receipt'
 
 
 def inspect(port, target):
@@ -31,6 +32,15 @@ def mutation(port, target, configuration=None, create=False, name=""):
             muscle = captured.muscle
             commands.configure(port.root, port.scene, muscle.id, configuration)
         yield muscle.id
+
+
+@contextmanager
+def domain_mutation(port, target, configuration):
+    from ...app.use_cases import muscle_domain
+    captured, _ = commands.inspect(port.root, port.scene, target['muscle_id'])
+    with commands.transaction(port.root, port.scene, captured.muscle):
+        muscle_domain.configure(port.root, port.scene, captured.muscle.id, configuration)
+        yield captured.muscle.id
 
 
 def marker(port, muscle_id, kind, receipt=None):

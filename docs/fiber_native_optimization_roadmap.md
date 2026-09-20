@@ -316,6 +316,13 @@ The production defaults are asynchronous multi-session execution. Internal deter
 references remain available through `AF_FIBER_V3_ASYNC_SESSION=0` and
 `AF_FIBER_V3_MULTI_SESSION=0`.
 
+Once a group has submitted asynchronous work, `AUTO` keeps polling that owner until the
+remaining jobs finish, even when the group shrinks below four fibers. A direct controller
+`step` also polls its existing asynchronous owner instead of mutating the same native state
+from Python. The FCU six-fiber cold recompute exposed this ownership bug when three jobs
+remained; its guarded replay now completes all six routes without concurrent access.
+This is an execution fix and does not change solver budgets, tolerances, or convergence rules.
+
 Three fresh Blender runs of the real Cranium Lobe Width shortcut measured:
 
 | Boundary | Median full cycle | Result parity |

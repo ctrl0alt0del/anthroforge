@@ -3769,6 +3769,87 @@
             "mode"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "control_point",
+                "distributed"
+              ]
+            },
+            "native": {
+              "type": "object",
+              "properties": {
+                "inflation_max_value": {
+                  "type": "number",
+                  "minimum": 0.0,
+                  "maximum": 10.0
+                },
+                "inflation_falloff_radius": {
+                  "type": "number",
+                  "minimum": 0.001,
+                  "maximum": 100.0
+                },
+                "inflation_direction_depth": {
+                  "type": "number",
+                  "minimum": 0.0001,
+                  "maximum": 10.0
+                },
+                "inflation_boundary_strength": {
+                  "type": "number",
+                  "minimum": 0.0,
+                  "maximum": 1.0
+                },
+                "inflation_boundary_band": {
+                  "type": "number",
+                  "minimum": 0.1,
+                  "maximum": 16.0
+                },
+                "inflation_boundary_power": {
+                  "type": "number",
+                  "minimum": 0.1,
+                  "maximum": 8.0
+                },
+                "inflation_length_taper_band": {
+                  "type": "number",
+                  "minimum": 0.01,
+                  "maximum": 0.49
+                },
+                "inflation_enabled": {
+                  "type": "boolean"
+                },
+                "inflation_falloff_type": {
+                  "enum": [
+                    "GAUSSIAN",
+                    "LINEAR",
+                    "SMOOTHSTEP"
+                  ]
+                },
+                "inflation_ctrl_world": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "flip_normals": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "surface_flip_normals": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode",
+            "native"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -3797,6 +3878,66 @@
           },
           "required": [
             "fiber_surface_id"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "muscle_output_domain": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "full"
+              ]
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "plane"
+              ]
+            },
+            "space": {
+              "enum": [
+                "root_local"
+              ]
+            },
+            "origin": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": {
+                "type": "number"
+              }
+            },
+            "normal": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": {
+                "type": "number"
+              }
+            },
+            "keep_positive": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode",
+            "space",
+            "origin",
+            "normal",
+            "keep_positive"
           ],
           "additionalProperties": false
         }
@@ -7218,37 +7359,86 @@
           ]
         },
         "params": {
-          "type": "object",
-          "properties": {
-            "scene_id": {
-              "type": "string",
-              "minLength": 1
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "scene_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "expected_scene_revision": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "point_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "position": {
+                  "$ref": "#/$defs/xyz"
+                },
+                "scp_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "offset": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "scene_id",
+                "expected_scene_revision",
+                "point_id"
+              ],
+              "additionalProperties": false
             },
-            "expected_scene_revision": {
-              "type": "string",
-              "minLength": 1
-            },
-            "point_id": {
-              "type": "string",
-              "minLength": 1
-            },
-            "position": {
-              "$ref": "#/$defs/xyz"
-            },
-            "scp_id": {
-              "type": "string",
-              "minLength": 1
-            },
-            "offset": {
-              "type": "number"
+            {
+              "type": "object",
+              "properties": {
+                "scene_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "expected_scene_revision": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "point_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "offset": {
+                  "type": "number"
+                },
+                "attachment": {
+                  "type": "object",
+                  "properties": {
+                    "parent_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "attach_param": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "parent_id",
+                    "attach_param"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "scene_id",
+                "expected_scene_revision",
+                "point_id",
+                "attachment"
+              ],
+              "additionalProperties": false
             }
-          },
-          "required": [
-            "scene_id",
-            "expected_scene_revision",
-            "point_id"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -7948,6 +8138,132 @@
           "required": [
             "scene_id",
             "surface_id",
+            "expected_scene_revision",
+            "expected_base_revision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "dsl",
+        "version",
+        "message_type",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "muscles.domain_inspect"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "muscle_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "muscle_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "dsl",
+        "version",
+        "message_type",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "muscles.domain_configure"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "muscle_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "configuration": {
+              "$ref": "#/$defs/muscle_output_domain"
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_base_revision": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "muscle_id",
+            "configuration",
             "expected_scene_revision",
             "expected_base_revision"
           ],

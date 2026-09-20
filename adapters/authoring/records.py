@@ -18,6 +18,9 @@ def _record_values(item):
     values = scalar_dict(item)
     if _default_profile(item, values):
         values = {key: value for key, value in values.items() if key not in PROFILE_FIELDS}
+    if values.get('output_domain_mode') == 'FULL':
+        from ...core.vcp.muscle_output_domain import FIELDS
+        values = {key: value for key, value in values.items() if key not in FIELDS}
     return values
 
 

@@ -58,27 +58,89 @@ def _remember(root, request, result):
 
 def _transaction(root, request):
     from ...adapters.authoring.capture import native_records
-    saved = native_records(root)
+    saved = native_records(root); runtime = _runtime_memento(root)
     try:
         with suppress_vcp_prop_updates():
             result = _mutate(root, request['op'], request['params'])
+        _notify(root, request['op'], request['params'], result)
     except Exception as error:
-        _restore(root, saved)
+        _restore(root, saved); _restore_runtime(root, runtime)
         if isinstance(error, AuthoringError):
             raise
         raise AuthoringError('INVALID_BRANCH_CONFIGURATION', str(error)) from error
-    _notify(root, request['op'], request['params'], result)
     return result
 
 
 def _restore(root, saved):
-    from ...adapters.authoring.records import restore
+    from ...core.vcp.shared_point_storage import clear_indexes
     with suppress_vcp_prop_updates():
         for name, records in saved.items():
-            collection = getattr(root.af_vcp_system, name)
-            collection.clear()
-            for row in records:
-                restore(collection.add(), row)
+            _restore_collection(getattr(root.af_vcp_system, name), records)
+    clear_indexes()
+
+
+def _restore_collection(collection, records):
+    from ...adapters.authoring.records import restore
+    keys = {row['values']['id'] for row in records}
+    for index in reversed(range(len(collection))):
+        if collection[index].id not in keys:
+            collection.remove(index)
+    existing = {item.id: item for item in collection}
+    for row in records:
+        restore(existing.get(row['values']['id']) or collection.add(), row)
+
+
+def _runtime_memento(root):
+    import bpy
+    from ...core.vcp import fiber_anchor_preflight as preflight
+    from ...core.visualization import fiber_anchor_overlay as overlay
+    from ...core.warnings.session import REPOSITORY, scopes_for
+    names = ('fibers', 'fiber_surfaces', 'muscles'); scopes = set(scopes_for(bpy.context.scene, root))
+    native = {name: {item.id: _custom_runtime(item) for item in getattr(root.af_vcp_system, name)} for name in names}
+    proxies = {o.name: _custom_runtime(o, 'af_fiber_') for o in bpy.context.scene.objects if o.get('af_root_name') == root.name and o.get('af_fiber_id')}
+    warnings = {key: dict(value) for key, value in REPOSITORY.provider_states.items() if key[0] in scopes}
+    return dict(native=native, proxies=proxies, scopes=scopes, warnings=warnings,
+                preflight=dict(preflight._CACHE), overlay=dict(overlay._BATCHES))
+
+
+def _custom_runtime(item, prefix='_af_rt_'):
+    from ...adapters.authoring.records import plain
+    return {key: plain(item[key]) for key in item.keys() if key.startswith(prefix)}
+
+
+def _restore_custom(item, saved, prefix='_af_rt_'):
+    for key in tuple(item.keys()):
+        if key.startswith(prefix) and key not in saved:
+            del item[key]
+    for key, value in saved.items():
+        item[key] = value
+
+
+def _restore_runtime(root, saved):
+    import bpy
+    from ...core.vcp import fiber_anchor_preflight as preflight
+    from ...core.visualization import fiber_anchor_overlay as overlay
+    for name, rows in saved['native'].items():
+        for item in getattr(root.af_vcp_system, name):
+            _restore_custom(item, rows.get(item.id, {}))
+    for name, values in saved['proxies'].items():
+        if bpy.data.objects.get(name) is not None:
+            _restore_custom(bpy.data.objects[name], values, 'af_fiber_')
+    _restore_warning_states(saved)
+    preflight._CACHE.clear(); preflight._CACHE.update(saved['preflight'])
+    overlay._BATCHES.clear(); overlay._BATCHES.update(saved['overlay'])
+
+
+def _restore_warning_states(saved):
+    from ...core.warnings.session import REPOSITORY
+    for key in tuple(REPOSITORY.provider_states):
+        if key[0] in saved['scopes']:
+            del REPOSITORY.provider_states[key]
+    for scope in saved['scopes']:
+        REPOSITORY.states.pop(scope, None)
+    for (scope, provider), value in saved['warnings'].items():
+        REPOSITORY._state(scope, provider, value)
+    REPOSITORY.changed()
 
 
 def _mutate(root, op, params):
@@ -139,25 +201,75 @@ def _link(root, point, params):
 
 
 def _edit(root, point, params):
-    import bpy
-    from mathutils import Vector
-    from ...core.vcp.fiber_pin_snapping import capture_attachment_from_world
-    if 'position' in params:
-        owner = params.get('scp_id', point.parent_id)
-        radius = max((f.collision_radius for f, _, _ in point_users(root, point.id)), default=.002)
-        raw = capture_attachment_from_world(root, bpy.context.scene, owner, Vector(params['position']),
-                                            radius=radius, offset=params.get('offset', point.normal_offset))
-        if raw is None:
-            raise ValueError('Qualified surface snapping failed')
-        point.parent_id, point.attach_param = owner, raw
+    if 'attachment' in params:
+        _edit_retained(root, point, params)
+    elif 'position' in params:
+        _edit_position(root, point, params)
     if 'offset' in params:
         _edit_offset(root, point, params['offset'])
 
 
+def _edit_position(root, point, params):
+    import bpy
+    from mathutils import Vector
+    from ...core.vcp.fiber_pin_snapping import capture_attachment_from_world
+    owner = params.get('scp_id', point.parent_id)
+    radius = max((f.collision_radius for f, _, _ in point_users(root, point.id)), default=.002)
+    raw = capture_attachment_from_world(root, bpy.context.scene, owner, Vector(params['position']),
+                                        radius=radius, offset=params.get('offset', point.normal_offset))
+    if raw is None:
+        raise ValueError('Qualified surface snapping failed')
+    point.parent_id, point.attach_param = owner, raw
+
+
+def _edit_retained(root, point, params):
+    import bpy
+    from ...core.vcp.attachment_backend import attachment_runtime
+    from ...core.vcp.fiber_pin_snapping import qualify_attachment
+    require(not {'position', 'scp_id'} & params.keys(), 'INVALID_PARAMETER')
+    binding = params['attachment']; owner, raw = binding['parent_id'], binding['attach_param']
+    radius = max((f.collision_radius for f, _, _ in point_users(root, point.id)), default=.002)
+    runtime = attachment_runtime(bpy.context.scene)
+    _validate_retained_surface(root, bpy.context.scene, owner, raw, runtime)
+    for offset in (0., params.get('offset', point.normal_offset)):
+        result = qualify_attachment(root, bpy.context.scene, owner, raw, runtime, radius, offset)
+        require(result.valid and result.raw == raw, 'RETAINED_ATTACHMENT_UNQUALIFIED',
+                'Requested surface binding must remain exposed and unchanged at zero and final offsets.')
+    point.parent_id, point.attach_param = owner, raw
+
+
+def _validate_retained_surface(root, scene, owner, raw, runtime):
+    from ...core.vcp.attachment_backend import _parent_mesh
+    from ...core.scp_runtime.surface import build_mesh_surface_data
+    values = _retained_values(raw); obj = _parent_mesh(root, scene, owner)
+    require(obj is not None, 'RETAINED_ATTACHMENT_OWNER_NOT_FOUND')
+    surface = build_mesh_surface_data(obj, runtime['depsgraph'], runtime['surface_cache'])
+    triangles = () if surface is None else surface['triangles']
+    ordered = {tuple(int(v) for v in tri) for tri in triangles}
+    triangle = tuple(values['tri_vidx'])
+    require(any(triangle[i:]+triangle[:i] in ordered for i in range(3)), 'RETAINED_ATTACHMENT_TRIANGLE_INVALID')
+
+
+def _retained_values(raw):
+    from math import isfinite
+    data = decode(raw); require(isinstance(data, dict), 'RETAINED_ATTACHMENT_INVALID')
+    require(data.get('mode') == 'surface_param_v2', 'RETAINED_ATTACHMENT_INVALID')
+    triangle, weights = data.get('tri_vidx', ()), data.get('tri_weights', ())
+    require(len(triangle) == len(weights) == 3, 'RETAINED_ATTACHMENT_INVALID')
+    require(all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in triangle)
+            and len(set(triangle)) == 3, 'RETAINED_ATTACHMENT_TRIANGLE_INVALID')
+    require(all(isinstance(w, (int, float)) and not isinstance(w, bool) and isfinite(w) and 0 <= w <= 1 for w in weights),
+            'RETAINED_ATTACHMENT_WEIGHTS_INVALID')
+    require(abs(sum(weights)-1.) <= 1e-7, 'RETAINED_ATTACHMENT_WEIGHTS_INVALID')
+    return data
+
+
 def _edit_offset(root, point, offset):
     users = point_users(root, point.id)
-    if offset and not any(role == 'MID' for _, _, role in users):
-        raise ValueError('Ordinary endpoints must stay on the SCP surface')
+    if offset:
+        protected = use.protected_references(root)
+        if not any(role == 'MID' for _, _, role in users) or any(role != 'MID' and (fiber.id, index) not in protected for fiber, index, role in users):
+            raise ValueError('Ordinary endpoints must stay on the SCP surface')
     point.normal_offset = offset
 
 

@@ -12,6 +12,7 @@ class BranchedMuscleRequest:
     muscle_id: str
     assembly: object
     part_specs: tuple
+    output_domain: object = None
 
     @property
     def spec(self):
@@ -30,11 +31,18 @@ def execute_mixed(requests, backend):
 
 
 def evaluate(request, backend):
+    from .muscle_output_domain import apply_result
     try:
         main, branches = inflate_assembly(request.assembly, request.part_specs, backend)
         base, faces = assemble(request.assembly)
         inflated, _ = assemble(request.assembly, main, branches)
-        return MuscleNumericResult(request.muscle_id, _readonly_array(base, np.float64, (-1, 3)),
+        result = MuscleNumericResult(request.muscle_id, _readonly_array(base, np.float64, (-1, 3)),
             _readonly_array(inflated, np.float64, (-1, 3)), _readonly_array(faces, np.int64, (-1, 4)), 0, 0)
+        return apply_result(request, result, _part_labels(request.assembly))
     except (ValueError, RuntimeError) as error:
         return _invalid_result(request.muscle_id, str(error))
+
+
+def _part_labels(assembly):
+    grids = (assembly.main, *(branch.grid for branch in assembly.branches))
+    return np.concatenate([np.full((len(grid)-1)*(grid.shape[1]-1), index, dtype=int) for index, grid in enumerate(grids)])

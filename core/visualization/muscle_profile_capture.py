@@ -9,6 +9,7 @@ from ..vcp.muscle_section_profile import PROFILE_VERSION
 from ..vcp.muscle_profile_cache import content_key
 from .fiber_sync_helpers import cached_fiber_points
 from .muscle_sync_runtime import expanded_rows_with_provenance
+from ..vcp.muscle_output_domain import DEFAULTS, revision as domain_revision
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,7 @@ def capture_target(root, scene, muscle_id="", surface_id=""):
             return _branched_target(root, scene, muscle, source, reasons)
         rows, chart = expanded_rows_with_provenance(root, source, rows, fibers)
         payload = _payload(source, fibers, rows)
-        revision = _revision(payload, chart, source)
+        revision = domain_revision(_revision(payload, chart, source), muscle)
         return ProfileTarget(muscle, source, payload, chart, revision, True, reasons)
     except (ValueError, TypeError) as error:
         return ProfileTarget(muscle, source, reasons=reasons or (str(error),))
@@ -63,7 +64,7 @@ def _branched_target(root, scene, muscle, source, reasons):
     vertices, faces = assemble(assembly)
     sources = (source.main_surface_id, *(c.surface_id for c in source.branches))
     keys = tuple((c.id, c.boundary_fiber_id, tuple(r.point_id for r in c.roots)) for c in source.branches)
-    revision = content_key(vertices, PROFILE_VERSION, source.id, sources, keys, faces.tolist())
+    revision = domain_revision(content_key(vertices, PROFILE_VERSION, source.id, sources, keys, faces.tolist()), muscle)
     return ProfileTarget(muscle, source, base_revision=revision, current=True, reasons=reasons, assembly=assembly)
 
 
@@ -128,7 +129,8 @@ def default_muscle():
         inflation_falloff_type="GAUSSIAN", inflation_falloff_radius=.2, inflation_direction_depth=.05,
         inflation_boundary_strength=.7, inflation_boundary_band=2., inflation_boundary_power=1.5,
         inflation_length_taper_band=.2, closed_v=False, flip_normals=False,
-        inflation_ctrl_world=(0., 0., 0.), inflation_ctrl_initialized=False, get=lambda key, default=None: default)
+        inflation_ctrl_world=(0., 0., 0.), inflation_ctrl_initialized=False, id_data=None, **DEFAULTS,
+        get=lambda key, default=None: default)
 
 
 def _revision(payload, chart, source):

@@ -3,7 +3,7 @@ import sys
 import unittest
 from time import sleep
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from dataclasses import replace
 from importlib.util import find_spec
 
@@ -15,7 +15,7 @@ from core.vcp.v3.manifest import V3_ACCEPTED_REFERENCE, V3_REJECTED_MODULES
 from core.vcp.v3.policy import V3_PRODUCTION_POLICY, V3ShortcutMode, accepted_v3_request
 from core.vcp.v3.production import (V3_PRODUCTION_VERSION, begin_v3, solve_v3,
                                     solve_v3_controller)
-from core.vcp.v3.native_controller import (_prepare_report_install, poll_native_controllers,
+from core.vcp.v3.native_controller import (NativeControllerRun, _prepare_report_install, poll_native_controllers,
                                             shutdown_native_async_controllers)
 from tests.unit.test_fiber_v2_planner import _anchors, _angle_points, _box, _request, _sphere
 
@@ -68,6 +68,14 @@ def _wait_async(sessions):
 
 
 class FiberV3ProductionTests(unittest.TestCase):
+    def test_step_polls_async_owner_without_mutating_native_state(self):
+        run = NativeControllerRun.__new__(NativeControllerRun)
+        run.async_owner, run.library, run.done = Mock(), Mock(), False
+        self.assertFalse(run.step(64))
+        run.async_owner.poll.assert_called_once_with((run,))
+        run.library.af_v3_native_sqp_step.assert_not_called()
+        run.async_owner = run.handle = None
+
     def test_final_native_points_refresh_shared_owner_span(self):
         session, report = _owner_span_fixture(); _prepare_report_install(session, report)
         self.assertEqual([row.state.owner_span_override for row in session.spans], [.7, .7])

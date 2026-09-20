@@ -1,6 +1,7 @@
 """Canonical native profile wire configuration shared by UI and authoring."""
 from ..vcp.muscle_section_profile import SectionProfileSpec, canonical_profile, profile_from_muscle, profile_properties
 from .errors import require
+from .legacy_config import normalize_legacy, legacy_values
 
 MODES = {"control_point": "CTRL_POINT", "distributed": "DISTRIBUTED", "section_profile": "SECTION_PROFILE"}
 DIRECTIONS = {"local": "LOCAL", "smooth": "SMOOTH", "section": "SECTION"}
@@ -11,8 +12,7 @@ def normalize(configuration):
     mode = configuration.get("mode")
     require(mode in MODES, "PROFILE_MODE_UNSUPPORTED", str(mode))
     if mode != "section_profile":
-        require(set(configuration) == {"mode"}, "PROFILE_CONFIGURATION_INVALID")
-        return dict(mode=mode)
+        return normalize_legacy(configuration)
     require(set(configuration) == FIELDS, "PROFILE_CONFIGURATION_INVALID")
     require(type(configuration["enabled"]) is bool and type(configuration["flip_normals"]) is bool, "PROFILE_CONFIGURATION_INVALID")
     require(configuration["direction"] in DIRECTIONS, "PROFILE_DIRECTION_UNSUPPORTED")
@@ -37,7 +37,7 @@ def wire(spec, enabled=True, flip=False):
 def native_values(configuration):
     value = normalize(configuration)
     if value["mode"] != "section_profile":
-        return dict(inflation_mode=MODES[value["mode"]])
+        return legacy_values(value, MODES[value["mode"]])
     spec = SectionProfileSpec(value["profile_version"], tuple(row["value"] for row in value["depths"]),
                               tuple(value["peaks"]), value["roundness"], DIRECTIONS[value["direction"]])
     return dict(profile_properties(spec), inflation_enabled=value["enabled"], flip_normals=value["flip_normals"], inflation_mode="SECTION_PROFILE")

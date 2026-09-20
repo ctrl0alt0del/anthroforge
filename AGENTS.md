@@ -6,11 +6,21 @@
 - Do not push, fetch, pull, open a pull request, or otherwise contact a Git remote unless the user explicitly requests that action.
 - Deliver result `.blend` files with all current source and mirrored fibers visible in their normal curve display, and with native SCP colors shown in Solid/Object color mode. Preserve the manual debug presentation demonstrated by `E:/development/WIP_models/skull_muscles.blend`. Do not save render-only hiding, wire display, or uniform SCP recoloring into deliverables. Use `StaticScene.save_debug_copy` for authoring exports and verify visibility after reopening the saved file.
 
+## Ownership, completion, and changing approach
+
+AnthroForge is a practical tool for building avatars for the user's game. Take initiative as a trusted collaborator and own the usable result. Keep implementation and research directed toward completing that result.
+
+1. **Finish the authorized work end to end.** The completion standard is 100% of the requested outcome, including ordinary expected cases, integration, relevant validation, and delivery. Fix failures encountered within that scope; do not stop at an intermediate success or relabel required unfinished work as a future improvement. For geometry work, inspect the actual resulting shapes and saved artifacts: successful API calls or numerical checks alone do not establish success. Only genuinely extreme edge cases that require joint design discussion may remain unresolved; investigate them, explain the concrete blocker and tradeoff, and complete all independent work before raising the focused question. Report completion honestly against observed evidence; never hide a failure behind a claim of success.
+
+2. **Replace approaches that keep needing repairs.** After 3–4 refinements without an acceptable result, treat the current approach as failing and actively find and implement a better alternative. Switch, combine, or redesign approaches autonomously within the authorized task; do not wait for the user to instruct each change. Compare alternatives against the actual required result, including visual quality where applicable. Keep track of failed attempts and their causes so that renaming a tweak does not restart the same cycle. Continue until the result works or the extreme-edge-case exception above genuinely applies.
+
+3. **Use and extend the tools needed to solve the problem.** Research existing APIs, examples, papers, algorithms, packages, and tools whenever useful, especially when stuck; research is not limited to the beginning of a task. Use available inspection, execution, visualization, and validation capabilities actively. The authoring layer is an authorized development playground: build the geometry queries, diagnostics, calibrated views, Blender interaction, automation, and reproducible experiments needed to understand and complete the task. Missing authoring capabilities are problems to solve. Integrate useful reusable capabilities into maintained authoring and keep disposable experiments separate from production. Exercise this autonomy while preserving the user's explicit scope, data, Git, and workflow constraints.
+
 ## Default: direct work
 
 Handle implementation, debugging, refactoring, tests, and code review directly in the current task and workspace. A normal coding request does not require a Jira ticket, coordinator, ticket branch, ticket worktree, or staged delivery process.
 
-Do not search for, create, infer, or require a Jira ticket to start ordinary work. Do not spawn subagents unless the user explicitly asks for delegation or the named-ticket skill below is active. Generic delegation requested by the user does not activate the Jira workflow.
+Do not search for, create, infer, or require a Jira ticket to start ordinary work. Do not spawn subagents unless the user explicitly asks for delegation, the muscle reconstruction workflow below applies, or the named-ticket skill below is active. Generic delegation requested by the user does not activate the Jira workflow.
 
 A Jira key in a branch name, file, commit message, quoted example, or completed conversation is not an instruction to start ticket delivery. A new request without a ticket uses direct work even if earlier work in the same conversation involved Jira.
 
@@ -19,6 +29,12 @@ A Jira key in a branch name, file, commit message, quoted example, or completed 
 For SCP shape analysis, anatomical region discovery, reference-to-SCP correspondence, or corrections to region placement/connectivity, use [anthroforge-anatomical-region-discovery](C:/Users/alexe/.codex/skills/anthroforge-anatomical-region-discovery/SKILL.md). This does not activate Jira delivery or delegation.
 
 The user requests ongoing skill maintenance: during relevant work, incorporate new user corrections, findings, implementation changes, and validation results into that skill or its existing case reference before the final response. Distinguish verified evidence, inferred anatomy, rejected approaches, and unvalidated proposals; update superseded claims rather than accumulating reports. Keep fixture-specific measurements scoped to their source and revision. Report results inline by default instead of generating Markdown report collections.
+
+## Muscle reconstruction agents and practical knowledge
+
+For the transfer → whole underside → native fibers → inflation workflow, use [anthroforge-muscle-reconstruction](C:/Users/alexe/.codex/skills/anthroforge-muscle-reconstruction/SKILL.md). The user explicitly authorized stage agents and an evidence librarian for this workflow. The main agent coordinates the six roles in `.codex/agents/af_muscle_*.toml`; this does not activate Jira delivery or delegation for unrelated coding. Respect a later request for direct work. Supply complete core stage procedures regardless of semantic retrieval, and ask the librarian to inspect original geometry and bone context without requiring a worker to diagnose relevance first.
+
+Keep all new muscle-workflow byproducts under `E:/development/WIP_models/muscle_reconstruction_workflow`, with separate versioned candidates/journals per writer. Use `tools/muscle_workflow/workflow.py` with the external runtime Python for run manifests, stage context receipts, versioned lessons, and handoff/feedback validation. A ready handoff needs a matching context receipt and librarian brief for the actual inputs. Chroma is a rebuildable local search index; immutable evidence-backed JSON lessons are authoritative. Record a suspected cause separately from an observed defect. After repairing an upstream stage, invalidate and rerun affected downstream work. Record final anatomical, route/collision, persistence, and debug-visibility acceptance separately.
 
 ## Opt-in Jira delivery
 

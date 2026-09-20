@@ -135,6 +135,11 @@ collapsed output triangles, degenerate source triangles and the fraction of
 samples outside the landmark **axis-aligned bounds**. This last check is not a
 convex-hull test. Source object transforms are baked into output world vertices;
 reflected transforms and explicit field reflections preserve triangle winding.
+With reflection enabled, expected handedness comes from a least-squares affine
+fit to the mapped skeletal landmarks, shared across every transferred mesh.
+The RBF polynomial tail alone is not the complete deformation and may have the
+opposite handedness. Local Jacobians are still checked against that common
+reference; a mesh with the opposite sign or a collapsed region remains unresolved.
 
 A fold/collapse or excessive landmark error returns `status: unresolved`.
 Publishing an unresolved preview is allowed **for inspection**, retaining its

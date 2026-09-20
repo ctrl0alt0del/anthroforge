@@ -124,6 +124,8 @@ class NativeControllerRun:
         self.async_trials = 0; self.async_elapsed = 0.0
 
     def step(self, trials=1):
+        if self.async_owner is not None:
+            self.async_owner.poll((self,)); return self.done
         done, accepted, infeasible = c_int(), c_int(), c_int()
         code = self.library.af_v3_native_sqp_step(
             self.handle, max(1, int(trials)), byref(done), byref(accepted), byref(infeasible))

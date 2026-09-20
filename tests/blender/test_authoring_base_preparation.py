@@ -18,6 +18,13 @@ def cube(name, location):
     return dict(source_object=name, topology_digest=row['topology_digest'], geometry_digest=row['geometry_digest'])
 
 
+def outside_once(original, calls, port, params, inventory):
+    hits = original(port, params, inventory); calls.append(params)
+    if len(calls) == 1:
+        hits[0]['point'] = [1000., 1000., 1000.]
+    return hits
+
+
 class BasePreparationTests(BlenderTestCase):
     def setUp(self):
         super().setUp(); folder = tempfile.TemporaryDirectory(); self.addCleanup(folder.cleanup)
@@ -55,3 +62,41 @@ class BasePreparationTests(BlenderTestCase):
             self.assertLess(vertices[faces[index]].mean(0)[0], 0)
             self.assertGreater(evidence['faces'][index]['distance'], .5)
         self.assertEqual(len(evidence['source_triangles']), 2)
+
+    def test_contact_evidence_is_json_serializable(self):
+        fixture(self.root, self.folder); inventory = snapshot(self.root)
+        owner = next(r for r in inventory['instances'] if r['label'] == 'Cube.001')
+        support = bpy.data.objects[owner['label']]
+        mesh = bpy.data.meshes.new_from_object(support.evaluated_get(bpy.context.evaluated_depsgraph_get()))
+        obj = bpy.data.objects.new('Coincident reference', mesh)
+        bpy.context.scene.collection.objects.link(obj); obj.matrix_world = support.matrix_world.copy()
+        row = capture(bpy.context.scene, [obj.name])[obj.name]
+        spec = dict(source_object=obj.name, **{k: row[k] for k in ('topology_digest', 'geometry_digest')})
+        result = run(self.root, self.folder, 'base_candidates', **spec, support_instances=[owner['instance_id']])
+        self.assertEqual(result['status'], 'success', result)
+        evidence = read_asset(result)
+        self.assertTrue(any(r['distance'] < 1e-6 for r in evidence['faces']))
+        self.assertTrue(all(type(r['visible']) is bool for r in evidence['faces']))
+
+    def test_zero_area_region_fragment_does_not_block_valid_native_pins(self):
+        from _native_base_fixture import planned
+        from anthroforge.app.authoring import base_pins
+        original = base_pins.target_domain
+
+        def clipped_fragment(*args):
+            domain = original(*args); point = domain['polygons'][0][0]
+            return dict(domain, polygons=[*domain['polygons'], [point, point, point]])
+
+        with patch.object(base_pins, 'target_domain', side_effect=clipped_fragment):
+            result, _params, _obj = planned(self.root, self.folder)
+        self.assertEqual(result['status'], 'success', result)
+
+    def test_qualified_snap_outside_region_tries_another_in_region_candidate(self):
+        from _native_base_fixture import planned
+        from anthroforge.adapters.authoring.scene import StaticScene
+        original = StaticScene.snap_points; calls = []
+        fallback = lambda port, params, inventory: outside_once(original, calls, port, params, inventory)
+        with patch.object(StaticScene, 'snap_points', fallback):
+            result, _params, _obj = planned(self.root, self.folder)
+        self.assertEqual(result['status'], 'success', result)
+        self.assertGreaterEqual(len(calls), 5)

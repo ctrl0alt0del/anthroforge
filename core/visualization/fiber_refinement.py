@@ -933,6 +933,7 @@ def _is_v3_job(job):
 
 def _batch_job_enabled(job):
     if not _batch_candidate(job): return False
+    if _V3_BATCH.async_pending: return True
     mode = os.environ.get("AF_FIBER_V3_BATCH", "AUTO").upper()
     count = int(getattr(job.session, "params", {}).get("node_count", 0))
     return mode == "1" or count >= 256 or len(_V3_BATCH.entries) >= 4
