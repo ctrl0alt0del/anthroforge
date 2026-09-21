@@ -18,7 +18,6 @@ def execute(port, request, store):
     root, scene, params = port.root, port.scene, request['params']
     require(params['scene_id'] == root.name, 'SCENE_NOT_FOUND')
     revision = capture(root, scene)['revision']
-    _request_identity(root, request, store)
     if request['op'] == 'fibers.path_inspect': return _response(request, root, scene, _fiber(root, params['fiber_id']))
     replayed = replay(root, scene, request)
     if replayed is not None: return replayed
@@ -37,16 +36,6 @@ def _execute_mutation(root, scene, request, store):
     store.put('free_path_requests', key, dict(request=request, receipt=receipt))
     root['af_free_receipts'] = encode(rows); root['af_authoring_journal'] = str(store.directory)
     return result
-
-
-def _request_identity(root, request, store):
-    key = [root.get('af_authoring_id') or root.name, request['request_id']]
-    for category in ('v04_requests', 'requests'):
-        cached = store.get(category, key)
-        require(not cached or cached.get('digest') == digest(request), 'REQUEST_ID_REUSED')
-    for field in ('af_branch_receipts', 'af_free_receipts'):
-        cached = decode(root.get(field, '{}')).get(request['request_id'])
-        require(not cached or cached.get('digest') == digest(request), 'REQUEST_ID_REUSED')
 
 
 def _fiber(root, identity):

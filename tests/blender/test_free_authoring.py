@@ -29,7 +29,11 @@ class FreeAuthoringTests(BlenderTestCase):
         from anthroforge.core.authoring.storage import FileStore
         owner, _surface, item, points = fixture(); value = creation(owner, item, points)
         before = capture(owner, bpy.context.scene)['revision']
-        with tempfile.TemporaryDirectory() as folder, patch.object(FileStore, 'put', side_effect=OSError('Injected journal write failure')):
+        original = FileStore.put
+        def fail_receipt(store, category, key, row):
+            if category == 'free_path_requests': raise OSError('Injected final journal write failure')
+            return original(store, category, key, row)
+        with tempfile.TemporaryDirectory() as folder, patch.object(FileStore, 'put', new=fail_receipt):
             result = execute(value, owner, bpy.context.scene, folder)
         self.assertNotEqual(result['status'], 'success'); self.assertEqual(capture(owner, bpy.context.scene)['revision'], before)
         self.assertEqual(len(owner.af_vcp_system.fibers), 1)

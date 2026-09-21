@@ -1,5 +1,6 @@
 """Preallocate bounded Free-containing derived output; never simplify a path."""
 import numpy as np
+from mathutils import Vector
 from ..vcp.free_path import is_free, decode, point_indices
 from ..vcp.free_surface import prepare_rows, branch_budget, check_budget
 from ..vcp.branched_surface import BranchInput
@@ -32,7 +33,7 @@ def _branch(root, scene, surface, replacements, payloads):
     for connection in surface.branches:
         side = _boundary(fibers, connection.boundary_fiber_id); parent = fibers[side]
         keys = [r.point_id for r in connection.roots]; payload = payloads.get(parent.id)
-        indices = point_indices(payload or decode(parent.free_path_json), keys) if payload or is_free(parent) else _root_indices(root, scene, parent, rows[side], keys)
+        indices = point_indices(payload or decode(parent.free_path_json), keys) if payload or is_free(parent) else _root_indices(root, scene, parent, list(map(Vector, rows[side])), keys)
         children = source_fibers(root, source_surface(root, connection.surface_id))
         curves = _routes(root, scene, children, replacements)
         curves = tuple(row if child.a_point_id == key else row[::-1] for child, key, row in zip(children, keys, curves))
@@ -50,11 +51,11 @@ def _surface(root, scene, surface, fibers, replacements, payloads):
 
 
 def validate_outputs(root, scene, replacements, payloads=None):
+    from .free_output_verification import affected_surfaces
     system = root.af_vcp_system; lookup = {f.id: f for f in system.fibers}; payloads = payloads or {}
-    counts = {}; affected = set(replacements)
-    for surface in system.fiber_surfaces:
+    counts = {}
+    for surface in affected_surfaces(root, set(replacements)):
         fibers = [lookup[r.fiber_id] for r in surface.fiber_refs if r.fiber_id in lookup]
-        if not affected.intersection(f.id for f in fibers): continue
         counts[surface.id] = _surface(root, scene, surface, fibers, replacements, payloads)
         check_budget(*counts[surface.id], multiplier=2)
     for muscle in system.muscles:

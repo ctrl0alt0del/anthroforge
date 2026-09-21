@@ -48,6 +48,8 @@ def rebuild(root, scene, ids):
     from ...core.deps.dirty_hints import dirty_hints_for
     sync_scene(root, scene, dirty_hints_for('FIBER', ids), source='free_path',
                event_type='FIBER_SOLVE_READY', payload={'solved_fiber_ids': sorted(ids)})
+    from ...core.visualization.free_output_verification import verify_outputs
+    verify_outputs(root, scene, ids)
 
 
 def configure_mode(root, scene, fiber, mode):

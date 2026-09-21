@@ -25,6 +25,8 @@ default to Controlled.
 The Fiber panel follows both a directly selected source and its active draft;
 an older SCP/tree selection does not hide Apply or Cancel. Editor objects carry
 dedicated `af_free_editor_*` ownership, never native fiber-proxy ownership.
+Each scene owns its editor collection. Opening a draft restores that collection's
+visibility in the active view layer; failed opening removes every partial span.
 
 **Convert to Bézier** creates one VECTOR-handle knot per POLY vertex, preserving
 the starting shape. **Sampling Resolution** controls explicit Bézier evaluation
@@ -126,12 +128,19 @@ children retain the shared binding/offset with independent incident tangents.
 
 UI and authoring use the same atomic validation/capture/publication service.
 Failed geometry, binding, budget or journal writes roll back native records and
-generated output. Relevant errors include `STALE_SCENE_REVISION`,
+generated output. Explicit commits verify dependent surfaces, branched assemblies,
+base/inflated meshes and derived mirrors inside the transaction. Failed output
+evaluation restores geometry and runtime status and retains the UI draft.
+Relevant errors include `STALE_SCENE_REVISION`,
 `STALE_PATH_REVISION`, `STALE_FREE_EDIT`, `EDIT_IN_PROGRESS`,
 `STRUCTURAL_IDENTITY_CHANGED`, `INVALID_FREE_PATH` and `INVALID_ATTACHMENT`.
 Retain the journal: identical replay returns its receipt only when the live
 postcondition still matches. Conflicting request IDs yield `REQUEST_ID_REUSED`;
 changed postconditions yield `STALE_FREE_PATH_RECEIPT`.
+Request identity is reserved durably across operation families before dispatch,
+including native points/branches/recompute, profiles, anatomy and compatibility
+operations. An exception releases only that attempt's new reservation as part of
+journal rollback; existing successful reservations remain immutable.
 
 Import/export and duplication preserve the graph, remap SCP/shared-point IDs and
 destination coordinates, and allocate fresh sample/occurrence IDs for copies.
@@ -152,6 +161,9 @@ stations to preserve every source corner without rewriting the fibers. Exact
 structural tags locate branch roots; ambiguous repeated occurrences reject the
 operation. Existing branch seams, mirror generation and inflation are reused.
 Controlled-only loft preparation stays unchanged.
+Free LOOP patches retain every boundary sample during triangulation, including
+collinear samples: an ear cannot clip a diagonal through another boundary sample.
+Self-intersecting boundaries still reject the transaction.
 
 Limits are 4,096 samples per Free fiber, 16,384 union stations per piece, and
 262,144 generated vertices / 524,288 triangles per checked output assembly,
@@ -182,22 +194,24 @@ blender --factory-startup --python tests/blender/free_fiber_ui_probe.py -- --out
 blender --factory-startup -b --python tests/blender/free_fiber_probe.py -- --output=E:/path/to/versioned-geometry-evidence
 ```
 
-The AF-24 technical fixture measured Blender 5.0.1 on Windows on 2026-09-21.
+The AF-24 repair-v003 technical fixture measured Blender 5.0.1 on Windows on
+2026-09-21, including transactional output verification. The raw results are in
+`maintenance/AF-24/repair_v003_geometry_01` under the external workflow directory.
 Five warm repetitions follow one cold measurement; these are local observations,
 not a speedup claim or an anatomical workload guarantee. Warm median / p95 in ms:
 
 | Samples | Edit open | POLY extraction | Apply incl. capture | SCP deformation |
 | ---: | ---: | ---: | ---: | ---: |
-| 32 | 2.93 / 3.64 | 0.13 / 0.21 | 12.52 / 15.77 | 2.02 / 2.06 |
-| 64 | 3.89 / 5.94 | 0.20 / 0.40 | 13.49 / 15.01 | 2.85 / 4.46 |
-| 256 | 15.10 / 38.94 | 0.71 / 0.76 | 36.46 / 36.80 | 10.06 / 16.00 |
-| 512 | 33.01 / 63.42 | 2.20 / 27.32 | 90.90 / 93.37 | 25.51 / 27.38 |
-| 4096 | 318.75 / 328.75 | 20.56 / 38.57 | 778.27 / 791.50 | 245.26 / 283.64 |
+| 32 | 3.51 / 3.87 | 0.18 / 0.23 | 10.35 / 11.48 | 1.85 / 2.23 |
+| 64 | 5.49 / 6.24 | 0.32 / 0.33 | 15.26 / 21.02 | 4.07 / 4.38 |
+| 256 | 14.81 / 15.15 | 0.79 / 1.04 | 35.46 / 36.30 | 9.46 / 9.64 |
+| 512 | 35.45 / 56.20 | 2.31 / 2.38 | 87.93 / 93.36 | 25.11 / 29.03 |
+| 4096 | 229.27 / 301.25 | 12.65 / 25.15 | 583.56 / 701.71 | 187.64 / 207.92 |
 
-Initial commit including capture measured 12.56, 13.31, 41.12, 80.33 and
-660.67 ms respectively. A two-Free/two-Controlled branched fixture measured
-capture 1.64 / 1.92 ms, native evaluation 1.19 / 1.52 ms, output rebuild
-19.01 / 21.05 ms and forced preallocation rejection 0.67 / 0.81 ms.
+Initial commit including capture measured 13.29, 13.35, 35.49, 92.36 and
+507.94 ms respectively. A two-Free/two-Controlled branched fixture measured
+capture 1.21 / 1.21 ms, native evaluation 0.85 / 0.86 ms, verified output rebuild
+26.69 / 27.06 ms and forced preallocation rejection 0.47 / 0.49 ms.
 The probe emits raw/cold/warm JSON, saved geometry, a recovery `.blend`, and a
 normally reopened debug `.blend`; keep those versioned outside the repository.
 

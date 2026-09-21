@@ -23,8 +23,10 @@ class AuthoringService:
         self.request_id = request['request_id']
         self.inventory = self.scene.capture_authoring()
         require(request['params']['scene_id'] == self.inventory['scene_id'], 'SCENE_NOT_FOUND')
+        from ...core.authoring.request_identity import reservation
         self.repository = DraftRepository(self.store, self.inventory['root_id'] or self.inventory['scene_id'])
-        return self.dispatch(request, started)
+        with reservation(self.store, request, (self.inventory['root_id'] or self.inventory['scene_id'], self.inventory['scene_id'])):
+            return self.dispatch(request, started)
 
     def dispatch(self, request, started):
         from . import native_profiles

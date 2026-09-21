@@ -45,31 +45,61 @@ def _geometry(obj, scene, depsgraph=None):
 def open_edit(root, scene, fiber):
     if not free_path.is_free(fiber): raise ValueError('Edit Path requires Free mode.')
     if state(root, fiber): raise ValueError('EDIT_IN_PROGRESS')
+    _inverse(root.matrix_world)
     payload, points = runtime.current(root, scene, fiber)
     session = dict(version=1, id=str(uuid4()), fiber_id=fiber.id, fingerprint=fingerprint(root, scene, fiber),
                    payload=payload, opening=[list(p) for p in points], spans=[], stale=False, recovery=[])
-    for indices in free_path.spans(points, free_path.tagged_indices(payload), fiber.topology_mode == 'LOOP'):
+    try: return _open_spans(root, scene, fiber, session, points)
+    except Exception:
+        for obj in objects(session): _remove_object(obj)
+        root.pop(PREFIX + fiber.id, None)
+        raise
+
+
+def _open_spans(root, scene, fiber, session, points):
+    for indices in free_path.spans(points, free_path.tagged_indices(session['payload']), fiber.topology_mode == 'LOOP'):
         session['spans'].append(_new_span(root, scene, session, [points[i] for i in indices], int(indices[0]), int(indices[-1])))
+    (bpy.context.view_layer if bpy.context.scene == scene else scene.view_layers[0]).update()
     session['initial_draft'] = draft(root, fiber, session)
     save_state(root, fiber, session)
     return objects(session)
 
 
 def _collection(scene):
-    collection = bpy.data.collections.get('AF_FREE_PATH_EDIT')
+    collection = next((c for c in scene.collection.children if c.get('af_free_editor_scene') == scene), None)
     if collection is None:
         collection = bpy.data.collections.new('AF_FREE_PATH_EDIT'); scene.collection.children.link(collection)
+        collection['af_free_editor_scene'] = scene
+    collection.hide_viewport = collection.hide_select = False
+    view = bpy.context.view_layer if bpy.context.scene == scene else scene.view_layers[0]
+    layer = next(c for c in view.layer_collection.children if c.collection == collection)
+    layer.exclude = layer.hide_viewport = False
     return collection
 
 
 def _new_span(root, scene, session, points, first, last):
+    inverse = _inverse(root.matrix_world); local = [inverse @ Vector(point) for point in points]
     identity = str(uuid4()); curve = bpy.data.curves.new('AF_PathDraft', 'CURVE'); curve.dimensions = '3D'
-    obj = bpy.data.objects.new('AF_PathDraft', curve); obj.matrix_world = root.matrix_world.copy()
+    obj = None
+    try:
+        obj = bpy.data.objects.new('AF_PathDraft', curve); _mark_span(obj, root, session, identity)
+        _collection(scene).objects.link(obj); _poly(curve, local); obj.show_in_front = True
+        return dict(id=identity, first=first, last=last)
+    except Exception:
+        if obj is not None: _remove_object(obj)
+        elif curve.users == 0: bpy.data.curves.remove(curve)
+        raise
+
+
+def _inverse(matrix):
+    if abs(matrix.determinant()) < 1e-12: raise ValueError('Noninvertible editor root transform.')
+    return matrix.inverted()
+
+
+def _mark_span(obj, root, session, identity):
+    obj.matrix_world = root.matrix_world.copy()
     obj['af_free_editor_session'] = session['id']; obj['af_free_editor_span'] = identity
     obj['af_free_editor_root'] = root.name; obj['af_free_editor_fiber'] = session['fiber_id']
-    _collection(scene).objects.link(obj); inverse = obj.matrix_world.inverted()
-    _poly(curve, [inverse @ Vector(point) for point in points]); obj.show_in_front = True
-    return dict(id=identity, first=first, last=last)
 
 
 def _poly(curve, points):
