@@ -47,8 +47,7 @@ def open_edit(root, scene, fiber):
     if state(root, fiber): raise ValueError('EDIT_IN_PROGRESS')
     _inverse(root.matrix_world)
     payload, points = runtime.current(root, scene, fiber)
-    session = dict(version=1, id=str(uuid4()), fiber_id=fiber.id, fingerprint=fingerprint(root, scene, fiber),
-                   payload=payload, opening=[list(p) for p in points], spans=[], stale=False, recovery=[])
+    session = _new_session(root, scene, fiber, payload, points)
     try: return _open_spans(root, scene, fiber, session, points)
     except Exception:
         for obj in objects(session): _remove_object(obj)
@@ -56,12 +55,17 @@ def open_edit(root, scene, fiber):
         raise
 
 
-def _open_spans(root, scene, fiber, session, points):
+def _new_session(root, scene, fiber, payload, points):
+    return dict(version=1, id=str(uuid4()), fiber_id=fiber.id, fingerprint=fingerprint(root, scene, fiber),
+                payload=payload, opening=[list(p) for p in points], spans=[], stale=False, recovery=[])
+
+
+def _open_spans(root, scene, fiber, session, points, persist=True):
     for indices in free_path.spans(points, free_path.tagged_indices(session['payload']), fiber.topology_mode == 'LOOP'):
         session['spans'].append(_new_span(root, scene, session, [points[i] for i in indices], int(indices[0]), int(indices[-1])))
     (bpy.context.view_layer if bpy.context.scene == scene else scene.view_layers[0]).update()
     session['initial_draft'] = draft(root, fiber, session)
-    save_state(root, fiber, session)
+    if persist: save_state(root, fiber, session)
     return objects(session)
 
 
@@ -210,7 +214,7 @@ def cancel(root, fiber):
 
 def _remove_object(obj):
     data = obj.data; bpy.data.objects.remove(obj, do_unlink=True)
-    if data is not None and data.users == 0: bpy.data.curves.remove(data)
+    if data is not None and data.users == 0: bpy.data.batch_remove(ids=(data,))
 
 
 def convert_bezier(root, fiber):
@@ -240,11 +244,23 @@ def refresh(root, scene, fiber, rebase=False):
     if runtime.structure(fiber) != tuple((r['point_id'], r['role']) for r in old['payload']['structural']):
         raise ValueError('Structural order changed; preserve the draft and Cancel before rebuilding.')
     sampled = _sample_draft(saved, fiber.free_sampling_resolution, fiber.topology_mode == 'LOOP') if rebase else None
-    cancel(root, fiber); open_edit(root, scene, fiber); new = state(root, fiber)
+    new = _new_session(root, scene, fiber, payload, current)
     new['recovery'] = old.get('recovery', []) + [dict(spans=saved, opening=old['opening'], fingerprint=old['fingerprint'])]
-    if rebase: _rebase_objects(root, old, new, sampled, current)
-    save_state(root, fiber, new)
+    _replace_session(root, scene, fiber, old, new, sampled, current)
     return objects(new)
+
+
+def _replace_session(root, scene, fiber, old, new, sampled, current):
+    original = root[PREFIX + fiber.id]
+    try:
+        _open_spans(root, scene, fiber, new, current, persist=False)
+        if sampled is not None: _rebase_objects(root, old, new, sampled, current)
+        save_state(root, fiber, new)
+    except Exception:
+        for obj in objects(new): _remove_object(obj)
+        root[PREFIX + fiber.id] = original
+        raise
+    for obj in objects(old): _remove_object(obj)
 
 
 def _rebase_objects(root, old, new, sampled, current):

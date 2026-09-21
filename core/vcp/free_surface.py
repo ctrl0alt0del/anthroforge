@@ -29,6 +29,7 @@ def sample_at(points, target, closed=False):
 
 def prepare_rows(rows, closed=False, densify=True, multiplier=1):
     from .fiber_surface import _average_row_step, _row_inserts, _densify_rows
+    rows = align_closed_rows(rows) if closed else rows
     target = union_stations(rows, closed)
     check_budget(len(rows) * len(target), 2 * (len(rows) - 1) * len(target), multiplier)
     prepared = [sample_at(np.asarray(row), target, closed).tolist() for row in rows]
@@ -37,6 +38,16 @@ def prepare_rows(rows, closed=False, densify=True, multiplier=1):
     count = len(rows) + inserts
     check_budget(count * len(target), 2 * (count - 1) * len(target), multiplier)
     return _densify_rows(prepared, 3 if closed else 0) if densify else prepared
+
+
+def align_closed_rows(rows):
+    output = [np.asarray(rows[0]).copy()]
+    for row in rows[1:]:
+        reference = output[-1]; row = np.asarray(row)
+        target = stations(np.vstack((reference, reference[:1])))[:-1]
+        candidates = (np.roll(values, -i, axis=0) for values in (row, row[::-1]) for i in range(len(row)))
+        output.append(min(candidates, key=lambda candidate: float(np.square(sample_at(candidate, target, True) - reference).sum())))
+    return output
 
 
 def branch_budget(main, branches, across_count=17, multiplier=1):

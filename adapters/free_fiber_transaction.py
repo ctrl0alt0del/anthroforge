@@ -33,6 +33,7 @@ def _restore_custom(item, values):
 
 def restore(root, scene, saved):
     from ..core.visualization.fiber_cache_lifecycle import invalidate_fiber_caches
+    from ..app.authoring.native_branches import _restore_runtime
     _restore_native(root, saved)
     for obj in _owned(root, scene):
         if obj.name not in saved['objects']: bpy.data.objects.remove(obj, do_unlink=True)
@@ -42,6 +43,7 @@ def restore(root, scene, saved):
             obj.data = saved['data'][data] if data else None
             _restore_custom(obj, values); obj.matrix_world = matrix
     invalidate_fiber_caches(scene, root)
+    _restore_runtime(root, saved['notifications'])
 
 
 def _root_key(key):
@@ -49,14 +51,13 @@ def _root_key(key):
 
 
 def _restore_native(root, saved):
-    from ..app.authoring.native_branches import _restore, _restore_runtime
+    from ..app.authoring.native_branches import _restore
     with suppress_vcp_prop_updates():
         _restore(root, saved['records'])
         for fiber in root.af_vcp_system.fibers: _restore_fiber(fiber, saved['runtime'][fiber.id])
         for key in tuple(root.keys()):
             if _root_key(key) and key not in saved['root']: del root[key]
         for key, value in saved['root'].items(): root[key] = value
-    _restore_runtime(root, saved['notifications'])
 
 
 def _restore_fiber(fiber, values):

@@ -6,6 +6,24 @@ from core.vcp.free_curve import allocation
 
 
 class FreeSurfaceTests(unittest.TestCase):
+    def test_closed_shifts_and_windings_align_without_mutating_source_samples(self):
+        first = np.array([[-1., -1, 0], [1, -1, 0], [1, 1, 0], [-1, 1, 0]])
+        for shift in range(4):
+            for reverse in (False, True):
+                second = np.roll(first, shift, axis=0).copy() + (0, 0, 1)
+                if reverse: second = second[::-1]
+                originals = first.copy(), second.copy(); rows = np.asarray(prepare_rows([first, second], True, False))
+                np.testing.assert_allclose(rows[0, :, :2], rows[1, :, :2], atol=1e-12)
+                for actual, saved in zip((first, second), originals): np.testing.assert_array_equal(actual, saved)
+
+    def test_unequal_closed_rows_align_and_retain_all_source_corners(self):
+        first = np.array([[0., 0, 0], [2, 0, 0], [2, 1, 0], [0, 1, 0]])
+        second = np.array([[2., .3, 1], [2, 0, 1], [.4, 0, 1], [0, 0, 1], [0, 1, 1], [2, 1, 1]])
+        rows = np.asarray(prepare_rows([first, second], True, False))
+        np.testing.assert_allclose(rows[0, :, :2], rows[1, :, :2], atol=1e-12)
+        for row, source in zip(rows, (first, second)):
+            for point in source: self.assertLess(np.linalg.norm(row - point, axis=1).min(), 1e-12)
+
     def test_patch_retains_collinear_float32_boundary_samples_without_degenerate_faces(self):
         for corners, area in (([(.1, .1, 0), (.6, .1, 0), (.1, .6, 0)], .125),
                               ([(0, 0, 0), (2, 0, 0), (2, 2, 0), (1, 1, 0), (0, 2, 0)], 3.)):

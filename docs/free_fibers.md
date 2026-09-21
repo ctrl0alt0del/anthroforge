@@ -41,6 +41,9 @@ publication authority makes an open draft stale. Apply refuses to overwrite the
 new state. **Refresh** opens the current path; **Rebase Preview** transfers the
 old draft displacement onto the current span by normalized arc length. Both
 retain the prior draft for recovery. Rebase still requires explicit Apply.
+Replacement spans are staged before the prior session is removed. Allocation,
+rebase or persistence failures retain the original raw curve, session and recovery
+history unchanged; no partial replacement becomes authoritative.
 Changed structural order requires preserving/discarding the old draft before
 opening another session.
 
@@ -57,6 +60,8 @@ owned session; deleting a draft does not delete its native fiber.
 
 Unsupported extra splines, changed cyclic flags, joined/split spans, modifiers,
 constraints and singular transforms reject Apply and preserve the draft.
+Converting a draft to Mesh also rejects Apply; Cancel still removes every owned
+span and its unused data through Blender's type-aware datablock removal.
 
 ## Authoring protocol 0.4
 
@@ -131,6 +136,8 @@ Failed geometry, binding, budget or journal writes roll back native records and
 generated output. Explicit commits verify dependent surfaces, branched assemblies,
 base/inflated meshes and derived mirrors inside the transaction. Failed output
 evaluation restores geometry and runtime status and retains the UI draft.
+Rollback invalidates obsolete work before restoring runtime diagnostics, so cache
+cleanup cannot overwrite the pre-operation statuses of mixed-mode neighbors.
 Relevant errors include `STALE_SCENE_REVISION`,
 `STALE_PATH_REVISION`, `STALE_FREE_EDIT`, `EDIT_IN_PROGRESS`,
 `STRUCTURAL_IDENTITY_CHANGED`, `INVALID_FREE_PATH` and `INVALID_ATTACHMENT`.
@@ -157,8 +164,10 @@ mode and generation token rejects obsolete solver progress, final publication,
 cache writes, status restoration and migration rollback after conversion.
 
 Free-containing ordinary lofts use the union of normalized source arc-length
-stations to preserve every source corner without rewriting the fibers. Exact
-structural tags locate branch roots; ambiguous repeated occurrences reject the
+stations to preserve every source corner without rewriting the fibers. Closed-loop
+winding and cyclic starts are aligned on derived row copies before
+union sampling; unequal sample counts are supported and source order is unchanged.
+Exact structural tags locate branch roots; ambiguous repeated occurrences reject the
 operation. Existing branch seams, mirror generation and inflation are reused.
 Controlled-only loft preparation stays unchanged.
 Free LOOP patches retain every boundary sample during triangulation, including
