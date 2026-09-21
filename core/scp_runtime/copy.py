@@ -16,7 +16,7 @@ from .tree import children_map
 
 _FULL_OBJECT_RE = re.compile(r"^bpy\.data\.objects\[[\"'](.+?)[\"']\](.+)$")
 _SCP_SKIP = {"id", "name", "parent_id", "color", "color_initialized", "bound_objects", "transform_object_ref", "geometry_object_ref", "mirror_status", "mirror_source_id", "mirror_effective_axis"}
-_FIBER_SKIP = {"id", "name", "mid_touches", "loop_anchors", "a_parent_id", "b_parent_id", "muscle_id", "not_converged", "last_recompute_ms", "last_recompute_status", "last_eps_disp", "last_eps_pen"}
+_FIBER_SKIP = {"id", "name", "mid_touches", "loop_anchors", "a_point_id", "b_point_id", "a_parent_id", "b_parent_id", "muscle_id", "not_converged", "last_recompute_ms", "last_recompute_status", "last_eps_disp", "last_eps_pen"}
 _MUSCLE_SKIP = {"id", "name", "fiber_refs", "active_fiber_ref_index"}
 _BLOB_SKIP = {"id", "name", "attach_target_id", "attach_target_object_name", "last_solve_converged", "last_solve_max_disp", "last_solve_iterations"}
 
@@ -132,14 +132,14 @@ def _new_item(collection, prefix):
 def _copy_touches(src, dst, scp_map):
     for touch in src.mid_touches:
         new_touch = dst.mid_touches.add()
-        _copy_scalars(touch, new_touch, skip={"parent_id"})
+        _copy_scalars(touch, new_touch, skip={"parent_id", "point_id"})
         new_touch.parent_id = scp_map.get(as_id(touch.parent_id), "")
 
 
 def _copy_loop_anchors(src, dst, scp_map):
     for anchor in getattr(src, "loop_anchors", ()):
         item = dst.loop_anchors.add()
-        _copy_scalars(anchor, item, skip={"parent_id"})
+        _copy_scalars(anchor, item, skip={"parent_id", "point_id"})
         item.parent_id = scp_map.get(as_id(anchor.parent_id), "")
 
 
@@ -251,6 +251,11 @@ def _copy_shortcuts(root, maps):
 
 
 def copy_scp_subtree(root, scene, scp_id, child_ids=None):
+    from .free_copy import copy_if_free
+    return copy_if_free(root, scene, lambda: _copy_scp_subtree(root, scene, scp_id, child_ids))
+
+
+def _copy_scp_subtree(root, scene, scp_id, child_ids=None):
     maps = _new_maps()
     source_ids = _source_ids(root, scp_id, child_ids)
     if not source_ids:
@@ -258,5 +263,7 @@ def copy_scp_subtree(root, scene, scp_id, child_ids=None):
     pairs = _copy_scps(root, scene, _source_scps(root, source_ids), maps)
     _apply_scp_links(pairs, maps["scps"])
     _copy_fibers(root, set(source_ids), maps), _copy_muscles(root, maps)
+    from .free_copy import finish_graph
+    finish_graph(root, scene, maps)
     _copy_blobs(root, maps), _copy_shortcuts(root, maps)
     return maps["scps"].get(as_id(scp_id), "")

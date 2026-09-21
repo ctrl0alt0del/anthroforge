@@ -2,6 +2,7 @@
 from uuid import uuid4
 from .rna import scalar_dict, apply_scalar_dict
 from ..vcp.shared_point_storage import slots
+from .free_fibers import remap_state
 
 
 def capture_graph(root):
@@ -19,9 +20,8 @@ def _connection(connection):
 
 def restore_graph(state):
     data = getattr(state.snapshot, 'branching', {})
-    if not data:
-        return
-    point_ids = _restore_points(state, data)
+    if not data: return
+    temporary = _temporary_points(state); point_ids = _restore_points(state, data)
     by_id = {f.id: f for f in state.root.af_vcp_system.fibers}
     for source, refs in data['fibers'].items():
         if source in state.fibers:
@@ -31,6 +31,20 @@ def restore_graph(state):
     for source, graph in data['surfaces'].items():
         if source in state.fiber_surfaces:
             _restore_surface(state, source, graph, point_ids)
+    remap_state(state, point_ids)
+    _discard_temporary(state.root, temporary)
+
+
+def _temporary_points(state):
+    return {getattr(owner, slot) for f in state.root.af_vcp_system.fibers if f.id in state.fibers.values() for owner, slot, _ in slots(f)}
+
+
+def _discard_temporary(root, keys):
+    from ..vcp.shared_point_storage import referenced_point_ids, clear_indexes
+    used = referenced_point_ids(root); points = root.af_vcp_system.authored_points
+    for index in reversed(range(len(points))):
+        if points[index].id in keys and points[index].id not in used: points.remove(index)
+    clear_indexes()
 
 
 def _restore_points(state, data):

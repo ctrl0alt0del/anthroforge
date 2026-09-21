@@ -191,13 +191,23 @@ def _requested_fibers(root, outcome):
 
 
 def _commit_one_fiber(sync, root, scene, fiber, result, index):
+    from ..vcp.free_path import fiber_geometry_point_count
     if fiber is None: return False
     points = result.fiber_points[index]
-    if result.fiber_status[index] or not _finite(points) or len(points) != int(fiber.node_count):
+    if result.fiber_status[index] or not _finite(points) or len(points) != fiber_geometry_point_count(fiber):
         _fail_fiber(fiber, "A Fiber node attachment no longer resolves."); return False
+    if not _valid_free_output(fiber, points): return False
     proxy = sync.apply_points(root, scene, fiber, tuple(Vector(row) for row in points), commit=True)
     if proxy is None: _fail_fiber(fiber, "Fiber proxy is unavailable."); return False
     proxy.pop("af_fiber_display_mode", None); _succeed_fiber(fiber); return True
+
+
+def _valid_free_output(fiber, points):
+    from ..vcp.free_path import is_free, coordinates
+    if not is_free(fiber): return True
+    try: coordinates(points, fiber.topology_mode)
+    except ValueError as error: _fail_fiber(fiber, str(error)); return False
+    return True
 
 
 def _fail_fiber(fiber, error):
@@ -207,7 +217,9 @@ def _fail_fiber(fiber, error):
 
 
 def _succeed_fiber(fiber):
+    from ..vcp.free_path import is_free
     set_fiber_invalid_reason(fiber, "")
+    if is_free(fiber): set_fiber_recompute_status(fiber, 'FREE_UPDATED'); return
     if fiber_recompute_status(fiber) == "INVALID_ATTACHMENT": set_fiber_recompute_status(fiber, "UNKNOWN")
 
 

@@ -24,7 +24,10 @@ def _active_vcp_item(context, attr_name):
 
 
 def active_fiber_from_context(context):
-    return _active_vcp_item(context, "fibers")
+    root = root_for_context(context)
+    if root is None: return None
+    kind, identity = get_active_af_entity(root, context)
+    return next((item for item in root.af_vcp_system.fibers if item.id == identity), None) if kind == "FIBER" else None
 
 
 def active_muscle_from_context(context):

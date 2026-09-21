@@ -179,7 +179,13 @@ def protocol(definitions):
     definitions['patch_value'] = choice({'type': 'string'}, N, B, array(ref('patch_value')), dict(type='object', additionalProperties=ref('patch_value')))
     definitions['document'] = {k: v for k, v in authoring().items() if k != '$defs'}
     extend(definitions, operations, '0.4.0')
-    return {'$schema': 'https://json-schema.org/draft/2020-12/schema', '$id': 'urn:anthroforge:protocol:0.4.0', '$defs': definitions, 'oneOf': operations+transfer_operations()+native_base_operations()+[response()]}
+    return _free_extensions({'$schema': 'https://json-schema.org/draft/2020-12/schema', '$id': 'urn:anthroforge:protocol:0.4.0', '$defs': definitions, 'oneOf': operations+transfer_operations()+native_base_operations()+[response()]})
+
+
+def _free_extensions(schema):
+    try: from tools.authoring_free_schema import extend
+    except ModuleNotFoundError: from authoring_free_schema import extend
+    return extend(schema)
 
 
 def protocol_extensions():

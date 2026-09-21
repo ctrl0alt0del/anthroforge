@@ -10,6 +10,7 @@ from ..vcp.muscle_profile_cache import content_key
 from .fiber_sync_helpers import cached_fiber_points
 from .muscle_sync_runtime import expanded_rows_with_provenance
 from ..vcp.muscle_output_domain import DEFAULTS, revision as domain_revision
+from ..vcp.free_path import is_free
 
 
 @dataclass(frozen=True)
@@ -87,7 +88,7 @@ def validate_domain(source, fibers):
     present = tuple(item for item in fibers if item is not None)
     if mode != "LOFT" or closed or any(is_loop_fiber(item) for item in present):
         raise ValueError("PROFILE_DOMAIN_UNSUPPORTED: Section Profile requires an ordinary open loft.")
-    if present and len({int(item.node_count) for item in present}) != 1:
+    if present and not any(is_free(f) for f in present) and len({int(item.node_count) for item in present}) != 1:
         raise ValueError("PROFILE_GRID_INVALID: source fibers must share a node count.")
 
 
@@ -115,6 +116,7 @@ def _check_source_proxies(root, scene, source, fibers):
 
 
 def _payload(source, fibers, rows):
+    if any(is_free(f) for f in fibers): return _free_payload(source, fibers, rows)
     target, densify = int(fibers[0].node_count), not hasattr(source, "construction_mode")
     closed = bool(is_loop_fiber(fibers[0]))
     if not densify:
@@ -122,6 +124,13 @@ def _payload(source, fibers, rows):
         _validate_sources(source, fibers)
         rows = evaluate_fiber_surface(rows, _surface_spec(source, fibers)).rows
     return np.asarray(rows, dtype=float), target, densify, closed, source
+
+
+def _free_payload(source, fibers, rows):
+    from ..vcp.free_surface import prepare_rows
+    closed = bool(is_loop_fiber(fibers[0]))
+    grid = prepare_rows(rows, closed, multiplier=4)
+    return np.asarray(grid, dtype=float), len(grid[0]), False, closed, source, True
 
 
 def default_muscle():

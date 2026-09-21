@@ -142,6 +142,8 @@ class FiberSolveSession:
 
 def begin_fiber_solve(solver, root, fiber, scene, depsgraph, quality="FINAL",
                       selection=None, explicit_engine=None):
+    from .free_path import require_controlled
+    require_controlled(fiber)
     telemetry_count("fiber_solves")
     selection = selection or selection_for_fiber(fiber, explicit_engine)
     adapter, backend = adapter_for_selection(selection), selected_backend_status(selection)
@@ -152,11 +154,12 @@ def begin_fiber_solve(solver, root, fiber, scene, depsgraph, quality="FINAL",
 
 
 def _begin_selected(solver, root, fiber, scene, depsgraph, quality, selection):
+    from .fiber_authority import capture_session
     if not selection.valid:
         return _invalid_engine_session(solver, root, fiber, scene, depsgraph, quality, selection)
     if selection.actual in {FiberEngineKind.V2, FiberEngineKind.V3}:
         return _begin_numeric(solver, root, fiber, scene, depsgraph, quality, selection)
-    session = FiberSolveSession(solver, root, fiber, scene, depsgraph, _quality(quality))
+    session = capture_session(FiberSolveSession(solver, root, fiber, scene, depsgraph, _quality(quality)))
     session.selection = selection
     session.telemetry = current_request_telemetry()
     session.loop = is_loop_fiber(fiber)
@@ -555,6 +558,8 @@ def _finish_session(session, converged, stalled):
 
 
 def publish_fiber_cache(session, result=None):
+    from .fiber_authority import session_owned
+    if not session_owned(session): return
     result = result or session.result()
     if not (session.done and result.converged):
         return

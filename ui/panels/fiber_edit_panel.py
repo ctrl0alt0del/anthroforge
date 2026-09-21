@@ -198,6 +198,8 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         layout.label(text=f"{fiber.id} ({suffix})", icon="CURVE_DATA")
 
     def _draw_mode_layout(self, layout, scene, root, fiber):
+        layout.prop(fiber, 'behavior_mode')
+        if fiber.behavior_mode == 'FREE': return _draw_free(layout, scene, root, fiber)
         if is_solved_loop(fiber):
             self._draw_solved_loop_mode(layout, scene, root, fiber)
             return
@@ -226,3 +228,17 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
 
         self._draw_header(layout, fiber)
         self._draw_mode_layout(layout, context.scene, root, fiber)
+
+
+def _draw_free(layout, scene, root, fiber):
+    from ...adapters.free_fiber_editor import state
+    layout.prop(fiber, 'name'); layout.prop(fiber, 'free_sampling_resolution'); layout.prop(fiber, 'thickness')
+    session = state(root, fiber)
+    actions = [('EDIT', 'Edit Path')] if not session else [('APPLY', 'Apply'), ('CANCEL', 'Cancel'), ('BEZIER', 'Convert to Bézier'), ('RESAMPLE', 'Resample Preview')]
+    if session and session['stale']: actions = [('REFRESH', 'Refresh'), ('REBASE', 'Rebase Preview'), ('CANCEL', 'Discard')]
+    for action, label in actions:
+        operator = layout.operator('af.free_fiber_path', text=label); operator.action = action; operator.fiber_id = fiber.id
+    layout.label(text='Stale draft: refresh or review a rebase.' if session and session['stale'] else 'Free path — no solver')
+    if session and session.get('recovery'): layout.label(text=f"{len(session['recovery'])} previous draft(s) retained for recovery")
+    error = fiber_invalid_reason(fiber)
+    layout.label(text=error or 'Attachments resolved' if fiber_recompute_status(fiber) == 'FREE_UPDATED' else error or 'Attachment update required', icon='ERROR' if error else 'INFO')

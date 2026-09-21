@@ -355,6 +355,12 @@ def _schedule_imported_sync(state):
 
 
 def apply_vcp_snapshot(snapshot, root, context, stage_root=None):
+    from .free_fibers import atomic_import
+    return atomic_import(root, context.scene, snapshot, _compatible_scp_ids(snapshot, root),
+                         lambda: _apply_vcp_snapshot(snapshot, root, context, stage_root))
+
+
+def _apply_vcp_snapshot(snapshot, root, context, stage_root=None):
     from .branching import restore_graph
     state = VcpImportState(root, context.scene, snapshot, _compatible_scp_ids(snapshot, root), stage_root=stage_root)
     with suppress_vcp_prop_updates():

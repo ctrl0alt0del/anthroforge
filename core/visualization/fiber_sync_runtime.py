@@ -13,6 +13,7 @@ from .control_runtime import active_entity_id
 from .fiber_attachment_transfer import capture_attachment_target, with_attachment_raw
 from .fiber_sync_helpers import mark_fiber_output_stale, show_curve_preview
 from .vcp_object_index import build_vcp_object_index
+from ..vcp.free_path import fiber_geometry_point_count
 
 
 def _iter_endpoints(fiber):
@@ -260,7 +261,7 @@ def refresh_propagated_handles(sync, root, scene, points_by_id, fiber_ids):
     fiber = _active_fiber(root, scene); affected = set(fiber_ids or ())
     if fiber is None or str(fiber.id) not in affected: return True
     points = tuple(dict(points_by_id or {}).get(str(fiber.id), ()))
-    if len(points) != int(fiber.node_count): return False
+    if len(points) != fiber_geometry_point_count(fiber): return False
     payload = decode_node_attachments(fiber.node_attachments_json)
     indices = _propagated_pin_indices(fiber, payload)
     if indices is None: return False
@@ -269,7 +270,7 @@ def refresh_propagated_handles(sync, root, scene, points_by_id, fiber_ids):
 
 
 def _propagated_pin_indices(fiber, payload):
-    if payload is None or payload.point_count != int(fiber.node_count): return None
+    if payload is None or payload.point_count != fiber_geometry_point_count(fiber): return None
     bindings = _propagated_bindings(fiber)
     if is_loop_fiber(fiber): return _ordered_matches(payload.nodes, bindings, 0, len(payload.nodes))
     return _open_matches(payload.nodes, bindings)

@@ -229,6 +229,8 @@ class FiberSolver:
             nodes[idx] = pt.copy()
 
     def solve_points(self, root, fiber_prop, scene, depsgraph, bake=False):
+        from .free_path import require_controlled
+        require_controlled(fiber_prop)
         from .fiber_progressive import begin_fiber_solve
         quality = "FINAL" if bake else "INTERACTIVE"
         session = begin_fiber_solve(self, root, fiber_prop, scene, depsgraph, quality)

@@ -8,6 +8,11 @@ operations. Anatomical correspondences, head identities, attachment bands and
 review remain explicit inputs; successful execution does not certify anatomical
 accuracy.
 
+For an already reviewed path, [Controlled and Free fibers](free_fibers.md)
+describes direct sampled/Bézier creation, editing the current deformed path,
+shared structural tags and solver-free attachment updates. The planning
+operations below retain their existing Controlled behavior.
+
 Use `app.authoring.api.execute(request, root, scene, journal_directory)` or
 `tools/authoring_blender.py`. `anatomy.discover` advertises `skeleton_transfer.v1`,
 `muscle_base.v1`, and `native_base.v1`; old experimental names remain compatibility

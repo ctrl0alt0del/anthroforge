@@ -17,6 +17,7 @@ from .fiber_node_attachment_codec import (FiberNodeAttachment, FiberNodeAttachme
                                           encode_node_attachments, FiberNodeInfluence, node_influences)
 from .fiber_node_attachment_weights import attachment_owner_weights
 from .prop_update_guard import suppress_vcp_prop_updates
+from .free_path import fiber_geometry_point_count, is_free
 
 
 @dataclass(frozen=True)
@@ -52,12 +53,12 @@ def clear_fiber_node_attachments(fiber):
         fiber.node_attachments_json = ""
 
 
-def _capture_payload(root, scene, fiber, points, depsgraph):
+def _capture_payload(root, scene, fiber, points, depsgraph, indices=None):
     if len(points) < 2: return None, "Fiber has no committed nodes."
     runtime = attachment_runtime(scene, depsgraph)
     objects = _candidate_objects(root, scene, fiber, points, runtime)
     if not objects: return None, "No SCP geometry surface is available."
-    forced = _forced_nodes(root, scene, fiber, points, runtime)
+    forced = _forced_nodes(root, scene, fiber, points, runtime, indices)
     nodes = tuple(_capture_node(point, forced.get(index), objects, runtime, scene)
                   for index, point in enumerate(points))
     if any(row is None for row in nodes): return None, "A Fiber node could not attach to an SCP surface."
@@ -119,15 +120,16 @@ def _node_from_raw(point, sid, raw, objects, runtime, scene):
     return FiberNodeAttachment(str(sid or ""), str(raw or ""), tuple(offset))
 
 
-def _forced_nodes(root, scene, fiber, points, runtime):
+def _forced_nodes(root, scene, fiber, points, runtime, indices=None):
     specs = _anchor_specs(root, scene, fiber, runtime)
     anchors = tuple(row[2] for row in specs)
-    indices = _pin_indices(points, anchors, is_loop_fiber(fiber))
+    indices = _pin_indices(points, anchors, is_loop_fiber(fiber)) if indices is None else indices
     return {index: (row[0], row[1]) for index, row in zip(indices, specs)}
 
 
 def _anchor_specs(root, scene, fiber, runtime):
     from .shared_point_storage import endpoint_record
+    if is_free(fiber): return _free_specs(root, scene, fiber, runtime)
     if is_loop_fiber(fiber): return _loop_specs(root, scene, fiber, runtime)
     first = _touch_spec(root, scene, runtime, endpoint_record(fiber, "a"))
     mids = tuple(_touch_spec(root, scene, runtime, row) for row in fiber.mid_touches)
@@ -180,7 +182,7 @@ def _loop_pin_indices(points, anchors):
 
 def _payload_issue(payload, fiber):
     if payload is None: return "Fiber node attachments are missing or invalid."
-    if payload.point_count != int(getattr(fiber, "node_count", 0)): return "Fiber node count changed."
+    if payload.point_count != fiber_geometry_point_count(fiber): return "Fiber geometry point count changed."
     if payload.cyclic != is_loop_fiber(fiber): return "Fiber topology changed."
     return ""
 
@@ -242,3 +244,22 @@ def _resolved_issue(points):
 
 def _elapsed(started):
     return (perf_counter() - started) * 1000.0
+
+
+def _free_specs(root, scene, fiber, runtime):
+    from .shared_point_storage import slots, point_record
+    records = [point_record(owner, slot) for owner, slot, _role in slots(fiber)]
+    if any(point is None for point in records): return ()
+    return tuple(row for point in records if (row := _touch_spec(root, scene, runtime, point)) is not None)
+
+
+def prepare_fiber_node_attachments(root, scene, fiber, points, indices, depsgraph=None):
+    """Prepare without changing RNA; preserve all off-surface sample coordinates."""
+    rows = tuple(Vector(point) for point in points)
+    payload, error = _capture_payload(root, scene, fiber, rows, depsgraph, indices)
+    if payload is None: raise ValueError(error)
+    runtime = attachment_runtime(scene, depsgraph); objects = _surface_objects(scene, root)
+    resolved = tuple(_resolve_node(row, objects, runtime, scene) for row in payload.nodes)
+    if any(p is None or (p - q).length > 1e-5 for p, q in zip(resolved, rows)):
+        raise ValueError('Attachment capture did not reproduce the supplied sampled path.')
+    return encode_node_attachments(payload)

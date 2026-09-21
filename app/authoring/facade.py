@@ -34,6 +34,8 @@ class AuthoringInterpreter:
             return request, result
 
     def _execute(self, request):
+        from . import native_free
+        if request['op'] in native_free.OPERATIONS: return native_free.execute(self.scene, request, self.store)
         from . import native_branches, native_fibers
         if request['op'] in (*native_branches.OPERATIONS, *native_fibers.OPERATIONS):
             return execute_native(self, request, native_branches, native_fibers)

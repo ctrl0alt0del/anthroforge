@@ -10,6 +10,7 @@ class FiberSurfaceSpec:
     flip_normals: bool = False
     patch_resolution: int = 4
     target_node_count: int = 0
+    exact_samples: bool = False
 
 
 @dataclass(frozen=True)
@@ -30,10 +31,17 @@ def evaluate_fiber_surface(ordered_points, spec):
 
 
 def _evaluate_loft(ordered_points, spec):
-    prepared = prepare_loft_rows(ordered_points, spec.target_node_count, spec.closed_along_fibers)
+    prepared = _prepare_spec_rows(ordered_points, spec)
     count = len(prepared[0])
     vertices, faces = _flatten(prepared), _grid_faces(len(prepared), count, spec)
     return FiberSurfaceResult(tuple(vertices), tuple(_oriented_faces(faces, spec.flip_normals)), _frozen_rows(prepared), bool(spec.closed_along_fibers))
+
+
+def _prepare_spec_rows(points, spec):
+    if spec.exact_samples:
+        from .free_surface import prepare_rows
+        return prepare_rows(points, spec.closed_along_fibers, multiplier=4)
+    return prepare_loft_rows(points, spec.target_node_count, spec.closed_along_fibers)
 
 
 def prepare_loft_rows(ordered_points, target_count=0, closed=False, densify=True):
@@ -151,9 +159,16 @@ def _evaluate_loop_patch(ordered_points, spec):
     if len(ordered_points) != 1:
         raise ValueError("LOOP_PATCH requires exactly one LOOP Fiber.")
     loop = [_co3(point) for point in ordered_points[0]]
+    if spec.exact_samples: _check_free_patch(loop, spec.patch_resolution)
     _validate_patch_loop(loop)
     vertices, faces = _triangulated_patch(loop, spec.patch_resolution)
     return FiberSurfaceResult(tuple(vertices), tuple(_oriented_faces(faces, spec.flip_normals)), (), True)
+
+
+def _check_free_patch(loop, level):
+    from .free_surface import check_budget
+    count = max(1, len(loop) - 2)
+    check_budget(count * (level + 1) * (level + 2) // 2, count * level * level, multiplier=2)
 
 
 def _validate_patch_loop(loop):

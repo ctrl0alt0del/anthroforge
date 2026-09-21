@@ -69,7 +69,7 @@ def operations():
 
 
 def capabilities():
-    return ['muscle_output_domain.v1', 'section_profile.v1', 'muscle_from_surface.v1', 'static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'branched_loft.v1', 'shared_points.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1', 'fiber_layout_planner.v1', 'skeleton_transfer.v1', 'muscle_base.v1', 'native_base.v1', 'skeleton_transfer.experimental.v1', 'muscle_base.experimental.v1']
+    return ['free_fibers.v1', 'muscle_output_domain.v1', 'section_profile.v1', 'muscle_from_surface.v1', 'static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'branched_loft.v1', 'shared_points.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1', 'fiber_layout_planner.v1', 'skeleton_transfer.v1', 'muscle_base.v1', 'native_base.v1', 'skeleton_transfer.experimental.v1', 'muscle_base.experimental.v1']
 
 
 def point_operations():

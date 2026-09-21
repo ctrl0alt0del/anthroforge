@@ -8,6 +8,7 @@ from ..vcp.runtime_state import set_fiber_surface_runtime
 from .muscle_sync_helpers import get_vis_collection, remove_proxy_obj, update_mesh
 from .muscle_sync_runtime import collect_surface_rows
 from .vcp_object_index import build_vcp_object_index
+from ..vcp.free_path import is_free, fiber_geometry_point_count
 
 
 class FiberSurfaceSceneSync:
@@ -109,15 +110,15 @@ def _validate_loft_fibers(surface, fibers):
         raise ValueError("LOFT requires at least two Fibers.")
     modes = {bool(is_loop_fiber(fiber)) for fiber in fibers}
     counts = {int(fiber.node_count) for fiber in fibers}
-    if len(modes) != 1 or len(counts) != 1:
+    if len(modes) != 1 or (not any(is_free(f) for f in fibers) and len(counts) != 1):
         raise ValueError("LOFT Fibers must share topology and node count.")
 
 
 def _surface_spec(surface, fibers):
     loop = bool(fibers and is_loop_fiber(fibers[0]))
-    count = int(fibers[0].node_count) if fibers else 0
+    count = fiber_geometry_point_count(fibers[0]) if fibers else 0
     return FiberSurfaceSpec(str(surface.construction_mode), bool(surface.close_across_fibers), loop,
-                            bool(surface.flip_normals), int(surface.patch_resolution), count)
+                            bool(surface.flip_normals), int(surface.patch_resolution), count, any(is_free(f) for f in fibers))
 
 
 def _ensure_proxy(collection, root, surface, index):

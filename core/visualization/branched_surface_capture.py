@@ -3,6 +3,7 @@ import numpy as np
 from ..vcp.branched_surface import BranchInput, prepare_assembly
 from ..vcp.shared_point_storage import slots, point_record
 from .muscle_sync_runtime import collect_fiber_points
+from ..vcp.free_path import is_free, decode, point_indices
 
 
 def source_surface(root, key):
@@ -29,7 +30,15 @@ def capture_assembly(root, scene, surface):
     if not routes:
         raise ValueError("Main solved fibers are unavailable")
     branches = tuple(_branch_input(root, scene, fibers, routes, c) for c in surface.branches)
+    _free_budget(root, surface, routes, branches)
     return prepare_assembly(routes, branches, surface.flip_normals)
+
+
+def _free_budget(root, surface, routes, branches):
+    sources = [source_surface(root, surface.main_surface_id)] + [source_surface(root, b.surface_id) for b in surface.branches]
+    if any(is_free(f) for source in sources for f in source_fibers(root, source)):
+        from ..vcp.free_surface import branch_budget
+        branch_budget(routes, branches, multiplier=4)
 
 
 def _branch_input(root, scene, fibers, routes, connection):
@@ -56,6 +65,7 @@ def _boundary(fibers, key):
 
 
 def _root_indices(root, scene, fiber, route, keys):
+    if is_free(fiber): return point_indices(decode(fiber.free_path_json), keys)
     from ..vcp.fiber_node_attachment import _anchor_specs, _open_pin_indices
     from ..vcp.attachment_backend import attachment_runtime
     specs = _anchor_specs(root, scene, fiber, attachment_runtime(scene, None))

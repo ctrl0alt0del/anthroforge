@@ -426,6 +426,8 @@ def _register_runtime_hooks():
 
 
 def _register_warnings():
+    from .operators import free_fiber
+    free_fiber.register()
     from .ui import muscle_branches
     muscle_branches.register()
     from .core.vcp import shared_point_storage
@@ -453,6 +455,8 @@ def _unregister_runtime_hooks():
 
 
 def _unregister_fiber_attachment_runtime():
+    from .operators import free_fiber
+    free_fiber.unregister()
     from .ui import muscle_branches
     muscle_branches.unregister()
     from .core.vcp import shared_point_storage

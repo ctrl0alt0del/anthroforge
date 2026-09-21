@@ -99,7 +99,10 @@ class V2RuntimeSession:
 
 
 def begin_v2_runtime(solver, root, fiber, scene, depsgraph, quality, selection):
-    session = V2RuntimeSession(solver, root, fiber, scene, depsgraph, _quality(quality))
+    from .fiber_authority import capture_session
+    from .free_path import require_controlled
+    require_controlled(fiber)
+    session = capture_session(V2RuntimeSession(solver, root, fiber, scene, depsgraph, _quality(quality)))
     session.core_factory = begin_v2
     session.selection = selection
     session.telemetry = current_request_telemetry()
@@ -108,8 +111,11 @@ def begin_v2_runtime(solver, root, fiber, scene, depsgraph, quality, selection):
 
 
 def begin_v3_runtime(solver, root, fiber, scene, depsgraph, quality, selection):
+    from .fiber_authority import capture_session
+    from .free_path import require_controlled
+    require_controlled(fiber)
     from .v3.production import V3_PRODUCTION_VERSION, begin_v3
-    session = V2RuntimeSession(solver, root, fiber, scene, depsgraph, _quality(quality))
+    session = capture_session(V2RuntimeSession(solver, root, fiber, scene, depsgraph, _quality(quality)))
     session.engine, session.engine_version, session.solver_version = "V3", V3_PRODUCTION_VERSION, 3
     session.warm_key = _v3_warm_key(scene, root, fiber)
     session.core_factory = begin_v3; session.selection = selection
@@ -434,6 +440,8 @@ def _result_error(result):
 
 
 def retain_v3_warm_state(session, result=None):
+    from .fiber_authority import session_owned
+    if not session_owned(session): return False
     if getattr(session, "engine", "") != "V3": return False
     if session.request is None or not session.warm_key: return False
     if result is not None and not bool(getattr(result, "validated", False)): return False
