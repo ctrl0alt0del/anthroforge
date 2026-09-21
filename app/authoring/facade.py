@@ -34,6 +34,12 @@ class AuthoringInterpreter:
             return request, result
 
     def _execute(self, request):
+        from .request_identity import request_scope
+        with request_scope(self.scene.root, request, self.store): return self._dispatch(request)
+
+    def _dispatch(self, request):
+        from . import native_free
+        if request['op'] in native_free.OPERATIONS: return native_free.execute(self.scene, request, self.store)
         from . import native_branches, native_fibers
         if request['op'] in (*native_branches.OPERATIONS, *native_fibers.OPERATIONS):
             return execute_native(self, request, native_branches, native_fibers)
@@ -82,13 +88,7 @@ def cache_response(service, request, result):
 
 
 def execute_native(service, request, branches, fibers):
-    """Reserve identity before native work; handlers retain their live replay."""
-    root = service.scene.root
-    key = [root.get('af_authoring_id') or root.name, request['request_id']]
-    saved = service.store.get('v04_requests', key)
-    require(not saved or saved['digest'] == digest(request), 'REQUEST_ID_REUSED')
-    if not saved:
-        service.store.put('v04_requests', key, dict(digest=digest(request), response={}, native_live_dispatch=True))
+    """Identity is reserved by the facade; handlers retain their live replay."""
     handler = branches if request['op'] in branches.OPERATIONS else fibers
     return handler.execute(service.scene, request)
 

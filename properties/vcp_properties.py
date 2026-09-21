@@ -385,7 +385,19 @@ class AF_FiberLoopAnchor_Property(bpy.types.PropertyGroup):
     attach_param: _binding_string("point_id", "attach_param", "attach_param", "Loop Attach Param JSON", "0.0")
 
 
+def _on_fiber_behavior_update(self, context):
+    if vcp_prop_updates_suppressed(): return
+    from ..app.use_cases.free_fiber import property_mode_changed
+    property_mode_changed(self, context)
+
+
 class AF_FiberVCP_Property(bpy.types.PropertyGroup):
+    behavior_mode: bpy.props.EnumProperty(name="Mode", default="CONTROLLED",
+        items=(("CONTROLLED", "Controlled", "Solver-controlled path"), ("FREE", "Free", "Explicit sampled path; no solver")),
+        update=_on_fiber_behavior_update)
+    free_path_json: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    free_path_revision: bpy.props.IntProperty(default=0, min=0, options={"HIDDEN"})
+    free_sampling_resolution: bpy.props.IntProperty(name="Sampling Resolution", default=64, min=2, max=4096)
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="")
 

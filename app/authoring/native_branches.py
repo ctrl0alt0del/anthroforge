@@ -61,7 +61,7 @@ def _transaction(root, request):
     saved = native_records(root); runtime = _runtime_memento(root)
     try:
         with suppress_vcp_prop_updates():
-            result = _mutate(root, request['op'], request['params'])
+            result = _free_mutation(root, request)
         _notify(root, request['op'], request['params'], result)
     except Exception as error:
         _restore(root, saved); _restore_runtime(root, runtime)
@@ -69,6 +69,12 @@ def _transaction(root, request):
             raise
         raise AuthoringError('INVALID_BRANCH_CONFIGURATION', str(error)) from error
     return result
+
+
+def _free_mutation(root, request):
+    import bpy
+    from ..use_cases.free_point_edit import graph_action
+    return graph_action(root, bpy.context.scene, lambda: _mutate(root, request['op'], request['params']))
 
 
 def _restore(root, saved):
@@ -90,14 +96,14 @@ def _restore_collection(collection, records):
         restore(existing.get(row['values']['id']) or collection.add(), row)
 
 
-def _runtime_memento(root):
+def _runtime_memento(root, scene=None):
     import bpy
     from ...core.vcp import fiber_anchor_preflight as preflight
     from ...core.visualization import fiber_anchor_overlay as overlay
     from ...core.warnings.session import REPOSITORY, scopes_for
-    names = ('fibers', 'fiber_surfaces', 'muscles'); scopes = set(scopes_for(bpy.context.scene, root))
+    scene = scene or bpy.context.scene; names = ('fibers', 'fiber_surfaces', 'muscles'); scopes = set(scopes_for(scene, root))
     native = {name: {item.id: _custom_runtime(item) for item in getattr(root.af_vcp_system, name)} for name in names}
-    proxies = {o.name: _custom_runtime(o, 'af_fiber_') for o in bpy.context.scene.objects if o.get('af_root_name') == root.name and o.get('af_fiber_id')}
+    proxies = {o.name: _custom_runtime(o, 'af_fiber_') for o in scene.objects if o.get('af_root_name') == root.name and o.get('af_fiber_id')}
     warnings = {key: dict(value) for key, value in REPOSITORY.provider_states.items() if key[0] in scopes}
     return dict(native=native, proxies=proxies, scopes=scopes, warnings=warnings,
                 preflight=dict(preflight._CACHE), overlay=dict(overlay._BATCHES))

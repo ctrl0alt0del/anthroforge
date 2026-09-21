@@ -121,7 +121,9 @@ def point_updated(point, context):
         return
     from ...app.runtime_api import schedule_context
     from ..deps.dirty_hints import dirty_hints_for
+    from ...app.use_cases.free_point_edit import point_changed
     ids = {fiber.id for fiber, _, _ in point_users(point.id_data, point.id) if fiber.id}
+    ids -= point_changed(point, context)
     if ids:
         _invalidate(point.id_data, context, ids)
         schedule_context(context, dirty_hints=dirty_hints_for("FIBER", ids), event_type="FIBER_UPDATE",

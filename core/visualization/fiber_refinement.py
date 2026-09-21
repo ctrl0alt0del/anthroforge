@@ -38,6 +38,8 @@ from .fiber_engine_migration import (claim_engine_migration, clear_engine_migrat
                                      pending_engine_points, prepare_engine_migration,
                                      rollback_engine_migration, write_engine_provenance)
 from .fiber_sync_helpers import mark_fiber_output_current, mark_fiber_output_stale, persisted_fiber_points
+from ..vcp.free_path import is_free
+from ..vcp import fiber_authority
 
 
 _SLICE_MS = 12.0
@@ -87,6 +89,7 @@ class FiberRefinementJob:
     retain_preview: bool = False
     last_geometry_check: float = 0.0
     group_token: str = ""
+    authority: tuple = ()
 
 
 @dataclass
@@ -100,12 +103,14 @@ class FiberRefinementGroup:
     pending: set = field(default_factory=set)
     committed: set = field(default_factory=set)
     failures: dict = field(default_factory=dict)
+    free_targets: set = field(default_factory=set)
     done: bool = False
 
 
 def request_fiber_refinement(root, scene, fiber, show_preview=False, quality="FINAL", group_token=""):
     if root is None or scene is None or fiber is None:
         return RefinementRequest(False, "Fiber refinement context is unavailable.")
+    if is_free(fiber): return _update_free(root, scene, fiber, group_token)
     key = _job_key(scene, root, fiber.id)
     preflight = _hard_anchor_preflight(root, scene, fiber, quality)
     if show_preview and preflight is not None and not preflight.valid:
@@ -159,6 +164,23 @@ def _new_refinement_group(root, scene, fiber_ids):
 
 def _request_error(request):
     return "MISSING_FIBER" if request is None else str(request.error or "REQUEST_FAILED")
+
+
+def _update_free(root, scene, fiber, group_token):
+    from .free_fiber_runtime import update
+    ok, error, proxy = update(root, scene, fiber)
+    group = _GROUPS.get(str(group_token or ""))
+    if group is not None:
+        group.free_targets.add(str(fiber.id))
+        _group_member_done(group_token, fiber.id, ok, error or 'FREE_UPDATED')
+    else:
+        _sync_fiber_group(root, scene, {fiber.id}, immediate=True)
+    return RefinementRequest(ok, error, proxy)
+
+
+def _authority_current(job):
+    root, _scene, fiber = _owned_job_data(job)
+    return fiber_authority.owns(root, fiber, getattr(job, 'authority', ()))
 
 
 def _launch_refinement(key, root, scene, fiber, session, show_preview, group_token=""):
@@ -286,7 +308,7 @@ def _new_job(key, scene, root, fiber, session, group_token=""):
                              _geometry_signature(session), session, token=token,
                              previous_status=fiber_recompute_status(fiber),
                              previous_points=previous,
-                             retain_preview=retain, group_token=str(group_token or ""))
+                             retain_preview=retain, group_token=str(group_token or ""), authority=fiber_authority.token(root, fiber))
     claim_engine_migration(fiber, token)
     job.last_apply, job.last_generation = monotonic(), session.generation
     job.last_geometry_check = job.last_apply
@@ -412,6 +434,7 @@ def _advance_active_job(job):
 
 
 def _apply_progress(job, result, known_valid=False):
+    if not _authority_current(job): return
     if not known_valid and not _valid_job(job):
         return
     if _async_native_pending(job, result): return
@@ -496,6 +519,7 @@ def _finish_job(job, result=None):
 
 
 def _finish_refined_job(job, result):
+    if not _authority_current(job): return
     committed = bool(job.output_committed and _commit_allowed(job, result))
     kept = bool(not committed and _keep_failed_preview(job, result))
     _restore_previous_output(job, stale=True) if not committed and not kept else None
@@ -510,19 +534,24 @@ def _finish_refined_job(job, result):
 
 
 def _publish_commit_identity(job, result):
+    if not _authority_current(job): return
     root, scene, fiber = _owned_job_data(job)
     proxy = _find_proxy(scene, root.name, fiber.id) if root and scene and fiber else None
     _commit_provenance(job, result, fiber, proxy)
 
 
 def _refresh_node_attachments(job, result):
+    if not _authority_current(job): return False
     root, scene, fiber = _owned_job_data(job)
     if root is None or scene is None or fiber is None: return False
     from .fiber_node_attachment_runtime import capture_committed_fiber_node_attachments
-    return capture_committed_fiber_node_attachments(root, scene, fiber, result.points)
+    captured = capture_committed_fiber_node_attachments(root, scene, fiber, result.points)
+    if captured: fiber.pop('af_controlled_retained_free', None)
+    return captured
 
 
 def _publish_result_cache(job, result):
+    if not _authority_current(job): return
     engine = str(getattr(result, "engine", "V1"))
     if engine == "V1": publish_fiber_cache(job.session, result)
     if engine == "V3": retain_v3_warm_state(job.session, result)
@@ -536,6 +565,7 @@ def _clear_job_v3_warm(job):
 
 
 def _keep_failed_preview(job, result):
+    if not _authority_current(job): return False
     if getattr(job, "retain_preview", False):
         return _mark_retained_failed_preview(job)
     root, scene, fiber = _owned_job_data(job)
@@ -653,6 +683,7 @@ def _owner_surface_curve_clear(job, points, collider):
 
 
 def _finish_pending_version(job, committed):
+    if not _authority_current(job): return
     fiber = _owned_job_data(job)[2]
     if fiber is None or not migration_owned(fiber, job.token):
         return
@@ -663,6 +694,7 @@ def _finish_pending_version(job, committed):
 
 
 def _restore_previous_output(job, stale=False):
+    if not _authority_current(job): return
     root, scene, fiber = _owned_job_data(job)
     if root is None or fiber is None:
         return
@@ -727,7 +759,7 @@ def _claim_pending_version(fiber, token):
 
 
 def _job_owns_pending(job, fiber):
-    return migration_owned(fiber, job.token)
+    return _authority_current(job) and migration_owned(fiber, job.token)
 
 
 def _next_token(fiber):
@@ -769,11 +801,14 @@ def _sync_final(job):
     _sync_fiber_group(root, scene, {fiber.id})
 
 
-def _sync_fiber_group(root, scene, fiber_ids):
+def _sync_fiber_group(root, scene, fiber_ids, immediate=False):
+    from .sync_runner import sync_from_dirty_hints
     ids = set(fiber_ids)
     payload = {"solved_fiber_ids": sorted(ids)}
-    _sync_scene()(root=root, scene=scene, dirty_hints=dirty_hints_for("FIBER", ids),
-                  source="fiber_refinement", event_type="FIBER_SOLVE_READY", payload=payload)
+    # Terminal IDs skip source dispatch even on failure; consumers see stale sources.
+    dispatch = sync_from_dirty_hints if immediate else _sync_scene()
+    dispatch(root=root, scene=scene, dirty_hints=dirty_hints_for("FIBER", ids),
+             source="fiber_refinement", event_type="FIBER_SOLVE_READY", payload=payload)
 
 
 def _finish_group_member(job, committed, result):
@@ -799,7 +834,10 @@ def _group_member_done(token, fiber_id, committed, reason):
 def _finish_group_if_ready(group):
     if group is None or group.done or group.pending: return
     group.done = True; root, scene = _group_data(group)
-    if root is not None and scene is not None and group.committed:
+    if root is None or scene is None: return
+    if group.free_targets:
+        _sync_fiber_group(root, scene, group.committed | group.free_targets, immediate=True)
+    elif group.committed:
         _sync_fiber_group(root, scene, group.committed)
 
 
@@ -890,7 +928,7 @@ def _terminate_job(job, reason, mark_unknown, stale=False):
 
 
 def _restore_job_status(job, fiber, mark_unknown):
-    if fiber is None:
+    if fiber is None or not _authority_current(job):
         return
     status = "UNKNOWN" if mark_unknown else job.previous_status
     set_fiber_recompute_status(fiber, status)
@@ -979,6 +1017,7 @@ def _valid_job(job, force_geometry=False):
 
 
 def _invalid_job_reason(job, force_geometry=False):
+    if not _authority_current(job): return FiberTermination.SUPERSEDED
     root, scene, fiber = _owned_job_data(job)
     if root is None or scene is None or fiber is None:
         return FiberTermination.CANCELLED

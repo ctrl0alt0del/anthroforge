@@ -88,6 +88,7 @@ def recompute_fiber(context, fiber_id="", max_passes=12):
 def restore_legacy_fiber(context, fiber_id=""):
     root = root_for_context(context)
     fiber, error = _resolved_fiber(root, fiber_id)
+    if fiber is not None and getattr(fiber, 'behavior_mode', 'CONTROLLED') == 'FREE': return failure('Switch to Controlled before restoring a solver result.')
     points = None if fiber is None else _decoded_points(fiber.legacy_points_json)
     if fiber is None or not points:
         return failure(error or "No legacy Fiber shape is available.")
@@ -231,6 +232,7 @@ def remove_fiber_touch_point(context, fiber_id="", touch_index=-1):
     index = int(touch_index)
     if fiber is None:
         return failure(error)
+    if getattr(fiber, 'behavior_mode', 'CONTROLLED') == 'FREE': return failure('Free path structural anchors must retain their tagged order.')
     if index < 0 or index >= len(fiber.mid_touches) or (fiber.id, index+1) in _branch_protected(root):
         return failure("Invalid touch index.")
     fiber.mid_touches.remove(index)
@@ -252,6 +254,7 @@ def move_fiber_touch_point(context, fiber_id="", touch_index=-1, direction=0):
     index, target = int(touch_index), int(touch_index) + int(direction)
     if fiber is None:
         return failure(error)
+    if getattr(fiber, 'behavior_mode', 'CONTROLLED') == 'FREE': return failure('Free path structural anchors must retain their tagged order.')
     if not _valid_touch_move(fiber, index, target) or not _routing_touch_move(root, fiber, index, target):
         return failure("Invalid touch move.")
     _remove_fiber_touch_handles(context.scene, root.name, fiber.id)
@@ -309,6 +312,7 @@ def _resolved_touch(context, root, fiber_id=""):
 
 
 def _append_touch_result(context, root, fiber, touch_specs):
+    if getattr(fiber, 'behavior_mode', 'CONTROLLED') == 'FREE': return failure('Edit Free path samples without adding routing anchors.')
     _append_touch_specs(fiber, touch_specs)
     return _touch_order_changed(context, root, fiber)
 

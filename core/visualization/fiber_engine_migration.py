@@ -9,6 +9,7 @@ from ..vcp.runtime_state import (fiber_active_colliders, fiber_eps_disp, fiber_e
                                  fiber_recompute_ms, fiber_recompute_status, fiber_refine_ms,
                                  fiber_route_mode)
 from .fiber_sync_helpers import persisted_fiber_points
+from ..vcp.free_path import is_free
 
 
 _PENDING_KEYS = ("af_pending_solver_version", "af_pending_solver_token",
@@ -17,6 +18,7 @@ _PENDING_KEYS = ("af_pending_solver_version", "af_pending_solver_token",
 
 
 def prepare_engine_migration(root, scene, fiber, selection):
+    if is_free(fiber): return False
     if not selection.valid:
         return False
     target, current = _engine_number(selection.actual), _stored_version(fiber)
@@ -38,6 +40,7 @@ def migration_owned(fiber, token):
 
 
 def commit_engine_migration(fiber, selection, token=0):
+    if is_free(fiber): return False
     if token and _pending_version(fiber) and not migration_owned(fiber, token):
         return False
     _set_version(fiber, _engine_number(selection.actual))
@@ -46,6 +49,7 @@ def commit_engine_migration(fiber, selection, token=0):
 
 
 def rollback_engine_migration(fiber, token=0):
+    if is_free(fiber): return False
     if token and not migration_owned(fiber, token):
         return False
     previous = int(fiber.get("af_pending_solver_previous_version", 0) or 0)

@@ -10,22 +10,23 @@ try:
     from ...core.vcp.fiber_modes import is_loop_fiber
     from ...core.vcp.prop_update_guard import suppress_vcp_prop_updates
     from ...core.visualization.fiber_surface_sync import evaluate_surface_record, find_fiber_surface_proxy
+    from ...core.visualization.free_fiber_runtime import validate_pair
 except ImportError:
     from core.deps.dirty_hints import dirty_hints_for
     from core.id_utils import next_prefixed_id
     from core.vcp.fiber_modes import is_loop_fiber
     from core.vcp.prop_update_guard import suppress_vcp_prop_updates
     from core.visualization.fiber_surface_sync import evaluate_surface_record, find_fiber_surface_proxy
+    from core.visualization.free_fiber_runtime import validate_pair
 
 
 def create_fiber_surface(context, name="", close_across=False, use_mirrored_rows=False):
     root = root_for_context(context)
     payload = None if root is None else _creation_payload(context, root, use_mirrored_rows)
-    if root is None:
-        return failure("No AF_ROOT found.")
-    if payload is None:
-        return failure("Select Fibers for LOFT, or one LOOP Fiber for LOOP_PATCH.")
+    if root is None: return failure("No AF_ROOT found.")
+    if payload is None: return failure("Select Fibers for LOFT, or one LOOP Fiber for LOOP_PATCH.")
     fiber_ids, fibers, mode, mirrored, error = payload
+    error = error or _free_creation_error(root, context.scene, fibers, mode, close_across, mirrored)
     if error:
         return failure(error)
     surface = _new_surface(root.af_vcp_system, name, mode, close_across, mirrored)
@@ -34,6 +35,22 @@ def create_fiber_surface(context, name="", close_across=False, use_mirrored_rows
     _sync_surface(root, context.scene, surface.id)
     _select_surface(context, root, surface.id)
     return success(f"Created {surface.id} from {len(fibers)} Fiber(s).", value=surface)
+
+
+def _free_creation_error(root, scene, fibers, mode, close_across, mirrored):
+    from types import SimpleNamespace
+    from .muscle_create import is_free
+    if not any(is_free(fiber) for fiber in fibers): return ""
+    candidate = SimpleNamespace(construction_mode=mode, close_across_fibers=close_across,
+                                use_mirrored_rows=mirrored, flip_normals=False, patch_resolution=4,
+                                fiber_refs=[SimpleNamespace(fiber_id=f.id) for f in fibers])
+    try:
+        for fiber in fibers:
+            if is_free(fiber): validate_pair(fiber)
+        evaluate_surface_record(root, scene, candidate)
+    except (ValueError, RuntimeError) as error:
+        return str(error)
+    return ""
 
 
 def _creation_payload(context, root, requested_mirror):

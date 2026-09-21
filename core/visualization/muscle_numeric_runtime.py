@@ -125,6 +125,8 @@ def _numeric_input(sync, root, scene, muscle):
 
 def _legacy_input(sync, root, scene, muscle):
     fibers, missing = sync._collect_fiber_props(root, muscle)
+    from ..vcp.free_path import is_free
+    if any(is_free(f) for f in fibers): return _free_legacy_input(sync, root, scene, muscle, fibers, missing)
     if missing or not fibers or (len(fibers) > 1 and not validate_anchor_structure(fibers)[0]):
         return None
     points = sync._collect_points_with_fallback(root, scene, muscle, fibers)
@@ -138,13 +140,31 @@ def _surface_input(sync, root, scene, muscle):
     if payload is None:
         return None
     points, closed_u, config = payload
-    return points, len(points[0]), False, closed_u, config
+    return points, len(points[0]), False, closed_u, config, _free_source(root, config)
 
 
 def _make_request(muscle, payload, initialize=False):
-    points, target, densify, closed_u, config = payload
+    points, target, densify, closed_u, config = payload[:5]
     spec = _numeric_spec(muscle, config, target, densify, closed_u, initialize)
+    if len(payload) > 5 and payload[5]:
+        from dataclasses import replace
+        spec = replace(spec, preserve_samples=True)
     return make_muscle_request(muscle.id, np.asarray(points, dtype=np.float64), spec, output_domain=capture_domain(muscle))
+
+
+def _free_source(root, source):
+    from ..vcp.free_path import is_free
+    wanted = {ref.fiber_id for ref in source.fiber_refs}
+    return any(is_free(f) for f in root.af_vcp_system.fibers if f.id in wanted)
+
+
+def _free_legacy_input(sync, root, scene, muscle, fibers, missing):
+    from ..vcp.free_surface import prepare_rows
+    if missing or len(fibers) < 2: return None
+    points = sync._collect_points_with_fallback(root, scene, muscle, fibers)
+    if not points or len({f.topology_mode for f in fibers}) != 1: return None
+    closed = sync._closed_u(fibers); rows = prepare_rows(points, closed, multiplier=4)
+    return rows, len(rows[0]), False, closed, muscle, True
 
 
 def _numeric_spec(muscle, config, target, densify, closed_u, initialize=False):

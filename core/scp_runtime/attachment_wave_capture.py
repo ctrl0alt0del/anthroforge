@@ -13,6 +13,7 @@ from ..vcp.attachment_wave import (ATTACHMENT_WAVE_VERSION, AttachmentPropagatio
                                    AttachmentSurfaceSnapshot, FiberNodeAttachmentOperation,
                                    SCPAttachmentOperation)
 from ..vcp.fiber_modes import is_loop_fiber
+from ..vcp.free_path import fiber_geometry_point_count
 from ..vcp.fiber_node_attachment_codec import decode_node_attachments, node_influences
 from .attachment_session import follow_rotation_enabled, tangent_strategy
 from .common import (as_id, indexed_geometry_mesh_scp_obj, indexed_transform_scp_obj,
@@ -295,9 +296,14 @@ def _topological_waves(scps, active):
 
 
 def _fiber_payload(fiber):
+    from ..vcp.free_path import is_free
+    from ..visualization.free_fiber_runtime import validate_pair
+    if is_free(fiber):
+        try: validate_pair(fiber)
+        except ValueError as error: return None, str(error)
     payload = decode_node_attachments(getattr(fiber, "node_attachments_json", ""))
     if payload is None: return None, "Fiber node attachments are missing or invalid."
-    if payload.point_count != int(fiber.node_count): return None, "Fiber node count changed."
+    if payload.point_count != fiber_geometry_point_count(fiber): return None, "Fiber geometry point count changed."
     if payload.cyclic != is_loop_fiber(fiber): return None, "Fiber topology changed."
     return payload, ""
 

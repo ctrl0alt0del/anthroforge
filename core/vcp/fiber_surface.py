@@ -10,6 +10,7 @@ class FiberSurfaceSpec:
     flip_normals: bool = False
     patch_resolution: int = 4
     target_node_count: int = 0
+    exact_samples: bool = False
 
 
 @dataclass(frozen=True)
@@ -30,10 +31,17 @@ def evaluate_fiber_surface(ordered_points, spec):
 
 
 def _evaluate_loft(ordered_points, spec):
-    prepared = prepare_loft_rows(ordered_points, spec.target_node_count, spec.closed_along_fibers)
+    prepared = _prepare_spec_rows(ordered_points, spec)
     count = len(prepared[0])
     vertices, faces = _flatten(prepared), _grid_faces(len(prepared), count, spec)
     return FiberSurfaceResult(tuple(vertices), tuple(_oriented_faces(faces, spec.flip_normals)), _frozen_rows(prepared), bool(spec.closed_along_fibers))
+
+
+def _prepare_spec_rows(points, spec):
+    if spec.exact_samples:
+        from .free_surface import prepare_rows
+        return prepare_rows(points, spec.closed_along_fibers, multiplier=4)
+    return prepare_loft_rows(points, spec.target_node_count, spec.closed_along_fibers)
 
 
 def prepare_loft_rows(ordered_points, target_count=0, closed=False, densify=True):
@@ -151,9 +159,16 @@ def _evaluate_loop_patch(ordered_points, spec):
     if len(ordered_points) != 1:
         raise ValueError("LOOP_PATCH requires exactly one LOOP Fiber.")
     loop = [_co3(point) for point in ordered_points[0]]
+    if spec.exact_samples: _check_free_patch(loop, spec.patch_resolution)
     _validate_patch_loop(loop)
-    vertices, faces = _triangulated_patch(loop, spec.patch_resolution)
+    vertices, faces = _triangulated_patch(loop, spec.patch_resolution, spec.exact_samples)
     return FiberSurfaceResult(tuple(vertices), tuple(_oriented_faces(faces, spec.flip_normals)), (), True)
+
+
+def _check_free_patch(loop, level):
+    from .free_surface import check_budget
+    count = max(1, len(loop) - 2)
+    check_budget(count * (level + 1) * (level + 2) // 2, count * level * level, multiplier=2)
 
 
 def _validate_patch_loop(loop):
@@ -166,18 +181,18 @@ def _validate_patch_loop(loop):
         raise ValueError("LOOP_PATCH boundary self-intersects.")
 
 
-def _triangulated_patch(loop, resolution):
+def _triangulated_patch(loop, resolution, exact=False):
     points = _project_loop(loop, _best_fit_normal(loop))
-    sources, triangles = _patch_source_triangles(loop, points)
+    sources, triangles = _patch_source_triangles(loop, points, exact)
     vertices, faces, keys = _subdivided_triangles(sources, triangles, resolution)
     fixed = _fixed_patch_indices(keys, len(loop))
     vertices = _fair_patch(vertices, faces, fixed)
     return _boundary_last(vertices, faces, keys, len(loop))
 
 
-def _patch_source_triangles(loop, points):
+def _patch_source_triangles(loop, points, exact=False):
     try:
-        return loop, _ear_triangles(points)
+        return loop, _ear_triangles(points, exact)
     except ValueError:
         if not _is_convex_polygon(points):
             raise
@@ -196,11 +211,11 @@ def _is_convex_polygon(points):
     return bool(signs) and len(set(signs)) == 1
 
 
-def _ear_triangles(points):
+def _ear_triangles(points, exact=False):
     remaining = _oriented_polygon_indices(points)
     triangles = []
     while len(remaining) > 3:
-        ear = _first_ear(points, remaining)
+        ear = _first_ear(points, remaining, exact)
         if ear < 0:
             raise ValueError("LOOP_PATCH boundary cannot be triangulated.")
         triangles.append(_ear_at(remaining, ear))
@@ -214,10 +229,10 @@ def _oriented_polygon_indices(points):
     return list(range(len(points))) if area > 0.0 else list(reversed(range(len(points))))
 
 
-def _first_ear(points, polygon):
+def _first_ear(points, polygon, exact=False):
     for position in range(len(polygon)):
         triangle = _ear_at(polygon, position)
-        if _is_ear(points, polygon, triangle):
+        if _is_ear(points, polygon, triangle, exact):
             return position
     return -1
 
@@ -227,12 +242,18 @@ def _ear_at(polygon, position):
     return polygon[(position - 1) % count], polygon[position], polygon[(position + 1) % count]
 
 
-def _is_ear(points, polygon, triangle):
+def _is_ear(points, polygon, triangle, exact=False):
     a, b, c = (points[index] for index in triangle)
     if _orient2(a, b, c) <= 1.0e-12:
         return False
     others = (index for index in polygon if index not in triangle)
-    return not any(_strictly_inside_triangle(points[index], a, b, c) for index in others)
+    inside = _inside_closed_triangle if exact else _strictly_inside_triangle
+    return not any(inside(points[index], a, b, c) for index in others)
+
+
+def _inside_closed_triangle(point, a, b, c):
+    # Do not clip a diagonal through retained boundary samples, stranding them.
+    return min(_orient2(a, b, point), _orient2(b, c, point), _orient2(c, a, point)) >= -1.0e-12
 
 
 def _strictly_inside_triangle(point, a, b, c):

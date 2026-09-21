@@ -18,6 +18,7 @@ _PROXY_CHECKS = (
 
 
 def _entity_from_active_object(root_name, obj):
+    if _free_editor_entity(root_name, obj): return "FIBER", obj.get("af_free_editor_fiber")
     if not obj or obj.get("af_root_name") != root_name:
         return None
     if is_bound_scp_obj(obj, root_name):
@@ -26,6 +27,11 @@ def _entity_from_active_object(root_name, obj):
         if obj.get(flag) and obj.get(id_key):
             return kind, obj.get(id_key)
     return None
+
+
+def _free_editor_entity(root_name, obj):
+    return bool(obj is not None and obj.get("af_free_editor_root") == root_name
+                and obj.get("af_free_editor_session") and obj.get("af_free_editor_fiber"))
 
 
 def _active_scp_from_tree(root):

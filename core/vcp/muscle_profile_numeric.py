@@ -38,7 +38,7 @@ def execute_partitioned(requests, kind, execute):
 def prepared_key(request, backend):
     spec = request.spec
     return content_key(request.points, PROFILE_VERSION, backend, spec.target_count, spec.densify,
-        spec.closed_u, spec.close_across_fibers, spec.topology_flip_normals)
+        spec.closed_u, spec.close_across_fibers, spec.topology_flip_normals, *(['FREE_EXACT'] if spec.preserve_samples else []))
 
 
 def prepare_profile(request, backend, execute):

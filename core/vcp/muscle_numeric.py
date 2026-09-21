@@ -41,6 +41,7 @@ class MuscleNumericSpec:
     control_world: tuple
     initialize_control: bool = False
     section_profile: object = None
+    preserve_samples: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,9 +109,15 @@ def _execute_ordinary(requests, kind):
         execute = execute_native_muscle_batch
     else:
         execute = execute_python_muscle_batch
+    execute = _exact_executor(execute, kind.value)
     if any(request_error(row) or row.spec.inflation_mode not in LEGACY_MODES for row in requests):
         return apply_batch(requests, execute_partitioned(requests, kind.value, execute))
     return apply_batch(requests, execute(requests))
+
+
+def _exact_executor(ordinary, kind):
+    from .free_muscle_numeric import execute
+    return lambda requests: execute(requests, kind, ordinary) if any(r.spec.preserve_samples for r in requests) else ordinary(requests)
 
 
 def execute_python_muscle_batch(requests):

@@ -21,6 +21,14 @@ def _record_values(item):
     if values.get('output_domain_mode') == 'FULL':
         from ...core.vcp.muscle_output_domain import FIELDS
         values = {key: value for key, value in values.items() if key not in FIELDS}
+    return _legacy_fiber_values(values)
+
+
+def _legacy_fiber_values(values):
+    from ...core.vcp.free_path import FREE_FIELDS
+    defaults = ('CONTROLLED', '', 0, 64)
+    if all(values.get(key, default) == default for key, default in zip(FREE_FIELDS, defaults)):
+        return {key: value for key, value in values.items() if key not in FREE_FIELDS}
     return values
 
 

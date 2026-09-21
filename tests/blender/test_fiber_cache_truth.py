@@ -94,13 +94,15 @@ class FiberCacheTruthTests(unittest.TestCase):
         with patch.object(solver, "_store_status"), patch.object(solver, "_store_metrics"):
             _finish_session(session, True, False)
         self.assertFalse(solver._warm_cache or solver._loop_exact_results)
-        publish_fiber_cache(session, session.result())
+        with patch('anthroforge.core.vcp.fiber_authority.session_owned', return_value=True):
+            publish_fiber_cache(session, session.result())
         self.assertTrue(solver._warm_cache and solver._loop_exact_results)
 
     def test_refinement_publishes_only_after_output_commit(self):
         fiber, result = object(), SimpleNamespace()
         job = SimpleNamespace(session=object(), output_committed=False)
         with patch.object(fiber_refinement, "_invalid_job_reason", return_value=None), \
+             patch.object(fiber_refinement, "_authority_current", return_value=True), \
              patch.object(fiber_refinement, "_owned_job_data", return_value=(None, None, fiber)), \
              patch.object(fiber_refinement, "_store_result"), patch.object(fiber_refinement, "_commit_allowed", return_value=True), \
              patch.object(fiber_refinement, "_restore_previous_output"), patch.object(fiber_refinement, "_finish_pending_version"), \

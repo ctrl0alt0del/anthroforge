@@ -18,6 +18,12 @@ def muscle_surface(root, muscle):
 
 
 def add_branch(root, muscle_id, branch_surface_id, boundary_id, point_ids):
+    import bpy
+    from .free_point_edit import graph_action
+    return graph_action(root, bpy.context.scene, lambda: _add_branch(root, muscle_id, branch_surface_id, boundary_id, point_ids))
+
+
+def _add_branch(root, muscle_id, branch_surface_id, boundary_id, point_ids):
     muscle = find_muscle(root, muscle_id)
     validate_prepared_mode(muscle.inflation_mode)
     current = muscle_surface(root, muscle)
@@ -135,6 +141,12 @@ def protected_references(root):
 
 
 def detach_point(root, fiber_id, index):
+    import bpy
+    from .free_point_edit import graph_action
+    return graph_action(root, bpy.context.scene, lambda: _detach_point(root, fiber_id, index))
+
+
+def _detach_point(root, fiber_id, index):
     if (fiber_id, index) in protected_references(root):
         raise ValueError("Remove the branch connection before detaching its root")
     fiber = next(f for f in root.af_vcp_system.fibers if f.id == fiber_id)

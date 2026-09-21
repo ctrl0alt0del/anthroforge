@@ -18,6 +18,13 @@ from ..vcp.fiber_node_attachment_codec import node_attachment_target_ids
 from ..vcp.prop_update_guard import suppress_vcp_prop_updates
 from .fiber_cache_lifecycle import invalidate_fiber_caches
 
+_FIBER_DELETE_CALLBACK = None
+
+
+def set_fiber_delete_callback(callback):
+    global _FIBER_DELETE_CALLBACK
+    _FIBER_DELETE_CALLBACK = callback
+
 
 def _owner_key(obj):
     if obj.get("af_scp_bound") and not obj.get("af_scp_mirror") and obj.get("af_scp_id"):
@@ -126,6 +133,7 @@ def _orphan_blob_scp_ids(root):
 
 
 def _remove_fibers(root, fiber_ids):
+    if _FIBER_DELETE_CALLBACK is not None: _FIBER_DELETE_CALLBACK(root, fiber_ids)
     changed = _remove_items_by_id(root.af_vcp_system.fibers, fiber_ids)
     changed = _clear_active_vcp(root, "FIBER", fiber_ids) or changed
     return _remove_muscle_refs(root, fiber_ids) or changed

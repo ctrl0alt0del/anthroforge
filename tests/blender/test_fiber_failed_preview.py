@@ -15,6 +15,7 @@ for value in (str(BLENDER_TEST_ROOT), str(ADDON_ROOT), str(ADDON_ROOT.parent)):
 from anthroforge.core.visualization import fiber_refinement
 from anthroforge.core.visualization.fiber_sync import register_fiber_sync
 from anthroforge.core.visualization.fiber_sync_helpers import cached_fiber_points
+from anthroforge.core.vcp.fiber_authority import token
 from _helpers import BlenderTestCase, capture_mesh_attachment, fiber, mesh_object, root, scp_with_object
 
 
@@ -38,7 +39,7 @@ def _job(root_obj, item, session):
     return fiber_refinement.FiberRefinementJob(
         fiber_refinement._job_key(scene, root_obj, item.id), scene.name, root_obj.name,
         fiber_refinement._id_uid(scene), fiber_refinement._id_uid(root_obj),
-        fiber_refinement._id_pointer(item), item.id, (), (), session)
+        fiber_refinement._id_pointer(item), item.id, (), (), session, authority=token(root_obj, item))
 
 
 def _displayed(proxy):
