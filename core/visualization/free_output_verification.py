@@ -69,5 +69,10 @@ def _mirror(source, mirrored, rule):
         if mirrored is not None: raise ValueError('FREE_OUTPUT_NOT_CURRENT: obsolete mirror')
         return
     expected = mirror_world_matrix(source.matrix_world, axis=rule[0], origin=rule[1]) if source else None
-    if source is None or mirrored is None or mirrored.data != source.data or mirrored.matrix_world != expected:
+    if source is None or mirrored is None or mirrored.data != source.data or not _same_matrix(mirrored.matrix_world, expected):
         raise ValueError('FREE_OUTPUT_NOT_CURRENT: derived mirror')
+
+
+def _same_matrix(actual, expected):
+    # Blender decomposes object transforms on reload; retain mesh publication precision.
+    return all(abs(a - b) <= 1e-6 for row, other in zip(actual, expected) for a, b in zip(row, other))

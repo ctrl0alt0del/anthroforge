@@ -136,6 +136,9 @@ Failed geometry, binding, budget or journal writes roll back native records and
 generated output. Explicit commits verify dependent surfaces, branched assemblies,
 base/inflated meshes and derived mirrors inside the transaction. Failed output
 evaluation restores geometry and runtime status and retains the UI draft.
+Mirror matrices use an absolute `1e-6` verification tolerance, matching mesh
+coordinates and allowing Blender's transform decomposition on save/reload.
+Larger transform mismatches still reject publication and roll back Apply.
 Rollback invalidates obsolete work before restoring runtime diagnostics, so cache
 cleanup cannot overwrite the pre-operation statuses of mixed-mode neighbors.
 Relevant errors include `STALE_SCENE_REVISION`,
@@ -163,6 +166,14 @@ does not certify collision clearance or anatomical quality. A session/root/fiber
 mode and generation token rejects obsolete solver progress, final publication,
 cache writes, status restoration and migration rollback after conversion.
 
+Standalone Free recompute and direct property changes finish through the same
+dependency dispatch as grouped/API requests. Terminal groups notify dependents
+of successful and failed Free members once; a failed source retains its last
+valid geometry and propagates stale state to ordinary lofts, transitive branches,
+base/inflated meshes and mirrors. Immediate Free completion uses the runtime's
+existing tail queue when another update is active, without recursively dispatching
+the source or entering a planner/solver.
+
 Free-containing ordinary lofts use the union of normalized source arc-length
 stations to preserve every source corner without rewriting the fibers. Closed-loop
 winding and cyclic starts are aligned on derived row copies before
@@ -170,6 +181,10 @@ union sampling; unequal sample counts are supported and source order is unchange
 Exact structural tags locate branch roots; ambiguous repeated occurrences reject the
 operation. Existing branch seams, mirror generation and inflation are reused.
 Controlled-only loft preparation stays unchanged.
+Public surface and muscle creation accept unequal saved Controlled node counts
+when any source is Free, including unequal current sample counts. They validate
+Free payloads and evaluate bounded candidate geometry before adding a surface
+record. Controlled-only count restrictions and mixed OPEN/LOOP rejection remain.
 Free LOOP patches retain every boundary sample during triangulation, including
 collinear samples: an ear cannot clip a diagonal through another boundary sample.
 Self-intersecting boundaries still reject the transaction.

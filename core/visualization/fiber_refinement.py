@@ -103,6 +103,7 @@ class FiberRefinementGroup:
     pending: set = field(default_factory=set)
     committed: set = field(default_factory=set)
     failures: dict = field(default_factory=dict)
+    free_targets: set = field(default_factory=set)
     done: bool = False
 
 
@@ -168,7 +169,12 @@ def _request_error(request):
 def _update_free(root, scene, fiber, group_token):
     from .free_fiber_runtime import update
     ok, error, proxy = update(root, scene, fiber)
-    _group_member_done(group_token, fiber.id, ok, error or 'FREE_UPDATED')
+    group = _GROUPS.get(str(group_token or ""))
+    if group is not None:
+        group.free_targets.add(str(fiber.id))
+        _group_member_done(group_token, fiber.id, ok, error or 'FREE_UPDATED')
+    else:
+        _sync_fiber_group(root, scene, {fiber.id}, immediate=True)
     return RefinementRequest(ok, error, proxy)
 
 
@@ -795,11 +801,14 @@ def _sync_final(job):
     _sync_fiber_group(root, scene, {fiber.id})
 
 
-def _sync_fiber_group(root, scene, fiber_ids):
+def _sync_fiber_group(root, scene, fiber_ids, immediate=False):
+    from .sync_runner import sync_from_dirty_hints
     ids = set(fiber_ids)
     payload = {"solved_fiber_ids": sorted(ids)}
-    _sync_scene()(root=root, scene=scene, dirty_hints=dirty_hints_for("FIBER", ids),
-                  source="fiber_refinement", event_type="FIBER_SOLVE_READY", payload=payload)
+    # Terminal IDs skip source dispatch even on failure; consumers see stale sources.
+    dispatch = sync_from_dirty_hints if immediate else _sync_scene()
+    dispatch(root=root, scene=scene, dirty_hints=dirty_hints_for("FIBER", ids),
+             source="fiber_refinement", event_type="FIBER_SOLVE_READY", payload=payload)
 
 
 def _finish_group_member(job, committed, result):
@@ -825,7 +834,10 @@ def _group_member_done(token, fiber_id, committed, reason):
 def _finish_group_if_ready(group):
     if group is None or group.done or group.pending: return
     group.done = True; root, scene = _group_data(group)
-    if root is not None and scene is not None and group.committed:
+    if root is None or scene is None: return
+    if group.free_targets:
+        _sync_fiber_group(root, scene, group.committed | group.free_targets, immediate=True)
+    elif group.committed:
         _sync_fiber_group(root, scene, group.committed)
 
 

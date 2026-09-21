@@ -3,12 +3,14 @@ from .results import failure, success
 
 try:
     from ...core.vcp.fiber_modes import is_loop_fiber
+    from ...core.vcp.free_path import is_free
     from ...core.id_utils import next_prefixed_id
     from ...core.visualization.mirror_rules import effective_rule_for_fiber
     from ...core.vcp.runtime_state import reset_muscle_runtime
     from ...core.vcp.prop_update_guard import suppress_vcp_prop_updates
 except ImportError:
     from core.vcp.fiber_modes import is_loop_fiber
+    from core.vcp.free_path import is_free
     from core.id_utils import next_prefixed_id
     from core.visualization.mirror_rules import effective_rule_for_fiber
     from core.vcp.runtime_state import reset_muscle_runtime
@@ -114,6 +116,8 @@ def _compatibility_error(root, fibers):
     _ = root
     if _mixed_topology(fibers):
         return "Do not mix open and loop fibers in one muscle."
+    if any(is_free(fiber) for fiber in fibers):
+        return ""
     node_count = int(fibers[0].node_count)
     for fiber in fibers[1:]:
         if int(fiber.node_count) != node_count:
