@@ -2,12 +2,15 @@
 
 import hashlib
 import json
+import re
 
 from filelock import FileLock
 
 from common import COLLECTION, STAGES, read_json, reference, root, write_json
 from contracts import validate_record, verify_artifacts
 from service import client
+from memory_cards import (INDEX_VERSION, category_of, compact, index_text,
+                          select_diverse, stages_for, validate_size)
 
 
 def latest_records():
@@ -19,20 +22,38 @@ def latest_records():
     return records
 
 
+def get_record(identifier, revision=None):
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", identifier):
+        raise ValueError("Invalid lesson id")
+    directory = root() / "knowledge/lessons" / identifier
+    versions = sorted(directory.glob("r[0-9]*.json"))
+    if not versions:
+        raise ValueError("Unknown lesson: " + identifier)
+    path = directory / f"r{revision:06d}.json" if revision is not None else versions[-1]
+    record = validate_record(read_json(path), "lesson")
+    return verify_artifacts(record)
+
+
+def feature_catalogue(stage):
+    cards = [r["card"] for r in latest_records() if applicable(r, stage) and "card" in r]
+    return {"stage": stage, "features": sorted({tag for card in cards for tag in card["tags"]}),
+            "topics": sorted({card["topic"] for card in cards})}
+
+
 def collection():
     return client().get_or_create_collection(COLLECTION,
         metadata={"schema_version": 1, "authority": "knowledge/lessons"})
 
 
 def indexed_text(record):
-    fields = ("title", "observation", "action", "applicability", "limitations")
-    return "\n".join(f"{field}: {record[field]}" for field in fields)
+    return index_text(record)
 
 
 def metadata(record):
     result = {key: record[key] for key in ("id", "revision", "kind", "status", "title")}
     for stage in STAGES:
-        result["stage_" + stage] = "all" in record["stages"] or stage in record["stages"]
+        result["stage_" + stage] = applicable(record, stage)
+    result.update(index_version=INDEX_VERSION, category=category_of(record))
     result["record_path"] = (root() / "knowledge" / "lessons" / record["id"] /
                              f"r{record['revision']:06d}.json").as_posix()
     return result
@@ -47,9 +68,9 @@ def upsert(index, records):
 
 def synchronize(index, records):
     existing = index.get(include=["metadatas"])
-    versions = {key: value.get("revision") for key, value in
+    versions = {key: (value.get("revision"), value.get("index_version")) for key, value in
                 zip(existing["ids"], existing["metadatas"])}
-    changed = [item for item in records if versions.get(item["id"]) != item["revision"]]
+    changed = [item for item in records if versions.get(item["id"]) != (item["revision"], INDEX_VERSION)]
     upsert(index, changed)
 
 
@@ -78,6 +99,7 @@ def remember(path):
     verify_artifacts(record)
     with FileLock(str(root() / "knowledge" / "curation.lock"), timeout=120):
         if require_next_revision(record, latest_records()):
+            validate_size(record)
             write_json(metadata(record)["record_path"], record)
         upsert(collection(), [record])
     return {"id": record["id"], "revision": record["revision"], "indexed": True}
@@ -88,13 +110,15 @@ def reindex():
         records = latest_records()
         for record in records:
             validate_record(record, "lesson")
+            if "card" in record:
+                validate_size(record)
         upsert(collection(), records)
     return {"indexed": len(records)}
 
 
 def applicable(record, stage):
     return record["status"] != "superseded" and (
-        "all" in record["stages"] or stage in record["stages"])
+        "all" in record["stages"] or bool(set(stages_for(stage)).intersection(record["stages"])))
 
 
 def memory_digest(records):
@@ -107,30 +131,38 @@ def semantic_records(index, stage, query, records, limit):
                        {"status": {"$ne": "superseded"}}]}
     if not records:
         return []
-    matches = index.query(query_texts=[query], n_results=min(limit, len(records)), where=where)
+    matches = index.query(query_texts=[query], n_results=min(limit, len(records)),
+                          where=where, ids=[r["id"] for r in records])
     by_id = {item["id"]: item for item in records}
     return [dict(by_id[key], retrieval_distance=distance) for key, distance in
             zip(matches["ids"][0], matches["distances"][0]) if key in by_id]
 
 
-def retrieve_indexed(stage, query, records, limit):
+def retrieve_indexed(stage, query, records, limit, features=(), category="modeling"):
     try:
         index = collection()
         synchronize(index, records)
-        lessons = [r for r in records if r["kind"] == "lesson" and applicable(r, stage)]
-        matches = semantic_records(index, stage, query, lessons, limit)
-        return {"lessons": matches, "retrieval_status": "available"}
+        lessons = [r for r in records if r["kind"] == "lesson" and applicable(r, stage)
+                   and (category == "all" or category_of(r) == category)]
+        search = query + (" Features: " + " ".join(features) if features else "")
+        matches = semantic_records(index, stage, search, lessons, len(lessons))
+        return {"lessons": select_diverse(matches, limit, features), "retrieval_status": "available"}
     except Exception as error:
         return {"lessons": [], "retrieval_status": "unavailable", "retrieval_error": str(error)}
 
 
-def retrieve(stage, query, limit=6):
+def retrieve(stage, query, limit=4, features=(), category="modeling", full=False):
+    if stage not in STAGES or category not in ("modeling", "engineering", "history", "all") or limit < 1:
+        raise ValueError("Invalid stage, category or lesson limit")
     with FileLock(str(root() / "knowledge" / "curation.lock"), timeout=120):
         records = latest_records()
         mandatory = [r for r in records if r["kind"] == "procedure" and
                      r["status"] == "requirement" and applicable(r, stage)]
-        indexed = retrieve_indexed(stage, query, records, limit)
+        indexed = retrieve_indexed(stage, query, records, limit, features, category)
     if not mandatory:
         raise ValueError("No stage procedure: seed the workflow before construction")
-    return {"knowledge_digest": memory_digest(records), "procedures": mandatory,
-            "query": query, "stage": stage, **indexed}
+    if not full:
+        mandatory, indexed["lessons"] = list(map(compact, mandatory)), list(map(compact, indexed["lessons"]))
+    return {"knowledge_digest": memory_digest(records), "procedures": mandatory, **indexed,
+            "query": query, "stage": stage, "features": list(features), "category": category,
+            "format": "full" if full else "cards", "included_stages": list(stages_for(stage))}

@@ -47,23 +47,25 @@ def capture_target(root, scene, muscle_id="", surface_id=""):
     muscle, source = find_target(root, muscle_id, surface_id)
     reasons = _domain_reasons(root, source)
     try:
-        fibers, rows = current_rows(root, scene, source)
         if getattr(source, 'construction_mode', '') == 'BRANCHED_LOFT':
             return _branched_target(root, scene, muscle, source, reasons)
+        fibers, rows = current_rows(root, scene, source)
         rows, chart = expanded_rows_with_provenance(root, source, rows, fibers)
         payload = _payload(source, fibers, rows)
         revision = domain_revision(_revision(payload, chart, source), muscle)
         return ProfileTarget(muscle, source, payload, chart, revision, True, reasons)
     except (ValueError, TypeError) as error:
-        return ProfileTarget(muscle, source, reasons=reasons or (str(error),))
+        return ProfileTarget(muscle, source, reasons=(str(error), *reasons))
 
 
 def _branched_target(root, scene, muscle, source, reasons):
-    from .branched_surface_capture import capture_assembly
+    from .branched_surface_capture import capture_assembly, source_surface
     from ..vcp.branched_surface import assemble
+    sources = (source.main_surface_id, *(c.surface_id for c in source.branches))
+    for key in sources:
+        current_rows(root, scene, source_surface(root, key))
     assembly = capture_assembly(root, scene, source)
     vertices, faces = assemble(assembly)
-    sources = (source.main_surface_id, *(c.surface_id for c in source.branches))
     keys = tuple((c.id, c.boundary_fiber_id, tuple(r.point_id for r in c.roots)) for c in source.branches)
     revision = domain_revision(content_key(vertices, PROFILE_VERSION, source.id, sources, keys, faces.tolist()), muscle)
     return ProfileTarget(muscle, source, base_revision=revision, current=True, reasons=reasons, assembly=assembly)
@@ -127,9 +129,9 @@ def _payload(source, fibers, rows):
 
 
 def _free_payload(source, fibers, rows):
-    from ..vcp.free_surface import prepare_rows
+    from ..vcp.free_surface_stations import prepare_record
     closed = bool(is_loop_fiber(fibers[0]))
-    grid = prepare_rows(rows, closed, multiplier=4)
+    grid = prepare_record(source, fibers, rows, closed)
     return np.asarray(grid, dtype=float), len(grid[0]), False, closed, source, True
 
 

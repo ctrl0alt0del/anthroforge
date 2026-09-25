@@ -334,6 +334,20 @@ class VcpUseCaseTests(unittest.TestCase):
         self.assertTrue(muscle.flip_normals)
         self.assertEqual(calls[0][2:], ("MUSCLE", {"M1"}))
 
+    def test_flip_inflation_uses_muscle_for_loft_and_source_for_branch(self):
+        for construction in ("LOFT", "BRANCHED_LOFT"):
+            source = Bag(id="S1", construction_mode=construction, flip_normals=False)
+            muscle = Bag(id="M1", flip_normals=False, surface_source_mode="FIBER_SURFACE", fiber_surface_id="S1")
+            root_obj = root(muscles=[muscle], active_type="MUSCLE", active_id="M1")
+            root_obj.af_vcp_system.fiber_surfaces = [source]
+            with patch("app.use_cases.muscle_tools._sync_entity") as sync:
+                result = flip_muscle_normals(context(scene(root_obj)))
+            self.assertTrue(result.ok)
+            self.assertEqual(muscle.flip_normals, construction == "LOFT")
+            self.assertEqual(source.flip_normals, construction == "BRANCHED_LOFT")
+            expected = ("MUSCLE", {"M1"}) if construction == "LOFT" else ("FIBER_SURFACE", {"S1"})
+            self.assertEqual(sync.call_args.args[2:], expected)
+
     def test_select_muscle_inflation_ctrl_updates_selection_and_active_vcp(self):
         muscle = Bag(id="M1")
         root_obj = root(muscles=[muscle], active_type="MUSCLE", active_id="M1")

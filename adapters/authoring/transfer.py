@@ -61,10 +61,12 @@ def create_group(root, scene, record):
 
 
 def manifest(record):
-    return dict(version='skeleton_transfer.v1', preview_id=record['id'], experimental=False,
+    return dict(version=record['result'].get('version', 'skeleton_transfer.v1'), preview_id=record['id'], experimental=False,
                 method=record['result']['method'], definition=record['definition'],
                 field=record['result']['field'], status=record['result']['status'],
-                annotations=record['result']['annotations'], validation=record['result']['validation'])
+                annotations=record['result']['annotations'], validation=record['result']['validation'],
+                shape_preservation=record['result'].get('shape_preservation'), field_role=record['result'].get('field_role', 'final_mapping'),
+                annotation_mapping=record['result'].get('annotation_mapping', 'shared_field'))
 
 
 def create_object(collection, row, identity):

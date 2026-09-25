@@ -551,6 +551,10 @@ AF_EXPORT int af_candidate_pairs(const double* start, const double* end, const i
 #include "af_fiber_v3_batch.hpp"
 #include "af_attachment_wave.hpp"
 #include "af_muscle_numeric.hpp"
+#include "af_base_spline.hpp"
+#include "af_base_partition.hpp"
+#include "af_transfer_shape.hpp"
+#include "af_attachment_graft.hpp"
 #if defined(AF_V3_OPERATION_EXPERIMENT) || defined(AF_V3_NATIVE_CONTROLLER)
 #include "af_fiber_v3_operations.hpp"
 #include "af_fiber_v3_coordinator.hpp"

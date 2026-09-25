@@ -11,6 +11,7 @@ class BranchInput:
     fibers: tuple
     width: float = .25
     fullness: float = 0.0
+    stations: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -38,10 +39,23 @@ def parameter(points):
     return lengths / lengths[-1]
 
 
-def sample(points, knots):
+def sample(points, knots, stations=()):
     points = np.asarray(points, dtype=float)
-    source = parameter(points)
+    source = correspondence(points, stations)
     return np.column_stack([np.interp(knots, source, points[:, axis]) for axis in range(3)])
+
+
+def correspondence(points, stations=()):
+    if len(stations) == 0: return parameter(points)
+    values = np.asarray(stations, dtype=float)
+    if values.shape != (len(points),) or not np.isfinite(values).all() or np.any(np.diff(values) <= 0):
+        raise ValueError('FREE_CORRESPONDENCE_STATIONS')
+    return (values-values[0])/(values[-1]-values[0])
+
+
+def row_stations(rows, stations):
+    if len(stations) not in (0, len(rows)): raise ValueError('FREE_CORRESPONDENCE_ROWS')
+    return tuple(correspondence(row, stations[i] if len(stations) else ()) for i, row in enumerate(rows))
 
 
 def unit(values):
@@ -88,14 +102,15 @@ def _shared_root_equal(first, second):
     return bool(np.all(np.abs(first-second) <= tolerance))
 
 
-def prepare_assembly(main_fibers, branches, flip=False, across_count=17):
+def prepare_assembly(main_fibers, branches, flip=False, across_count=17, main_stations=()):
     main = tuple(np.asarray(row, dtype=float) for row in main_fibers)
     if len(main) < 2 or any(row.ndim != 2 or row.shape[1] != 3 or len(row) < 2 for row in main):
         raise ValueError("Main loft requires at least two valid open fibers")
     validate_connections(main, branches)
-    along = np.unique(np.concatenate([parameter(row) for row in main]))
-    grid = _across_grid(np.array([sample(row, along) for row in main]), across_count)
-    prepared = tuple(_prepare_branch(main, grid, along, branch) for branch in branches)
+    stations = row_stations(main, main_stations)
+    along = np.unique(np.concatenate(stations))
+    grid = _across_grid(np.array([sample(row, along, s) for row, s in zip(main, stations)]), across_count)
+    prepared = tuple(_prepare_branch(main, grid, along, branch, stations) for branch in branches)
     return PreparedAssembly(grid, along, prepared, bool(flip))
 
 
@@ -106,13 +121,14 @@ def _across_grid(rows, count):
     return np.array([np.interp(target, source, col) for col in flat.T]).T.reshape(-1, *rows.shape[1:])
 
 
-def _prepare_branch(main, grid, along, branch):
-    roots = parameter(main[branch.boundary])[list(branch.roots)]
+def _prepare_branch(main, grid, along, branch, stations):
+    roots = stations[branch.boundary][list(branch.roots)]
     seam = np.flatnonzero((along >= roots[0]) & (along <= roots[-1]))
     across = (along[seam] - roots[0]) / (roots[-1] - roots[0])
     root_u = (roots - roots[0]) / (roots[-1] - roots[0])
-    longitudinal = np.unique(np.concatenate([np.linspace(0., 1., 17)] + [parameter(r) for r in branch.fibers]))
-    rows = np.array([sample(row, longitudinal) for row in branch.fibers])
+    child_stations = row_stations(branch.fibers, branch.stations)
+    longitudinal = np.unique(np.concatenate([np.linspace(0., 1., 17), *child_stations]))
+    rows = np.array([sample(row, longitudinal, s) for row, s in zip(branch.fibers, child_stations)])
     flat = rows.reshape(len(rows), -1)
     result = np.array([np.interp(across, root_u, col) for col in flat.T]).T.reshape(len(across), -1, 3)
     correction = grid[branch.boundary, seam] - result[:, 0]

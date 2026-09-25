@@ -11,7 +11,8 @@ def _finish(operator, result):
 
 class AF_OT_FlipMuscleNormals(bpy.types.Operator):
     bl_idname = "af.flip_muscle_normals"
-    bl_label = "Flip Muscle Normals"
+    bl_label = "Swap Inflation Side"
+    bl_description = "Reverse muscle inflation; branched muscles reverse the whole assembly"
     bl_options = {"REGISTER", "UNDO"}
 
     muscle_id: bpy.props.StringProperty(default="")

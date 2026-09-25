@@ -1,7 +1,11 @@
 # Guided muscle reconstruction in authoring 0.4
 
-**Transfer reference volumes → define the retained bone-facing underside → preview
-SCP-bound native fibers → publish native Fiber Surfaces → configure inflation.**
+**Transfer → simplified base with native Free fibers → inflation.**
+Use [the combined base API](smooth_native_base.md): `anatomy.smooth_base_preview`
+fits the simplified underside and native-compatible curves together;
+`anatomy.smooth_base_publish` creates shared Free fibers and uninflated native parts.
+This supersedes independent base fitting followed by an unchecked conversion to curves.
+The older preparation and Controlled planning operations below remain compatible.
 Guarded native inflation controls are described in [Section Profile and legacy
 authoring](section_profile.md); automated volume fitting is not part of these
 operations. Anatomical correspondences, head identities, attachment bands and
@@ -10,8 +14,42 @@ accuracy.
 
 For an already reviewed path, [Controlled and Free fibers](free_fibers.md)
 describes direct sampled/Bézier creation, editing the current deformed path,
-shared structural tags and solver-free attachment updates. The planning
-operations below retain their existing Controlled behavior.
+shared structural tags and solver-free attachment updates. Free creation is the
+default for this reconstruction workflow: the reviewed underside already defines
+the anatomical path. The planning operations below retain their existing
+Controlled behavior and are available when solver routing is explicitly wanted.
+
+## Reuse the underside and reconstruct with Free fibers
+
+Inspect saved stage handoffs and actual geometry before starting a new transfer
+or base extraction. Reuse a suitable reviewed smooth underside, including its
+declared heads, shared seams and retained extent. A former Controlled solver's
+failure to follow that shape does not invalidate the upstream anatomical target.
+
+Fit sparse longitudinal curves to the selected charts, preserving their boundary
+extrema and belly width. Publish them directly with `fibers.create_free` and
+exact sample/occurrence/shared-point tags; do not first create a Controlled route.
+Physical endpoints use qualified zero-offset SCP bindings. Deliberate contacts
+and structural junctions retain explicit supported binding/offset contracts.
+Unbound path samples and Bezier handles may lie off the SCP; they do not count
+against the eight-midpoint Controlled routing budget. A crop is a modeling
+boundary: if qualified construction curves extend beyond it, retain the native
+output-domain omission through loft, inflation, mirrors and reopening.
+
+Use guarded public authoring creation/update, surface, branch and muscle operations
+with a matching journal. Free recomputation resolves attachments and rebuilds
+dependents without a planner/solver. Verify completed `FREE_UPDATED` outcomes,
+zero solver calls, exact structural identities, and the actual union-sampled loft
+in matched views and five interior sections. Fit existing curves before adding
+another, then test removal of nonessential fibers. Solver convergence is not
+applicable; path validity, observed collisions and anatomical fit remain separate.
+
+After skeletal changes, `fibers.path_inspect.points_world` and native Edit Path
+provide the current deformed geometry. Preserve structural tags when updating;
+do not substitute stored capture coordinates for the visible path. Test no-op
+editing, recompute and normal save/reopen, and exercise subsequent attachment
+deformation in a disposable copy. Free geometry does not certify collision
+clearance and never silently falls back to routing.
 
 Use `app.authoring.api.execute(request, root, scene, journal_directory)` or
 `tools/authoring_blender.py`. `anatomy.discover` advertises `skeleton_transfer.v1`,
@@ -125,7 +163,10 @@ Source geometry and topology digests guard selections. Source deformation requir
 refitting; it does not rebuild the skeleton's indexed regions. Mesh work is bounded;
 oversized/complex selections require manageable explicit patches or completion.
 
-## Preview native fibers
+## Optional Controlled-fiber planner
+
+The following planner uses solver-controlled routes. For reconstruction from a
+reviewed underside, use the Free-fiber procedure above instead.
 
 `anatomy.plan_base_fibers` takes `base_id`, a positive scene-unit `tolerance`, and
 one `parts` entry per patch: `{patch_id, bindings}`. Every binding has:
@@ -165,7 +206,7 @@ pins or increase budgets. The count is sparse within fixed candidates, not a glo
 minimum. Separate head patches become coordinated parts; no shared branch junctions
 or arbitrary connector graph is invented by this operation.
 
-## Publish, resume and export
+## Publish a Controlled plan, resume and export
 
 `anatomy.publish_base_fibers` takes `plan_id` and current scene revision. It rechecks
 source geometry, supports and discovery revisions, then atomically appends native

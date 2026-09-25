@@ -7,7 +7,7 @@ A branched muscle is one native Muscle with a retained main Fiber Surface and on
 1. Create an open main loft and a separate open branch loft. Convert a legacy muscle to a Fiber Surface first if needed.
 2. On the muscle panel, use **Add Fiber Loft Branch**. Supply the branch surface ID, the main outer fiber ID, and its ordered point indices, one per branch fiber. Index 0 is the main fiber start; branch roots must be interior midpoints. The command explicitly replaces the branch fibers' start references with these shared points.
 3. Use **Edit Main Inflation** or **Edit Branch Inflation**, then the normal inflation controls. Each part supports Distributed or Control Point mode. A selected control-point gizmo snaps only to that part's base grid.
-4. Adjust connector Width (default 0.25) and signed Fullness (default 0). Width controls how far the connector reaches into each loft; fullness uses the assembly's selected normal side. **Swap Normals** affects the whole assembly.
+4. Adjust connector Width (default 0.25) and signed Fullness (default 0). Width controls how far the connector reaches into each loft; fullness uses the assembly's selected normal side. **Swap Inflation Side** affects the whole assembly.
 
 Binding and normal offset belong to the shared authored point. Editing a shared point affects all incident fibers. The point list shows identities and uses. Detach creates an independent copy; active branch roots cannot be detached, removed, or reordered until the connection is removed. Removing a branch connection preserves source lofts, fibers, and points. Removing the last connection returns the muscle to an ordinary loft.
 
@@ -19,9 +19,18 @@ Multiple disjoint root intervals are supported on either outer main fiber. Inter
 
 Legacy files migrate each old point occurrence to a distinct identity without merging coincident positions, moving pins, or requesting a solve. Shared identities and part settings persist in normal Blender files and package imports; imports allocate new point identities while preserving internal sharing. Undo/redo clears the point lookup caches.
 
-Restart Blender after installing this update to register the new RNA types and load the native library. Rebuild the native library with `native/fiber_ccd/build_windows.ps1` when packaging from source; the default output is `af_fiber_ccd_v3_14.dll`. Its prepared-grid inflation entry point preserves the assembled sampling and uses the existing inflation formulas.
+Restart Blender after installing this update to register the new RNA types and load the native library. Rebuild the native library with `native/fiber_ccd/build_windows.ps1` when packaging from source; the default output is `af_fiber_ccd_v3_18.dll`. Its prepared-grid inflation entry point preserves the assembled sampling and uses the existing inflation formulas.
 
 ## Authoring
+
+Authored Free source lofts may retain `af_authoring_free_surface_stations`, the
+same identity-guarded material correspondence used by ordinary Free lofts. Branch
+capture resolves those stations for both the main and child lofts, including
+children whose shared root is their end. Main sections, root intervals and child
+sections use that correspondence instead of independently normalizing every
+curve by arc length. Source lofts without this metadata retain their existing
+arc-length behavior. This preserves a designed base; it does not prevent a
+connector or inflation configuration from producing a poor anatomical shape.
 
 Protocol 0.4 exposes `muscles.branch_inspect`, `muscles.branch_add`, `muscles.branch_remove`, `muscles.branch_configure`, and `points.inspect/edit/link/detach`. Mutations require a scene revision and request ID, support replay, and restore native records on validation failure. UI and authoring use the same branch operations and qualified SCP snapping.
 

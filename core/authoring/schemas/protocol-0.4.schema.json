@@ -6209,14 +6209,45 @@
               },
               "minItems": 0,
               "maxItems": 64
+            },
+            "source_object": {
+              "type": "string",
+              "minLength": 1
+            },
+            "context_objects": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 0,
+              "maxItems": 64
+            },
+            "automatic_context": {
+              "type": "boolean"
+            },
+            "neighbor_distance": {
+              "type": "number",
+              "minimum": 0
             }
           },
           "required": [
             "scene_id",
-            "instance_id",
             "expected_scene_revision"
           ],
-          "additionalProperties": false
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "instance_id"
+              ]
+            },
+            {
+              "required": [
+                "source_object"
+              ]
+            }
+          ]
         }
       },
       "required": [
@@ -6298,6 +6329,9 @@
                 },
                 "controls": {
                   "type": "boolean"
+                },
+                "labels": {
+                  "type": "boolean"
                 }
               },
               "required": [],
@@ -6330,6 +6364,22 @@
               },
               "minItems": 0,
               "maxItems": 64
+            },
+            "context_objects": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 0,
+              "maxItems": 64
+            },
+            "automatic_context": {
+              "type": "boolean"
+            },
+            "neighbor_distance": {
+              "type": "number",
+              "minimum": 0
             }
           },
           "required": [
@@ -8746,6 +8796,128 @@
               },
               "minItems": 0,
               "maxItems": 1024
+            },
+            "shape_preservation": {
+              "type": "object",
+              "properties": {
+                "family_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "protected_bands": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "source_object": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "topology_digest": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "geometry_digest": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "vertex_indices": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "minItems": 1,
+                        "maxItems": 100000
+                      }
+                    },
+                    "required": [
+                      "source_object",
+                      "topology_digest",
+                      "geometry_digest",
+                      "vertex_indices"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 128
+                },
+                "obstacle_instance_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 1,
+                  "maxItems": 32
+                },
+                "tolerance": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "validation_samples": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 60000
+                },
+                "settings": {
+                  "type": "object",
+                  "properties": {
+                    "radius_fraction": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 2
+                    },
+                    "cluster_radius_fraction": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    },
+                    "bridge_fraction": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 0.1
+                    },
+                    "shape_strength": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1000
+                    },
+                    "collision_strength": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1000
+                    },
+                    "clearance": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "convergence": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "far_influence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "max_iterations": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1000
+                    }
+                  },
+                  "required": [],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "family_id",
+                "protected_bands",
+                "obstacle_instance_ids",
+                "tolerance"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -8792,6 +8964,644 @@
         "op": {
           "enum": [
             "anatomy.transfer_publish"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "preview_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "preview_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.transfer_collisions"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_object": {
+              "type": "string",
+              "minLength": 1
+            },
+            "topology_digest": {
+              "type": "string",
+              "minLength": 1
+            },
+            "geometry_digest": {
+              "type": "string",
+              "minLength": 1
+            },
+            "obstacle_instance_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1,
+              "maxItems": 16
+            },
+            "settings": {
+              "type": "object",
+              "properties": {
+                "tolerance": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "validation_samples": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 60000
+                }
+              },
+              "required": [
+                "tolerance"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "source_object",
+            "topology_digest",
+            "geometry_digest",
+            "obstacle_instance_ids",
+            "settings"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.transfer_correct_preview"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_object": {
+              "type": "string",
+              "minLength": 1
+            },
+            "topology_digest": {
+              "type": "string",
+              "minLength": 1
+            },
+            "geometry_digest": {
+              "type": "string",
+              "minLength": 1
+            },
+            "obstacle_instance_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1,
+              "maxItems": 16
+            },
+            "settings": {
+              "type": "object",
+              "properties": {
+                "tolerance": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "validation_samples": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 60000
+                },
+                "influence_radius": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "max_displacement": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "protection_blend": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "fit_clearance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "smoothness": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "centers": {
+                  "type": "integer",
+                  "minimum": 4,
+                  "maximum": 48
+                },
+                "max_iterations": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 150
+                },
+                "max_seconds": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 180
+                },
+                "max_volume_change": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "cleanup": {
+                  "enum": [
+                    "none",
+                    "exact"
+                  ]
+                },
+                "influences": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "center": {
+                        "$ref": "#/$defs/xyz"
+                      },
+                      "radius": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      }
+                    },
+                    "required": [
+                      "center",
+                      "radius"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 0,
+                  "maxItems": 16
+                }
+              },
+              "required": [
+                "tolerance",
+                "influence_radius",
+                "max_displacement"
+              ],
+              "additionalProperties": false
+            },
+            "guard_instance_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 0,
+              "maxItems": 16
+            },
+            "protected_bands": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "vertex_indices": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "minItems": 1,
+                    "maxItems": 30000
+                  }
+                },
+                "required": [
+                  "id",
+                  "vertex_indices"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0,
+              "maxItems": 64
+            },
+            "contacts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source_binding": {
+                    "$ref": "#/$defs/surface_binding"
+                  },
+                  "obstacle_instance_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "target_binding": {
+                    "$ref": "#/$defs/surface_binding"
+                  }
+                },
+                "required": [
+                  "id",
+                  "source_binding",
+                  "obstacle_instance_id",
+                  "target_binding"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0,
+              "maxItems": 128
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "source_object",
+            "topology_digest",
+            "geometry_digest",
+            "obstacle_instance_ids",
+            "settings"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.transfer_correct_publish"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "preview_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "preview_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.transfer_attachment_preview"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_object": {
+              "type": "string",
+              "minLength": 1
+            },
+            "topology_digest": {
+              "type": "string",
+              "minLength": 1
+            },
+            "geometry_digest": {
+              "type": "string",
+              "minLength": 1
+            },
+            "obstacle_instance_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1,
+              "maxItems": 16
+            },
+            "settings": {
+              "type": "object",
+              "properties": {
+                "cut_value": {
+                  "type": "number"
+                },
+                "overlap_cut_value": {
+                  "type": "number"
+                },
+                "escape_distance": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "tolerance": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "departure_direction": {
+                  "$ref": "#/$defs/xyz"
+                },
+                "attachment_axes": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/xyz"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "retained_axes": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/xyz"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "validation_samples": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 60000
+                }
+              },
+              "required": [
+                "cut_value",
+                "overlap_cut_value",
+                "escape_distance",
+                "tolerance",
+                "departure_direction",
+                "attachment_axes",
+                "retained_axes"
+              ],
+              "additionalProperties": false
+            },
+            "attachment_instance_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_cut_values": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 4,
+              "maxItems": 30000
+            },
+            "footprint": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "tri_vidx": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "minItems": 3,
+                    "maxItems": 3
+                  },
+                  "polygon": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/xyz"
+                    },
+                    "minItems": 3,
+                    "maxItems": 16
+                  }
+                },
+                "required": [
+                  "tri_vidx",
+                  "polygon"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 30000
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "source_object",
+            "topology_digest",
+            "geometry_digest",
+            "obstacle_instance_ids",
+            "settings",
+            "attachment_instance_id",
+            "source_cut_values",
+            "footprint"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.transfer_attachment_publish"
           ]
         },
         "params": {
@@ -9500,6 +10310,776 @@
             "anthroforge.authoring.protocol"
           ]
         },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.smooth_base_preview"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_object": {
+              "type": "string",
+              "minLength": 1
+            },
+            "topology_digest": {
+              "type": "string",
+              "minLength": 1
+            },
+            "geometry_digest": {
+              "type": "string",
+              "minLength": 1
+            },
+            "family": {
+              "type": "string",
+              "minLength": 1
+            },
+            "heads": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id",
+                  "label"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 16
+            },
+            "patches": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "head_ids": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "minItems": 1,
+                        "maxItems": 16
+                      },
+                      "endpoints": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "start": {
+                              "type": "object",
+                              "properties": {
+                                "instance_id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "position": {
+                                  "$ref": "#/$defs/xyz"
+                                },
+                                "max_distance": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "mode": {
+                                  "enum": [
+                                    "fit",
+                                    "extend"
+                                  ]
+                                },
+                                "normal_offset": {
+                                  "type": "number"
+                                },
+                                "purpose": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "instance_id",
+                                "position",
+                                "max_distance"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "end": {
+                              "type": "object",
+                              "properties": {
+                                "instance_id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "position": {
+                                  "$ref": "#/$defs/xyz"
+                                },
+                                "max_distance": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "mode": {
+                                  "enum": [
+                                    "fit",
+                                    "extend"
+                                  ]
+                                },
+                                "normal_offset": {
+                                  "type": "number"
+                                },
+                                "purpose": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "instance_id",
+                                "position",
+                                "max_distance"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "start",
+                            "end"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "minItems": 2,
+                        "maxItems": 8
+                      },
+                      "output_domain": {
+                        "$ref": "#/$defs/muscle_output_domain"
+                      },
+                      "grid_vertex_ids": {
+                        "type": "array",
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "minItems": 4,
+                          "maxItems": 129
+                        },
+                        "minItems": 4,
+                        "maxItems": 129
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "head_ids",
+                      "endpoints",
+                      "grid_vertex_ids"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "head_ids": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "minItems": 1,
+                        "maxItems": 16
+                      },
+                      "endpoints": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "start": {
+                              "type": "object",
+                              "properties": {
+                                "instance_id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "position": {
+                                  "$ref": "#/$defs/xyz"
+                                },
+                                "max_distance": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "mode": {
+                                  "enum": [
+                                    "fit",
+                                    "extend"
+                                  ]
+                                },
+                                "normal_offset": {
+                                  "type": "number"
+                                },
+                                "purpose": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "instance_id",
+                                "position",
+                                "max_distance"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "end": {
+                              "type": "object",
+                              "properties": {
+                                "instance_id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "position": {
+                                  "$ref": "#/$defs/xyz"
+                                },
+                                "max_distance": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "mode": {
+                                  "enum": [
+                                    "fit",
+                                    "extend"
+                                  ]
+                                },
+                                "normal_offset": {
+                                  "type": "number"
+                                },
+                                "purpose": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "instance_id",
+                                "position",
+                                "max_distance"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "start",
+                            "end"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "minItems": 2,
+                        "maxItems": 8
+                      },
+                      "output_domain": {
+                        "$ref": "#/$defs/muscle_output_domain"
+                      },
+                      "source_triangles": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "minItems": 1,
+                        "maxItems": 8192
+                      },
+                      "boundary_vertex_ids": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "minItems": 4,
+                        "maxItems": 4
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "head_ids",
+                      "endpoints",
+                      "source_triangles",
+                      "boundary_vertex_ids"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 8
+            },
+            "seams": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "first": {
+                    "type": "object",
+                    "properties": {
+                      "patch_id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "side": {
+                        "enum": [
+                          0,
+                          1
+                        ]
+                      }
+                    },
+                    "required": [
+                      "patch_id",
+                      "side"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "second": {
+                    "type": "object",
+                    "properties": {
+                      "patch_id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "side": {
+                        "enum": [
+                          0,
+                          1
+                        ]
+                      }
+                    },
+                    "required": [
+                      "patch_id",
+                      "side"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "first",
+                  "second"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0,
+              "maxItems": 8
+            },
+            "settings": {
+              "type": "object",
+              "properties": {
+                "longitudinal_controls": {
+                  "type": "integer",
+                  "minimum": 4,
+                  "maximum": 8
+                },
+                "fairness": {
+                  "type": "number",
+                  "minimum": 1e-08,
+                  "maximum": 1
+                },
+                "junction_smoothness": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "samples_per_fiber": {
+                  "type": "integer",
+                  "minimum": 9,
+                  "maximum": 65
+                },
+                "max_shape_error": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "max_native_error": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "max_width_change": {
+                  "type": "number",
+                  "minimum": 0.01,
+                  "maximum": 1
+                },
+                "collision_radius": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "max_shape_error",
+                "max_native_error"
+              ],
+              "additionalProperties": false
+            },
+            "anatomical_note": {
+              "type": "string",
+              "minLength": 1
+            },
+            "overlap_repairs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "patch_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  "sides": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        0,
+                        1
+                      ]
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  "settings": {
+                    "type": "object",
+                    "properties": {
+                      "along_axis": {
+                        "$ref": "#/$defs/xyz"
+                      },
+                      "across_axis": {
+                        "$ref": "#/$defs/xyz"
+                      },
+                      "blend_distance": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "max_displacement": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "max_depth_gap": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "max_outline_error": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      }
+                    },
+                    "required": [
+                      "along_axis",
+                      "across_axis",
+                      "blend_distance",
+                      "max_displacement",
+                      "max_depth_gap",
+                      "max_outline_error"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "patch_ids",
+                  "sides",
+                  "settings"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0,
+              "maxItems": 4
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "source_object",
+            "topology_digest",
+            "geometry_digest",
+            "family",
+            "heads",
+            "patches",
+            "seams",
+            "settings",
+            "anatomical_note"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.smooth_base_publish"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "preview_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "preview_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "anatomy.partition_base_surfaces"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/xyz"
+                  },
+                  "minItems": 2,
+                  "maxItems": 1025
+                },
+                "minItems": 2,
+                "maxItems": 8
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "sides": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  0,
+                  1
+                ]
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "settings": {
+              "type": "object",
+              "properties": {
+                "along_axis": {
+                  "$ref": "#/$defs/xyz"
+                },
+                "across_axis": {
+                  "$ref": "#/$defs/xyz"
+                },
+                "blend_distance": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "max_displacement": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "max_depth_gap": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "max_outline_error": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "along_axis",
+                "across_axis",
+                "blend_distance",
+                "max_displacement",
+                "max_depth_gap",
+                "max_outline_error"
+              ],
+              "additionalProperties": false
+            },
+            "connection": {
+              "type": "object",
+              "properties": {
+                "main": {
+                  "enum": [
+                    0,
+                    1
+                  ]
+                },
+                "side": {
+                  "enum": [
+                    0,
+                    1
+                  ]
+                },
+                "root_indices": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "minItems": 2,
+                  "maxItems": 8
+                }
+              },
+              "required": [
+                "main",
+                "side",
+                "root_indices"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "paths",
+            "sides",
+            "settings"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
         "version": {
           "enum": [
             "0.4.0"
@@ -9695,6 +11275,9 @@
         "recompute": {
           "$ref": "#/$defs/patch_value"
         },
+        "inspection": {
+          "$ref": "#/$defs/patch_value"
+        },
         "matches": {
           "type": "array",
           "items": {
@@ -9710,6 +11293,9 @@
           "$ref": "#/$defs/patch_value"
         },
         "base_surface": {
+          "$ref": "#/$defs/patch_value"
+        },
+        "partition": {
           "$ref": "#/$defs/patch_value"
         },
         "plan_id": {

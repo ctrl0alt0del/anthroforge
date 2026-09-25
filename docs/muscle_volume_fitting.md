@@ -7,7 +7,38 @@ in the external workflow artifact/knowledge store. Use the production
 [reconstruction workflow](authoring_muscle_reconstruction.md) and
 [inflation controls](section_profile.md) for native creation and publication.
 
+## Simplified game-muscle target
+
+The September 21, 2026 user correction sets the target as a designer-built,
+low-complexity muscle approximation: preserve general silhouette, head arrangement,
+belly position, broad volume distribution and meaningful attachment neighborhoods.
+Do not reproduce small creases, bumps, serrations or incidental reference concavities,
+even when those features are real anatomy. This takes precedence over earlier
+case acceptance based on close surface residuals or preserving every concavity.
+
+Design the retained underside as a few broad, smooth forms with sparse editable
+controls. Simplify both borders and interior; smoothing borders alone is insufficient.
+Fit Free paths as deliberate simple curves on that designed form rather than copying
+every sample of a triangulated parameterization. Add a bend, control or fiber only
+when it materially preserves the silhouette, broad sectional volume distribution,
+head arrangement or an essential attachment/route. Reject unexplained alternating
+bends even when distance, width and topology checks pass. Dense evaluation samples
+may tessellate a simple curve; they must not become independent modeling detail.
+
+Compare large-scale silhouettes, belly position, head proportions and broad section
+width/depth/area before pointwise residuals. Retain raw anatomy for context, not as
+an instruction to recover discarded detail during inflation. No universal spline
+control count, triangle budget or proven simplification algorithm is established by
+this correction. Final output tessellation and modeling-control complexity are
+separate decisions. Existing accepted cases require reassessment under this target.
+
 ## Separate the decisions
+
+Operationally there are three stages: transfer, combined simplified base/native
+Free fibers, and inflation. Use `anatomy.smooth_base_preview` / `smooth_base_publish`
+as described in [the combined API](smooth_native_base.md). The four checks below
+remain separate evidence categories inside that workflow, not four independent
+construction passes. A native reproduction failure is corrected inside stage two.
 
 Keep four separately validated results: **transfer correspondence**, **underside
 definition**, **native base reproduction**, and **inflation fit**. Native route
@@ -29,12 +60,14 @@ to a transferred reference cannot certify that the transfer itself is correct.
    A tiny neighborhood around a geometric extremum can collapse an attachment
    band. Declare heads and seams explicitly; a head ending at a common soft-tissue
    junction must not be independently extended to a convenient distal bone.
-4. Reconstruct through native qualified SCP pins. In the current base workflow,
-   authored points have zero offsets; dense curve samples are not authored pins.
-   Start sparse, allow at most eight routing corrections per fiber, and reject a
-   candidate whose surface-bound guides cannot reproduce the selected underside.
-   Use that failure to revise its routes or earlier construction decisions. Do not
-   increase the tolerance merely to turn unresolved anatomy into an accepted result.
+4. Reconstruct the reviewed underside directly through native Free paths. Keep
+   physical endpoints on qualified zero-offset SCP bindings and preserve deliberate
+   contact/junction binding contracts; unbound shape samples may lie off bone.
+   Start sparse, fit actual boundaries and belly width, and measure the native
+   loft. Do not route the reviewed shape through the solver or project every
+   sample onto bone. The eight-routing-correction limit applies only when
+   Controlled routing is explicitly chosen. Never relax anatomical tolerance to
+   force an unresolved candidate through publication.
 
 User scope correction, September 20, 2026: define a retained anatomical extent
 at the base stage and omit thin tendon-like extensions that do not contribute
@@ -58,7 +91,7 @@ handoff/feedback validation and local Chroma retrieval in
 this is not an autonomous numerical reconstruction controller.
 
 Preserve versioned checkpoints for the transfer, selected/prepared underside,
-native solved loft and inflated output. Retain source anatomy, head identities,
+native loft and inflated output. Retain source anatomy, head identities,
 allowed indexed attachment regions, intended proportions and acceptance criteria
 as independent evidence. A transfer may be corrected against that evidence; it
 must not be distorted merely to make reconstruction easier. Changed targets need
@@ -73,7 +106,7 @@ one global distance score can conceal a missing head or collapsed belly.
 | Evidence | First repair to test |
 |---|---|
 | Native underside and outline fit, but belly depth/profile does not | Inflation direction, settings or another supported mode. |
-| Selected underside is adequate, but native solved loft loses width or route | Qualified pin placement, routing, ordering, shared junctions or fiber layout. |
+| Selected underside is adequate, but native Free loft loses width or path | Free curve sampling/layout, ordering, shared junctions, qualified attachments or output-domain mapping. |
 | Selected underside itself omits a head, cuts the origin band or bridges a cleft | Underside selection, boundary roles and patch/branch decomposition. |
 | Selected underside has unexplained kinks, jagged borders or interior ripples | Redesign smooth anatomical borders and fair or rebuild the base before making more fibers. |
 | The transferred volume disagrees with independent skeletal correspondence | Transfer landmarks, local mapping or the transfer method. |
@@ -150,22 +183,32 @@ supports focused inspection; it does not itself certify recognition or anatomy.
 
 ## Check the base before fitting depth
 
-Before selecting longitudinal boundary fibers, measure suspended boundary extrema
-and proposed shared seams against qualified surfaces of the allowed SCPs. A guide
-whose target lies away from every allowed SCP cannot be reproduced by simply
-placing another zero-offset pin there. This is a layout feasibility check, not
-proof that every native decomposition fails.
-Compare a different supported layout or explicitly permitted normal offsets;
-preserve the original underside and record any changed approximation contract.
+The reviewed underside now supplies native Free paths; see
+[Free fibers](free_fibers.md). Reuse suitable accepted transfer/base checkpoints.
+Check qualified SCP support at actual physical endpoints, contacts and shared
+junctions. Suspended boundary and interior shape samples may lie off bone; do not
+replace them with nearest-surface solver pins or move the target onto the SCP.
+Retain explicit supported junction offsets and the declared output extent.
+Old Controlled shortest-route failures remain mode-specific evidence.
 
 Measure the **actual native loft after all resampling**, not just ideal source
 curves. Inspect identical camera views and five interior cross-sections. Record
 boundary placement, local width, orientation and separation from the reference
 underside. A 15% width/depth discrepancy is a review trigger inherited from the
 rebuild plan, not automatic acceptance or a universal biological tolerance.
-Run the intended native recomputation before freezing this fitting base. Record
-route acceptance separately from solver convergence. If a later recomputation
-changes the routes, regenerate the loft and recheck or refit the thickness target.
+Run the intended Free recomputation before freezing this fitting base: attachment
+resolution and downstream rebuilding must finish without planner/solver calls.
+Record native path/binding validity and observed collisions; solver convergence
+is not applicable. If deformation or an explicit edit changes the path, regenerate
+the loft and recheck or refit the thickness target. Use the current deformed
+points when editing, not stale capture coordinates.
+
+For branches, compare both raw assembled base and actual zero-depth connected
+output. Connector evaluation can move the displayed surface with inflation
+disabled. Treat that movement separately from inflation and do not certify only
+the pre-connector grids. Bound redundant Free sample density by geometric error
+and native allocation limits; union sampling can multiply surface size. Preserve
+structural tags and remeasure after simplification.
 
 Choose positional tolerances using local belly width and thickness, with a
 separate policy for thin tendons. Overall muscle length or bounding-box diagonal
@@ -177,6 +220,13 @@ For the current open loft modes, inflation leaves the perimeter fixed. A missing
 boundary, collapsed width, wrong attachment or wrong base orientation returns to
 base construction. Adding interior fibers only helps when the missing shape is
 in the base. It does not automatically fix the height model.
+
+Before accepting a thin-area omission, compare its width/thickness and section
+area within the affected anatomical head or slip as well as across the whole
+muscle. A small total-volume fraction can conceal a substantial portion of a
+small head. The September 21 pectoral omission audit rejected such a crop before
+native creation; its section-integrated estimates are diagnostic, not occupied
+union volumes or universal thresholds.
 
 ## Derive and fit a thickness target
 
@@ -193,11 +243,19 @@ Section directions where supported. Swap Side is a geometric choice that must be
 rechecked when direction or chart ordering changes. A globally reversed side
 does not repair an incoherent or folded chart.
 
+A direction mode called Smooth is not evidence of a smooth inflated surface.
+Compare actual sections, silhouettes and localized self-overlap extent after
+fitting each direction. In the September 21 brachioradialis Free-fiber case,
+Smooth and Local produced conspicuous loops while Section preserved the broad
+body with only localized proximal rim overlap. The canonical lesson
+`brachioradialis-inflation-direction-geometry-20260921` records the exact inputs;
+this is a case result, not a rule to select Section for every muscle.
+
 Keep the native base fixed while comparing the existing modes:
 
 | Mode | First controls to fit | When to increase complexity |
 |---|---|---|
-| Control Point | Side, amplitude, control position and radius | A localized bulge is misplaced or too concentrated. |
+| Control Point | Side, amplitude, control position, radius and direction depth | A bulge is misplaced, too concentrated or displaced tangentially. |
 | Distributed | Side, amplitude, boundary strength/band and end taper | Broad thickness is present but its boundary transition is wrong. |
 | Section Profile | Direction and four depths; begin with centered peaks and roundness 1 | Independent widthwise peak movement or section fullness materially improves the fit. |
 
@@ -208,6 +266,12 @@ search instead of assuming amplitude scales the result linearly. Profile fitting
 uses bounded depths, peaks and roundness with rebuilt native direction frames.
 Freeze unidentifiable controls: a three-row grid has only one interior across
 sample and cannot independently determine a peak location and roundness.
+
+Control Point direction depth moves the displacement source behind its control;
+it changes direction, not just magnitude. Diagnose a narrow but already deep
+section before increasing amplitude. Prepared branch inflation derives each
+part's effective side from assembly orientation and boundary ordering; a stored
+per-part flip is not an independent side override. Evaluate the assembled output.
 
 Fit with area weights and bounded evaluation counts. Reserve samples for checking
 the fit, then compare against independent samples of the entire reference and
@@ -242,3 +306,12 @@ Native muscles can retain a plane-bounded modeled extent without moving physical
 The domain classifies the evaluated base after native inflation and complete branch connector evaluation. The same intersection weights interpolate base and inflated coordinates, so no new boundary taper or artificial pinch is introduced. The inflated cut can depart from the geometric plane because it follows the same material as the base. Source fibers and branch roots remain complete and visible; full FiberSurface objects are construction geometry and can be hidden independently in a final presentation. Both published muscle meshes and their derived mirrors contain only the retained extent. Mirrors reflect the already cropped source, and the source plane follows avatar root motion using inverse-transpose normal transformation.
 
 Cropped numeric results contain triangle faces, `source_faces` indexing the original evaluated polygons, and `face_parts` (0 main, 1 onward child order). Their row/column counts are zero because output no longer forms a rectangular grid; requests retain the complete original grids and inflation settings. Profile inspection revisions, previews and receipt postconditions include the domain. Historical untrimmed version 1/2 profile receipts remain compatible. An empty cut is rejected by the guarded authoring configuration.
+
+Faces wholly outside the retained half-space are discarded before triangulation;
+folded construction geometry in an excluded extension cannot block the retained
+muscle. Vertex references and part labels remain validated. Faces touching or
+crossing the retained domain still require valid triangulation. A genuinely
+nonplanar quad with a crossing 2D projection uses its fixed 0-2 diagonal; its
+two triangles define the existing warped surface without moving any vertex.
+Planar bowties still reject. Record local folds separately: triangulation does
+not repair or certify the complete construction surface.

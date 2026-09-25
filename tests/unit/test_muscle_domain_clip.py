@@ -60,6 +60,30 @@ class MuscleDomainClipTests(unittest.TestCase):
         self.assertEqual(result.face_parts.shape, (0,))
         self.assertEqual(result.face_parts.dtype.kind, 'U')
 
+    def test_excluded_crossing_face_does_not_block_retained_domain(self):
+        excluded = points([(-4, -1), (-2, 1), (-4, 1), (-2, -1)])
+        base = np.vstack((excluded, self.base))
+        for retained in ((4, 5, 6, 7), (4, 5, 6)):
+            faces = [(0, 1, 2, 3), retained]
+            result = clip_domain(base, affine(base), faces, plane(), ['omit', 'keep'])
+            expected = clip_domain(base, affine(base), [retained], plane())
+            for field in ('base_vertices', 'inflated_vertices', 'faces'):
+                np.testing.assert_array_equal(getattr(result, field), getattr(expected, field))
+            self.assertTrue(np.all(result.source_faces == 1))
+            self.assertTrue(np.all(result.face_parts == 'keep'))
+
+    def test_partly_retained_crossing_face_still_fails(self):
+        with self.assertRaisesRegex(ValueError, 'crossing edges'):
+            clip_domain(self.base, self.base, [(0, 2, 1, 3)], plane())
+
+    def test_excluded_faces_still_validate_references_and_labels(self):
+        base = self.base - [10., 0., 0.]
+        cases = [([(0, 1, 4, 3)], None), ([(0, 1, 2, 1)], None),
+                 ([(0, 1, 2, 3)], ['too', 'many'])]
+        for faces, labels in cases:
+            with self.subTest(faces=faces), self.assertRaises(ValueError):
+                clip_domain(base, base, faces, plane(), labels)
+
     def test_empty_mesh_and_faceless_mesh(self):
         for base in (np.empty((0, 3)), self.base):
             result = clip_domain(base, base, [], plane())
@@ -151,6 +175,24 @@ class MuscleDomainClipTests(unittest.TestCase):
         negative = clip_domain(base, base, [(0, 1, 2, 3)], plane(.2, keep_positive=False))
         self.assertAlmostEqual(area(positive) + area(negative), area(full))
         np.testing.assert_array_equal(full.faces, self.faces)
+
+    def test_nonplanar_crossing_projection_uses_fixed_diagonal(self):
+        base = np.array([(0., 0., 0.), (2., 2., 0.), (0., 2., 0.), (1., 0., .1)])
+        for faces in ([(0, 1, 2, 3)], [(0, 1, 2, 3, 0)]):
+            full = clip_domain(base, affine(base), faces, plane(-1), ['U'])
+            positive = clip_domain(base, affine(base), faces, plane(.7), ['U'])
+            negative = clip_domain(base, affine(base), faces, plane(.7, keep_positive=False))
+            np.testing.assert_array_equal(full.faces, self.faces)
+            np.testing.assert_array_equal(full.base_vertices, base)
+            self.assertAlmostEqual(area(positive) + area(negative), area(full))
+            np.testing.assert_allclose(positive.inflated_vertices, affine(positive.base_vertices))
+            self.assertTrue(np.all(positive.source_faces == 0))
+            self.assertTrue(np.all(positive.face_parts == 'U'))
+
+    def test_crossing_quad_with_roundoff_height_still_fails(self):
+        base = np.array([(0., 0., 0.), (2., 2., 0.), (0., 2., 0.), (1., 0., 1e-15)])
+        with self.assertRaisesRegex(ValueError, 'crossing edges'):
+            clip_domain(base, base, [(0, 1, 2, 3)], plane(-1))
 
     def test_concave_polygon_cut_does_not_bridge_disconnected_arms(self):
         base = points([(0, 0), (3, 0), (3, 3), (2, 3), (2, 1), (1, 1), (1, 3), (0, 3)])

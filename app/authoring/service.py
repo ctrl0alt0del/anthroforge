@@ -71,10 +71,12 @@ def operations():
 
 
 def capabilities():
-    return ['free_fibers.v1', 'muscle_output_domain.v1', 'section_profile.v1', 'muscle_from_surface.v1', 'static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'branched_loft.v1', 'shared_points.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1', 'fiber_layout_planner.v1', 'skeleton_transfer.v1', 'muscle_base.v1', 'native_base.v1', 'skeleton_transfer.experimental.v1', 'muscle_base.experimental.v1']
+    return ['base_partition.v1', 'continuous_attachment.v1', 'shape_preserving_transfer.v1', 'smooth_native_base.v1', 'transfer_collisions.v1', 'transfer_correction.v1', 'free_fibers.v1', 'muscle_output_domain.v1', 'section_profile.v1', 'muscle_from_surface.v1', 'static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'branched_loft.v1', 'shared_points.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1', 'fiber_layout_planner.v1', 'skeleton_transfer.v1', 'muscle_base.v1', 'native_base.v1', 'skeleton_transfer.experimental.v1', 'muscle_base.experimental.v1']
 
 
 def point_operations():
+    from .base_partitions import operations as partition_operations
+    from .smooth_bases import operations as smooth_operations
     from .surface_points import snap_points
     from .fiber_plans import plan_fibers
     from .base_surfaces import prepare_base
@@ -82,13 +84,13 @@ def point_operations():
     from .base_planning import plan_base_fibers
     from .base_publication import publish_base_fibers
     from .base_preparation import base_candidates, repair_volume
-    return {'anatomy.snap_points': snap_points, 'anatomy.plan_fibers': plan_fibers, 'anatomy.prepare_base': prepare_base,
+    return {**partition_operations(), **smooth_operations(), 'anatomy.snap_points': snap_points, 'anatomy.plan_fibers': plan_fibers, 'anatomy.prepare_base': prepare_base,
             'anatomy.base_candidates': base_candidates, 'anatomy.repair_volume': repair_volume,
             'anatomy.define_base': define_base, 'anatomy.plan_base_fibers': plan_base_fibers, 'anatomy.publish_base_fibers': publish_base_fibers}
 
 
 def check_live_preview(service, request):
-    if request['op'] == 'anatomy.snap_points':
+    if request['op'] in ('anatomy.snap_points', 'anatomy.partition_base_surfaces'):
         service.check(request['params'])
     elif request['op'] == 'anatomy.plan_fibers':
         service.check(request['params'], service.load(request['params']))
@@ -110,7 +112,7 @@ def finish_response(service, request, result, started):
 
 def replay_response(service, request):
     from ...core.authoring.codec import digest
-    if request['op'].startswith('anatomy.transfer_') or request['op'] in ('anatomy.prepare_base', 'anatomy.define_base', 'anatomy.plan_base_fibers', 'anatomy.publish_base_fibers', 'anatomy.base_candidates', 'anatomy.repair_volume'):
+    if request['op'].startswith(('anatomy.transfer_', 'anatomy.smooth_base_')) or request['op'] in ('anatomy.prepare_base', 'anatomy.define_base', 'anatomy.plan_base_fibers', 'anatomy.publish_base_fibers', 'anatomy.base_candidates', 'anatomy.repair_volume'):
         return check_transfer_request(service, request)
     key = [service.inventory['root_id'] or service.inventory['scene_id'], request['request_id']]
     cached = current_preview_cache(service.store.get('v04_requests', key), request)

@@ -60,6 +60,13 @@ def _record(kind, properties, conditions=()):
     return schema
 
 
+CARD_SCHEMA = _object({
+    "when": TEXT, "do": TEXT, "check": TEXT, "limits": TEXT,
+    "basis": {"enum": ["user_requirement", "case_observation", "repeated_observation", "hypothesis"]},
+    "topic": SLUG, "tags": _array(SLUG, minimum=1, unique=True),
+    "category": {"enum": ["modeling", "engineering", "history"]},
+})
+
 LESSON_SCHEMA = _record("lesson", {
     "id": SLUG,
     "revision": POSITIVE_INTEGER,
@@ -79,6 +86,7 @@ LESSON_SCHEMA = _record("lesson", {
            "required": ["status"]},
     "then": {"properties": {"evidence": {"minItems": 1}}},
 },))
+LESSON_SCHEMA["properties"]["card"] = CARD_SCHEMA
 
 CHECK_SCHEMA = _object({
     "name": TEXT,
@@ -161,11 +169,23 @@ LIBRARIAN_BRIEF_SCHEMA = _record("librarian_brief", {
     "unresolved_questions": STRINGS,
 })
 
+USAGE_SCHEMA = _record("usage", {
+    "run_id": TEXT, "stage": STAGE, "context_receipt": ARTIFACT,
+    "lessons": _array(_object({
+        "id": SLUG, "revision": POSITIVE_INTEGER,
+        "disposition": {"enum": ["applied", "adapted", "not_applicable", "skipped"]},
+        "decision": TEXT, "result": TEXT,
+        "effect": {"enum": ["helped", "neutral", "harmed", "unknown", "not_tested"]},
+        "evidence": ARTIFACTS,
+    }), minimum=1),
+})
+
 SCHEMAS = {
     "lesson": LESSON_SCHEMA,
     "feedback": FEEDBACK_SCHEMA,
     "handoff": HANDOFF_SCHEMA,
     "librarian_brief": LIBRARIAN_BRIEF_SCHEMA,
+    "usage": USAGE_SCHEMA,
 }
 
 

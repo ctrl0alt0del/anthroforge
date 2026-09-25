@@ -1,8 +1,10 @@
 """Clip a paired muscle output to a half-space selected on its base.
 
-Faces are triangulated before clipping, so a concave polygon cannot bridge a
-removed region. Simple polygons use a dominant-plane projection; nonplanar
-native quads retain that deterministic triangular interpretation. Cuts share
+Wholly excluded faces are discarded before triangulation. Remaining faces are
+triangulated before clipping, so concave polygons cannot bridge a removed region.
+Simple polygons use a dominant-plane projection. A nonplanar native quad whose
+projection crosses uses the fixed 0-2 diagonal without moving its vertices;
+this defines its triangular surface, not a collision repair. Cuts share
 vertex identities only across edges that already share input indices.
 """
 from dataclasses import dataclass, field
@@ -155,11 +157,28 @@ def _projected_triangles(ids, points, epsilon):
             else _ear_triangles(ids, points, np.sign(area), epsilon))
 
 
+def _nonplanar_quad(points):
+    if len(points) != 4:
+        return False
+    edges = points[1:] - points[0]
+    scale = float(np.max(np.abs(edges)))
+    if scale == 0:
+        return False
+    edges = edges / scale
+    volume = float(np.dot(np.cross(edges[0], edges[1]), edges[2]))
+    return abs(volume) > np.finfo(np.float64).eps * 64
+
+
 def _triangulate(ids, base):
     if len(ids) < 4:
         return [tuple(ids)] if len(ids) == 3 else []
     points, epsilon = _projection(base[ids])
-    return [] if points is None else _projected_triangles(ids, points, epsilon)
+    try:
+        return [] if points is None else _projected_triangles(ids, points, epsilon)
+    except ValueError:
+        if not _nonplanar_quad(base[ids]):
+            raise
+        return [(ids[0], ids[1], ids[2]), (ids[0], ids[2], ids[3])]
 
 
 def _dense_faces(faces, count):
@@ -214,6 +233,20 @@ def _input_triangles(base, faces):
     if dense.shape[1] == 3:
         return dense, np.arange(len(dense), dtype=np.int64)
     return _quad_triangles(base, dense)
+
+
+def _domain_triangles(base, faces, distances):
+    dense = _dense_faces(faces, len(base))
+    if dense is None:
+        checked = [_face_indices(face, len(base)) for face in faces]
+        return _fallback_faces(base, ((i, face) for i, face in enumerate(checked)
+                                      if np.any(distances[face] >= 0)))
+    repeated = np.any(np.diff(np.sort(dense, axis=1), axis=1) == 0, axis=1)
+    for face in dense[repeated]:
+        _face_indices(face, len(base))
+    retained = np.flatnonzero(np.any(distances[dense] >= 0, axis=1))
+    triangles, sources = _input_triangles(base, dense[retained])
+    return triangles, retained[sources]
 
 
 def _intersection(state, first, last):
@@ -309,9 +342,9 @@ def clip_domain(base_vertices, inflated_vertices, faces, plane, face_parts=None,
     normal, offset = _plane_values(plane, tolerance)
     faces = list(faces)
     labels = _part_labels(face_parts, len(faces))
-    triangles, sources = _input_triangles(base, faces)
     distances = base @ normal - offset
     distances[np.abs(distances) <= tolerance] = 0.
+    triangles, sources = _domain_triangles(base, faces, distances)
     state = _ClipState(list(base), list(inflated), distances)
     _emit_triangles(state, base, triangles, sources)
     return _result(state, labels)

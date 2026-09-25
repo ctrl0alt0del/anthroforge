@@ -18,15 +18,13 @@ def normalized(values):
 
 
 def coherent(values):
-    result = values.copy().reshape(-1, 3)
-    previous = None
-    for normal in result:
-        if np.linalg.norm(normal) == 0:
-            continue
-        if previous is not None and np.dot(normal, previous) < 0:
-            normal *= -1
-        previous = normal
-    return result.reshape(values.shape)
+    result = values.copy()
+    for i, row in enumerate(result):
+        for j, normal in enumerate(row):
+            previous = row[j - 1] if j else result[i - 1, 0] if i else None
+            if previous is not None and np.dot(normal, previous) < 0:
+                normal *= -1
+    return result
 
 
 def direction_field(base, direction):

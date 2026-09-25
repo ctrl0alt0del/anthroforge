@@ -11,7 +11,9 @@ def snapshot(inventory, owner, context=()):
     keys = [owner]+sorted(set(context)-{owner})
     require(set(keys) <= set(inventory['geometry']), 'VIEW_CONTEXT_UNAVAILABLE')
     controls = [c for c in inventory['controls'] if c.get('scp_id') in {r['scp_id'] for r in inventory['instances'] if r.get('instance_id') in keys}]
-    return dict(root_id=inventory['root_id'] or inventory['scene_id'], scene_revision=inventory['revision'], reference_pose=inventory['reference_pose'], owner=owner, geometry={k: inventory['geometry'][k] for k in keys}, controls=controls)
+    names = {r['instance_id']: r.get('locator', r['instance_id']) for r in inventory['instances'] if r['instance_id'] in keys}
+    sources = {key: name for key, name in inventory.get('visual_objects', {}).items() if key in keys}
+    return dict(root_id=inventory['root_id'] or inventory['scene_id'], scene_revision=inventory['revision'], reference_pose=inventory['reference_pose'], owner=owner, geometry={k: inventory['geometry'][k] for k in keys}, controls=controls, names=names, object_sources=sources)
 
 
 def triangles(scene):

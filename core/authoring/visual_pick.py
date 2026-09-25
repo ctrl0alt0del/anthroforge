@@ -22,26 +22,29 @@ def pick(scene, view, uv):
 
 
 def project_hit(scene, view, hit):
+    from .visual_labels import identity
     point = np.asarray(hit['point'])
     projected = camera.project(view['camera'], point)
     uv = projected[:2].tolist()
     if min(uv) < 0 or max(uv) > 1:
-        return dict(point_id=hit['id'], uv=uv, state='outside_view')
+        return dict(point_id=hit['id'], label=identity(hit['id'], 'P'), uv=uv, state='outside_view')
     other = pick(scene, view, uv)
     tolerance = view['camera']['span']*1e-7
     visible = other['hit'] and other['owner'] == hit['owner'] and np.linalg.norm(np.asarray(other['point'])-point) < tolerance
-    return dict(point_id=hit['id'], uv=uv, state='visible' if visible else 'occluded')
+    return dict(point_id=hit['id'], label=identity(hit['id'], 'P'), uv=uv, state='visible' if visible else 'occluded')
 
 
 def markers(pixels, rows):
+    from .visual_labels import identity, color, stamp
     result = pixels.copy()
-    height, width = result.shape[:2]
-    yy, xx = np.mgrid[:height, :width]
+    height, width = result.shape[:2]; yy, xx = np.mgrid[:height, :width]
     for row in rows:
         if row['state'] != 'visible':
             continue
         x, y = np.asarray(row['uv'])*[width, height]-.5
         radius = (xx-x)**2+(yy-y)**2
-        result[(radius >= 16) & (radius <= 36)] = [255, 187, 65]
+        label = row.get('label', identity(row['point_id'], 'P'))
+        result[(radius >= 16) & (radius <= 36)] = color(label)
         result[radius <= 2] = [255, 239, 177]
+        stamp(result, label, x+8, y-8)
     return result

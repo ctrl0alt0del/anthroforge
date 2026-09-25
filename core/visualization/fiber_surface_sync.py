@@ -115,10 +115,11 @@ def _validate_loft_fibers(surface, fibers):
 
 
 def _surface_spec(surface, fibers):
+    from ..vcp.free_surface_stations import resolve
     loop = bool(fibers and is_loop_fiber(fibers[0]))
     count = fiber_geometry_point_count(fibers[0]) if fibers else 0
     return FiberSurfaceSpec(str(surface.construction_mode), bool(surface.close_across_fibers), loop,
-                            bool(surface.flip_normals), int(surface.patch_resolution), count, any(is_free(f) for f in fibers))
+                            bool(surface.flip_normals), int(surface.patch_resolution), count, any(is_free(f) for f in fibers), resolve(surface, fibers))
 
 
 def _ensure_proxy(collection, root, surface, index):

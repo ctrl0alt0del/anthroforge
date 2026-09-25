@@ -30,7 +30,8 @@ def _draw_properties(layout, surface):
     box = layout.box()
     box.prop(surface, "name")
     box.prop(surface, "construction_mode")
-    box.prop(surface, "flip_normals")
+    label = "Flip Assembly Side" if surface.construction_mode == "BRANCHED_LOFT" else "Flip Surface Winding"
+    box.prop(surface, "flip_normals", text=label)
     if surface.construction_mode == "LOFT":
         box.prop(surface, "close_across_fibers")
         box.prop(surface, "use_mirrored_rows")

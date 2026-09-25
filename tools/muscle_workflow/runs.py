@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from common import STAGES, now, read_json, reference, root, verify_reference, write_json
 from knowledge import retrieve
+from build_provenance import run_provenance
 
 
 def initialize(name, source, target=None):
@@ -18,7 +19,8 @@ def initialize(name, source, target=None):
     for part in (*STAGES, "inputs", "knowledge", "feedback", "logs", "tmp"):
         (directory / part).mkdir(parents=True, exist_ok=False)
     manifest = {"schema_version": 1, "run_id": run_id, "name": name, "created": now(),
-                "input_artifacts": inputs, "status": "created", "accepted_candidate": None}
+                "input_artifacts": inputs, "status": "created", "accepted_candidate": None,
+                "build_provenance": run_provenance()}
     return write_json(directory / "run.json", manifest)
 
 
@@ -39,10 +41,10 @@ def context_inputs(manifest, extras):
     return list(inputs.values())
 
 
-def context(run, stage, query, extras=()):
+def context(run, stage, query, extras=(), features=(), category="modeling", full=False):
     manifest = manifest_path(run)
     inputs = context_inputs(manifest, extras)
-    packet = retrieve(stage, query)
+    packet = retrieve(stage, query, features=features, category=category, full=full)
     packet.update(schema_version=1, created=now(), run_id=read_json(manifest)["run_id"],
                   input_artifacts=inputs, run_manifest=reference(manifest))
     path = manifest.parent / "knowledge" / f"{stage}-{uuid4().hex[:12]}.json"

@@ -318,7 +318,7 @@ def _capture_profile_work(sync, vis_col, root, scene, muscle):
 
 
 def _publish_error(sync, vcp, work, error):
-    if "PROFILE_BASE_NOT_CURRENT" in error:
+    if all(reason.strip().startswith("PROFILE_BASE_NOT_CURRENT:") for reason in error.split(";")):
         return sync._retain_stale_muscle(work.base_obj, work.infl_obj)
     for obj in (work.base_obj, work.infl_obj):
         if obj is not None:

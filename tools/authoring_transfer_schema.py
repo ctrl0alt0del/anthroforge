@@ -1,8 +1,10 @@
 """Closed protocol contracts for guided shared anatomy transfer."""
 try:
     from tools.authoring_schema_v04 import S, I, B, ref, obj, array, operation
+    from tools.authoring_shape_transfer_schema import specification
 except ModuleNotFoundError:
     from authoring_schema_v04 import S, I, B, ref, obj, array, operation
+    from authoring_shape_transfer_schema import specification
 
 
 def source_binding():
@@ -29,6 +31,15 @@ def operations():
     fields = dict(**common, correspondences=array(pair, 4, 256), settings=settings())
     required = list(fields)
     fields['annotations'] = array(obj(dict(id=S, label=S, source=source_binding())), 0, 1024)
+    fields['shape_preservation'] = specification()
     rows.append(operation('anatomy.transfer_preview', fields, required))
     publish = dict(expected_scene_revision=S, preview_id=S)
-    return rows + [operation('anatomy.transfer_publish', publish, list(publish))]
+    return rows + [operation('anatomy.transfer_publish', publish, list(publish))] + correction_operations()
+
+
+def correction_operations():
+    try:
+        from tools.authoring_correction_schema import operations as corrections
+    except ModuleNotFoundError:
+        from authoring_correction_schema import operations as corrections
+    return corrections()

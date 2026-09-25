@@ -47,6 +47,11 @@ def _surface(root, scene, surface, fibers, replacements, payloads):
     if surface.construction_mode == 'LOOP_PATCH':
         level = surface.patch_resolution; triangles = max(1, len(rows[0]) - 2)
         return triangles * (level + 1) * (level + 2) // 2, triangles * level * level
+    from ..vcp.free_surface_stations import resolve, prepare
+    stations = resolve(surface, fibers, payloads)
+    if stations:
+        prepared = prepare(rows, stations)
+        return len(prepared)*len(prepared[0]), 2*(len(prepared)-1)*(len(prepared[0])-1)
     return _ordinary(rows, fibers[0].topology_mode == 'LOOP', surface.close_across_fibers)
 
 

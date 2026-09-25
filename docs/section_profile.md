@@ -13,6 +13,10 @@ centered. Roundness in `[0.25, 4]` changes shoulder fullness: `1` is parabolic.
 Local uses coherent local normals; Smooth filters them in chart coordinates;
 Section shares an area-weighted direction across each section. **Swap Side** changes
 the muscle's displacement sign without changing its source surface winding.
+Normal coherence follows adjacent samples in the chart. In particular, a new
+row starts from its neighbor in the preceding row, not that row's distant end;
+the latter could reverse entire rows on a strongly curved strip. The APB case
+and a curved-strip regression exposed and verified this correction.
 **Scale Depths** rejects overflow; **Reset Profile…** shows the replacement peak
 depth before applying it. These actions support ordinary Blender undo and redo.
 
@@ -111,10 +115,12 @@ An uninitialized control omits `inflation_ctrl_world` from this writable form so
 round trips preserve automatic initialization. `native_state.legacy` retains the
 raw coordinates and initialization flag for diagnostics.
 
-Optional `surface_flip_normals` follows the manual Swap Normals target: the source
+Optional `surface_flip_normals` targets the source
 Fiber Surface, or the muscle for a legacy fiber-owned source. It affects every
 muscle using that same source. For an ordinary Fiber Surface this changes mesh
 winding only; set `native.flip_normals` to change ordinary inflation direction.
+The muscle panel's **Swap Inflation Side** changes that native direction for
+ordinary muscles. The separate Fiber Surface winding control remains available.
 For a branched assembly, `surface_flip_normals` controls the assembled inflation
 direction; a separate native flip is rejected because assembly orientation would
 override it. Preview evaluates the selected whole assembly

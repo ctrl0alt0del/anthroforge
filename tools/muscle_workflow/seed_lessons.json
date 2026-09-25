@@ -8,10 +8,24 @@
     ],
     "title": "Complete the final muscle through evidence-driven stage repairs",
     "observation": "A successful intermediate API call or distance score does not establish a usable anatomical muscle.",
-    "action": "Inspect the original muscle and bones, obtain a librarian assessment, validate each actual output, and send observed failures with versioned evidence to the responsible stage. Preserve the best candidate. After 3-4 failed refinements change approach. Changed upstream inputs invalidate all affected downstream checks.",
+    "action": "The coordinator inspects anatomy, retrieves applicable lessons and records decisions; localize observed defects before upstream repair. After 3-4 failed refinements change approach; changed inputs invalidate affected downstream checks.",
     "applicability": "Every muscle reconstruction, including simple muscles and cases with no diagnosed feature.",
     "limitations": "This is the user-directed workflow, not evidence that automatic fitting or geometry recognition is solved.",
-    "evidence_source": "project:docs/muscle_volume_fitting.md"
+    "evidence_source": "project:docs/muscle_volume_fitting.md",
+    "card": {
+      "topic": "workflow-feedback",
+      "tags": [
+        "review",
+        "feedback",
+        "practical-knowledge"
+      ],
+      "when": "Starting a stage or responding to a material defect.",
+      "do": "The coordinator inspects anatomy, retrieves applicable lessons and records decisions; localize observed defects before upstream repair.",
+      "check": "After 3-4 failed refinements change approach; changed inputs invalidate affected downstream checks.",
+      "limits": "No librarian agent required. Distinguish user-accepted form from technical residuals; retrieval alone is not application.",
+      "category": "modeling",
+      "basis": "user_requirement"
+    }
   },
   {
     "id": "transfer-anatomical-correspondence",
@@ -25,7 +39,21 @@
     "action": "Inspect bone identities, laterality, transforms, attachment bands and neighbors; use indexed discovery correspondence and local anatomical frames. Preserve head identities and label proxies. Repair overlapping transferred solids before underside extraction, preserving originals and validating union geometry. Never distort the transfer simply to make downstream fitting pass.",
     "applicability": "Transfer of reference muscle geometry to existing SCPs.",
     "limitations": "Correspondence requires anatomical evidence; a whole-limb transform or region centroid alone is insufficient.",
-    "evidence_source": "project:docs/muscle_volume_fitting.md"
+    "evidence_source": "project:docs/muscle_volume_fitting.md",
+    "card": {
+      "topic": "transfer-correspondence",
+      "tags": [
+        "transfer",
+        "landmarks",
+        "multihead"
+      ],
+      "when": "Placing original anatomy onto SCPs.",
+      "do": "Inspect bone identities, laterality, attachment bands and neighbors using indexed discovery and local frames; preserve heads and label proxies.",
+      "check": "Validate transfer shape independently; repair overlapping source solids before extracting underside when needed.",
+      "limits": "A region centroid or whole-limb transform alone does not establish anatomical correspondence.",
+      "category": "modeling",
+      "basis": "user_requirement"
+    }
   },
   {
     "id": "whole-underside-and-heads",
@@ -39,7 +67,21 @@
     "action": "Choose and record the retained extent before fiber creation; noninflating thin extensions may be omitted explicitly. Declare heads, attachment bands, side boundaries and seams. Preserve useful existing underside geometry; complete holes while retaining boundaries and clefts. Design approximate smooth borders rather than tracing extraction kinks. Check prepared charts for spatial folds and missing retained head tissue. Put four corners across full retained start/end bands, distinguishing modeling cuts from physical attachments. Return transfer errors upstream with geometry evidence.",
     "applicability": "Base selection/preparation for single- and multiheaded muscles.",
     "limitations": "Connected components do not identify anatomical heads. A disk chart cannot represent arbitrary branching or overhangs; decompose explicitly.",
-    "evidence_source": "project:docs/muscle_volume_fitting.md"
+    "evidence_source": "project:docs/muscle_volume_fitting.md",
+    "card": {
+      "topic": "whole-underside",
+      "tags": [
+        "smooth-base",
+        "multihead",
+        "shared-side"
+      ],
+      "when": "Defining the retained bone-facing underside.",
+      "do": "Declare meaningful heads, full attachment bands, side boundaries and seams; retain suspended spans and broad belly.",
+      "check": "Check missing tissue, bridged clefts and assembled folds before fitting fibers.",
+      "limits": "Components do not identify heads automatically; unsupported topology needs explicit decomposition.",
+      "category": "modeling",
+      "basis": "user_requirement"
+    }
   },
   {
     "id": "native-base-width-before-depth",
@@ -49,11 +91,25 @@
       "fibers"
     ],
     "title": "Preserve belly width and boundaries in the actual native loft",
-    "observation": "Surface-bound pins and accepted routes can still yield a narrow or wrongly ordered loft.",
-    "action": "Start sparse and fit the selected retained underside. Use qualified SCP snapping and indexed persisted bindings; physical endpoints have zero offset. Explicit routing offsets default to zero and need a recorded purpose; shared starts inherit the same junction identity and offset. Allow at most eight routing corrections per fiber and count structural shared junctions separately. Persist any selected output extent and remove excluded continuation parts. Recompute, measure the actual loft at five interior width/depth stations and inspect calibrated views. Repair lost belly width here, before inflation.",
+    "observation": "A reviewed anatomical underside supplies a Free path; qualified attachments alone do not establish native loft width, ordering or coverage.",
+    "action": "Reuse suitable reviewed transfer/base checkpoints. Fit sparse curves to retained smooth charts and create directly with fibers.create_free; never run a Controlled solve first. Keep physical endpoints on qualified zero-offset SCP bindings, explicit contacts/junctions on their supported binding/offset contract, and unbound shape samples off bone where the underside requires it. Preserve exact structural tags and native output-domain omissions. Shape samples are not routing pins; the eight-midpoint budget applies only to Controlled routes. Recompute attachments and downstream geometry with zero planner/solver calls; solver convergence is not applicable. Measure the actual native loft at five interior stations and in calibrated views before inflation, fit existing curves before adding fibers, and remove nonessential interior fibers. After deformation edit current points_world with retained tags; verify no-op/reopen and subsequent attachment deformation.",
     "applicability": "Every native fiber reconstruction; the width check is unconditional, so recognizing a belly is not a retrieval prerequisite.",
-    "limitations": "Fifteen percent station discrepancy triggers review, not automatic acceptance. Branch roots must be disjoint intervals on one outer main fiber, with shared point identities; unsupported layouts require coordinated parts.",
-    "evidence_source": "project:docs/muscle_volume_fitting.md"
+    "limitations": "Free mode supplies no anatomical or collision guarantee. Fifteen percent station discrepancy triggers review, not automatic acceptance. Branch roots must be disjoint intervals on one outer main fiber with exact shared identities; unsupported graphs require coordinated parts. Modeling crops are not physical attachments.",
+    "evidence_source": "project:docs/muscle_volume_fitting.md",
+    "card": {
+      "topic": "native-free-construction",
+      "tags": [
+        "free-fibers",
+        "belly-width",
+        "attachment-band"
+      ],
+      "when": "Constructing or editing native fibers for a reviewed simplified underside.",
+      "do": "Create Free paths directly with qualified physical endpoints and supported shared identities; preserve suspended shape with unbound samples and authored stations.",
+      "check": "Measure actual loft width before depth fitting; verify current deformed editing and zero solver calls.",
+      "limits": "Routing-pin budgets apply to Controlled fibers, not Free samples. Unsupported branch graphs need parts.",
+      "category": "modeling",
+      "basis": "user_requirement"
+    }
   },
   {
     "id": "inflation-on-validated-native-base",
@@ -67,7 +123,21 @@
     "action": "Check native base width, orientation and deep gap first. Measure whole-underside-to-superficial thickness, distinguish missing/multiple ray intersections, evaluate supported Control Point/Distributed/Section Profile settings through native code, and validate held-out samples and views. Section Profile is for ordinary open LOFT only. Return width/boundary loss to fibers, omitted underside to base, and incorrect anatomical correspondence to transfer.",
     "applicability": "Fitting muscle depth after native base reconstruction.",
     "limitations": "A failed parameter fit does not prove representation impossibility. No universal inflation mode is established; branch inflation support differs from ordinary loft support.",
-    "evidence_source": "project:docs/muscle_volume_fitting.md"
+    "evidence_source": "project:docs/muscle_volume_fitting.md",
+    "card": {
+      "topic": "inflation-fit",
+      "tags": [
+        "inflation",
+        "belly-width",
+        "direction"
+      ],
+      "when": "Fitting depth to an accepted simplified native base.",
+      "do": "Check width and direction first; compare supported modes against broad thickness distribution. Return missing boundaries to base/fibers.",
+      "check": "Inspect complete assembled heads and held-out sections.",
+      "limits": "Section Profile is ordinary open LOFT only; no inflation mode is universally best.",
+      "category": "modeling",
+      "basis": "user_requirement"
+    }
   },
   {
     "id": "final-review-and-debug-delivery",
@@ -78,10 +148,24 @@
     ],
     "title": "Review actual anatomy and saved editability separately",
     "observation": "Route acceptance, mesh persistence and visualization settings measure different properties.",
-    "action": "Review heads, ordering, belly/tendon proportions, attachments, neighbors and coverage in isolated and contextual views. Record anatomical, route/collision, persistence, indexed-discovery and visibility results separately. Use StaticScene.save_debug_copy and reopen normally. Verify every source and mirrored fiber visible in normal curve display and native SCP colors in Solid/Object mode; report proxy and cropped attachments.",
+    "action": "Review heads, ordering, belly/tendon proportions, attachments, neighbors and coverage in isolated and contextual views. For Free reconstruction verify zero planner/solver calls and current deformed geometry; record solver convergence as not applicable. Record anatomical, native attachment/path, observed collision, persistence, indexed-discovery and visibility results separately. Use StaticScene.save_debug_copy and reopen normally. Verify every source and mirrored fiber visible in normal curve display and native SCP colors in Solid/Object mode; report proxy and cropped attachments.",
     "applicability": "Final muscle and checkpoint delivery.",
     "limitations": "A schema validator or renderer cannot certify anatomy. An open inflated patch is not a closed-volume match.",
-    "evidence_source": "project:docs/muscle_volume_fitting.md"
+    "evidence_source": "project:docs/muscle_volume_fitting.md",
+    "card": {
+      "topic": "debug-delivery",
+      "tags": [
+        "review",
+        "persistence",
+        "visibility"
+      ],
+      "when": "Delivering a reconstructed muscle.",
+      "do": "Separate visual acceptance, attachments, collision observations and persistence; save_debug_copy and reopen with all source/mirrored curves visible and native SCP colors.",
+      "check": "Inspect actual reopened geometry and normal debug presentation.",
+      "limits": "Free fibers need no solver convergence certificate; technical checks alone do not certify anatomy.",
+      "category": "modeling",
+      "basis": "user_requirement"
+    }
   },
   {
     "id": "inflation-relevant-base-scope-20260920",
@@ -98,6 +182,78 @@
     "action": "Choose omissions at the base stage from source width, depth, area and branch anatomy. Record excluded parts and modeling boundaries; preserve meaningful belly, heads and shared structure. Apply the same retained extent to native meshes, inflation, mirrors, measurements and saved regeneration. Qualified construction curves may extend outside the output extent, but excluded tissue must not return. Review against the corresponding retained reference and disclose omissions.",
     "applicability": "Every muscle reconstruction; this rule is included without requiring a semantic match.",
     "limitations": "There is no universal thickness or station cutoff. A modeling cut is not a physical anatomical attachment. The rule does not justify discarding poorly fitted but meaningful muscle tissue.",
-    "evidence_source": "project:docs/authoring_muscle_reconstruction.md"
+    "evidence_source": "project:docs/authoring_muscle_reconstruction.md",
+    "card": {
+      "topic": "retained-scope",
+      "tags": [
+        "crop",
+        "thin-extensions",
+        "multihead"
+      ],
+      "when": "The requested result is a simplified inflated muscle body.",
+      "do": "Omit insignificant thin extensions at base construction; preserve meaningful heads, seams and belly. Carry the retained boundary through later stages.",
+      "check": "Inspect excluded tissue within its own head or slip.",
+      "limits": "Cut edges are modeling boundaries, not new anatomical attachments; full-anatomy requests retain their scope.",
+      "category": "modeling",
+      "basis": "user_requirement"
+    }
+  },
+  {
+    "id": "simplified-game-muscle-large-form-priority-20260921",
+    "kind": "procedure",
+    "status": "requirement",
+    "stages": [
+      "all"
+    ],
+    "title": "Preserve broad muscle form and volume distribution; discard minor surface detail",
+    "observation": "User rejected jiggly fibers and anatomically detailed reconstructions. The pictured pectoral native paths preserve all 33 authored samples within 3.4e-7 scene units, confirming the authored base-derived curves already supplied their small variations. This is not an FCU-specific cause diagnosis.",
+    "action": "Design simple smooth whole undersides and low-complexity Free curves; preserve silhouette, head layout, broad belly and volume distribution. Do not chase small raw-reference creases/bumps or add guides for incidental concavity. Judge broad form visually before residuals; prevent downstream inflation from restoring discarded detail.",
+    "applicability": "AnthroForge game-avatar muscle recreation under the September 21 user correction. Applies to earlier accepted cases on review and future runs.",
+    "limitations": "A modeling requirement, not a proven automatic simplification algorithm or fixed polygon/control budget. Major head clefts, skeletal placement, qualified physical bindings and intentional shared structure remain relevant.",
+    "card": {
+      "topic": "large-form-priority",
+      "tags": [
+        "smooth-base",
+        "simplified-form",
+        "inflation"
+      ],
+      "when": "Reconstructing simplified muscles for the game.",
+      "do": "Preserve broad silhouette, head layout, belly and volume distribution with smooth sparse curves; discard incidental creases and bumps.",
+      "check": "Judge broad form before small residuals; retain explicitly accepted approximations.",
+      "limits": "Does not permit omitting meaningful heads or ignoring the user's current quality requirements.",
+      "category": "modeling",
+      "basis": "user_requirement"
+    },
+    "evidence_source": "C:/Users/alexe/.codex/skills/anthroforge-muscle-reconstruction/SKILL.md"
+  },
+  {
+    "id": "smooth-anatomical-base-requirement-20260920",
+    "kind": "procedure",
+    "status": "requirement",
+    "stages": [
+      "base",
+      "fibers",
+      "review"
+    ],
+    "title": "Design a smooth anatomical underside before native fibers",
+    "observation": "base surface step should not rely on strict mathematical algorithms; we need approximate smooth-border surface. The user rejected kinked base previews before continuation.",
+    "action": "Use sparse anatomical landmarks and designed smooth borders; fair the actual interior. Review regularity separately from source fit and topology. Return jagged targets to base instead of reproducing their kinks with more fibers.",
+    "applicability": "All AnthroForge muscle-reconstruction base handoffs, including suspended underside spans and multiheaded muscles.",
+    "limitations": "Do not reproduce noisy targets with more fibers. This requirement does not imply automatic anatomy extraction. Requirement is unchanged; later guided FCU results supersede the earlier no-repair-yet statement.",
+    "card": {
+      "topic": "smooth-base-design",
+      "tags": [
+        "smooth-base",
+        "sections",
+        "free-fibers"
+      ],
+      "when": "Preparing the combined base and native fibers.",
+      "do": "Design sparse smooth boundaries and a smooth interior; preserve genuine clefts, bands and belly width.",
+      "check": "Inspect regularity separately from source distance and topology.",
+      "limits": "Do not reproduce noisy targets with more fibers. This requirement does not imply automatic anatomy extraction.",
+      "category": "modeling",
+      "basis": "user_requirement"
+    },
+    "evidence_source": "C:/Users/alexe/.codex/skills/anthroforge-muscle-reconstruction/SKILL.md"
   }
 ]

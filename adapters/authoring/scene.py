@@ -42,6 +42,18 @@ class StaticScene(BlenderScene):
         from .transfer import capture
         return capture(self.scene, names)
 
+    def shape_transfer(self, sources, result, supports, masks, spec):
+        from .shape_transfer import refine
+        return refine(self.scene, sources, result, supports, masks, spec)
+
+    def visual_inventory(self, captured, params):
+        from .visual_inventory import prepare
+        return prepare(self, captured, params)
+
+    def visual_refresh(self, captured, names):
+        from .visual_inventory import extend
+        return extend(self, captured, names)
+
     def publish_transfer(self, record):
         from .transfer import publish
         return publish(self.root, self.scene, record)
@@ -49,6 +61,28 @@ class StaticScene(BlenderScene):
     def base_mesh_quality(self, vertices, triangles):
         from .base_quality import inspect
         return inspect(vertices, triangles)
+
+    def smooth_base_quality(self, parts, seams, settings):
+        from .smooth_quality import inspect
+        from .smooth_domains import prepare
+        prepare(self.root, parts)
+        return inspect(parts, seams, settings)
+
+    def smooth_base_junction(self, hit, offset, purpose):
+        from .smooth_domains import junction
+        return junction(self.root, self.scene, hit, offset, purpose)
+
+    def partition_base_quality(self, meshes):
+        from .base_partition import inspect
+        return inspect(meshes)
+
+    def publish_smooth_base(self, preview):
+        from .smooth_publication import publish
+        return publish(self.root, self.scene, preview)
+
+    def verify_smooth_base(self, receipt):
+        from .smooth_publication import verify
+        return verify(self.root, self.scene, receipt)
 
     def publish_native_base(self, plan):
         from .base_native import publish
@@ -65,6 +99,18 @@ class StaticScene(BlenderScene):
     def union_volume(self, sources):
         from .volume_union import evaluate
         return evaluate(self.scene, sources)
+
+    def transfer_collisions(self, source, supports, settings):
+        from .collision_correction import inspect
+        return inspect(self.scene, source, supports, settings)
+
+    def correct_transfer(self, source, supports, settings, fixed, contacts):
+        from .collision_correction import correct
+        return correct(self.scene, source, supports, settings, fixed, contacts)
+
+    def attachment_transfer(self, source, supports, params):
+        from .attachment_graft import preview
+        return preview(self.scene, source, supports, params)
 
     def snap_points(self, params, captured):
         from .point_picker import snap_points

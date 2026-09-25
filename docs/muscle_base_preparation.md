@@ -1,5 +1,15 @@
 # Bounded completion of muscle bases
 
+## Current production path
+
+Use [Simplified base and native Free fibers](smooth_native_base.md) for the combined
+second stage of transfer → base/native Free fibers → inflation. It fits a sparse
+smooth base in the actual native loft's ruled-strip family, preserves material
+correspondence, and jointly fits explicitly shared head boundaries. It supersedes
+using a freely fitted surface followed by unchecked arc-length loft conversion.
+The experiments and older completion API below are historical/compatibility
+procedures, not the default reconstruction path.
+
 `anatomy.prepare_base` provides optional completion in the
 [authoring flow](authoring_muscle_reconstruction.md), between **selecting the whole bone-facing
 underside** and calculating fiber curves. The selected mesh is evidence to fit;
@@ -40,7 +50,70 @@ This is the construction and acceptance contract. The existing bounded
 guarantee these anatomical or smoothness criteria. A ready API result therefore
 still needs this review and, where necessary, explicit boundary redesign.
 
+## Proposed low-supervision simplification (not implemented)
+
+September 21 workflow revision: produce a simplified game-muscle form, preserving
+broad curvature, silhouette and volume distribution while discarding local creases
+and bumps, including real reference detail. The coordinator runs routine operations;
+a specialist is optional for semantic head/border decisions or a localized failure.
+
+The proposed authoring operation first fits sparse cubic boundary curves, protecting
+selected attachment landmarks and major cleft tips rather than fixing every noisy
+boundary vertex. The preferred next experiment fits coarse bicubic B-spline patches
+to the broad underside, penalizing bending and constraining sectional shape drift.
+Share seam controls and constrain transverse tangents where continuity is intended;
+do not smooth across a genuine cleft. Retain constrained implicit fairing and Taubin
+filtering as comparison baselines, not guarantees of local shape preservation. For an
+open underside there is no intrinsic enclosed volume: preserve broad cross-sectional
+width, depth, area relative to the reference envelope, and landmark placement instead.
+
+Expose detail scale relative to muscle size, allowed broad-shape drift, protected
+landmarks/clefts and an optional control-complexity budget. Evaluate a small batch
+of strengths automatically and return the simplest candidate satisfying these
+constraints, with before/after views and localized failures. Do not freeze the entire
+old perimeter or pull each smoothed vertex back to the raw mesh. Verify no introduced
+folds, seam cracks or increased bone penetration. Filtering alone does not guarantee
+a low-complexity editable model; fit the resulting broad form with sparse controls
+and assess actual longitudinal curves for residual wiggles before native publication.
+
+This is a design to validate on retained FCU and pectoral fixtures before batch work
+resumes. It is not a claim that a production smoothing API or automatic choice of
+anatomically important features already exists. Implement the new optimization and
+its repeated geometry queries in the existing C++ native infrastructure; Python
+orchestrates authoring and Blender integration. The existing NumPy patch fitter is
+legacy implementation, not the pattern for this extension. Relevant primary references:
+[smooth surface fitting](https://graphics.stanford.edu/papers/surfacefitting/),
+[implicit fairing](https://multires.caltech.edu/pubs/ImplicitFairing.pdf),
+[CGAL fairing and shape smoothing](https://doc.cgal.org/latest/Polygon_mesh_processing/index.html),
+[Open3D Taubin filtering](https://www.open3d.org/docs/latest/tutorial/geometry/mesh.html).
+
 ## Input from AI or a human
+
+### FCU sparse-spline experiment, September 21 (preferred visual direction)
+
+The external `base/sparse_spline_v005` candidate in run
+`2026-09-19-fcu-complete-8ecb3eff` fits cubic patches with an experimental C++
+extension of the existing native backend. It reuses retained head charts displaced
+by the saved transfer-correction field; it does not re-extract the Boolean-cleaned
+volume. Sparse fitting visibly reduces fine path wiggles in this case.
+
+September 22 user feedback prefers this simplified result to the original approach.
+Retain that simplification level as the visual baseline. This is a preference for
+the demonstrated shape treatment, not approval of anatomical fidelity, collision
+clearance or final inflated volume; those checks remain separate.
+
+The transverse branched trial developed native self-folds despite individually
+unfolded target patches. Additional branch guides did not reliably repair it.
+The retained experiment uses two coordinated longitudinal head lofts and five
+Free fibers. Aligning their distal construction extents removed detected
+within-head folds; these native lofts match curves by normalized arc length.
+Do not assume that a smooth patch or arbitrary iso-curves imply a valid native loft.
+A monotonic-control trial did not change the failing geometry and was not the
+effective repair. Between-head overlap and humerus/ulna penetration remain;
+this result is not production collision acceptance or anatomical certification.
+Save/reload, qualified bindings, solver exclusion and ten visible source/mirrored
+curves were verified. Exact evidence and reproduction steps are in that candidate's
+`experiment.json`, `validation.json`, `geometry_checks.json` and previews.
 
 Capture the repaired muscle mesh with `anatomy.transfer_sources`. The preparation
 request includes its `source_object`, `topology_digest`, `geometry_digest`, current

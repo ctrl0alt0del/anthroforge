@@ -205,10 +205,10 @@ def protocol_extensions():
 def response():
     fields = dict(dsl=enum('anthroforge.authoring.protocol'), version=enum('0.4.0'), message_type=enum('response'), request_id=S, op=S, status=enum('success', 'unresolved', 'failed'), scene_id=S, scene_revision=S, published=B, entities=array(ref('patch_value')), diagnostics=array(ref('patch_value')), assets=array(ref('patch_value')), cost=ref('patch_value'))
     required = list(fields)
-    names = 'draft_revision normalized_patch affected receipt evaluation unsupported replayed recovery root_id initialized inventory capabilities operations document state dependencies provenance purpose anatomical_review first second comparison_assets search_state missing candidates ranking candidate native_ids generation recovered_copy generation_id draft restored_active_scene comparison authored_changed scenarios normalized_overrides views view hits selection coverage plan recompute'
+    names = 'draft_revision normalized_patch affected receipt evaluation unsupported replayed recovery root_id initialized inventory capabilities operations document state dependencies provenance purpose anatomical_review first second comparison_assets search_state missing candidates ranking candidate native_ids generation recovered_copy generation_id draft restored_active_scene comparison authored_changed scenarios normalized_overrides views view hits selection coverage plan recompute inspection'
     fields.update({k: ref('patch_value') for k in names.split()})
     fields['matches'] = array(ref('patch_value'))
-    fields.update(catalog=ref('patch_value'), transfer=ref('patch_value'), base_surface=ref('patch_value'), plan_id=S)
+    fields.update(catalog=ref('patch_value'), transfer=ref('patch_value'), base_surface=ref('patch_value'), partition=ref('patch_value'), plan_id=S)
     fields['warnings'] = ref('warning_state')
     return obj(fields, required)
 
@@ -295,9 +295,12 @@ def plan_fibers_operation():
 
 def visual_operations():
     fields = dict(instance_id=S, expected_scene_revision=S, resolution={'type': 'integer', 'minimum': 64, 'maximum': 1024}, context_ids=array(S, 0, 64))
-    rows = [operation('anatomy.views', fields, ['instance_id', 'expected_scene_revision'])]
-    fields = dict(view_id=S, azimuth=N, elevation={'type': 'number', 'minimum': -90, 'maximum': 90}, zoom={'type': 'number', 'minimum': .1, 'maximum': 20}, center=ref('xyz'), point_id=S, label=S, display=obj(dict(edges=B, controls=B), []))
+    fields.update(source_object=S, context_objects=array(S, 0, 64), automatic_context=B, neighbor_distance=dict(type='number', minimum=0))
+    rows = [operation('anatomy.views', fields, ['expected_scene_revision'])]
+    rows[0]['properties']['params']['oneOf'] = [dict(required=[name]) for name in ('instance_id', 'source_object')]
+    fields = dict(view_id=S, azimuth=N, elevation={'type': 'number', 'minimum': -90, 'maximum': 90}, zoom={'type': 'number', 'minimum': .1, 'maximum': 20}, center=ref('xyz'), point_id=S, label=S, display=obj(dict(edges=B, controls=B, labels=B), []))
     fields.update(section=obj(dict(normal=ref('xyz'), distance=N)), clear_section=B, context_ids=array(S, 0, 64))
+    fields.update(context_objects=array(S, 0, 64), automatic_context=B, neighbor_distance=dict(type='number', minimum=0))
     rows += [operation('anatomy.view', fields, ['view_id'])]
     uv = array({'type': 'number', 'minimum': 0, 'maximum': 1}, 2, 2)
     rows += [operation('anatomy.pick', dict(view_id=S, points=array(uv, 1, 64)), ['view_id', 'points'])]

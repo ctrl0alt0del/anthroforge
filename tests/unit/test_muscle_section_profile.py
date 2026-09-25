@@ -6,7 +6,7 @@ import numpy as np
 from scipy.interpolate import PchipInterpolator
 from scipy.ndimage import gaussian_filter1d
 from core.vcp.muscle_section_profile import SectionProfileSpec, apply_profile, canonical_profile, pchip, scale_profile
-from core.vcp.muscle_profile_frames import gaussian
+from core.vcp.muscle_profile_frames import gaussian, coherent, normalized, direction_field
 from core.vcp.muscle_profile_cache import CACHE, clear_profile_cache
 from core.vcp.muscle_numeric import execute_muscle_batch, make_muscle_request
 from test_muscle_numeric_native import _spec
@@ -18,6 +18,17 @@ def grid():
 
 
 class SectionProfileTests(unittest.TestCase):
+    def test_curved_strip_normals_do_not_flip_at_row_boundary(self):
+        theta, width = np.meshgrid(np.linspace(-1.2, 1.2, 41), np.linspace(0, 1, 9))
+        base = np.stack((np.cos(theta), width, np.sin(theta)), axis=2)
+        raw = normalized(np.cross(np.gradient(base, axis=0), np.gradient(base, axis=1)))
+        self.assertLess(np.dot(raw[0, -1], raw[1, 0]), 0)
+        np.testing.assert_allclose(coherent(raw), raw)
+        for mode in ('LOCAL', 'SMOOTH', 'SECTION'):
+            normals = direction_field(base, mode)[0]
+            self.assertTrue(np.all(np.sum(normals * raw, axis=2) > .9))
+            np.testing.assert_allclose(direction_field(base[::-1], mode)[0], -normals[::-1], atol=1e-14)
+
     def test_pchip_matches_scipy_including_extrema_and_flat_segments(self):
         random = np.random.default_rng(13)
         for values in (*random.uniform(0, 10, (30, 6)), (0, 0, 1, 1, 0, 0), (1, 1, 1, 1, 1, 1)):

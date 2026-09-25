@@ -4,6 +4,7 @@ from ...core.authoring.codec import digest
 from ...core.authoring.errors import require
 from ...core.authoring.transfer_meshes import build, fingerprint
 from . import transfer_bindings as bindings
+from . import shape_transfers
 
 OPERATIONS = ('anatomy.transfer_sources', 'anatomy.transfer_preview', 'anatomy.transfer_publish')
 
@@ -44,7 +45,7 @@ def preview(service, request):
     replay = receipt(service, request, fingerprint(rows))
     if replay is not None:
         return replay
-    result = build(rows, params['source_objects'], pairs, params['settings'], annotations)
+    result = shape_transfers.apply(service, params, rows, build(rows, params['source_objects'], pairs, params['settings'], annotations))
     identity = digest([result['version'], params, fingerprint(rows)])
     record = preview_record(service, identity, params, rows, result)
     service.store.put('transfer_previews', key(service, identity), record)
@@ -77,6 +78,7 @@ def load_preview(service, params):
     require(fingerprint(rows) == record['source_fingerprint'], 'STALE_TRANSFER_SOURCE')
     pairs, _annotations = bindings.resolve(service, record['definition'], rows)
     require(digest(pairs) == digest(record['result']['correspondences']), 'STALE_TRANSFER_TARGET')
+    shape_transfers.verify(service, record)
     return record
 
 
@@ -108,4 +110,5 @@ def remember(service, request, source_fingerprint, result):
 
 
 def operations():
-    return dict(zip(OPERATIONS, (sources, preview, publish)))
+    from .corrections import operations as corrections
+    return dict(zip(OPERATIONS, (sources, preview, publish)), **corrections())

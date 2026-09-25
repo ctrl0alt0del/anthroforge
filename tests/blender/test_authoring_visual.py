@@ -24,10 +24,58 @@ def views(r, directory):
     owner = next(row for row in inventory['instances'] if row['has_surface'] and not row['mirror'])
     value = call(r, directory, 'views', instance_id=owner['instance_id'], expected_scene_revision=inventory['revision'], resolution=128)
     assert value['status'] == 'success', value
+    assert value['inspection']['scene_revision'] == inventory['revision']
+    assert value['inspection']['neighborhood']['automatic']
+    assert any(a['kind'] == 'inspection_measurements' for a in value['assets'])
+    assert all(row['legend'] for row in value['views'])
     return inventory, owner, value['views']
 
 
+def mesh_views(r, directory):
+    setup(r, directory)
+    bpy.ops.mesh.primitive_cube_add(size=.3)
+    obj = bpy.context.object
+    obj.name = 'inspection_reference'
+    inventory = StaticScene(r, bpy.context.scene).capture_authoring()
+    result = call(r, directory, 'views', source_object=obj.name, expected_scene_revision=inventory['revision'], resolution=128)
+    assert result['status'] == 'success', result
+    return obj, result
+
+
 class VisualIntegrationTests(BlenderTestCase):
+    def test_mesh_subject_includes_bones_and_can_be_isolated(self):
+        r = root()
+        with tempfile.TemporaryDirectory() as directory:
+            obj, result = mesh_views(r, directory)
+            self.assertEqual(result['inspection']['owner'], 'OBJECT:'+obj.name)
+            self.assertGreater(len(result['inspection']['objects']), 1)
+            isolated = call(r, directory, 'view', view_id=result['views'][0]['id'], context_objects=[])
+            self.assertEqual(isolated['status'], 'success', isolated)
+            self.assertEqual(len(isolated['inspection']['objects']), 1)
+
+    def test_mesh_edit_rejects_old_view(self):
+        r = root()
+        with tempfile.TemporaryDirectory() as directory:
+            obj, result = mesh_views(r, directory)
+            obj.data.vertices[0].co.x += .1
+            obj.data.update()
+            bpy.context.view_layer.update()
+            value = call(r, directory, 'pick', view_id=result['views'][0]['id'], points=[[.5, .5]])
+            self.assertEqual(value['status'], 'unresolved', value)
+            self.assertEqual(value['diagnostics'][0]['code'], 'STALE_VIEW')
+
+    def test_automatic_neighborhood_captures_native_muscle(self):
+        r = root()
+        with tempfile.TemporaryDirectory() as directory:
+            obj, result = mesh_views(r, directory)
+            neighbor = obj.copy(); neighbor.data = obj.data.copy()
+            bpy.context.scene.collection.objects.link(neighbor)
+            neighbor['af_muscle_proxy'] = True; neighbor['af_root_name'] = r.name
+            neighbor['af_muscle_surface'] = 'INFL'; neighbor.hide_set(True)
+            value = call(r, directory, 'view', view_id=result['views'][0]['id'], automatic_context=True)
+            self.assertEqual(value['status'], 'success', value)
+            self.assertIn('OBJECT:'+neighbor.name, [x['instance_id'] for x in value['inspection']['objects']])
+
     def test_point_can_be_confirmed_after_context_switch(self):
         r = root()
         with tempfile.TemporaryDirectory() as directory:

@@ -16,10 +16,17 @@ def flip_muscle_normals(context, muscle_id=""):
         from .muscle_profile import configure, action_configuration
         configure(root, context.scene, muscle.id, action_configuration(muscle, "side"))
         return success(value=muscle)
-    target, kind = _normal_target(vcp, muscle)
+    target, kind = _inflation_side_target(vcp, muscle)
     target.flip_normals = not target.flip_normals
     _sync_entity(root, context.scene, kind, {target.id})
     return success(value=muscle)
+
+
+def _inflation_side_target(vcp, muscle):
+    source, kind = _normal_target(vcp, muscle)
+    if getattr(source, "construction_mode", "") == "BRANCHED_LOFT":
+        return source, kind
+    return muscle, "MUSCLE"
 
 
 def _normal_target(vcp, muscle):

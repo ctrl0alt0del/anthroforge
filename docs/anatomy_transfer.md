@@ -1,5 +1,11 @@
 # Skeleton-driven anatomy transfer
 
+Use the optional `shape_preservation` block on `anatomy.transfer_preview` for the
+joint family shape-preservation and bone-clearance fit. See
+[shape_preserving_transfer.md](shape_preserving_transfer.md) for indexed bands,
+controls, final-surface reports and publication semantics. Without that block the
+original shared-field behavior described below is unchanged.
+
 Authoring 0.4 exposes `skeleton_transfer.v1` (with the former experimental alias). It fits **one spatial
 deformation from paired skeletal landmarks**, then applies that same field to all
 selected reference muscle meshes and optional annotations. Muscle names have no
@@ -176,6 +182,17 @@ attributes are not transferred; these are geometric review copies.
 Save exports with `StaticScene.save_debug_copy` to retain the normal visible native
 curves and native SCP colors. Publication itself does not change existing visibility.
 
+## Collision reports and local correction
+
+The production operations `anatomy.transfer_collisions`,
+`anatomy.transfer_correct_preview` and `anatomy.transfer_correct_publish` implement
+the requested diagnostics and calculated local correction. See
+[transfer_collision_correction.md](transfer_collision_correction.md) for parameters,
+protected bands, contact bindings, guard bones, budgets, acceptance and replay.
+They create a separately owned corrected reference; the original skeleton and
+native muscles remain unchanged. After accepting it, regenerate affected downstream
+stages. Collision readiness is distinct from anatomical acceptance.
+
 ## Validation
 
 Disposable demo scripts are archived outside the addon. The maintained tests below
@@ -195,3 +212,12 @@ publication, rollback on receipt failure, save/reload and reuse of bindings afte
 a topology-preserving SCP deformation. Anatomical suitability on the production
 skeleton requires anatomical review. Native loft publication is supported by the
 guided reconstruction flow; automatic inflation fitting is deferred.
+
+
+### FCU collision experiment, September 21, 2026
+
+Evidence: `E:/development/WIP_models/muscle_reconstruction_workflow/runs/2026-09-19-fcu-complete-8ecb3eff/review/collision_comparison_v001`. This is a transfer-reference experiment, not a production repair API or a rebuilt native FCU. The source reference already penetrates SCP13; the native output inherits an upper collision. A manually chosen smoothly faded translation clears SCP13 but separates the selected humeral contact by 0.38524 scene units and is rejected for attachment preservation.
+
+A smooth RBF displacement fit with two explicit head-contact constraints, distal locking, bone-distance penalties and displacement-gradient regularization clears the tested upper collision after self-intersection union cleanup and a residual bone difference. Test the actual deformed triangles: evaluating a nonlinear field at undeformed triangle centroids is not equivalent. The fit reached its 150-evaluation budget, so this is not evidence of convergence or a universal optimum. Only two declared contact landmarks are constrained; full attachment bands remain unvalidated. Exact cleanup is part of the measured result, not an omitted implementation detail.
+
+At 1e-4 scene-unit tolerance, final vertices/centroids and 60,000 additional area-weighted samples find no SCP13 penetration. Selected contact distances are below 1.2e-7 scene units; signed surface integral changes about -1.9%, which is not an occupied-volume certificate. Ulna penetration remains (about 0.107 vs 0.260 originally). Clearance does not certify simplified shape quality, complete attachment anatomy, or downstream native reconstruction. Preserve failed/manual variants, actual-mesh checks, cleanup and reopen evidence with the successful local correction.

@@ -4,6 +4,7 @@ from ..vcp.branched_surface import BranchInput, prepare_assembly
 from ..vcp.shared_point_storage import slots, point_record
 from .muscle_sync_runtime import collect_fiber_points
 from ..vcp.free_path import is_free, decode, point_indices
+from ..vcp.free_surface_stations import resolve
 
 
 def source_surface(root, key):
@@ -31,7 +32,7 @@ def capture_assembly(root, scene, surface):
         raise ValueError("Main solved fibers are unavailable")
     branches = tuple(_branch_input(root, scene, fibers, routes, c) for c in surface.branches)
     _free_budget(root, surface, routes, branches)
-    return prepare_assembly(routes, branches, surface.flip_normals)
+    return prepare_assembly(routes, branches, surface.flip_normals, main_stations=resolve(main_surface, fibers))
 
 
 def _free_budget(root, surface, routes, branches):
@@ -53,7 +54,14 @@ def _branch_input(root, scene, fibers, routes, connection):
         raise ValueError("Branch solved fibers are unavailable")
     indices = _root_indices(root, scene, fibers[boundary], routes[boundary], root_ids)
     ordered = _oriented_children(children, child_routes, root_ids)
-    return BranchInput(connection.id, boundary, indices, ordered, connection.width, connection.fullness)
+    stations = _oriented_stations(branch, children, root_ids)
+    return BranchInput(connection.id, boundary, indices, ordered, connection.width, connection.fullness, stations)
+
+
+def _oriented_stations(surface, fibers, keys):
+    values = resolve(surface, fibers)
+    return tuple(s if f.a_point_id == key else (np.asarray(s)[-1]+np.asarray(s)[0]-np.asarray(s)[::-1]).tolist()
+                 for f, s, key in zip(fibers, values, keys))
 
 
 def _boundary(fibers, key):

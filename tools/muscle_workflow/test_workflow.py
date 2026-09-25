@@ -16,7 +16,10 @@ def lesson(evidence):
                 status="verified_case", stages=["fibers"], title="Test fixture",
                 observation="Observed geometry in fixture.", action="Inspect its boundary.",
                 applicability="This fixture only.", limitations="No anatomical claim.",
-                evidence=[reference(evidence)])
+                evidence=[reference(evidence)], card=dict(when="A boundary needs review.",
+                    do="Inspect its boundary.", check="Compare the actual geometry.",
+                    limits="This fixture only.", basis="case_observation", topic="boundary",
+                    tags=["free-fibers"], category="modeling"))
 
 
 class WorkflowTests(unittest.TestCase):
@@ -28,6 +31,7 @@ class WorkflowTests(unittest.TestCase):
         patch.dict("os.environ", AF_MUSCLE_WORKFLOW_HOME=str(self.directory)).start()
         (self.directory / "knowledge" / "lessons").mkdir(parents=True)
         self.index = patch.object(knowledge, "collection", return_value=MagicMock()).start()
+        patch("runs.run_provenance", return_value={"approach_id": "test"}).start()
         self.evidence = self.directory / "geometry.json"
         self.evidence.write_text('{"actual":"geometry fixture"}', encoding="utf-8")
 

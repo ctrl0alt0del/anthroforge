@@ -43,4 +43,5 @@ def decorate(pixels, buffer, scene, view):
     if display.get('controls'):
         paths = [c['points'] for c in scene.get('controls', []) if len(c['points']) > 1 and c['kind'] in ('guide', 'profile')]
         pixels = lines(pixels, buffer['depth'], view['camera'], paths, [97, 220, 163])
-    return pixels
+    from .visual_labels import objects
+    return objects(pixels, buffer) if display.get('labels', True) else pixels

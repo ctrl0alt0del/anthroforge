@@ -37,8 +37,12 @@ def plan_operation():
 
 
 def operations():
+    try:
+        from tools.authoring_smooth_schema import operations as smooth_operations
+    except ModuleNotFoundError:
+        from authoring_smooth_schema import operations as smooth_operations
     fields = dict(expected_scene_revision=S, plan_id=S)
-    return [define_operation(), plan_operation(), operation('anatomy.publish_base_fibers', fields, list(fields))]+preparation_operations()
+    return [define_operation(), plan_operation(), operation('anatomy.publish_base_fibers', fields, list(fields))]+preparation_operations()+smooth_operations()
 
 
 def preparation_operations():

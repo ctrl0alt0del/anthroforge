@@ -36,6 +36,27 @@ class NativeBranchTests(BlenderTestCase):
         self.assertEqual(use.muscle_surface(self.root, self.muscle).construction_mode, 'LOFT')
         self.assertAlmostEqual(self.muscle.inflation_max_value, .2)
 
+    def test_profile_capture_uses_retained_sources_of_empty_branch_wrapper(self):
+        from anthroforge.app.use_cases.muscle_profile import inspect, preview
+        wrapper = use.muscle_surface(self.root, self.muscle)
+        wrapper.fiber_refs.clear()
+        target, state = inspect(self.root, bpy.context.scene, self.muscle.id)
+        self.assertTrue(state['current'], state)
+        self.assertEqual(len(state['base_revision']), 64)
+        _, _, batch = preview(target, dict(mode='distributed', native=dict(inflation_max_value=.12)))
+        self.assertFalse(batch.results[0].error)
+
+    def test_profile_capture_rejects_stale_child_of_branch_wrapper(self):
+        from anthroforge.app.use_cases.muscle_profile import inspect
+        child = self.fibers[-1]
+        proxy = next(o for o in bpy.context.scene.objects if o.get('af_fiber_proxy')
+                     and o.get('af_fiber_id') == child.id and not o.get('af_fiber_mirror_proxy'))
+        proxy['af_fiber_output_state'] = 'STALE'
+        target, state = inspect(self.root, bpy.context.scene, self.muscle.id)
+        self.assertFalse(state['current'])
+        self.assertFalse(state['base_revision'])
+        self.assertIn('PROFILE_BASE_NOT_CURRENT', state['reasons'][0])
+
     def test_transaction_failure_restores_graph_and_settings(self):
         from anthroforge.app.authoring.native_branches import _transaction
         from anthroforge.adapters.authoring.capture import native_records

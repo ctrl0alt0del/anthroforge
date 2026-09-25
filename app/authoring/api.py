@@ -1,5 +1,19 @@
 """Composition root. Call execute(request, root, scene, journal_directory).
 
+Adjacent base repair: anatomy.partition_base_surfaces takes two directed path
+grids, facing sides and a local chart, returns a common local border, preserved
+endpoints, bounded outline error and actual native mesh checks. Optional existing
+branch roots are retained. smooth_base_preview can run this explicitly through
+overlap_repairs before atomic publication. See docs/base_surface_partition.md.
+
+Simplified reconstruction (DSL 0.4): transfer -> combined base/native Free fibers
+-> inflation. anatomy.smooth_base_preview jointly fits directed underside patches
+and shared boundaries to a sparse native-compatible ruled spline base, qualifies
+pins and checks the actual retained loft. smooth_base_publish atomically creates
+shared Free fibers, coordinated surfaces and uninflated muscles. No routing solver
+or Python optimizer runs. See docs/smooth_native_base.md for the input contract,
+material correspondence, editing, diagnostics and replay semantics.
+
 Guided reconstruction (DSL 0.4): transfer_sources/transfer_preview/transfer_publish
 adapt reference volumes to indexed skeletal correspondences. repair_volume creates
 an audited Boolean-union copy. base_candidates supplies whole-underside evidence;
@@ -9,6 +23,20 @@ zero-offset SCP pins, up to eight middle points, and independent loft checks.
 publish_base_fibers atomically creates editable fibers and uninflated Fiber Surfaces.
 Anatomical review and inflation fitting remain separate. See
 docs/authoring_muscle_reconstruction.md for parameters, limits and replay semantics.
+
+Transfer collision correction (DSL 0.4): anatomy.transfer_collisions reports
+penetration against selected evaluated SCP instances. transfer_correct_preview
+fits a local displacement field with fixed vertex bands, qualified contact
+bindings, optional influence masks and obstacle guards, then validates cleanup.
+transfer_correct_publish publishes only a technically ready preview as a separate
+reference object. Originals, SCPs and native fibers remain unchanged. Rebuild
+downstream stages from the new reference. See docs/transfer_collision_correction.md.
+
+Continuous attachments: transfer_attachment_preview replaces an explicit source
+end cap with a complete indexed bone footprint and native solid transition.
+transfer_attachment_publish requires footprint, topology and collision checks.
+This remeshes the reference; rebind annotations and rebuild downstream stages.
+See docs/continuous_attachment.md for inputs and approximation limits.
 
 warnings.list (all protocol versions) reads the transient file-wide warning store.
 It bypasses scene capture, solver and request replay. See docs/warnings.md for

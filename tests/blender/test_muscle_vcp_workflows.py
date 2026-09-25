@@ -321,8 +321,7 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
 
     def test_flip_normals_and_inflation_control_selection_keep_muscle_active(self):
         root_obj, first, second = _muscle_setup()
-        select_only(first)
-        second.select_set(True)
+        select_only(first); second.select_set(True)
         bpy.ops.af.add_muscle_vcp()
         _clear_selection()
         sync = register_muscle_sync()
@@ -332,7 +331,8 @@ class MuscleVcpWorkflowTests(BlenderTestCase):
         ctrl = find_flagged("af_muscle_inflation_ctrl", muscle.id, "af_muscle_id")
         ctrl = ctrl or sync._create_inflation_ctrl(sync._get_vis_collection(bpy.context.scene), root_obj, muscle.id)
         select_only(ctrl)
-        self.assertTrue(root_obj.af_vcp_system.fiber_surfaces[0].flip_normals)
+        self.assertTrue(muscle.flip_normals)
+        self.assertFalse(root_obj.af_vcp_system.fiber_surfaces[0].flip_normals)
         self.assertEqual(bpy.context.active_object.get("af_muscle_id"), muscle.id)
 
     def test_fiber_can_feed_multiple_muscle_surfaces(self):

@@ -40,4 +40,5 @@ def card(view):
     path = escape(view['image']['path'].replace('\\', '/').split('/')[-1])
     label, identity = escape(view['label']), escape(view['id'])
     canvas = '<svg class="overlay" viewBox="0 0 1 1" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>'
-    return '<figure><figcaption>'+label+' · '+identity[:16]+'</figcaption><div style="position:relative"><img style="display:block;cursor:crosshair" data-view="'+identity+'" src="'+path+'" alt="'+label+'">'+canvas+'</div></figure>'
+    legend = '<br>'.join(escape(k+' = '+v) for k, v in view.get('legend', {}).items())
+    return '<figure><figcaption>'+label+' · '+identity[:16]+'</figcaption><div style="position:relative"><img style="display:block;cursor:crosshair" data-view="'+identity+'" src="'+path+'" alt="'+label+'">'+canvas+'</div><details><summary>Geometry labels</summary>'+legend+'</details></figure>'
