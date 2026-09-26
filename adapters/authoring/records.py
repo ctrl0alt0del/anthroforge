@@ -21,7 +21,7 @@ def _record_values(item):
     if values.get('output_domain_mode') == 'FULL':
         from ...core.vcp.muscle_output_domain import FIELDS
         values = {key: value for key, value in values.items() if key not in FIELDS}
-    return _legacy_fiber_values(values)
+    return _envelope_record(item, _legacy_fiber_values(values))
 
 
 def _legacy_fiber_values(values):
@@ -65,3 +65,13 @@ def restore(item, value):
             del item[key]
     for key, data in value["custom"].items():
         item[key] = data
+
+
+def _envelope_record(item, values):
+    values.pop('envelope_edit_side', None)
+    if values.get('envelope_version', 0) == 0:
+        return {k: v for k, v in values.items() if not k.startswith('envelope_') and k != 'inflation_secondary'}
+    if item.bl_rna.identifier == 'AF_MuscleVCP_Property' and item in item.id_data.af_vcp_system.muscles[:]:
+        from ...core.authoring.envelope_config import configuration
+        values['envelope_configuration'] = configuration(item.id_data, item)
+    return values

@@ -128,6 +128,8 @@ from .operators.topology import AF_OT_CancelTopology, AF_OT_GenerateTopology
 from .operators.warm_update import AF_OT_CancelWarmUpdate, AF_OT_UpdateSkinTopology
 
 from .operators.muscle_profile import CLASSES as PROFILE_CLASSES
+from .operators.muscle_envelope import CLASSES as ENVELOPE_CLASSES
+from .properties.muscle_envelope import AF_MuscleSideProperties
 from .ui.main_panel import AF_PT_MainPanel
 from .ui.panels.create_panel import AF_PT_CreatePanel
 from .ui.panels.tree_panel import AF_PT_TreePanel
@@ -281,6 +283,7 @@ classes = (
 
     AF_MuscleFiberRef_Property,
     AF_FiberSurfaceFiberRef_Property,
+    AF_MuscleSideProperties,
     AF_MuscleVCP_Property,
     AF_BranchPointRef_Property,
     AF_BranchConnection_Property,
@@ -357,7 +360,7 @@ classes = (
 )
 
 
-classes += PROFILE_CLASSES
+classes += PROFILE_CLASSES + ENVELOPE_CLASSES
 
 
 def _already_registered(error):
@@ -426,6 +429,8 @@ def _register_runtime_hooks():
 
 
 def _register_warnings():
+    from .core.visualization import muscle_envelope_overlay
+    muscle_envelope_overlay.register(lambda: bpy.context)
     from .operators import free_fiber
     free_fiber.register()
     from .ui import muscle_branches

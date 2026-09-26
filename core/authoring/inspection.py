@@ -46,6 +46,8 @@ def context(snapshot, project, low, high, axes):
 
 
 def sections(output,project):
+    if "side_a" in output:
+        return _envelope_sections(output, project)
     from .inflation import sample
     if "inflated" not in output:
         return []
@@ -64,10 +66,11 @@ def surface(output, project, view):
     if "faces" not in output or view == "fibers":
         return []
     vertices = np.array(output["inflated"])
-    contacts = {i % len(output["faces"]) for i in output.get("contact",{}).get("triangles",[])}
+    faces = output.get("inflated_faces", output["faces"])
+    contacts = {i % len(faces) for i in output.get("contact",{}).get("triangles",[])}
     return [polygon(project(vertices[face]), "#df1630" if view == "contacts" and i in contacts else "#b76150",
                     ".7" if view == "contacts" and i in contacts else ".35", "#904638")
-            for i,face in enumerate(output["faces"])]
+            for i,face in enumerate(faces)]
 
 
 def paths(output, project):
@@ -82,3 +85,11 @@ def paths(output, project):
             x,y = project([anchor["point"]])[0]
             parts.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="3" fill="#efb02a" stroke="#563d12"/>')
     return parts
+
+
+def _envelope_sections(output, project):
+    result = []
+    for key in ('side_a', 'side_b'):
+        value = dict(output, inflated=output[key]); value.pop('side_a'); value.pop('side_b')
+        result.extend(sections(value, project))
+    return result

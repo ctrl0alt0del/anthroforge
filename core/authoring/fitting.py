@@ -49,8 +49,8 @@ def evaluate(output, config, targets):
 
 
 def fit(output, shape, budget=None):
-    budget = budget or Budget()
-    spec = shape['fitting']
+    if 'envelope_configuration' in output: return envelope_result(output, shape)
+    budget, spec = budget or Budget(), shape['fitting']
     require(output["config"]["mode"] != "section_profile" or not spec["enabled"], "PROFILE_FITTING_UNSUPPORTED")
     best, rows = evaluate(output, deepcopy(output['config']), shape['targets'])
     count, step = 1, spec['step']
@@ -87,3 +87,12 @@ def changed(original, key, delta):
     require(field in target, 'FITTING_PARAMETER_UNAVAILABLE')
     target[field] = float(np.clip(target[field]+delta, *LIMITS[key]))
     return config
+
+
+def envelope_result(output, shape):
+    from .envelope_numeric import measurements
+    require(not shape['fitting']['enabled'], 'ENVELOPE_FITTING_UNSUPPORTED')
+    best = deepcopy(output); values = measurements(best); rows = errors(values, shape['targets'])
+    best['fitting'] = dict(evaluations=0, achieved=values, residuals=rows, scope='complete_envelope',
+        state='resolved' if all(r['state'] == 'resolved' for r in rows) else 'unresolved', fibers_preserved=len(best['fibers']))
+    return best

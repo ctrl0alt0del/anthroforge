@@ -10,8 +10,7 @@ def write(root, scene, name, output, previous):
     system = root.af_vcp_system
     muscle = find(system.muscles, previous.get('muscle')) or _new_muscle(system, name, False, False)
     wrapper = find(system.fiber_surfaces, previous.get('surface')) or _new_surface(system, name, 'BRANCHED_LOFT', False, False)
-    wrapper.branches.clear()
-    parts, fibers = _write_parts(root, scene, output, previous)
+    wrapper.branches.clear(); parts, fibers = _write_parts(root, scene, output, previous)
     wrapper.construction_mode, wrapper.main_surface_id = 'BRANCHED_LOFT', parts['main']
     wrapper.flip_normals = output['native_properties']['flip_normals']
     wrapper.fiber_refs.clear(); _assign_refs(wrapper, list(fibers.values()))
@@ -19,6 +18,7 @@ def write(root, scene, name, output, previous):
     configure(muscle, output)
     for key, definition in output['branch_connections'].items():
         _connection(root, wrapper, muscle, key, definition, output, parts, fibers)
+    _envelope(root, muscle, output)
     return dict(muscle=muscle.id, surface=wrapper.id, fibers=fibers, parts=parts)
 
 
@@ -62,3 +62,9 @@ def junction_fibers(output):
                 raise ValueError('Compiled junction anchor differs from its main point')
             allowed.add(row['id'])
     return allowed
+
+
+def _envelope(root, muscle, output):
+    if "envelope_configuration" in output:
+        from ...app.use_cases.muscle_envelope import write as write_envelope
+        write_envelope(root, muscle, output["envelope_configuration"])

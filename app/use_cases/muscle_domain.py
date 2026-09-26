@@ -22,7 +22,7 @@ def _mode(muscle):
 
 def preview(target, configuration):
     value = candidate(target, normalize(configuration))
-    request = profiles._preview_request(target, value, value.inflation_mode == 'CTRL_POINT' and not value.inflation_ctrl_initialized)
+    request = _request(target, value)
     batch = execute_muscle_batch((request,))
     if batch.results[0].error:
         raise ValueError(batch.results[0].error)
@@ -44,3 +44,13 @@ def configure(root, scene, muscle_id, configuration):
         write_configuration(target.muscle, configuration)
         profiles.publish(root, scene, target.muscle, request, batch)
     return normalize(configuration)
+
+
+def _request(target, value):
+    from dataclasses import replace
+    from ...core.vcp.muscle_output_domain import capture
+    if getattr(target.muscle, 'envelope_version', 0):
+        from .muscle_envelope import _request as envelope_request, configuration
+        config = configuration(target.muscle.id_data, target.muscle)
+        return replace(envelope_request(target, config), output_domain=capture(value))
+    return profiles._preview_request(target, value, value.inflation_mode == 'CTRL_POINT' and not value.inflation_ctrl_initialized)

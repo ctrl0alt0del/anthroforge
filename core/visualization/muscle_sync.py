@@ -458,6 +458,8 @@ def register_muscle_sync():
 
 
 def unregister_muscle_sync():
+    from .muscle_envelope_overlay import unregister
+    unregister()
     global _MUSCLE_SYNC
     if _MUSCLE_SYNC is None:
         return

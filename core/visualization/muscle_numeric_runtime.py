@@ -11,6 +11,7 @@ from ..vcp.muscle_surface import validate_anchor_structure
 from ..vcp.muscle_inflation_state import inflation_control_initialized, migrate_inflation_control
 from ..vcp.runtime_state import muscle_inflation_ctrl_world, set_muscle_inflation_ctrl_world
 from ..vcp.muscle_output_domain import capture as capture_domain
+from ..vcp.muscle_envelope import faces_for
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,8 @@ class MuscleNumericWork:
 
 
 def capture_muscle_work(sync, vis_col, root, scene, vcp, muscle):
+    if getattr(muscle, 'envelope_sides', '') == 'BOTH_SIDES':
+        return _capture_envelope_work(sync, vis_col, root, scene, muscle)
     error = _domain_error(muscle) or _branched_mode_error(root, muscle)
     if error:
         return _invalid_mode_work(sync, vis_col, root, muscle, error)
@@ -91,7 +94,7 @@ def _branched_request(root, scene, muscle):
     return _make_branched_request(muscle, surface, assembly)
 
 
-def _make_branched_request(muscle, surface, assembly):
+def _make_branched_request(muscle, surface, assembly, envelope=True):
     from ..vcp.branched_numeric import BranchedMuscleRequest
     from ..vcp.prepared_inflation import validate_prepared_mode
     settings = (muscle, *(b.settings for b in surface.branches))
@@ -99,7 +102,9 @@ def _make_branched_request(muscle, surface, assembly):
     grids = (assembly.main, *(b.grid for b in assembly.branches))
     specs = tuple(_numeric_spec(s, surface, g.shape[1], False, False, _initialize_control(s))
                   for s, g in zip(settings, grids))
-    return BranchedMuscleRequest(muscle.id, assembly, specs, capture_domain(muscle))
+    from .muscle_envelope_storage import attach
+    request = BranchedMuscleRequest(muscle.id, assembly, specs, capture_domain(muscle))
+    return attach(request, muscle) if envelope else request
 
 
 def execute_muscle_work(scene, work):
@@ -143,13 +148,15 @@ def _surface_input(sync, root, scene, muscle):
     return points, len(points[0]), False, closed_u, config, _free_source(root, config)
 
 
-def _make_request(muscle, payload, initialize=False):
+def _make_request(muscle, payload, initialize=False, envelope=True):
     points, target, densify, closed_u, config = payload[:5]
     spec = _numeric_spec(muscle, config, target, densify, closed_u, initialize)
     if len(payload) > 5 and payload[5]:
         from dataclasses import replace
         spec = replace(spec, preserve_samples=True)
-    return make_muscle_request(muscle.id, np.asarray(points, dtype=np.float64), spec, output_domain=capture_domain(muscle))
+    from .muscle_envelope_storage import attach
+    request = make_muscle_request(muscle.id, np.asarray(points, dtype=np.float64), spec, output_domain=capture_domain(muscle))
+    return attach(request, muscle) if envelope else request
 
 
 def _free_source(root, source):
@@ -199,7 +206,7 @@ def _initialize_control(muscle):
 def _publish_one(sync, vis_col, root, scene, vcp, work, result, batch):
     error = work.error or (result.error if result else "")
     work.muscle["_af_rt_section_profile_error"] = error
-    if work.muscle.inflation_mode == "SECTION_PROFILE" or error.startswith("PROFILE_"):
+    if (work.muscle.inflation_mode == "SECTION_PROFILE" and work.request is not None and work.request.envelope is None) or error.startswith("PROFILE_"):
         sync._remove_inflation_ctrl_for_muscle(vis_col, root.name, work.muscle.id)
     if error:
         return _publish_error(sync, vcp, work, error)
@@ -213,10 +220,11 @@ def _publish_one(sync, vis_col, root, scene, vcp, work, result, batch):
 
 
 def _profile_unchanged(sync, vis_col, root, work, result):
+    if work.request.envelope is not None: return False
     if work.muscle.inflation_mode != "SECTION_PROFILE" or sync._find_inflation_ctrl(vis_col, root.name, work.muscle.id):
         return False
     for obj, values in ((work.base_obj, result.base_vertices), (work.infl_obj, result.inflated_vertices)):
-        if obj is None or obj.get("af_muscle_output_state") != "CURRENT" or not mesh_matches(obj, values, result.faces):
+        if obj is None or obj.get("af_muscle_output_state") != "CURRENT" or not mesh_matches(obj, values, faces_for(result, obj == work.infl_obj)):
             return False
     return True
 
@@ -242,8 +250,9 @@ def _publish_valid(sync, vis_col, root, scene, vcp, work, result, batch):
         work = replace(work, base_obj=base, infl_obj=inflated)
     sync._update_mesh(work.base_obj, result.base_vertices, result.faces)
     _sync_control(sync, vis_col, root, scene, vcp, work, result)
-    sync._update_mesh(work.infl_obj, result.inflated_vertices, result.faces)
+    sync._update_mesh(work.infl_obj, result.inflated_vertices, faces_for(result, True))
     _domain_metadata(work, result)
+    _envelope_metadata(work, result)
     _mark_valid(sync, vcp, work, batch)
 
 
@@ -251,7 +260,7 @@ def _domain_metadata(work, result):
     from ..authoring.codec import encode
     for obj in (work.base_obj, work.infl_obj):
         obj['af_muscle_domain_plane'] = encode(work.request.output_domain)
-        for name, values in (('af_source_face', result.source_faces), ('af_muscle_part', result.face_parts)):
+        for name, values in _face_metadata(work, result, obj):
             old = obj.data.attributes.get(name)
             if old is not None:
                 obj.data.attributes.remove(old)
@@ -261,14 +270,18 @@ def _domain_metadata(work, result):
 
 
 def _sync_control(sync, vis_col, root, scene, vcp, work, result):
-    from .branch_control import selected_part
+    from .muscle_envelope_storage import selected_settings
     ensure = sync._selected_muscle_id(vcp, root, scene) == work.muscle.id
-    settings, key, index = selected_part(root, work.muscle)
+    settings, key, index = selected_settings(root, work.muscle)
+    settings.id = work.muscle.id
     rows, spec = _part_control(work.request, result, index)
+    if work.request.envelope and work.muscle.envelope_edit_side == 'B': spec = work.request.envelope.secondary[index]
     if spec.initialize_control: _store_initial_control(settings, rows)
     points = [[Vector(point) for point in row] for row in rows] if ensure and settings.inflation_mode == "CTRL_POINT" else ()
     ctrl = sync._sync_inflation_control(vis_col, root, settings, work.base_obj, points, ensure)
-    if ctrl is not None: ctrl['af_muscle_branch_id'] = key
+    if ctrl is not None:
+        ctrl['af_muscle_branch_id'] = key
+        ctrl['af_inflation_side'] = work.muscle.envelope_edit_side if work.request.envelope else 'A'
 
 
 def _part_control(request, result, index):
@@ -324,3 +337,30 @@ def _publish_error(sync, vcp, work, error):
         if obj is not None:
             sync._update_mesh(obj, [], [])
     sync._set_output_state((work.base_obj, work.infl_obj), "INVALID")
+
+
+def _face_metadata(work, result, obj):
+    if obj == work.infl_obj and result.inflated_faces is not None:
+        return (('af_source_face', result.inflated_sources), ('af_muscle_part', result.inflated_parts), ('af_inflation_side', result.inflated_sides))
+    return (('af_source_face', result.source_faces), ('af_muscle_part', result.face_parts), ('af_inflation_side', None))
+
+
+def _capture_envelope_work(sync, vis_col, root, scene, muscle):
+    from .muscle_profile_capture import capture_target
+    try:
+        target = capture_target(root, scene, muscle.id)
+        if not target.current or (target.assembly is None and not target.eligible):
+            raise ValueError('; '.join(target.reasons))
+        request = _make_branched_request(muscle, target.source, target.assembly) if target.assembly else _make_request(muscle, target.payload, _initialize_control(muscle))
+        base, inflated = sync._ensure_muscle_meshes(vis_col, root, muscle.id)
+        return MuscleNumericWork(muscle, base, inflated, request)
+    except (ValueError, TypeError) as error:
+        return _invalid_mode_work(sync, vis_col, root, muscle, str(error))
+
+
+def _envelope_metadata(work, result):
+    from ..authoring.codec import encode
+    work.muscle['_af_rt_envelope_diagnostics'] = encode(result.diagnostics or {})
+    work.infl_obj['af_envelope_diagnostics'] = encode(result.diagnostics or {})
+    from .muscle_envelope_overlay import arrows
+    work.infl_obj['af_envelope_arrows'] = encode(arrows(work, result))

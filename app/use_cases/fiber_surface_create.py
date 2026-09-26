@@ -143,6 +143,8 @@ def _select_created_muscle(context, root, muscle, surface):
 
 
 def create_native_muscle(root, scene, surface_id, name="", initial_configuration=None):
+    if (initial_configuration or {}).get('schema') == 'muscle_inflation_envelope.v1':
+        return _create_envelope(root, scene, surface_id, name, initial_configuration)
     from dataclasses import replace
     from .muscle_profile import inspect, preview, write_configuration, transaction, publish
     target, _ = inspect(root, scene, surface_id=surface_id)
@@ -321,3 +323,11 @@ def _sync_scene():
     except ImportError:
         from app.runtime_api import sync_scene
     return sync_scene
+
+
+def _create_envelope(root, scene, surface_id, name, configuration):
+    from .muscle_envelope import configure, transaction
+    with transaction(root, scene):
+        muscle = create_native_muscle(root, scene, surface_id, name)
+        configure(root, scene, muscle.id, configuration)
+    return muscle

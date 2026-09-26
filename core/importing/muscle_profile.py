@@ -5,6 +5,7 @@ from ..vcp.muscle_section_profile import PROFILE_FIELDS, SectionProfileSpec, can
 def prepared_properties(values, geometry_scale=1):
     result = dict(values or {})
     result.pop("af_authoring_profile_receipt", None)
+    result.pop("af_authoring_envelope_receipt", None)
     result.pop("af_authoring_muscle_creation", None)
     result.pop('af_authoring_domain_receipt', None)
     result = _domain_properties(result, geometry_scale)

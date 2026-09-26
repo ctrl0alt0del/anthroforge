@@ -5,11 +5,18 @@ from ...app.use_cases.fiber_surface_create import create_native_muscle
 from ...core.authoring.codec import encode, decode
 
 MARKERS = {"muscle_profile_configure.v1": "af_authoring_profile_receipt", "muscle_from_surface.v1": "af_authoring_muscle_creation"}
+MARKERS['muscle_inflation_configure.v1'] = 'af_authoring_envelope_receipt'
 MARKERS['muscle_domain_configure.v1'] = 'af_authoring_domain_receipt'
 
 
 def inspect(port, target):
-    return commands.inspect(port.root, port.scene, target.get("muscle_id", ""), target.get("fiber_surface_id", ""))[1]
+    captured, state = commands.inspect(port.root, port.scene, target.get("muscle_id", ""), target.get("fiber_surface_id", ""))
+    if getattr(captured.muscle, "envelope_sides", "") == "BOTH_SIDES":
+        from ...core.authoring.codec import digest
+        from ...core.authoring.envelope_config import configuration
+        state.update(envelope_api_required=True, capability="muscle_inflation_envelope.v1",
+                     envelope_configuration_revision=digest(configuration(port.root, captured.muscle)))
+    return state
 
 
 def preview(port, target, configuration):

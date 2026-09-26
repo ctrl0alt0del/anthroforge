@@ -46,7 +46,7 @@ def _muscles(root, scene, muscles):
     for item, result in zip(work, batch.results):
         if result.error: raise ValueError(result.error)
         _published(item.base_obj, 'af_muscle_output_state', result.base_vertices, result.faces, item.muscle.id)
-        _published(item.infl_obj, 'af_muscle_output_state', result.inflated_vertices, result.faces, item.muscle.id)
+        _published(item.infl_obj, 'af_muscle_output_state', result.inflated_vertices, result.inflated_faces if result.inflated_faces is not None else result.faces, item.muscle.id)
 
 
 def _mirrors(root, scene, fiber_ids, muscles):

@@ -51,6 +51,7 @@ class MuscleNumericRequest:
     spec: MuscleNumericSpec
     orientation_parity: int = 1
     output_domain: object = None
+    envelope: object = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,13 @@ class MuscleNumericResult:
     error: str = ""
     source_faces: object = None
     face_parts: object = None
+    inflated_faces: object = None
+    side_a: object = None
+    side_b: object = None
+    inflated_parts: object = None
+    inflated_sides: object = None
+    inflated_sources: object = None
+    diagnostics: object = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +102,9 @@ def resolve_muscle_backend(explicit=None, environment=None):
 def execute_muscle_batch(requests, backend=None):
     from .branched_numeric import BranchedMuscleRequest, execute_mixed
     kind, requests = resolve_muscle_backend(backend), tuple(requests)
+    if any(r.envelope is not None for r in requests):
+        from .muscle_envelope import execute
+        return execute(requests, kind.value)
     if any(isinstance(r, BranchedMuscleRequest) for r in requests):
         return execute_mixed(requests, kind.value)
     if not requests:

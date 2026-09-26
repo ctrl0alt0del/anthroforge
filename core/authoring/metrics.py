@@ -5,6 +5,7 @@ from .clipping import area, triangulate
 
 
 def sections(output):
+    if 'side_a' in output: return envelope_sections(output)
     grid = np.array(output['inflated']).reshape((len(output['u']), len(output['s']), 3))
     base = np.array(output['base']).reshape(grid.shape)
     return [section(grid[:, i], base[:, i], float(s)) for i, s in enumerate(output['s'])]
@@ -21,7 +22,7 @@ def section(points, base, s):
 def closure(output, kind):
     require(kind == 'planar_caps', 'CLOSURE_REQUIRED')
     points = np.array(output['inflated'])
-    faces = output['faces']
+    faces = output.get('inflated_faces', output['faces'])
     edges = boundary_edges(faces)
     loops = boundary_loops(edges)
     triangles = triangulate([points[face] for face in faces])
@@ -62,3 +63,15 @@ def boundary_loops(edges):
         require(current == start and len(loop) >= 3, 'OPEN_BOUNDARY')
         result.append(loop)
     return result
+
+
+def envelope_sections(output):
+    shape = (len(output['u']), len(output['s']), 3)
+    a, b, base = (np.asarray(output[key]).reshape(shape) for key in ('side_a', 'side_b', 'base'))
+    return [envelope_section(a[:, i], b[:, i], base[:, i], float(s)) for i, s in enumerate(output['s'])]
+
+
+def envelope_section(a, b, base, s):
+    combined = section(np.vstack((a, b)), np.vstack((base, base)), s)
+    return dict(s=s, side_a=section(a, base, s), side_b=section(b, base, s), width=combined['width'],
+                max_material_span=float(np.linalg.norm(a-b, axis=1).max()))

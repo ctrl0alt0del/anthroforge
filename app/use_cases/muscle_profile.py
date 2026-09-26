@@ -63,6 +63,8 @@ def _ownership(muscle):
 
 
 def preview(target, configuration):
+    if getattr(target.muscle, "envelope_sides", "") == "BOTH_SIDES":
+        raise ValueError("ENVELOPE_API_REQUIRED")
     configuration = normalize(configuration)
     _validate_target(target, configuration)
     candidate = _candidate(target.muscle, configuration)

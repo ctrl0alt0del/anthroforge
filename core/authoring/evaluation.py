@@ -74,19 +74,20 @@ def evaluated(document, name, resolver, plans, solved, refs):
     native, props, point = native_geometry.evaluate(base,u,s,config,plans[0].closed)
     result = pack_result(plans,rows,s,terminations,native.base_vertices,native.inflated_vertices,u,native.faces,config,{},refs,row_s)
     result.update(native_properties=props, native_control_world=point)
+    _envelope_output(result, config, base)
     return checked_result(result, document, name, resolver)
 
 
 def checked_result(result, document, name, resolver):
     base = np.array(result["base"]).reshape(len(result["u"]),len(result["s"]),3)
-    inflated = np.array(result["inflated"]).reshape(base.shape)
+    inflated = np.array(result.get("side_a", result["inflated"])).reshape(base.shape)
     closed, config, refs = result["fibers"][0]["closed"], result["config"], result["references"]
     try:
-        surface_checks.check(base, inflated, closed)
+        _check_sides(result, base, inflated, closed)
         result["shape"] = shape.measurements(base,inflated,result["u"],result["s"],config,closed,resolver,refs)
         shape.validate(result["shape"])
         tolerance = resolver.measure(document["policies"][document["muscles"][name]["policy"]]["penetration_tolerance"],refs)
-        result["contact"] = evaluate_contact(resolver,inflated,result["faces"],tolerance)
+        result["contact"] = evaluate_contact(resolver, np.asarray(result["inflated"]), result.get("inflated_faces", result["faces"]), tolerance)
         contact_repair.annotate(result)
     except AuthoringError as error:
         error.preview, error.pointer = result, "/muscles/"+name
@@ -200,3 +201,19 @@ def try_candidate(document,name,resolver,solver,result,candidate,refs):
             error.preview = result
             raise
         return None
+
+
+def _envelope_output(output, config, base):
+    if 'envelope' not in config: return
+    from .envelope_numeric import evaluate_output
+    from .native_geometry import numeric_properties
+    from ..vcp.muscle_numeric import MuscleNumericSpec, make_muscle_request
+    spec = MuscleNumericSpec(target_count=base.shape[1], densify=False, closed_u=False, close_across_fibers=False,
+        topology_flip_normals=False, closed_v=False, control_world=tuple(output['native_control_world']), **numeric_properties(output['native_properties']))
+    evaluate_output(output, config['envelope'], make_muscle_request('authored', base, spec))
+    output['measurement_scope'] = 'side_a_shape_checks; both_sides_contact; envelope_surface_diagnostics'
+
+
+def _check_sides(result, base, inflated, closed):
+    surface_checks.check(base, inflated, closed)
+    if 'side_b' in result: surface_checks.check(base, np.asarray(result['side_b']).reshape(base.shape), closed)

@@ -50,7 +50,7 @@ def operations(defs):
     target, config = {"$ref": "#/$defs/profile_target"}, {"$ref": "#/$defs/profile_configuration"}
     guards = dict(expected_scene_revision=text, expected_base_revision=text)
     preview = dict(target=target, configuration=config, include_geometry=dict(type="boolean"), **guards)
-    create = dict(surface_id=text, name=text, initial_configuration=configuration(depth), **guards)
+    create = dict(surface_id=text, name=text, initial_configuration=configuration(depth), initial_envelope={'$ref': '#/$defs/native_muscle_envelope'}, **guards)
     return [_operation("profile_inspect", dict(target=target), ["target"]),
         _operation("profile_preview", preview, ["target", "configuration", *guards]),
         _operation("profile_configure", dict(muscle_id=text, configuration=config, **guards), ["muscle_id", "configuration", *guards]),

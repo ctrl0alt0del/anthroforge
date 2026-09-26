@@ -1,6 +1,6 @@
 # Bidirectional muscle inflation
 
-Status: proposed implementation design, 2026-09-26. Code inspection supports the integration points below; the new geometry behavior has not yet been implemented or validated. This document is not an anatomical acceptance report.
+Status: implemented and integration-tested, 2026-09-26. See [usage and validation](bidirectional_inflation.md) for the shipped contracts, measured performance, and separately reported fixture limitations. This is not an anatomical acceptance report.
 
 ## 1. Product behavior and scope
 
@@ -246,9 +246,9 @@ Errors include `ENVELOPE_DOMAIN_UNSUPPORTED`, `ENVELOPE_VERSION_UNSUPPORTED`, `E
 
 ## 10. Native implementation and integration map
 
-Use the existing `native/fiber_ccd` build/load infrastructure. Introduce a versioned envelope entry point and capability bit; leave the current C ABI intact. Batch prepared charts, part/seam data and side parameters across one native boundary. Return buffers with separate vertex/face counts and provenance. No Blender callbacks, per-vertex Python callbacks or silent production Python fallback.
+Use the existing `native/fiber_ccd` build/load infrastructure. Use versioned envelope exports (`af_muscle_envelope_version`) without changing the existing C ABI or exhausting the shared capability bitfield. Batch each prepared chart across the native boundary; cache each complete evaluated side independently. Return buffers with separate vertex/face counts and provenance. No Blender callbacks, per-vertex Python callbacks or silent production Python fallback.
 
-New two-sided geometry evaluation, profile fields, assembly-side processing and composition should live in C++. Reuse current native law kernels; port only the missing required profile/assembly operations with parity fixtures. Existing one-sided routes remain available unchanged while the adapter adopts the new result shape. No new optimizer is necessary for manually configured inflation. Any later fitting/optimization must also live in C++.
+New profile fields, side diagnostics, and envelope composition live in C++. Existing branch preparation and seam/connector orchestration are reused unchanged around the existing native inflation/connector kernels. No new Python optimization loop is introduced. Existing one-sided routes remain available unchanged while the adapter adopts the new result shape. No new optimizer is necessary for manually configured inflation. Any later fitting/optimization must also live in C++.
 
 Suggested modules (names proposed, not existing APIs):
 
@@ -269,7 +269,7 @@ Reuse base preparation, material coordinates and source capture. Evaluate two si
 
 Expected incremental work is one additional inflation evaluation plus composition/publication; the composed mesh can approach twice the current inflated-surface size. This is an architectural expectation, not a measured speed claim. Control Point support queries, smoothing and connectors can make costs differ by law.
 
-Use existing UI update scheduling to coalesce slider events. Run optional full collision/self-intersection reports on explicit validation or completed edits, not unconditionally inside every redraw. Report capture, preparation, A, B, connector/composition, publication and total timings separately. Benchmark median and p95 latency for warm edits, cold rebuilds and save/reload. Compare at identical grid resolution; do not conceal cost by reducing sampling.
+Use existing UI update scheduling to coalesce slider events. Run optional full collision/self-intersection reports on explicit validation or completed edits, not unconditionally inside every redraw. Report total numeric time and side A/B evaluation timings including their preparation and connector work. The validation script additionally times full preview/configure operations; existing branch backend timings are not falsely presented as isolated connector measurements. Benchmark median and p95 latency for warm edits, cold rebuilds and save/reload. Compare at identical grid resolution; do not conceal cost by reducing sampling.
 
 ## 12. Verification and release gates
 

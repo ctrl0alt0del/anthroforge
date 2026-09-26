@@ -16,14 +16,25 @@ def _scalar_keys(prop, skip=()):
 
 
 def scalar_dict(prop, skip=()):
-    return {key: _json_value(getattr(prop, key)) for key in _scalar_keys(prop, skip)}
+    values = {key: _json_value(getattr(prop, key)) for key in _scalar_keys(prop, skip)}
+    if hasattr(prop, 'inflation_secondary'):
+        from ..visualization.muscle_envelope_storage import snapshot
+        values['inflation_secondary'] = snapshot(prop)
+    return values
 
 
 def apply_scalar_dict(prop, values, *, geometry_scale=1):
-    if values and "section_profile_version" in values:
+    if values and values.get('envelope_version', 0) == 1:
+        from .muscle_envelope import scaled_properties
+        values = scaled_properties(values, geometry_scale)
+    elif values and "section_profile_version" in values:
         from .muscle_profile import prepared_properties
         values = prepared_properties(values, geometry_scale)
     values = dict(values or {})
+    secondary = values.pop('inflation_secondary', None)
+    if secondary is not None:
+        from .muscle_envelope import restore_secondary
+        restore_secondary(prop, secondary, geometry_scale)
     for key, value in sorted(values.items(), key=lambda row: row[0] == "inflation_mode"):
         if hasattr(prop, key):
             setattr(prop, key, value)

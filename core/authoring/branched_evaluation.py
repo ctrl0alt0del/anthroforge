@@ -15,16 +15,18 @@ from ..vcp.muscle_numeric import MuscleNumericSpec
 def evaluate(document, name, construction, resolver, solver, main_transform=None):
     preset = document['volume_presets'][document['muscles'][name]['volume_preset']]
     require(preset['mode'] != 'section_profile', 'PROFILE_DOMAIN_UNSUPPORTED')
+    envelope = preset.get('envelope')
+    document = deepcopy(document)
+    document['volume_presets'][document['muscles'][name]['volume_preset']].pop('envelope', None)
     main = _evaluate_part(document, name, resolver, solver, main_transform)
-    parts = {'main': main}
-    connections = {}
+    parts, connections = {'main': main}, {}
     for key, definition in construction['branches'].items():
         require(key != 'main', 'RESERVED_BRANCH_NAME')
         branch = _branch(document, name, key, definition, main, resolver, solver)
-        parts[key] = branch
-        connections[key] = deepcopy(definition)
+        parts[key], connections[key] = branch, deepcopy(definition)
     require(bool(connections), 'BRANCH_REQUIRED')
-    return compose(parts, connections)
+    result = compose(parts, connections)
+    return _with_envelope(result, envelope) if envelope else result
 
 
 def _evaluate_part(document, name, resolver, solver, transform=None):
@@ -113,3 +115,14 @@ def _spec(part, grid):
     return MuscleNumericSpec(target_count=grid.shape[1], densify=False, closed_u=False,
         close_across_fibers=False, topology_flip_normals=False, closed_v=False,
         control_world=tuple(part['native_control_world']), **part['native_properties'])
+
+
+def _with_envelope(output, envelope):
+    from .envelope_numeric import evaluate_output
+    from ..vcp.branched_numeric import BranchedMuscleRequest
+    parts = output['branch_parts']; main = parts['main']; rows = tuple(_points(f) for f in main['fibers'])
+    branches = tuple(_input(k, d, main, parts[k], rows) for k, d in output['branch_connections'].items())
+    assembly = prepare_assembly(rows, branches, main['native_properties']['flip_normals'])
+    grids = (assembly.main, *(b.grid for b in assembly.branches))
+    specs = tuple(_spec(part, grid) for part, grid in zip(parts.values(), grids))
+    return evaluate_output(output, envelope, BranchedMuscleRequest('authored', assembly, specs))

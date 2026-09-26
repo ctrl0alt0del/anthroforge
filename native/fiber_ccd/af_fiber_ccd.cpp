@@ -551,6 +551,8 @@ AF_EXPORT int af_candidate_pairs(const double* start, const double* end, const i
 #include "af_fiber_v3_batch.hpp"
 #include "af_attachment_wave.hpp"
 #include "af_muscle_numeric.hpp"
+#include "af_muscle_envelope_profile.hpp"
+#include "af_muscle_envelope_compose.hpp"
 #include "af_base_spline.hpp"
 #include "af_base_partition.hpp"
 #include "af_transfer_shape.hpp"

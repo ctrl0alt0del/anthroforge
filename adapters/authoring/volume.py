@@ -12,7 +12,10 @@ def configure(muscle, output):
             setattr(muscle, key, value)
         else:
             assign_checked(muscle, key, value)
-    if muscle.inflation_mode == 'CTRL_POINT':
+    if 'envelope_configuration' in output and 'branch_parts' not in output:
+        from ...app.use_cases.muscle_envelope import write
+        write(muscle.id_data, muscle, output['envelope_configuration'])
+    if muscle.inflation_mode == 'CTRL_POINT' and 'envelope_configuration' not in output:
         set_muscle_inflation_ctrl_world(muscle, tuple(native['native_control_world']))
 
 

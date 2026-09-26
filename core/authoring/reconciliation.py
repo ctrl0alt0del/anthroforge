@@ -22,7 +22,7 @@ def semantic_patch(document, published, change):
 
 
 def check_conflict(document, published, name, before, after):
-    if not any(before['values'].get(k) != after['values'].get(k) for k in (*FIELDS, *PROFILE_FIELDS)):
+    if not any(before['values'].get(k) != after['values'].get(k) for k in (*FIELDS, *PROFILE_FIELDS, "envelope_configuration")):
         return
     baseline = published.get('authored_baseline', document)
     first, last = [lookup(d, '/instances/'+name) for d in (baseline, document)]
@@ -31,6 +31,8 @@ def check_conflict(document, published, name, before, after):
 
 
 def muscle_patch(document, name, native_id, before, after):
+    if before['values'].get('envelope_configuration') != after['values'].get('envelope_configuration'):
+        return envelope_patch(document, name, native_id, after['values'])
     changes = _changed_controls(before['values'], after['values'])
     if not changes:
         return []
@@ -91,6 +93,18 @@ def profile_patch(preset, name, native_id, values):
     preset['native'] = dict(metadata, **wire(spec, values['inflation_enabled'], values['flip_normals']))
     preset.pop('intent', None)
     preset['evidence'] = dict(basis='designer_authored', sources=[], note='Explicit reconciliation of complete native Section Profile.')
+    key = 'adopted_' + native_id
+    return [dict(op='add', path='/shape_presets/'+key, value=preset),
+            dict(op='replace', path='/instances/'+name+'/shape', value='/shape_presets/'+key)]
+
+
+def envelope_patch(document, name, native_id, values):
+    from .envelope_config import normalize
+    preset = deepcopy(lookup(document, lookup(document, '/instances/'+name)['shape']))
+    preset['native']['envelope'] = normalize(values['envelope_configuration'])
+    preset.pop('intent', None)
+    if 'fitting' in preset: preset['fitting']['enabled'] = False
+    preset['evidence'] = dict(basis='designer_authored', sources=[], note='Complete native inflation envelope, both sides and all parts.')
     key = 'adopted_' + native_id
     return [dict(op='add', path='/shape_presets/'+key, value=preset),
             dict(op='replace', path='/instances/'+name+'/shape', value='/shape_presets/'+key)]

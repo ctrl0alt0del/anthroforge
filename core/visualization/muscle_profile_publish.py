@@ -187,8 +187,9 @@ def publish(root, scene, muscle, request, batch):
 
 def _verify_output(base, inflated, result):
     from .muscle_numeric_runtime import mesh_matches
+    from ..vcp.muscle_envelope import faces_for
     for obj, expected in ((base, result.base_vertices), (inflated, result.inflated_vertices)):
-        if not mesh_matches(obj, expected, result.faces):
+        if not mesh_matches(obj, expected, faces_for(result, obj == inflated)):
             raise ValueError("PROFILE_PUBLICATION_FAILED: mesh differs from evaluated geometry")
 
 

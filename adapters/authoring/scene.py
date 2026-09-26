@@ -14,6 +14,18 @@ class StaticScene(BlenderScene):
     def capture_authoring(self):
         return inventory.capture(self.root, self.scene)
 
+    def envelope_inspect(self, target):
+        from .native_envelopes import inspect
+        return inspect(self, target)
+
+    def envelope_preview(self, target, configuration):
+        from .native_envelopes import preview
+        return preview(self, target, configuration)
+
+    def envelope_mutation(self, target, configuration):
+        from .native_envelopes import mutation
+        return mutation(self, target, configuration)
+
     def profile_inspect(self, target):
         from .native_profiles import inspect
         return inspect(self, target)

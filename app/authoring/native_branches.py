@@ -162,6 +162,8 @@ def _mutate(root, op, params):
 
 
 def _configure(root, params):
+    if params.get('inflation') and use.find_muscle(root, params['muscle_id']).envelope_sides == 'BOTH_SIDES':
+        require(False, 'ENVELOPE_API_REQUIRED')
     surface = use.muscle_surface(root, use.find_muscle(root, params['muscle_id']))
     connection = next(c for c in surface.branches if c.id == params['connection_id'])
     for name, value in params.get('connector', {}).items():

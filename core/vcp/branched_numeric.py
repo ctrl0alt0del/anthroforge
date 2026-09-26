@@ -1,5 +1,5 @@
 """Prepared branched Muscle requests share the standard numerical publication result."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 from .muscle_numeric import MuscleNumericBatchResult, MuscleNumericResult, _invalid_result, _readonly_array
 from .branched_surface import assemble
@@ -13,6 +13,7 @@ class BranchedMuscleRequest:
     assembly: object
     part_specs: tuple
     output_domain: object = None
+    envelope: object = None
 
     @property
     def spec(self):
@@ -38,7 +39,7 @@ def evaluate(request, backend):
         inflated, _ = assemble(request.assembly, main, branches)
         result = MuscleNumericResult(request.muscle_id, _readonly_array(base, np.float64, (-1, 3)),
             _readonly_array(inflated, np.float64, (-1, 3)), _readonly_array(faces, np.int64, (-1, 4)), 0, 0)
-        return apply_result(request, result, _part_labels(request.assembly))
+        return apply_result(request, replace(result, face_parts=_part_labels(request.assembly)), _part_labels(request.assembly))
     except (ValueError, RuntimeError) as error:
         return _invalid_result(request.muscle_id, str(error))
 

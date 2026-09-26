@@ -43,6 +43,9 @@ def _on_muscle_prop_update(self, context):
 
 
 def _on_muscle_mode_update(self, context):
+    if getattr(self, 'envelope_sides', '') == 'BOTH_SIDES':
+        from .muscle_envelope import initialize_profile
+        initialize_profile(self)
     _on_muscle_prop_update(self, context)
 
 
@@ -636,3 +639,7 @@ class AF_VCP_System_Property(bpy.types.PropertyGroup):
         default="NONE",
     )
 
+
+
+from .muscle_envelope import install as _install_envelope
+_install_envelope(AF_MuscleVCP_Property)

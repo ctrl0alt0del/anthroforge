@@ -1328,6 +1328,9 @@
             "linear",
             "smoothstep"
           ]
+        },
+        "envelope": {
+          "$ref": "#/$defs/muscle_envelope"
         }
       },
       "required": [
@@ -1397,6 +1400,9 @@
           "type": "number",
           "minimum": 0,
           "maximum": 0.5
+        },
+        "envelope": {
+          "$ref": "#/$defs/muscle_envelope"
         }
       },
       "required": [
@@ -1852,6 +1858,9 @@
         },
         "evidence": {
           "$ref": "#/$defs/evidence"
+        },
+        "envelope": {
+          "$ref": "#/$defs/muscle_envelope"
         }
       },
       "required": [
@@ -1867,6 +1876,103 @@
         "calibration",
         "shape_checks",
         "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "muscle_envelope": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "enum": [
+            "muscle_inflation_envelope.v1"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "sides": {
+          "enum": [
+            "one",
+            "both"
+          ]
+        },
+        "reverse_sides": {
+          "type": "boolean"
+        },
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "properties": {
+              "part_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "a": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "mode": {
+                    "enum": [
+                      "control_point",
+                      "distributed",
+                      "section_profile"
+                    ]
+                  },
+                  "parameters": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "mode",
+                  "parameters"
+                ],
+                "additionalProperties": false
+              },
+              "b": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "mode": {
+                    "enum": [
+                      "control_point",
+                      "distributed",
+                      "section_profile"
+                    ]
+                  },
+                  "parameters": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "mode",
+                  "parameters"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "part_id",
+              "a",
+              "b"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "schema",
+        "enabled",
+        "sides",
+        "reverse_sides",
+        "parts"
       ],
       "additionalProperties": false
     }

@@ -90,6 +90,7 @@ def compile_shape(document, instance):
     shape = lookup(document, instance['shape'])
     volume = native_values(shape['native'], instance['profile'])
     require(volume["mode"] != "section_profile" or not shape.get("fitting", {}).get("enabled"), "PROFILE_FITTING_UNSUPPORTED")
+    require('envelope' not in volume or not shape.get('fitting', {}).get('enabled'), 'ENVELOPE_FITTING_UNSUPPORTED')
     shape_intent(volume, shape.get('intent', {}))
     return volume
 
@@ -102,6 +103,8 @@ def role_bindings(instance):
 
 
 def shape_intent(volume, intent):
+    if "envelope" in volume and intent:
+        raise ValueError("ENVELOPE_INTENT_UNSUPPORTED: edit explicit per-side parameters")
     if volume["mode"] == "section_profile":
         return section_intent(volume, intent)
     for field, scale in [('amount', intent.get('height_scale', 1)), ('radius', intent.get('width_scale', 1))]:

@@ -5,6 +5,10 @@ import numpy as np
 def annotate(result):
     report = result["contact"]
     indices = np.asarray(result["faces"])
+    if "side_a" in result:
+        indices = indices[np.asarray(result["inflated_sources"])].copy()
+        mask = np.asarray(result["face_sides"]) == 2
+        indices[mask] = indices[mask, ::-1]
     indices = np.vstack((indices[:,:3],indices[:,[0,2,3]]))
     material = np.asarray([(u,s) for u in result["u"] for s in result["s"]])
     report["material_triangles"] = material[indices[report["triangles"]]].tolist()

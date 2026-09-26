@@ -20,10 +20,9 @@ def selected_part(root, muscle):
 
 def control_part(root, muscle, obj):
     key = str(obj.get('af_muscle_branch_id', ''))
-    if not key:
-        return muscle
     surface = branch_surface(root, muscle)
-    return next((c.settings for c in surface.branches if c.id == key), None) if surface else None
+    settings = muscle if not key else next((c.settings for c in surface.branches if c.id == key), None) if surface else None
+    return settings.inflation_secondary if settings is not None and obj.get('af_inflation_side') == 'B' else settings
 
 
 def snapped_control(root, scene, muscle, obj, target):

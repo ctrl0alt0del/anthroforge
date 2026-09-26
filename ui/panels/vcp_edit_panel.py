@@ -96,9 +96,10 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
         if muscle is None:
             layout.label(text="Muscle not found")
             return
-
         self._draw_identity(layout, muscle)
         self._draw_output_domain(layout, muscle)
+        from .muscle_envelope import draw as draw_envelope
+        if draw_envelope(layout, root_for_context(context), muscle): return
         from ...core.visualization.branch_control import selected_part
         settings, branch_id, _ = selected_part(root_for_context(context), muscle)
         layout.label(text='Editing branch inflation' if branch_id else 'Editing main inflation')

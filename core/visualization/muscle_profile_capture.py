@@ -141,6 +141,7 @@ def default_muscle():
         inflation_boundary_strength=.7, inflation_boundary_band=2., inflation_boundary_power=1.5,
         inflation_length_taper_band=.2, closed_v=False, flip_normals=False,
         inflation_ctrl_world=(0., 0., 0.), inflation_ctrl_initialized=False, id_data=None, **DEFAULTS,
+        envelope_version=0, envelope_sides="ONE_SIDE", envelope_enabled=True, envelope_reverse=False,
         get=lambda key, default=None: default)
 
 
