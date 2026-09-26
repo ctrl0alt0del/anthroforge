@@ -5,6 +5,7 @@ from ...core.authoring.errors import require
 from ...core.authoring.transfer_meshes import build, fingerprint
 from . import transfer_bindings as bindings
 from . import shape_transfers
+from .transfer_bands import validate_domains
 
 OPERATIONS = ('anatomy.transfer_sources', 'anatomy.transfer_preview', 'anatomy.transfer_publish')
 
@@ -41,7 +42,7 @@ def preview(service, request):
     started = perf_counter()
     params = request['params']; service.check(params)
     rows = capture(service, bindings.names(params))
-    pairs, annotations = bindings.resolve(service, params, rows)
+    pairs, annotations = bindings.resolve(service, params, rows); validate_domains(service, params); shape_transfers.validate_constraints(service, params, rows)
     replay = receipt(service, request, fingerprint(rows))
     if replay is not None:
         return replay

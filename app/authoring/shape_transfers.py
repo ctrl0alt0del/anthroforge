@@ -2,6 +2,7 @@
 import numpy as np
 from ...core.authoring.codec import digest
 from ...core.authoring.errors import require
+from . import transfer_bands, transfer_constraints
 
 
 def supports(service, spec):
@@ -12,7 +13,7 @@ def supports(service, spec):
 
 def bands(rows, names, spec):
     masks = {name: np.zeros(len(rows[name]['geometry']['vertices']), dtype=np.int32) for name in names}
-    for band in spec['protected_bands']:
+    for band in spec['protected_bands']+spec.get('attachment_bands', []):
         name = band['source_object']; require(name in masks, 'TRANSFER_SHAPE_BAND_SOURCE')
         require(rows[name]['topology_digest'] == band['topology_digest'], 'TRANSFER_SOURCE_TOPOLOGY_CHANGED')
         require(rows[name]['geometry_digest'] == band['geometry_digest'], 'STALE_TRANSFER_SOURCE')
@@ -27,7 +28,7 @@ def apply(service, params, rows, result):
         return result
     spec = params['shape_preservation']; geometry = supports(service, spec)
     require(all(np.isfinite(v) for v in spec.get('settings', {}).values()) and np.isfinite(spec['tolerance']), 'TRANSFER_SHAPE_SETTINGS')
-    masks = bands(rows, params['source_objects'], spec)
+    spec, masks = configure(service, rows, params['source_objects'], spec)
     method = getattr(service.scene, 'shape_transfer', None)
     require(callable(method), 'UNSUPPORTED_CAPABILITY', 'Shape transfer requires the native scene adapter.')
     output = method(rows, result, geometry, masks, spec)
@@ -39,3 +40,20 @@ def verify(service, record):
     spec = record['definition'].get('shape_preservation')
     if spec:
         require(digest(supports(service, spec)) == record['result']['shape_preservation']['support_digest'], 'STALE_TRANSFER_OBSTACLES')
+        transfer_bands.verify(service, record)
+        transfer_constraints.verify(service, record)
+
+
+def configure(service, rows, names, spec):
+    if 'constraints' in spec:
+        return transfer_constraints.configure(service, rows, names, spec)
+    require('protected_bands' in spec, 'SCHEMA_REQUIRED', 'protected_bands is required for legacy transfer.')
+    masks = bands(rows, names, spec)
+    spec, _targets = transfer_bands.configure(service, rows, names, spec)
+    return spec, masks
+
+
+def validate_constraints(service, params, rows):
+    spec = params.get('shape_preservation', {})
+    if 'constraints' in spec:
+        transfer_constraints.configure(service, rows, params['source_objects'], spec)

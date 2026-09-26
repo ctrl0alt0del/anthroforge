@@ -3,17 +3,23 @@
 Production authoring protocol 0.4 supports `shape_preservation` on
 `anatomy.transfer_preview`. Publish with the existing `anatomy.transfer_publish`.
 Omitting the block retains the original shared cubic RBF transfer unchanged.
-The calculation uses the current packaged native library `af_fiber_ccd_v3_18.dll`; restart
+The calculation uses the current packaged native library `af_fiber_ccd_v3_19.dll`; restart
 Blender after updating an already loaded addon/native library.
+
+Use `shape_preservation.constraints` (`transfer_constraints.v1`) for a dynamic
+list of local attachment, protection, shape, guide and clearance records. See
+[the production constraint API](transfer_constraints.md). The settings below
+describe the legacy mode used when that field is absent.
 
 ## Input and workflow
 
 Select **all heads of one anatomical family** in `source_objects`. Their existing
 indexed skeletal correspondences first create the original RBF guide. Supply
-protected attachment-band vertex indices for **every selected head**; obtain their
+attachment-band vertex indices for **every selected head**; obtain their
 evaluated topology and geometry digests from `anatomy.transfer_sources`.
-Band vertices retain their original RBF-transferred positions exactly. The API
-does not infer anatomical bands or move an invalid attachment automatically.
+Legacy `protected_bands` retain their original RBF-transferred positions exactly.
+Explicit `attachment_bands` instead hold qualified target positions on an indexed
+SCP region. The API does not infer anatomical bands or certify their selection.
 Use separate requests for unrelated muscle families.
 
 Add this block to the ordinary transfer preview request:
@@ -56,6 +62,72 @@ not SCP labels. Include all relevant neighboring bones, not just attachment owne
 The existing detached obstacle normalization repairs overlapping bone components
 for queries without changing the actual SCPs, modifiers or indexed discovery.
 Open or unresolved obstacle meshes fail explicitly.
+
+## Explicit attachment targets
+
+Capability `transfer_attachment_bands.v1` adds `shape_preservation.attachment_bands`.
+Use it for an origin or insertion that must reach a particular existing region,
+instead of freezing the initial field's guess. Set `protected_bands` to `[]` when
+all attachments use explicit targets. Every selected source still needs a band.
+Bands must have unique IDs and disjoint source vertices, including legacy bands.
+
+```json
+{
+  "id": "index_origin",
+  "source_object": "Atlas first dorsal interosseous",
+  "topology_digest": "<source evaluated topology>",
+  "geometry_digest": "<source evaluated geometry>",
+  "vertex_indices": [20, 21, 22],
+  "target": {
+    "document_id": "skeleton_direct_scp_18",
+    "expected_draft_revision": 1,
+    "region": "/skeleton_profiles/scp_18/regions/metacarpal_L",
+    "topology_digest": "<target evaluated topology>"
+  },
+  "mapping": {
+    "source_frame": [[0, 0, 0], [0, 0, 1], [1, 0, 0]],
+    "target_frame": [[2, 0, 0], [2, 0, 2], [3, 0, 0]],
+    "max_distance": 0.1
+  }
+}
+```
+
+Each frame contains three **world-space points**: proximal axis origin, distal
+axis end, and a point establishing the homologous transverse side. The mapping
+rotates and uniformly scales by the target/source axis-length ratio, then uses
+one batched native nearest query against the region polygons. `max_distance`
+limits the movement from this mapped guess to the region, in world units.
+Degenerate frames, stale source geometry, changed target topology/draft, targets
+outside the obstacle set, and exceeded projection budgets fail explicitly.
+Choose the correct local side/region; nearest projection does not infer anatomy.
+Frame coordinates describe the current evaluation, not live deformation bindings.
+
+Alternatively replace `mapping` with `target_bindings`, containing one existing
+`{ "tri_vidx": [i,j,k], "tri_weights": [a,b,c] }` binding per source index.
+These indexed targets must resolve inside the declared region. The two methods
+are mutually exclusive. Bindings preserve target correspondence through
+topology-preserving deformation; rerun preview/publication to update the reference.
+
+The existing C++ fitter holds these targets exactly. Its report includes band
+identity, target owner/region, mapped positions, projection distance, initial
+target error, and final target error. It explicitly does **not** certify whole
+attachment-area coverage or intervening triangles. Fully constrained triangles
+collapsed by the target mapping are listed before fitting, to distinguish bad
+target geometry from distortion introduced by the optimizer. Overly broad or poorly mapped
+hard bands can flatten or fold tissue even with zero final target error: inspect
+the selected source contact side, faces, span, and surrounding belly. This API
+does not perform the remeshed end-cap construction in `continuous_attachment.md`.
+
+Explicit bands replace the corresponding fixed target vertices; movable vertices
+still use the original RBF result as a soft guide. A large band correction can
+therefore conflict with the inherited belly guide. The FDI diagnostic restored
+contact but remained distorted, and increasing shape weight changed that bow.
+Do not interpret that weight ablation as a general repair or automatic rebinding
+of the whole deformation field. It remains a separate transfer acceptance check.
+
+Publication and replay revalidate the attachment region as well as existing
+skeletal correspondences. Changed drafts require a fresh request; old receipts
+are not permission to reuse stale attachment targets.
 
 ## Controls
 
