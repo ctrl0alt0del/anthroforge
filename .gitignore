@@ -42,6 +42,7 @@ Thumbs.db
 !native/fiber_ccd/af_fiber_ccd_v3_13.dll
 !native/fiber_ccd/af_fiber_ccd_v3_14.dll
 !native/fiber_ccd/af_fiber_ccd_v3_18.dll
+!native/fiber_ccd/af_fiber_ccd_v3_20.dll
 !native/fiber_ccd/libomp.dll
 *.dylib
 
@@ -49,6 +50,7 @@ Thumbs.db
 dist/
 build/
 *.zip
+vendor/draft_skin/bundles/
 
 # Virtual environments (if you experiment with one)
 venv/
