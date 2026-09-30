@@ -50,9 +50,10 @@ def prepare(rows, stations, multiplier=4):
     if any(abs(s[0]-values[0][0])+abs(s[-1]-values[0][-1]) > 1e-10 for s in values): raise ValueError('FREE_CORRESPONDENCE_EXTENTS')
     target = np.unique(np.concatenate(values)); check_budget(len(rows)*len(target), 2*(len(rows)-1)*len(target), multiplier)
     output = [np.column_stack([np.interp(target, s, np.asarray(row)[:, axis]) for axis in range(3)]).tolist() for row, s in zip(rows, values)]
-    step = _average_row_step(output); inserts = sum(_row_inserts(a, b, step, 0) for a, b in zip(output, output[1:]))
+    minimum = 1 if len(output) == 2 else 0
+    step = _average_row_step(output); inserts = sum(_row_inserts(a, b, step, minimum) for a, b in zip(output, output[1:]))
     check_budget((len(rows)+inserts)*len(target), 2*(len(rows)+inserts-1)*len(target), multiplier)
-    return _densify_rows(output, 0)
+    return _densify_rows(output, minimum)
 
 
 def prepare_record(source, fibers, rows, closed=False):

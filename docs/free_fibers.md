@@ -6,6 +6,11 @@ the existing SCP attachment deformation. Behavior is independent of OPEN/LOOP
 topology, symmetry and solver version. Legacy files and human creation methods
 default to Controlled.
 
+Open two-fiber lofts include at least one interpolated interior row when
+densification is enabled, including authored material-station lofts. This keeps
+very narrow strips eligible for inflation without adding an editable fiber.
+The two boundary paths remain exact; interpolation does not invoke the solver.
+
 ## Editing in Blender
 
 1. Select a native fiber and switch **Behavior** to **Free**. Conversion freezes

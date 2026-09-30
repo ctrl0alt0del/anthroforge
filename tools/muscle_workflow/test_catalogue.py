@@ -92,6 +92,27 @@ class CatalogueTests(unittest.TestCase):
         save_catalogue(path, 1)
         self.assertEqual(reference(first["revision_record"]["path"]), first["revision_record"])
 
+    def test_reverification_is_persisted_separately_from_acceptance(self):
+        record = self.accepted()
+        family = record["families"][0]
+        family.update(status="needs_reverification", current_stage="review", remaining_work=["Check arch"])
+        family["current_build"]["acceptance"]["status"] = "pending"
+        save_catalogue(write_json(self.root / "incoming.json", record), 0)
+        summary = catalogue_summary()
+        self.assertEqual(summary["accepted"], [])
+        self.assertEqual(summary["statuses"]["needs_reverification"], 1)
+
+    def test_reverification_requires_pending_candidate_and_reason(self):
+        record = self.accepted()
+        family = record["families"][0]
+        family.update(status="needs_reverification", current_stage="review")
+        with self.assertRaisesRegex(ValueError, "pending build"):
+            validate_catalogue(record)
+        family["current_build"]["acceptance"]["status"] = "pending"
+        family["remaining_work"] = []
+        with self.assertRaisesRegex(ValueError, "recorded reason"):
+            validate_catalogue(record)
+
     def test_accepted_family_cannot_be_queued_as_unfinished(self):
         record = self.accepted()
         record["next_selection"] = self.record["next_selection"]

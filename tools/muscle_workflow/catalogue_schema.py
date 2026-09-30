@@ -20,7 +20,7 @@ BUILD = _object({"run_id": TEXT, "approach_id": TEXT,
     "technical_review": _array(REF, minimum=1)})
 FAMILY = _object({"id": TEXT, "name": TEXT, "group": TEXT,
     "definition": {"type": "object"}, "sides": SIDES,
-    "status": {"enum": ["not_started", "needs_rebuild", "queued", "in_progress", "ready_for_review", "accepted"]},
+    "status": {"enum": ["not_started", "needs_rebuild", "queued", "in_progress", "ready_for_review", "needs_reverification", "accepted"]},
     "current_stage": {"enum": [None, *STAGES, "review", "complete"]},
     "current_build": {"anyOf": [BUILD, {"type": "null"}]},
     "historical_runs": _array(REF), "remaining_work": _array(TEXT)})

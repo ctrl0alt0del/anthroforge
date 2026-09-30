@@ -12,9 +12,7 @@ from contracts import verify_artifacts
 
 def validate_build(family, approaches):
     build = family["current_build"]
-    if family["status"] == "accepted":
-        if not build or build["acceptance"]["status"] != "user_accepted" or family["current_stage"] != "complete":
-            raise ValueError("Accepted families require an accepted build and complete stage")
+    validate_review_state(family, build)
     if build:
         if build["approach_id"] not in approaches:
             raise ValueError("Unknown build approach")
@@ -25,6 +23,17 @@ def validate_build(family, approaches):
             raise ValueError("A side cannot be both authored and a generated mirror")
         if build["authoring"]["provenance"] == "captured" and not build["authoring"]["source_manifest"]:
             raise ValueError("Captured authoring provenance needs a source manifest")
+
+
+def validate_review_state(family, build):
+    if family["status"] == "accepted":
+        if not build or build["acceptance"]["status"] != "user_accepted" or family["current_stage"] != "complete":
+            raise ValueError("Accepted families require an accepted build and complete stage")
+    if family["status"] == "needs_reverification":
+        if not build or build["acceptance"]["status"] != "pending" or family["current_stage"] != "review":
+            raise ValueError("Reverification requires a pending build and review stage")
+        if not family["remaining_work"]:
+            raise ValueError("Reverification requires a recorded reason or check")
 
 
 def validate_catalogue(record, artifacts=True):

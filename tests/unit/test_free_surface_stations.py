@@ -5,6 +5,16 @@ from core.vcp.fiber_surface import evaluate_fiber_surface, FiberSurfaceSpec
 
 
 class MaterialStationTests(unittest.TestCase):
+    def test_narrow_two_fiber_chart_has_an_inflatable_interior_row(self):
+        from core.vcp.free_surface import prepare_rows
+        rows = np.array([[[0, 0, 0], [0, 1, .1], [0, 2, 0]],
+                         [[.01, 0, 0], [.01, 1, .1], [.01, 2, 0]]])
+        for output in (prepare(rows, [[0, .5, 1]]*2), prepare_rows(rows)):
+            output = np.asarray(output)
+            self.assertEqual(output.shape, (3, 3, 3))
+            np.testing.assert_array_equal(output[[0, -1]], rows)
+            np.testing.assert_allclose(output[1], rows.mean(axis=0))
+
     def test_material_stations_preserve_corresponding_features(self):
         rows = [[[0, 0, 0], [0, .2, 0], [0, 1, 0]], [[1, 0, 0], [1, .8, .3], [1, 1, 0]]]
         result = prepare(rows, [[0, .5, 1], [0, .5, 1]])

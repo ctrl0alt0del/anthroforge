@@ -34,10 +34,11 @@ def prepare_rows(rows, closed=False, densify=True, multiplier=1):
     check_budget(len(rows) * len(target), 2 * (len(rows) - 1) * len(target), multiplier)
     prepared = [sample_at(np.asarray(row), target, closed).tolist() for row in rows]
     step = _average_row_step(prepared)
-    inserts = sum(_row_inserts(a, b, step, 3 if closed else 0) for a, b in zip(prepared, prepared[1:])) if densify else 0
+    minimum = 3 if closed else int(len(prepared) == 2)
+    inserts = sum(_row_inserts(a, b, step, minimum) for a, b in zip(prepared, prepared[1:])) if densify else 0
     count = len(rows) + inserts
     check_budget(count * len(target), 2 * (count - 1) * len(target), multiplier)
-    return _densify_rows(prepared, 3 if closed else 0) if densify else prepared
+    return _densify_rows(prepared, minimum) if densify else prepared
 
 
 def align_closed_rows(rows):

@@ -135,6 +135,13 @@ deltoid on September 24. Read `next_selection` for the current queue; queued doe
 not mean construction has already started. `not_started` denotes no current
 registered candidate, not proof that no older experiment ever existed.
 
+`needs_reverification` means a saved candidate is deliberately held for a future
+check and is **not approved**. It differs from `ready_for_review` (awaiting the
+current review) and `needs_rebuild` (known reconstruction work required). It
+requires a current build with pending acceptance, the review stage, and a reason
+or verification task in `remaining_work`. It does not count as accepted and does
+not prevent selecting a different muscle. Preserve its exact build and journal.
+
 AI approach IDs and per-stage method versions describe construction choices;
 authoring protocol, Git revision, source fingerprint and native runtime build are
 separate fields. Named approach definitions are immutable: materially changing
