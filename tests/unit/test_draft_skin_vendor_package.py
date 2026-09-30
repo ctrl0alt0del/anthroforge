@@ -186,6 +186,27 @@ class LoaderTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "conflicting preloaded package"):
                     vendor.ensure_worker_dependencies()
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows path syntax")
+    def test_extended_local_bundle_is_idempotent_and_readable(self):
+        extended = vendor._io_root(self.bundle)
+        self.assertEqual(vendor._io_root(extended), extended)
+        self.assertTrue(extended.is_dir())
+        self.assertEqual(vendor._actual_files(extended), {"native.pyd", "bundle.json"})
+        payload = json.loads((self.bundle / "bundle.json").read_text())
+        vendor._verify_files(extended, payload)
+        package = mock.Mock(__file__=str(self.bundle / "scipy/__init__.py"))
+        with mock.patch.object(vendor, "_preloaded", wraps=self.preloaded_fn):
+            with mock.patch.object(vendor, "PACKAGE_ROOTS", ("scipy",)):
+                with mock.patch.dict(sys.modules, {"scipy": package}):
+                    vendor._preloaded(extended)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows path syntax")
+    def test_unc_bundle_gets_required_extended_unc_prefix(self):
+        ordinary = Path(r"\\server\share\anthroforge\vendor")
+        extended = Path(r"\\?\UNC\server\share\anthroforge\vendor")
+        self.assertEqual(vendor._io_root(ordinary), extended)
+        self.assertEqual(vendor._io_root(extended), extended)
+
 
 class WorkerTests(unittest.TestCase):
     def test_dependency_failure_precedes_bake(self):

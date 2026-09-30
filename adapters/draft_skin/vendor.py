@@ -94,9 +94,14 @@ def _validate_name(name):
 
 
 def _io_root(path):
-    if platform.system() == "Windows":
-        return Path("\\\\?\\" + str(path.absolute()))
-    return path
+    if platform.system() != "Windows":
+        return path
+    absolute = str(Path(path).absolute())
+    if absolute.startswith("\\\\?\\"):
+        return Path(absolute)
+    if absolute.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + absolute[2:])
+    return Path("\\\\?\\" + absolute)
 
 
 def _actual_files(path):
@@ -126,10 +131,11 @@ def _verify_files(path, payload):
 
 
 def _preloaded(path):
+    base = _io_root(path.resolve())
     for root in PACKAGE_ROOTS:
         module = sys.modules.get(root)
         origin = getattr(module, "__file__", None)
-        if module is not None and (not origin or not Path(origin).resolve().is_relative_to(path.resolve())):
+        if module is not None and (not origin or not _io_root(Path(origin).resolve()).is_relative_to(base)):
             _failure(f"conflicting preloaded package: {root}")
 
 
