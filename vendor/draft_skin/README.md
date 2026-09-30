@@ -1,8 +1,9 @@
 # Draft-skin worker dependencies
 
-`manifest.json` locks the Windows x64 CPython 3.11 worker bundle by filename and
-SHA-256. The wheel archives are the distributed artifacts from PyPI and retain
-their upstream metadata and complete license files:
+`manifest.json` locks the Windows x64 CPython 3.11 source wheels and the exact
+expanded bundle manifest by SHA-256. The tracked wheel archives are packaging
+inputs from PyPI. The installed release carries the expanded files, including
+upstream metadata and complete license files, but not duplicate wheel archives:
 
 | Distribution | Version | License file in wheel |
 | --- | ---: | --- |
@@ -15,5 +16,9 @@ their upstream metadata and complete license files:
 | packaging | 25.0 | `packaging-25.0.dist-info/licenses/` |
 | lazy-loader | 0.4 | `lazy_loader-0.4.dist-info/LICENSE.md` |
 
-The worker verifies every archive before extraction. Do not replace or edit a
-wheel without updating the pinned checksum and reviewing its license metadata.
+The offline builder checks wheel SHA-256, `RECORD` hashes/sizes, safe and unique
+paths, and native modules. The worker only reads and hashes installed files;
+it does not extract wheels, download files, or modify its dependency directory.
+Do not replace a wheel without reviewing its license and bumping the bundle
+version and lock explicitly. See `docs/draft_skin.md` for build and upgrade
+instructions.

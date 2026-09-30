@@ -1,5 +1,6 @@
 {
-  "bundle": "win64-cp311-v1",
+  "bundle": "win64-cp311-v2",
+  "bundle_lock_sha256": "88b3cf87d8ab049f7d42ef09bac31780f5800f057985d34a23e20bfe032c5604",
   "python": [3, 11],
   "wheels": [
     {

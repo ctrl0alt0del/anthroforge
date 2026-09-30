@@ -87,9 +87,28 @@ append-only and `cancel.request` is the cancellation signal.
 
 Windows x64 CPython 3.11 wheels and their license files are stored under
 `vendor/draft_skin/wheels`. `vendor/draft_skin/manifest.json` pins every file
-by SHA-256. The worker verifies every wheel before extracting it into a
-versioned temporary cache; the interactive Blender process never changes its
-module search path.
+by SHA-256. The offline release builder verifies each wheel and its `RECORD`,
+then expands dependencies and native libraries into the add-on ZIP at
+`vendor/draft_skin/bundles/win64-cp311-v2`. The release ZIP omits the source
+wheels but retains wheel metadata, licenses, and a locked hash for every
+installed bundle file. The worker validates the complete bundle before
+modifying its module search path. It does not download, run pip, or extract a
+runtime cache. Temporary job input/output is separate and still uses TEMP.
+
+Build the installable ZIP with `python tools/package_addon.py --output
+dist/anthroforge-win64-cp311.zip` on a packaging host with the pinned wheels.
+The adjacent `.zip.json` records the ZIP SHA-256 and bundle lock. Install the
+ZIP as the add-on in Blender 5.0.1 on Windows x64 with CPython 3.11 and host
+NumPy 1.26.4. An editable checkout intentionally has no expanded dependency
+tree; with Blender and its workers closed, developers may explicitly run
+`python tools/build_draft_skin_vendor.py --in-place` once. Never run that
+command during a Draft Skin job. A missing or damaged bundle fails with a
+reinstall instruction. To upgrade, close Blender and all workers, replace the
+entire installed add-on, then generate again; hot-swapping loaded binaries is
+unsupported. Refreshing wheel or bundle hashes requires a version bump,
+removal of the previous `bundle_lock_sha256`, and `--refresh-lock
+--previous-bundle <old-id>` on an empty build target. Review and commit the
+new printed lock value before packaging.
 
 ## Output contract
 

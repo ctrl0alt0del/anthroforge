@@ -39,12 +39,12 @@ def finish_status(spec, state, message="", warnings=(), was_cancelled=False):
 
 def run_job(job_dir):
     spec = read_job(job_dir / "job.json")
+    status_writer(spec)("Dependencies", 0.01, "Validating packaged worker dependencies.")
+    ensure_worker_dependencies()
     capture = _bake_and_capture(spec)
     spec = replace(spec, input_hash=capture.input_hash)
     write_job(spec)
     write_capture(spec.input_path, capture)
-    status_writer(spec)("Dependencies", 0.05, "Preparing worker dependencies.")
-    ensure_worker_dependencies()
     from core.draft_skin.solver import solve_capture
     result = solve_capture(capture, status_writer(spec), lambda: cancelled(spec))
     write_result(spec.result_path, result)
