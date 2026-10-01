@@ -90,10 +90,17 @@ def bisect_left_half(work, plane):
 def mirrored_output(vertices, faces, anchors, plane):
     diagonal = float(np.linalg.norm(vertices.max(axis=0) - vertices.min(axis=0)))
     snap_symmetry_boundary(vertices, faces, diagonal, plane)
+    faces = exterior_half_faces(vertices, faces, plane, 1.0e-6 * diagonal)
     mirrored = reflect_points(vertices, plane)
     parts = [(vertices, faces), (mirrored, faces[:, ::-1])]
     hybrid = cube_test.welded_hybrid(parts, 1.0e-6 * diagonal)
     return hybrid.vertices, hybrid.faces
+
+
+def exterior_half_faces(vertices, faces, plane, tolerance):
+    """Discard cut-plane caps that would become internal faces after mirroring."""
+    distances = np.abs(signed_distances(vertices, plane))
+    return faces[np.max(distances[faces], axis=1) > tolerance]
 
 
 def signed_distances(points, plane):

@@ -1,7 +1,6 @@
 import time
 
 _ACTIVE = {}
-_SUPPRESSED = set()
 _RUNTIME = {}
 _CACHE_TTL = 1.0
 
@@ -40,7 +39,6 @@ def clear_override_session():
 
 def reset_shortcut_runtime_state():
     _ACTIVE.clear()
-    _SUPPRESSED.clear()
     _RUNTIME.clear()
 
 
@@ -69,17 +67,6 @@ def _active_mode(child_scp, key):
 def _active_entry(child_scp):
     sid = str(getattr(child_scp, "id", "") or "")
     return dict(_ACTIVE.get(sid, {}) or {})
-
-
-def suppress_next_depsgraph_ids(ids):
-    _SUPPRESSED.update({str(value or "") for value in set(ids or set()) if str(value or "")})
-
-
-def consume_suppressed_ids(ids):
-    valid = {str(value or "") for value in set(ids or set()) if str(value or "")}
-    hits = valid & _SUPPRESSED
-    _SUPPRESSED.difference_update(hits)
-    return valid - hits
 
 
 def cached_override_runtime(shortcut_id, overrides):

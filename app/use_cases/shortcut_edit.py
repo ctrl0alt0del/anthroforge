@@ -8,7 +8,7 @@ try:
     from ...core.shortcuts.proxy_props import shortcut_prop_name
     from ...core.shortcuts.vector_modes import is_uniform_vector_shortcut
     from ...core.shortcuts.owners import shortcut_relation
-    from ...core.shortcuts.session_state import begin_override_sessions, cached_override_runtime, clear_override_session, store_override_runtime, suppress_next_depsgraph_ids
+    from ...core.shortcuts.session_state import begin_override_sessions, cached_override_runtime, clear_override_session, store_override_runtime
     from ...core.scp_runtime.common import find_scp_by_id
     from ...core.scp_runtime.prop_update_guard import suppress_scp_prop_updates
     from ...core.scp_runtime.runtime_state import restore_attachment_runtime, snapshot_attachment_runtime
@@ -18,7 +18,7 @@ except ImportError:
     from core.shortcuts.proxy_props import shortcut_prop_name
     from core.shortcuts.vector_modes import is_uniform_vector_shortcut
     from core.shortcuts.owners import shortcut_relation
-    from core.shortcuts.session_state import begin_override_sessions, cached_override_runtime, clear_override_session, store_override_runtime, suppress_next_depsgraph_ids
+    from core.shortcuts.session_state import begin_override_sessions, cached_override_runtime, clear_override_session, store_override_runtime
     from core.scp_runtime.common import find_scp_by_id
     from core.scp_runtime.prop_update_guard import suppress_scp_prop_updates
     from core.scp_runtime.runtime_state import restore_attachment_runtime, snapshot_attachment_runtime
@@ -84,9 +84,7 @@ def _session_state(root, scene, shortcut, overrides, plan):
     _prime_session_runtime(root, plan)
     begin_override_sessions(overrides)
     runtime = _prepare_session_runtime(root, scene, plan)
-    suppressed = _suppressed_ids(root, shortcut, overrides)
-    suppress_next_depsgraph_ids(suppressed)
-    return {"owner": owner, "runtime": runtime, "suppressed": suppressed}
+    return {"owner": owner, "runtime": runtime}
 
 
 def _owner_backsolve_snapshot(root, scene, shortcut):
@@ -281,29 +279,6 @@ def _restore_runtime_snapshot(root, sid, snapshot):
 
 def _owner_id(shortcut):
     return str(getattr(shortcut, "owner_id", "") or "")
-
-
-def _suppressed_ids(root, shortcut, overrides):
-    owner_id = _owner_id(shortcut)
-    ids = _owner_subtree_ids(root, owner_id) or ({owner_id} | set(dict(overrides or {}).keys()))
-    return {sid for sid in ids if sid}
-
-
-def _owner_subtree_ids(root, owner_id):
-    system = getattr(root, "af_scp_system", None)
-    scps = () if system is None else getattr(system, "scps", ())
-    scp_by_id = {str(getattr(scp, "id", "") or ""): scp for scp in scps}
-    return set() if owner_id not in scp_by_id else _descendant_ids(_children_map()(scp_by_id), owner_id)
-
-
-def _descendant_ids(kids, owner_id):
-    out, stack = set(), [owner_id]
-    while stack:
-        sid = stack.pop()
-        if sid and sid not in out:
-            out.add(sid)
-            stack.extend(reversed(kids.get(sid, ())))
-    return out
 
 
 def _run_shortcut_sync(context, request):
@@ -502,14 +477,6 @@ def _dirty_hints_for():
     except ImportError:
         from core.deps.dirty_hints import dirty_hints_for
     return dirty_hints_for
-
-
-def _children_map():
-    try:
-        from ...core.scp_runtime.tree import children_map
-    except ImportError:
-        from core.scp_runtime.tree import children_map
-    return children_map
 
 
 def live_shortcut_value(context, shortcut):

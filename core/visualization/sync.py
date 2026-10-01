@@ -1,6 +1,7 @@
 ﻿import bpy
 
 from ..utils import get_af_root
+from ..scp_runtime.depsgraph_state import register_scp_states, unregister_scp_states
 from .sync_runtime import on_depsgraph_update as _on_depsgraph_update_runtime
 from .sync_runtime import sync_root_to_scene as _sync_root_to_scene_runtime
 
@@ -52,6 +53,7 @@ def register_sync():
     global _SYNC_MANAGER
     if _SYNC_MANAGER is None:
         _SYNC_MANAGER = SCPSceneSync()
+        register_scp_states()
     if _SYNC_MANAGER.on_depsgraph_update not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(_SYNC_MANAGER.on_depsgraph_update)
     return _SYNC_MANAGER
@@ -59,6 +61,7 @@ def register_sync():
 
 def unregister_sync():
     global _SYNC_MANAGER
+    unregister_scp_states()
     if _SYNC_MANAGER is None:
         return
     if _SYNC_MANAGER.on_depsgraph_update in bpy.app.handlers.depsgraph_update_post:

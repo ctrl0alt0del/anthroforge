@@ -5,11 +5,11 @@ import bpy
 from ..deps.runtime_trace import trace_line
 from ..deps.dirty_hints import dirty_hints_for
 from ..perf_trace import perf_time, perf_timer
-from ..shortcuts.session_state import consume_suppressed_ids
 from ..utils import get_af_root, scene_for_id, update_scene_view_layer
 from .attachment_runtime import apply_scp_attachments
 from .bound_objects import sync_all_scp_roles, sync_scp_roles_for_ids
 from .common import as_id, is_bound_scp_obj, scp_prop_map
+from .depsgraph_state import observe_scp_state, remember_applied_scp_states
 from .marking import detach_native_scp_parent_links, normalize_active_index, sync_parent_links
 from .mirror_scene import sync_mirrors
 from .tree import children_map
@@ -75,6 +75,7 @@ def _sync_pass_steps(sync, root, scene, target_scp_ids, attachment_parent_ids,
         attachment_parent_ids, attachment_gate_meta, attachment_fiber_ids)
     sync_mirrors(sync, root, scene, scp_by_id, target_scp_ids=target_scp_ids)
     _refresh_view_layer(scene)
+    remember_applied_scp_states(root, scene, _role_scope_ids(root, target_scp_ids, attachment_parent_ids))
     return report
 
 
@@ -124,7 +125,6 @@ def on_depsgraph_update(sync, scene, depsgraph):
 
 def _sync_from_depsgraph(sync, root, scene, depsgraph):
     changed_ids, transform_ids, geometry_ids = _depsgraph_change_sets(root, depsgraph)
-    changed_ids, transform_ids, geometry_ids = _filtered_changes(changed_ids, transform_ids, geometry_ids)
     if not changed_ids:
         return
     _sync_trace(f"depsgraph changed={_sorted_ids(changed_ids)} transform={_sorted_ids(transform_ids)} geometry={_sorted_ids(geometry_ids)}")
@@ -132,19 +132,14 @@ def _sync_from_depsgraph(sync, root, scene, depsgraph):
     schedule_sync_from_dirty_hints(root=root, scene=scene, dirty_hints=dirty_hints_for("SCP", changed_ids), source="depsgraph", event_type="SCP_UPDATE", payload=_payload(transform_ids, geometry_ids))
 
 
-def _filtered_changes(changed_ids, transform_ids, geometry_ids):
-    keep = consume_suppressed_ids(changed_ids)
-    return keep, set(transform_ids or set()) & keep, set(geometry_ids or set()) & keep
-
-
 def _depsgraph_change_sets(root, depsgraph):
     changed_ids, transform_ids, geometry_ids = set(), set(), set()
     for update in depsgraph.updates:
-        _collect_update(root, update, changed_ids, transform_ids, geometry_ids)
+        _collect_update(root, depsgraph, update, changed_ids, transform_ids, geometry_ids)
     return changed_ids, transform_ids, geometry_ids
 
 
-def _collect_update(root, update, changed_ids, transform_ids, geometry_ids):
+def _collect_update(root, depsgraph, update, changed_ids, transform_ids, geometry_ids):
     obj = update.id
     if not isinstance(obj, bpy.types.Object) or not is_bound_scp_obj(obj, root.name):
         return
@@ -152,9 +147,10 @@ def _collect_update(root, update, changed_ids, transform_ids, geometry_ids):
     is_geometry = bool(getattr(update, "is_updated_geometry", False))
     if not _has_role_update(obj, is_transform, is_geometry):
         return
-    t_ids = transform_ids if _transform_role_changed(obj, is_transform) else None
-    g_ids = geometry_ids if _geometry_role_changed(obj, is_transform, is_geometry) else None
-    _record_update_ids(obj, changed_ids, t_ids, g_ids)
+    transform_changed, geometry_changed = observe_scp_state(root, obj, depsgraph)
+    t_ids = transform_ids if transform_changed and _transform_role_changed(obj, is_transform) else None
+    g_ids = geometry_ids if geometry_changed and _geometry_role_changed(obj, is_transform, is_geometry) else None
+    if t_ids is not None or g_ids is not None: _record_update_ids(obj, changed_ids, t_ids, g_ids)
 
 
 def _has_role_update(obj, is_transform, is_geometry):

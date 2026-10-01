@@ -338,10 +338,8 @@ def _single_attachment_capture(sync, root, scene, scps, targets, parents, fibers
 
 def _single_commit_scps(root, scene, scps, outcome, result, state):
     from anthroforge.core.scp_runtime import attachment_wave_runtime as runtime
-    from anthroforge.core.shortcuts.session_state import suppress_next_depsgraph_ids
     changed = runtime._commit_scps(root, scene, outcome, result)
     state["changed"] |= set(changed); runtime._record_scp_failures(scps, outcome, result, state)
-    if changed: suppress_next_depsgraph_ids(changed)
 
 
 def _single_commit_fibers(root, scene, outcome, result, state):

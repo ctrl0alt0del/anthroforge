@@ -79,6 +79,29 @@ def side_transition_loops(boundary_count, ring_count):
 
 
 class TopologyIntegrationTests(BlenderTestCase):
+    def test_mirrored_closed_half_discards_internal_cut_plane_cap(self):
+        vertices, faces = cube_arrays()
+        vertices[:, 0] -= 1.0
+        plane = instant.SymmetryPlane(np.zeros(3), np.asarray((1.0, 0.0, 0.0)))
+        points, quads = instant.mirrored_output(vertices, faces, (), plane)
+        report = validate_topology(points, quads)
+        self.assertTrue(report.valid, report.message)
+        self.assertEqual(len(quads), 10)
+        self.assertEqual(len(instant.boundary_edges(quads)), 0)
+        self.assertEqual(instant.symmetry_error(points, plane), 0.0)
+
+    def test_cut_plane_caps_respect_translated_rotated_plane(self):
+        vertices, faces = cube_arrays()
+        vertices[:, 0] -= 1.0
+        rotation = np.asarray(((0.6, -0.8, 0), (0.8, 0.6, 0), (0, 0, 1)))
+        plane = instant.SymmetryPlane(np.asarray((3.0, 4.0, 5.0)), rotation[:, 0])
+        vertices = vertices @ rotation.T + plane.origin
+        points, quads = instant.mirrored_output(vertices, faces, (), plane)
+        report = validate_topology(points, quads)
+        self.assertTrue(report.valid, report.message)
+        self.assertEqual(len(quads), 10)
+        self.assertEqual(len(instant.boundary_edges(quads)), 0)
+
     def test_guide_cut_uses_bounded_transition_margin(self):
         ring = np.asarray(((-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)), dtype=float)
         vertices = np.asarray(((0.8, -.1, 0), (.9, .1, 0), (1, 0, 0),

@@ -7,7 +7,6 @@ from mathutils import Matrix, Vector
 import numpy as np
 
 from ..deps.runtime_trace import trace_line
-from ..shortcuts.session_state import suppress_next_depsgraph_ids
 from ..utils import update_scene_view_layer
 from ..vcp.attachment_wave import AttachmentExecutorKind
 from ..vcp.attachment_wave_native import (attachment_executor_stats, attachment_wave_status,
@@ -80,7 +79,6 @@ def _advance_scp_wave(root, scene, scps, wave, backsolve, kind, state):
     started = perf_counter(); changed = _commit_scps(root, scene, outcome, result)
     state["commit"] += _elapsed(started); state["changed"] |= set(changed)
     _record_scp_failures(scps, outcome, result, state)
-    if changed: suppress_next_depsgraph_ids(changed)
 
 
 def _advance_fiber_phase(root, scene, scps, fibers, kind, state):

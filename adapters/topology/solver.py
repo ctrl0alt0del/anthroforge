@@ -220,10 +220,24 @@ def _finish(capture, result, anchors, guide_map, warnings, target, density, upda
     stats = _result_stats(capture, metrics, target, guide_map, all_warnings,
                           budgets, density[4], transitions)
     stats.update(_warm_statistics(capture, vertices, faces, guide_map))
-    if not report.valid:
-        raise RuntimeError(report.message)
+    _require_valid_topology(capture, report, metrics)
     bindings = _result_bindings(capture, vertices, faces, regions, indices, anchors)
     return _topology_result(result, stats, report, owners, lengths, bindings)
+
+
+def _require_valid_topology(capture, report, metrics):
+    if report.valid:
+        return
+    details = []
+    if not report.fidelity_ok:
+        limit = 0.005 * max(float(np.linalg.norm(capture.upper - capture.lower)), 1e-9)
+        details.append(f"surface error P95 {metrics['fidelity_p95']:.4g} exceeds {limit:.4g}")
+        if capture.plane is not None:
+            details.append(f"check the selected {capture.settings.symmetry_mode} symmetry plane")
+    if not report.valence_ok:
+        details.append(f"maximum vertex valence {metrics['valence']['maximum']} exceeds 8")
+    suffix = f" ({'; '.join(details)})" if details else ""
+    raise RuntimeError(report.message + suffix)
 
 
 def _topology_result(result, stats, report, owners, lengths, bindings):
