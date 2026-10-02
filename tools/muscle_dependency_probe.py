@@ -37,7 +37,11 @@ def digest(path):
 def save():
     result = STATE['result']
     result['source_unchanged'] = result['source_sha256'] == digest(STATE['args'].file)
-    Path(STATE['args'].output).write_text(json.dumps(result, indent=2), encoding='utf-8')
+    Path(STATE['args'].output).write_text(json.dumps(result, indent=2, default=_json_default), encoding='utf-8')
+
+
+def _json_default(value):
+    return value.to_list() if hasattr(value, "to_list") else str(value)
 
 
 def root():
