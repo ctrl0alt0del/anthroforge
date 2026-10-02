@@ -1,4 +1,4 @@
-from .control_work import acknowledge_publication
+from .control_work import record_source_publication
 from .adapters import build_runtime_graph
 from .drivers import DependencyDriver
 from .runtime_intents import pop_runtime_intents
@@ -301,7 +301,7 @@ class MuscleSyncDriver(DependencyDriver):
         published = set()
         if is_full or ids:
             published = register_muscle_sync().sync_root_to_scene(root, scene, None if is_full else ids)
-        acknowledge_publication(gate_meta, published)
+        record_source_publication(gate_meta, published)
 
 
 class FiberSurfaceSyncDriver(DependencyDriver):

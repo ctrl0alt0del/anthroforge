@@ -3,7 +3,7 @@ from .runtime_constraint_phase import apply_constraint_drivers
 from .runtime_context_build import build_runtime_context, compute_scc_index, normalize_dirty_hints
 from .runtime_impact import compute_impacted_sets, dirty_start_nodes, expand_constraint_impacts, impact_sets, merge_impacts, source_start_nodes
 from .runtime_models import RuntimeBuild
-from .control_work import finish_application_phase
+from .control_work import finish_runtime_work
 from .runtime_sync_phase import run_sync_drivers
 from .runtime_trace import emit_trace_report, set_runtime_trace, sizes_map, timed_call, trace_enabled, trace_line, trace_min_ms, trace_session
 
@@ -82,7 +82,7 @@ def run_dependency_runtime(root, scene, dirty_hints=None, bake=False, gate_meta=
     _, sync_ms = timed_call(run_sync_drivers, root, scene, build.is_full, impacted, bake, gate_meta, trace.profile)
     emit_trace_report(trace, gate_meta, build, impacted, c_impacts, build_ms, impact_ms, c_ms, expand_ms, sync_ms)
     _notify_warnings(root, scene, build, impacted, gate_meta)
-    finish_application_phase(gate_meta)
+    finish_runtime_work(gate_meta)
 
 
 def _notify_warnings(root, scene, build, impacted, meta):

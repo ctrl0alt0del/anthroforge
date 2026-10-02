@@ -125,6 +125,8 @@ def _report_application_errors(request):
 
 
 def _retain_failed_request(ctx, request):
+    if not _request_owners_alive(ctx, request):
+        return
     item = next((item for item in _PENDING if item.request is request), None)
     if item is None and 'muscle_control_input' not in request.payload and not request.progress.accepted_dirty:
         return
@@ -252,7 +254,7 @@ def _enqueue_deferred(ctx, item):
 def _queue_item(ctx, request):
     started = _now()
     due_at = started + (_defer_seconds(request) if _deferable(request) else 0.0)
-    refs = (ctx.scene, ctx.root) if 'muscle_control_input' in request.payload else ()
+    refs = (ctx.scene, ctx.root)
     owner_ids = tuple(_owner_key(owner) for owner in refs)
     return QueuedRuntime(_obj_name(ctx.scene), _obj_name(ctx.root), request, started, due_at, owner_ids, refs)
 
@@ -341,11 +343,7 @@ def _obj_name(obj):
 
 
 def _resolve_item(item):
-    if item.owner_ids:
-        return _scoped_item_context(item), item.request
-    scene = bpy.data.scenes.get(item.scene_name)
-    root = bpy.data.objects.get(item.root_name)
-    return _context(root=root, scene=scene), item.request
+    return _scoped_item_context(item), item.request
 
 
 def _scoped_item_context(item):
@@ -354,7 +352,7 @@ def _scoped_item_context(item):
 
 
 def _request_owners_alive(ctx, request):
-    return 'muscle_control_input' not in request.payload or _owners_alive(ctx.scene, ctx.root)
+    return ctx is not None and _owners_alive(ctx.scene, ctx.root)
 
 
 def _owners_alive(scene, root, identities=()):

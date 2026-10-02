@@ -7,11 +7,13 @@ class RuntimeProgress:
     """Request-local recovery; application errors exist only during one execution."""
     accepted_dirty: dict = field(default_factory=dict)
     application_errors: list = field(default_factory=list)
+    published_muscles: set = field(default_factory=set)
     started: bool = False
     completed: bool = False
 
     def begin(self):
         self.application_errors.clear()
+        self.published_muscles.clear()
         self.started, self.completed = True, False
 
     def dirty_hints(self, original):
