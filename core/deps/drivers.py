@@ -37,15 +37,22 @@ class DependencyDriver:
 
 
 _DRIVERS = OrderedDict()
+_DRIVER_GENERATION = 0
 
 
 def register_dependency_driver(driver: DependencyDriver, replace: bool = False):
+    global _DRIVER_GENERATION
     name = str(getattr(driver, "name", "") or "").strip()
     if not name:
         raise ValueError("driver.name is required")
     if name in _DRIVERS and not replace:
         raise ValueError(f"dependency driver already registered: {name}")
     _DRIVERS[name] = driver
+    _DRIVER_GENERATION += 1
+
+
+def dependency_driver_generation():
+    return _DRIVER_GENERATION
 
 
 def get_dependency_drivers():

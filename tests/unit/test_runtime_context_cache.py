@@ -12,9 +12,10 @@ for value in (str(TEST_ROOT), str(ADDON_ROOT)):
     if value not in sys.path:
         sys.path.insert(0, value)
 
-from _support import ensure_import_path
+from _support import ensure_import_path, install_fake_modules
 
 ensure_import_path()
+install_fake_modules()
 
 PKG = types.ModuleType("deps_cache_test")
 PKG.__path__ = [str(ADDON_ROOT / "core" / "deps")]

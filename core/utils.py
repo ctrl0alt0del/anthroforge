@@ -138,6 +138,13 @@ def _bounded_state(namespace, max_entries, max_bytes):
     return state
 
 
+def clear_bounded_scene_cache(namespace, key_contains=""):
+    state = _BOUNDED_SCENE_CACHE.get(str(namespace))
+    for scene_id, key in tuple(() if state is None else state["items"]):
+        if not key_contains or key_contains in key:
+            _drop_scene_key(scene_id, _SCENE_CACHE.get(scene_id, {}), key)
+
+
 def _remember_bounded(namespace, token, size, max_entries, max_bytes):
     state = _bounded_state(namespace, max_entries, max_bytes)
     state["items"][token] = max(0, int(size))
