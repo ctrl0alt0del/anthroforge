@@ -370,3 +370,76 @@ class MuscleControlConsumptionTests(BlenderTestCase):
             changed = module.apply_muscle_control_update(self.sync, self.root, self.scene, self.ctrl)
         self.assertEqual(changed, self.muscle.id)
         self.assertEqual(tuple(self.ctrl.location), marker)
+
+    def rebound_input(self):
+        from anthroforge.core.visualization.muscle_numeric_runtime import _bind_control
+        previous = tuple(muscle_inflation_ctrl_world(self.muscle))
+        self.ctrl.location = self.target(.4)
+        old = inputs.reserve_input(self.root, self.scene, self.ctrl)
+        inputs.dispatch_input(self.root, self.scene, old, deferred=True)
+        collection = bpy.data.collections.get(self.sync.collection_name)
+        _bind_control(self.sync, collection, self.root, self.muscle.id, '', 'B')
+        self.assertIsNone(inputs.input_record(old))
+        _bind_control(self.sync, collection, self.root, self.muscle.id, '', 'A')
+        self.assertTrue(inputs.write_control(self.root, self.scene, self.ctrl, previous))
+        return old, previous
+
+    def test_return_to_same_side_does_not_revive_queued_input(self):
+        old, previous = self.rebound_input()
+        self.assertIsNone(inputs.input_record(old))
+        with patch.object(module, 'execute_muscle_work', wraps=module.execute_muscle_work) as numeric:
+            runner._flush_pending()
+        self.assertEqual(numeric.call_count, 0)
+        self.assertEqual(tuple(muscle_inflation_ctrl_world(self.muscle)), previous)
+        self.assertEqual(tuple(self.ctrl.location), previous)
+
+    def test_old_lifetime_neither_merges_nor_blocks_new_movement(self):
+        old, _ = self.rebound_input()
+        self.ctrl.location = self.target(.2)
+        new = inputs.reserve_input(self.root, self.scene, self.ctrl)
+        self.assertNotEqual(inputs.input_key(old), inputs.input_key(new))
+        self.assertFalse(runner.control_input_pending(new))
+        with patch.object(module, 'execute_muscle_work', wraps=module.execute_muscle_work) as numeric:
+            inputs.dispatch_input(self.root, self.scene, new)
+            runner._flush_pending()
+        self.assertEqual(numeric.call_count, 1); self.assert_visible_authored()
+
+    def test_old_lifetime_cannot_write_into_rebound_control(self):
+        old, previous = self.rebound_input()
+        self.assertFalse(inputs.write_control(self.root, self.scene, self.ctrl, old.point, old))
+        self.assertEqual(tuple(self.ctrl.location), previous)
+
+    def test_old_lifetime_does_not_block_higher_new_revision(self):
+        old, _ = self.rebound_input()
+        self.ctrl.location = self.target(.1)
+        inputs.reserve_input(self.root, self.scene, self.ctrl)
+        self.ctrl.location = self.target(.2)
+        new = inputs.reserve_input(self.root, self.scene, self.ctrl)
+        self.assertGreater(new.revision, old.revision)
+        self.assertFalse(runner.control_input_pending(new))
+        inputs.dispatch_input(self.root, self.scene, new)
+        self.assertEqual(inputs.input_record(new).handled, new.revision)
+        runner._flush_pending(); self.assert_visible_authored()
+
+    def test_tail_queue_keeps_same_revision_different_lifetimes_distinct(self):
+        old, _ = self.rebound_input()
+        self.ctrl.location = self.target(.2)
+        new = inputs.reserve_input(self.root, self.scene, self.ctrl)
+        self.assertEqual(old.revision, new.revision)
+        with patch.object(runner, '_RUNNING', True):
+            inputs.dispatch_input(self.root, self.scene, old)
+            inputs.dispatch_input(self.root, self.scene, new)
+        self.assertEqual(len(runner._TAIL_PENDING), 2)
+        self.assertNotEqual(runner._runtime_key(*runner._TAIL_PENDING[0]), runner._runtime_key(*runner._TAIL_PENDING[1]))
+
+    def test_acquisition_rebinding_to_same_side_retires_inflight_input(self):
+        original, seen = inputs.acquire_graph, []
+        def acquire(root, scene):
+            graph = original(root, scene)
+            seen.append(self.rebound_input())
+            return graph
+        self.ctrl.location = self.target()
+        with patch.object(inputs, 'acquire_graph', side_effect=acquire):
+            self.assertIsNone(module.apply_muscle_control_update(self.sync, self.root, self.scene, self.ctrl))
+        self.assertEqual(len(seen), 1)
+        runner._flush_pending(); self.assert_visible_authored()

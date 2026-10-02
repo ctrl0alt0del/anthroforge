@@ -1,6 +1,7 @@
 """Transient, immutable Muscle control observations; runtime owns the FIFO."""
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from itertools import count
 from math import isfinite
 
 from .relationship_cache import runtime_identity
@@ -10,6 +11,7 @@ _RECORDS = {}
 _BUSY = 0
 _BORROWED = None
 _CONTEXT_REVISION = 0
+_LIFETIMES = count(1)
 
 
 class ControlContextChanged(RuntimeError):
@@ -21,6 +23,7 @@ class MuscleControlInput:
     epoch: int
     owners: tuple
     binding: tuple
+    lifetime: int
     revision: int
     point: tuple
     muscle_id: str
@@ -34,6 +37,7 @@ class ControlRecord:
     control: object
     binding: tuple
     observed: tuple
+    lifetime: int = field(default_factory=lambda: next(_LIFETIMES))
     revision: int = 0
     handled: int = 0
     processing: int = 0
@@ -48,7 +52,7 @@ def reset_control_inputs():
 
 
 def input_key(value):
-    return () if value is None else (value.epoch, value.owners, value.binding, value.revision)
+    return () if value is None else (value.epoch, value.owners, value.binding, value.lifetime, value.revision)
 
 
 def owners(root, scene, obj):
@@ -126,14 +130,14 @@ def _reserve_record(record, point):
     record.observed = point
     record.revision += 1
     return MuscleControlInput(_EPOCH, owners(record.root, record.scene, record.control), record.binding,
-                              record.revision, point, record.binding[0], str(record.control.name))
+                              record.lifetime, record.revision, point, record.binding[0], str(record.control.name))
 
 
 def input_record(value):
     if value is None or value.epoch != _EPOCH:
         return None
     record = _RECORDS.get(value.owners)
-    if record is None or record.binding != value.binding:
+    if record is None or record.lifetime != value.lifetime or record.binding != value.binding:
         return None
     if not _alive(record):
         _RECORDS.pop(value.owners, None)
@@ -256,7 +260,7 @@ def _write_allowed(record, value):
 
 def _input_matches(record, value):
     return (value.epoch == _EPOCH and _RECORDS.get(value.owners) is record
-            and record.binding == value.binding)
+            and record.lifetime == value.lifetime and record.binding == value.binding)
 
 
 def freeze_payload(root, payload):

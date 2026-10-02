@@ -102,6 +102,33 @@ class MuscleControlInputTests(unittest.TestCase):
                 self.reserve((value, 0., 0.))
         self.assertEqual(inputs._RECORDS, {})
 
+    def test_retired_lifetime_cannot_claim_or_finish_replacement(self):
+        old = self.reserve((1., 0., 0.)); inputs.retire_control(self.obj)
+        new = self.reserve(old.point)
+        self.assertEqual(old.revision, new.revision)
+        self.assertNotEqual(inputs.input_key(old), inputs.input_key(new))
+        self.assertFalse(inputs.claim_input(old)); self.assertTrue(inputs.claim_input(new))
+        inputs.finish_input(old, False)
+        record = inputs.input_record(new)
+        self.assertEqual(record.processing, new.revision); self.assertIsNone(record.failed)
+        self.assertFalse(inputs._input_matches(record, old))
+
+    def test_binding_roundtrip_keeps_old_lifetime_invalid(self):
+        old = self.reserve((1., 0., 0.))
+        with patch.object(inputs, 'control_binding', return_value=('M', 'FS', 'S', 'branch', 'B', 'CTRL_POINT', 5)):
+            temporary = self.reserve((2., 0., 0.))
+        new = self.reserve(old.point)
+        self.assertIsNone(inputs.input_record(old)); self.assertIsNone(inputs.input_record(temporary))
+        self.assertTrue(inputs.claim_input(new))
+        self.assertNotEqual(inputs.input_key(old), inputs.input_key(new))
+
+    def test_pruned_record_recreated_with_same_owners_stays_distinct(self):
+        old = self.reserve((1., 0., 0.))
+        with patch.object(inputs, 'control_binding', return_value=None):
+            inputs.prune_inputs()
+        new = self.reserve(old.point)
+        self.assertIsNone(inputs.input_record(old)); self.assertTrue(inputs.claim_input(new))
+
     def test_acquisition_guard_releases_after_failure(self):
         with self.assertRaises(RuntimeError):
             with inputs.acquisition_guard():
