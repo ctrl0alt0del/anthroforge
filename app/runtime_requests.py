@@ -2,6 +2,27 @@ from dataclasses import dataclass, field
 from time import monotonic
 
 
+@dataclass
+class RuntimeProgress:
+    """Request-local recovery; application errors exist only during one execution."""
+    accepted_dirty: dict = field(default_factory=dict)
+    application_errors: list = field(default_factory=list)
+    started: bool = False
+    completed: bool = False
+
+    def begin(self):
+        self.application_errors.clear()
+        self.started, self.completed = True, False
+
+    def dirty_hints(self, original):
+        if not self.accepted_dirty:
+            return original
+        merged = {key: set(values) for key, values in original.items()}
+        for key, values in self.accepted_dirty.items():
+            merged.setdefault(key, set()).update(values)
+        return merged
+
+
 @dataclass(frozen=True)
 class RuntimeRequest:
     dirty_hints: dict = field(default_factory=dict)
@@ -13,10 +34,12 @@ class RuntimeRequest:
     dirty_aspects: dict = field(default_factory=dict)
     quality: str = "INTERACTIVE"
     queued_at: float = field(default_factory=monotonic)
+    progress: RuntimeProgress = field(default_factory=RuntimeProgress, compare=False)
 
     def gate_meta(self):
         return {"source": self.source, "event_type": self.event_type, "payload": dict(self.payload or {}),
-                "full": self.full, "dirty_aspects": dict(self.dirty_aspects or {}), "quality": self.quality}
+                "full": self.full, "dirty_aspects": dict(self.dirty_aspects or {}), "quality": self.quality,
+                "runtime_progress": self.progress}
 
 
 def _request_full(dirty_hints, full):

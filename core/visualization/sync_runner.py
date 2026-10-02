@@ -1,5 +1,6 @@
 import os
 import time
+import traceback
 from dataclasses import dataclass
 
 import bpy
@@ -14,6 +15,7 @@ except ImportError:
     from app.runtime_requests import runtime_request
     from app.runtime_sync import queue_runtime, run_runtime_now
 from ..deps import run_dependency_runtime
+from ..deps.control_work import ControlApplicationFailure
 from ..deps.runtime_trace import begin_request_telemetry, finish_request_telemetry, trace_enabled, trace_line
 from ..perf_trace import perf_count
 
@@ -51,6 +53,7 @@ class QueuedRuntime:
     due_at: float = 0.0
     owner_ids: tuple = ()
     owner_refs: tuple = ()
+    failed: bool = False
 
 
 def _run_request(ctx, request):
@@ -88,15 +91,47 @@ def _run_request_chain(ctx, request):
 def _run_one_request(ctx, request):
     if not _request_owners_alive(ctx, request):
         return
+    request.progress.begin()
     queue_ms = 1000.0 * max(0.0, _now() - _request_seen(request))
     started = time.perf_counter()
     record = begin_request_telemetry(request, queue_ms, ctx.root, ctx.scene)
     try:
-        run_runtime_now(ctx, request, run_dependency_runtime)
+        _execute_request(ctx, request)
     finally:
         elapsed = 1000.0 * max(0.0, time.perf_counter() - started)
         finish_request_telemetry(record, elapsed)
         _trace_request(ctx, request, queue_ms, elapsed)
+
+
+def _execute_request(ctx, request):
+    try:
+        run_runtime_now(ctx, request, run_dependency_runtime)
+    except ControlApplicationFailure:
+        request.progress.completed = True
+        raise
+    except Exception:
+        _report_application_errors(request)
+        _retain_failed_request(ctx, request)
+        raise
+    finally:
+        request.progress.application_errors.clear()
+    request.progress.completed = True
+
+
+def _report_application_errors(request):
+    for error in request.progress.application_errors:
+        traceback.print_exception(error)
+
+
+
+def _retain_failed_request(ctx, request):
+    item = next((item for item in _PENDING if item.request is request), None)
+    if item is None and 'muscle_control_input' not in request.payload and not request.progress.accepted_dirty:
+        return
+    if item is None:
+        item = _queue_item(ctx, request)
+        _PENDING.append(item)
+    item.failed = True
 
 
 def _finish_request(ctx):
@@ -150,7 +185,7 @@ def _arm_timer(first_interval=0.0):
         _drop_timer()
     _TIMER_ARMED = True
     _TIMER_DUE_AT = due_at
-    bpy.app.timers.register(_flush_pending, first_interval=interval)
+    bpy.app.timers.register(_timer_flush_pending, first_interval=interval)
 
 
 def _now():
@@ -225,7 +260,7 @@ def _queue_item(ctx, request):
 def _coalesce_index(item):
     key = _defer_key(item)
     for index, old in enumerate(_PENDING):
-        if _deferable(old.request) and _defer_key(old) == key:
+        if not old.request.progress.started and _deferable(old.request) and _defer_key(old) == key:
             return index
     return None
 
@@ -331,11 +366,19 @@ def _owners_alive(scene, root, identities=()):
         return False
 
 
-def _flush_pending():
+def _timer_flush_pending():
+    try:
+        return _flush_pending(retry_failed=False)
+    except Exception:
+        traceback.print_exc()
+        return _next_timer(_now())
+
+
+def _flush_pending(retry_failed=True):
     now = _now()
     if not _PENDING:
         return _timer_result(None, now)
-    idx = _ready_index(now)
+    idx = _ready_index(now, retry_failed)
     if idx is None:
         return _wait_for_next(now)
     item = _PENDING[idx]
@@ -349,14 +392,12 @@ def _flush_ready_item(idx, ctx, request, now):
     try:
         if not _run_request(ctx, request):
             return _timer_result(_RETRY_SECONDS, now)
-    except Exception:
-        from ..deps.muscle_control_intents import input_record
-        if input_record(request.payload.get('muscle_control_input')) is None:
-            raise
-        import traceback
+    except ControlApplicationFailure:
         traceback.print_exc()
-        _PENDING.pop(idx)
-        return _next_timer(now)
+    except Exception:
+        if request.progress.completed:
+            _PENDING.pop(idx)
+        raise
     return _finish_item(idx, ctx.scene, now)
 
 
@@ -372,9 +413,10 @@ def _finish_item(idx, scene, now):
     return _next_timer(now)
 
 
-def _ready_index(now):
+def _ready_index(now, retry_failed=True):
     ready = [(i, item.due_at) for i, item in enumerate(_PENDING)
-             if item.due_at <= now and not _earlier_control_pending(item.request)]
+             if (retry_failed or not item.failed) and item.due_at <= now
+             and not _earlier_control_pending(item.request)]
     return None if not ready else min(ready, key=lambda value: value[1])[0]
 
 
@@ -385,15 +427,15 @@ def _valid_context(ctx):
 def _wait_for_next(now):
     item = _next_due_item()
     _count(None if item is None else bpy.data.scenes.get(item.scene_name), "delayed")
-    return _timer_result(_next_delay(now), now)
+    return _next_timer(now)
 
 
 def _next_timer(now):
-    return _timer_result(None if not _PENDING else _next_delay(now), now)
+    return _timer_result(None if _next_due_item() is None else _next_delay(now), now)
 
 
 def _next_due_item():
-    eligible = [item for item in _PENDING if not _earlier_control_pending(item.request)]
+    eligible = [item for item in _PENDING if not item.failed and not _earlier_control_pending(item.request)]
     return None if not eligible else min(eligible, key=lambda item: item.due_at)
 
 
@@ -465,7 +507,7 @@ def control_input_pending(value):
     record = input_record(value)
     if record is None:
         return False
-    pending = (dict(item.request.payload or {}).get('muscle_control_input') for item in _PENDING)
+    pending = (dict(item.request.payload or {}).get('muscle_control_input') for item in _PENDING if not item.failed)
     return any(old is not None and input_key(old)[:-1] == input_key(value)[:-1]
                and record.handled < old.revision < value.revision
                and old.revision != record.processing for old in pending)
@@ -550,8 +592,8 @@ def _on_history_pre(_dummy):
 def _drop_timer():
     active = getattr(bpy.app.timers, "is_registered", None)
     cancel = getattr(bpy.app.timers, "unregister", None)
-    if callable(active) and callable(cancel) and active(_flush_pending):
-        cancel(_flush_pending)
+    if callable(active) and callable(cancel) and active(_timer_flush_pending):
+        cancel(_timer_flush_pending)
 
 
 def _append_handler(seq, fn):

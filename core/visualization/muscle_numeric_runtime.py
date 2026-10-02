@@ -116,10 +116,13 @@ def execute_muscle_work(scene, work):
 
 
 def publish_muscle_work(sync, vis_col, root, scene, vcp, work, batch):
-    results = iter(batch.results)
+    results, published = iter(batch.results), set()
     for item in work:
         result = next(results) if item.request is not None else None
         _publish_one(sync, vis_col, root, scene, vcp, item, result, batch)
+        if result is not None and not item.error and not result.error:
+            published.add(item.muscle.id)
+    return published
 
 
 def _numeric_input(sync, root, scene, muscle):

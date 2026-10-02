@@ -237,7 +237,7 @@ class MuscleSceneSync:
         muscles = tuple(muscle for muscle in vcp.muscles if muscle.id in muscle_ids_to_sync)
         work = tuple(capture_muscle_work(self, vis_col, root, scene, vcp, muscle) for muscle in muscles)
         batch = execute_muscle_work(scene, work)
-        publish_muscle_work(self, vis_col, root, scene, vcp, work, batch)
+        return publish_muscle_work(self, vis_col, root, scene, vcp, work, batch)
 
     def _cleanup_after_sync(self, vis_col, root, all_muscle_ids, active_muscle_id, control_muscle_ids):
         self._cleanup_removed_muscles(vis_col, root.name, all_muscle_ids)
@@ -250,8 +250,9 @@ class MuscleSceneSync:
         all_ids, target_ids = self._muscle_ids_to_sync(vcp, target_muscle_ids)
         active_id = self._selected_muscle_id(vcp, root, scene)
         control_ids = self._control_muscle_ids(vcp, root)
-        self._sync_target_muscles(vis_col, root, scene, vcp, target_ids)
+        published = self._sync_target_muscles(vis_col, root, scene, vcp, target_ids)
         self._cleanup_after_sync(vis_col, root, all_ids, active_id, control_ids)
+        return published
 
     def _cleanup_removed_muscles(self, vis_col, root_name, all_muscle_ids):
         for obj in list(vis_col.objects):
@@ -281,7 +282,7 @@ class MuscleSceneSync:
 
         self._syncing = True
         try:
-            self._sync_root_pass(root, scene, target_muscle_ids)
+            return self._sync_root_pass(root, scene, target_muscle_ids)
         finally:
             self._object_index = None
             self._syncing = False
@@ -362,8 +363,11 @@ class MuscleSceneSync:
         if record is None:
             return False
         if previous != tuple(point):
-            set_muscle_inflation_ctrl_world(muscle, tuple(point))
-            changed.add(value.muscle_id)
+            try:
+                set_muscle_inflation_ctrl_world(muscle, tuple(point))
+            finally:
+                if tuple(muscle_inflation_ctrl_world(muscle)) != previous:
+                    changed.add(value.muscle_id)
         control_inputs.write_control(root, record.scene, obj, point, value)
         return previous != tuple(point)
 

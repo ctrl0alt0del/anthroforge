@@ -1,3 +1,4 @@
+from .control_work import acknowledge_publication
 from .adapters import build_runtime_graph
 from .drivers import DependencyDriver
 from .runtime_intents import pop_runtime_intents
@@ -297,10 +298,10 @@ class MuscleSyncDriver(DependencyDriver):
         if _selection_event(gate_meta) or _fiber_update_event(gate_meta):
             return
         ids = set(impacted.get("MUSCLE", set()) or set())
-        if is_full:
-            register_muscle_sync().sync_root_to_scene(root=root, scene=scene)
-        elif ids:
-            register_muscle_sync().sync_root_to_scene(root=root, scene=scene, target_muscle_ids=ids)
+        published = set()
+        if is_full or ids:
+            published = register_muscle_sync().sync_root_to_scene(root, scene, None if is_full else ids)
+        acknowledge_publication(gate_meta, published)
 
 
 class FiberSurfaceSyncDriver(DependencyDriver):

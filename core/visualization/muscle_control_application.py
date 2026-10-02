@@ -1,5 +1,6 @@
 """Apply one reserved observation with a synchronous, scoped evaluated graph."""
 from ..deps import muscle_control_intents as inputs
+from ..deps.control_work import ControlApplicationFailure, remember_application_error, remember_accepted_work
 
 
 def apply_input(sync, root, scene, obj, value=None, depsgraph=None, collection=None, runtime=False):
@@ -21,28 +22,30 @@ def _unsafe_direct(sync, value, runtime):
 
 
 def _consume(sync, root, scene, obj, value, depsgraph, collection):
-    success = False
+    changed, success = set(), False
     try:
         with inputs.acquisition_guard():
-            changed = _with_graph(sync, root, scene, obj, value, depsgraph, collection)
-            success = True
-            return changed
+            result = _with_graph(sync, root, scene, obj, value, depsgraph, collection, changed)
+        success = True; return result
     except inputs.ControlContextChanged:
         success = None
         inputs.dispatch_input(root, scene, value, fresh_context=True)
         return None
+    except Exception as error:
+        success = bool(changed)
+        raise ControlApplicationFailure(value, changed, error) from error
     finally:
         inputs.finish_input(value, success)
 
 
-def _with_graph(sync, root, scene, obj, value, depsgraph, collection):
+def _with_graph(sync, root, scene, obj, value, depsgraph, collection, changed):
     revision = inputs.context_revision()
     graph = depsgraph or inputs.acquire_graph(root, scene)
     inputs.require_context(revision)
-    return _apply(sync, root, scene, obj, value, graph, collection)
+    return _apply(sync, root, scene, obj, value, graph, collection, changed)
 
 
-def _apply(sync, root, scene, obj, value, graph, collection):
+def _apply(sync, root, scene, obj, value, graph, collection, changed):
     import bpy
     record = inputs.input_record(value)
     collection = collection or bpy.data.collections.get(sync.collection_name)
@@ -50,7 +53,6 @@ def _apply(sync, root, scene, obj, value, graph, collection):
         return None
     if collection is None or graph is None:
         raise RuntimeError('Muscle control has no evaluated context')
-    changed = set()
     sync._process_inflation_ctrl_update(root, collection, obj, changed, value, graph)
     return next(iter(changed), None)
 
@@ -80,7 +82,15 @@ def _apply_inputs(ctx, pending):
             inputs.dispatch_input(ctx.root, ctx.scene, value)
             continue
         seen.add(value.muscle_id)
-        mid = apply_input(register_muscle_sync(), ctx.root, ctx.scene, record.control, value, runtime=True)
-        if mid:
-            changed.setdefault('MUSCLE', set()).add(mid)
+        ids = _request_input(ctx, register_muscle_sync(), record.control, value)
+        remember_accepted_work(ctx.gate_meta, ids)
+        if ids: changed.setdefault('MUSCLE', set()).update(ids)
     return changed
+
+
+def _request_input(ctx, sync, obj, value):
+    try:
+        mid = apply_input(sync, ctx.root, ctx.scene, obj, value, runtime=True)
+        return {mid} if mid else set()
+    except ControlApplicationFailure as error:
+        return remember_application_error(ctx.gate_meta, error)
