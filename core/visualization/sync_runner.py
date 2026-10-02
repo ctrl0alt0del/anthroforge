@@ -50,6 +50,7 @@ class QueuedRuntime:
     first_seen_at: float = 0.0
     due_at: float = 0.0
     owner_ids: tuple = ()
+    owner_refs: tuple = ()
 
 
 def _run_request(ctx, request):
@@ -85,6 +86,8 @@ def _run_request_chain(ctx, request):
 
 
 def _run_one_request(ctx, request):
+    if not _request_owners_alive(ctx, request):
+        return
     queue_ms = 1000.0 * max(0.0, _now() - _request_seen(request))
     started = time.perf_counter()
     record = begin_request_telemetry(request, queue_ms, ctx.root, ctx.scene)
@@ -191,6 +194,8 @@ def _deferable(request):
 
 
 def _enqueue_item(ctx, request):
+    if not _request_owners_alive(ctx, request):
+        return None
     item = _queue_item(ctx, request)
     if not _deferable(request):
         _PENDING.append(item)
@@ -212,8 +217,9 @@ def _enqueue_deferred(ctx, item):
 def _queue_item(ctx, request):
     started = _now()
     due_at = started + (_defer_seconds(request) if _deferable(request) else 0.0)
-    owner_ids = (_owner_key(ctx.scene), _owner_key(ctx.root)) if request.payload.get('muscle_control_input') else ()
-    return QueuedRuntime(_obj_name(ctx.scene), _obj_name(ctx.root), request, started, due_at, owner_ids)
+    refs = (ctx.scene, ctx.root) if 'muscle_control_input' in request.payload else ()
+    owner_ids = tuple(_owner_key(owner) for owner in refs)
+    return QueuedRuntime(_obj_name(ctx.scene), _obj_name(ctx.root), request, started, due_at, owner_ids, refs)
 
 
 def _coalesce_index(item):
@@ -225,14 +231,16 @@ def _coalesce_index(item):
 
 
 def _defer_key(item):
+    from ..deps.muscle_control_intents import input_key
     req = item.request
-    return (item.scene_name, item.root_name, str(req.source), str(req.event_type))
+    return (item.scene_name, item.root_name, str(req.source), str(req.event_type), item.owner_ids,
+            input_key(req.payload.get('muscle_control_input')))
 
 
 def _merge_item(old, new):
     request = _merge_request(old.request, new.request)
     due_at = _merge_due_at(old, new)
-    return QueuedRuntime(old.scene_name, old.root_name, request, old.first_seen_at, due_at, old.owner_ids)
+    return QueuedRuntime(old.scene_name, old.root_name, request, old.first_seen_at, due_at, old.owner_ids, old.owner_refs)
 
 
 def _merge_due_at(old, new):
@@ -298,16 +306,29 @@ def _obj_name(obj):
 
 
 def _resolve_item(item):
-    from ..deps.muscle_control_intents import input_record
-    value = dict(item.request.payload or {}).get('muscle_control_input')
-    if value is not None:
-        record = input_record(value)
-        return (None if record is None else _context(record.root, record.scene)), item.request
+    if item.owner_ids:
+        return _scoped_item_context(item), item.request
     scene = bpy.data.scenes.get(item.scene_name)
     root = bpy.data.objects.get(item.root_name)
-    if item.owner_ids and item.owner_ids != (_owner_key(scene), _owner_key(root)):
-        return None, item.request
     return _context(root=root, scene=scene), item.request
+
+
+def _scoped_item_context(item):
+    scene, root = item.owner_refs
+    return _context(root, scene) if _owners_alive(scene, root, item.owner_ids) else None
+
+
+def _request_owners_alive(ctx, request):
+    return 'muscle_control_input' not in request.payload or _owners_alive(ctx.scene, ctx.root)
+
+
+def _owners_alive(scene, root, identities=()):
+    try:
+        return (scene is not None and root is not None and bpy.data.scenes.get(scene.name) == scene
+                and bpy.data.objects.get(root.name) == root and scene.objects.get(root.name) == root
+                and (not identities or identities == (_owner_key(scene), _owner_key(root))))
+    except (ReferenceError, AttributeError, TypeError):
+        return False
 
 
 def _flush_pending():
@@ -329,7 +350,8 @@ def _flush_ready_item(idx, ctx, request, now):
         if not _run_request(ctx, request):
             return _timer_result(_RETRY_SECONDS, now)
     except Exception:
-        if not request.payload.get('muscle_control_input'):
+        from ..deps.muscle_control_intents import input_record
+        if input_record(request.payload.get('muscle_control_input')) is None:
             raise
         import traceback
         traceback.print_exc()
@@ -419,6 +441,8 @@ def _owner_key(owner):
 
 
 def _enqueue_tail(ctx, request):
+    if not _request_owners_alive(ctx, request):
+        return
     if _earlier_control_pending(request):
         _scheduler(ctx, request)
         return

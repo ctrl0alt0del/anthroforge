@@ -443,3 +443,121 @@ class MuscleControlConsumptionTests(BlenderTestCase):
             self.assertIsNone(module.apply_muscle_control_update(self.sync, self.root, self.scene, self.ctrl))
         self.assertEqual(len(seen), 1)
         runner._flush_pending(); self.assert_visible_authored()
+
+    def queue_scoped_work(self, dirty=None, full=False, **options):
+        self.ctrl.location = self.target(.4)
+        value = inputs.reserve_input(self.root, self.scene, self.ctrl)
+        payload = dict(options.pop('payload', {}), muscle_control_input=value)
+        runner.schedule_sync_from_dirty_hints(self.root, self.scene, dirty or {}, full=full, payload=payload, **options)
+        return value
+
+    def retire_scoped_control(self):
+        from anthroforge.core.visualization.muscle_numeric_runtime import _bind_control
+        collection = bpy.data.collections.get(self.sync.collection_name)
+        _bind_control(self.sync, collection, self.root, self.muscle.id, '', 'B')
+
+    def test_retired_control_preserves_independent_dirty_work(self):
+        value = self.queue_scoped_work({'MUSCLE': {self.muscle.id}})
+        self.retire_scoped_control(); self.assertIsNone(inputs.input_record(value))
+        with patch.object(module, 'execute_muscle_work', wraps=module.execute_muscle_work) as numeric:
+            runner._flush_pending()
+        self.assertEqual(numeric.call_count, 1); self.assertFalse(runner._PENDING)
+
+    def test_retired_control_preserves_explicit_full_work(self):
+        self.queue_scoped_work(full=True); self.retire_scoped_control()
+        with patch.object(module, 'execute_muscle_work', wraps=module.execute_muscle_work) as numeric:
+            with patch.object(runner, 'run_dependency_runtime', wraps=runner.run_dependency_runtime) as run:
+                runner._flush_pending()
+        self.assertTrue(run.call_args.kwargs['full']); self.assertEqual(numeric.call_count, 1)
+
+    def test_retired_control_only_keeps_explicit_nonfull_semantics(self):
+        self.queue_scoped_work(full=False); self.retire_scoped_control()
+        with patch.object(module, 'execute_muscle_work', wraps=module.execute_muscle_work) as numeric:
+            with patch.object(runner, 'run_dependency_runtime', wraps=runner.run_dependency_runtime) as run:
+                runner._flush_pending()
+        self.assertEqual(numeric.call_count, 0); self.assertFalse(runner._PENDING)
+        if run.call_args: self.assertFalse(run.call_args.kwargs['full'])
+
+    def test_retired_control_preserves_other_payload_and_intent(self):
+        from anthroforge.core.deps import builtin_drivers, runtime_intents
+        runtime_intents.enqueue_runtime_intent(self.root, 'OTHER/WORK', payload={'marker': 'intent'})
+        self.queue_scoped_work(payload={'scp_recapture_ids': ['independent']}); self.retire_scoped_control()
+        with patch.object(builtin_drivers, 'apply_runtime_intent', return_value={}) as apply:
+            with patch.object(runner, 'run_dependency_runtime', wraps=runner.run_dependency_runtime) as run:
+                runner._flush_pending()
+        self.assertEqual(apply.call_args.args[2].payload, {'marker': 'intent'})
+        self.assertEqual(run.call_args.kwargs['gate_meta']['payload']['scp_recapture_ids'], ['independent'])
+
+    def test_retired_control_keeps_renamed_original_owners(self):
+        self.queue_scoped_work({'MUSCLE': {self.muscle.id}}); self.retire_scoped_control()
+        self.root.name = 'RenamedRoot'; self.scene.name = 'RenamedScene'
+        with patch.object(runner, 'run_dependency_runtime') as run:
+            runner._flush_pending()
+        self.assertEqual(run.call_args.kwargs['root'], self.root)
+        self.assertEqual(run.call_args.kwargs['scene'], self.scene)
+
+    def test_retired_control_rejects_deleted_or_replaced_root(self):
+        self.queue_scoped_work({'MUSCLE': {self.muscle.id}}, full=True); self.retire_scoped_control()
+        name = self.root.name; bpy.data.objects.remove(self.root, do_unlink=True)
+        replacement = bpy.data.objects.new(name, None); self.scene.collection.objects.link(replacement)
+        with patch.object(runner, 'run_dependency_runtime') as run:
+            runner._flush_pending()
+        self.assertEqual(run.call_count, 0); self.assertFalse(runner._PENDING)
+
+    def test_retired_control_rejects_deleted_or_replaced_scene(self):
+        scene = bpy.data.scenes.new('OwnerScene')
+        scene.collection.objects.link(self.root); scene.collection.objects.link(self.ctrl)
+        self.scene = scene; self.queue_scoped_work({'MUSCLE': {self.muscle.id}}, full=True)
+        inputs.retire_control(self.ctrl); name = scene.name; bpy.data.scenes.remove(scene)
+        replacement = bpy.data.scenes.new(name); replacement.collection.objects.link(self.root)
+        with patch.object(runner, 'run_dependency_runtime') as run:
+            runner._flush_pending()
+        self.assertEqual(run.call_count, 0); self.assertFalse(runner._PENDING)
+
+    def test_tail_retired_control_preserves_independent_work(self):
+        self.queue_scoped_work({'MUSCLE': {self.muscle.id}})
+        item = runner._PENDING.pop(); ctx, request = runner._resolve_item(item)
+        with patch.object(runner, '_RUNNING', True): runner._dispatch_runtime(ctx, request)
+        self.retire_scoped_control()
+        with patch.object(module, 'execute_muscle_work', wraps=module.execute_muscle_work) as numeric:
+            runner._run_one_request(*runner._pop_tail())
+        self.assertEqual(numeric.call_count, 1)
+
+    def test_tail_control_rejects_replaced_owner_before_execution(self):
+        self.queue_scoped_work({'MUSCLE': {self.muscle.id}})
+        ctx, request = runner._resolve_item(runner._PENDING.pop())
+        with patch.object(runner, '_RUNNING', True): runner._dispatch_runtime(ctx, request)
+        name = self.root.name; bpy.data.objects.remove(self.root, do_unlink=True)
+        replacement = bpy.data.objects.new(name, None); self.scene.collection.objects.link(replacement)
+        with patch.object(runner, 'run_dependency_runtime') as run:
+            runner._run_one_request(*runner._pop_tail())
+        self.assertEqual(run.call_count, 0)
+
+    def test_deferred_control_payloads_do_not_coalesce_distinct_inputs(self):
+        self.queue_scoped_work({'MUSCLE': {self.muscle.id}}, source='depsgraph', event_type='SCP_UPDATE')
+        self.queue_scoped_work({'MUSCLE': {self.muscle.id}}, source='depsgraph', event_type='SCP_UPDATE')
+        self.assertEqual(len(runner._PENDING), 2)
+
+    def test_retired_control_keeps_independent_failed_request_for_retry(self):
+        self.queue_scoped_work({'MUSCLE': {self.muscle.id}}); self.retire_scoped_control()
+        self.assert_independent_failure_retry()
+
+    def test_independent_failure_policy_without_control_envelope(self):
+        runner.schedule_sync_from_dirty_hints(self.root, self.scene, {'MUSCLE': {self.muscle.id}}, full=False)
+        self.assert_independent_failure_retry()
+
+    def assert_independent_failure_retry(self):
+        with patch.object(runner, 'run_dependency_runtime', side_effect=RuntimeError('independent failure')):
+            with self.assertRaises(RuntimeError): runner._flush_pending()
+        self.assertEqual(len(runner._PENDING), 1)
+        with patch.object(module, 'execute_muscle_work', wraps=module.execute_muscle_work) as numeric:
+            runner._flush_pending()
+        self.assertEqual(numeric.call_count, 1); self.assertFalse(runner._PENDING)
+
+    def test_invalid_original_owner_cannot_enter_either_queue(self):
+        self.queue_scoped_work({'MUSCLE': {self.muscle.id}})
+        ctx, request = runner._resolve_item(runner._PENDING.pop())
+        bpy.data.objects.remove(self.root, do_unlink=True)
+        self.assertIsNone(runner._enqueue_item(ctx, request))
+        runner._enqueue_tail(ctx, request)
+        self.assertFalse(runner._PENDING); self.assertFalse(runner._TAIL_PENDING)
