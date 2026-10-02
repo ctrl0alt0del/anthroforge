@@ -1,5 +1,6 @@
 import os
 import time
+import traceback
 from dataclasses import dataclass
 
 import bpy
@@ -14,6 +15,7 @@ except ImportError:
     from app.runtime_requests import runtime_request
     from app.runtime_sync import queue_runtime, run_runtime_now
 from ..deps import run_dependency_runtime
+from ..deps.control_work import ControlApplicationFailure
 from ..deps.runtime_trace import begin_request_telemetry, finish_request_telemetry, trace_enabled, trace_line
 from ..perf_trace import perf_count
 
@@ -49,6 +51,9 @@ class QueuedRuntime:
     request: object = None
     first_seen_at: float = 0.0
     due_at: float = 0.0
+    owner_ids: tuple = ()
+    owner_refs: tuple = ()
+    failed: bool = False
 
 
 def _run_request(ctx, request):
@@ -84,15 +89,51 @@ def _run_request_chain(ctx, request):
 
 
 def _run_one_request(ctx, request):
+    if not _request_owners_alive(ctx, request):
+        return
+    request.progress.begin()
     queue_ms = 1000.0 * max(0.0, _now() - _request_seen(request))
     started = time.perf_counter()
     record = begin_request_telemetry(request, queue_ms, ctx.root, ctx.scene)
     try:
-        run_runtime_now(ctx, request, run_dependency_runtime)
+        _execute_request(ctx, request)
     finally:
         elapsed = 1000.0 * max(0.0, time.perf_counter() - started)
         finish_request_telemetry(record, elapsed)
         _trace_request(ctx, request, queue_ms, elapsed)
+
+
+def _execute_request(ctx, request):
+    try:
+        run_runtime_now(ctx, request, run_dependency_runtime)
+    except ControlApplicationFailure:
+        request.progress.completed = True
+        raise
+    except Exception:
+        _report_application_errors(request)
+        _retain_failed_request(ctx, request)
+        raise
+    finally:
+        request.progress.application_errors.clear()
+    request.progress.completed = True
+
+
+def _report_application_errors(request):
+    for error in request.progress.application_errors:
+        traceback.print_exception(error)
+
+
+
+def _retain_failed_request(ctx, request):
+    if not _request_owners_alive(ctx, request):
+        return
+    item = next((item for item in _PENDING if item.request is request), None)
+    if item is None and 'muscle_control_input' not in request.payload and not request.progress.accepted_dirty:
+        return
+    if item is None:
+        item = _queue_item(ctx, request)
+        _PENDING.append(item)
+    item.failed = True
 
 
 def _finish_request(ctx):
@@ -146,7 +187,7 @@ def _arm_timer(first_interval=0.0):
         _drop_timer()
     _TIMER_ARMED = True
     _TIMER_DUE_AT = due_at
-    bpy.app.timers.register(_flush_pending, first_interval=interval)
+    bpy.app.timers.register(_timer_flush_pending, first_interval=interval)
 
 
 def _now():
@@ -190,6 +231,8 @@ def _deferable(request):
 
 
 def _enqueue_item(ctx, request):
+    if not _request_owners_alive(ctx, request):
+        return None
     item = _queue_item(ctx, request)
     if not _deferable(request):
         _PENDING.append(item)
@@ -211,26 +254,30 @@ def _enqueue_deferred(ctx, item):
 def _queue_item(ctx, request):
     started = _now()
     due_at = started + (_defer_seconds(request) if _deferable(request) else 0.0)
-    return QueuedRuntime(_obj_name(ctx.scene), _obj_name(ctx.root), request, started, due_at)
+    refs = (ctx.scene, ctx.root)
+    owner_ids = tuple(_owner_key(owner) for owner in refs)
+    return QueuedRuntime(_obj_name(ctx.scene), _obj_name(ctx.root), request, started, due_at, owner_ids, refs)
 
 
 def _coalesce_index(item):
     key = _defer_key(item)
     for index, old in enumerate(_PENDING):
-        if _deferable(old.request) and _defer_key(old) == key:
+        if not old.request.progress.started and _deferable(old.request) and _defer_key(old) == key:
             return index
     return None
 
 
 def _defer_key(item):
+    from ..deps.muscle_control_intents import input_key
     req = item.request
-    return (item.scene_name, item.root_name, str(req.source), str(req.event_type))
+    return (item.scene_name, item.root_name, str(req.source), str(req.event_type), item.owner_ids,
+            input_key(req.payload.get('muscle_control_input')))
 
 
 def _merge_item(old, new):
     request = _merge_request(old.request, new.request)
     due_at = _merge_due_at(old, new)
-    return QueuedRuntime(old.scene_name, old.root_name, request, old.first_seen_at, due_at)
+    return QueuedRuntime(old.scene_name, old.root_name, request, old.first_seen_at, due_at, old.owner_ids, old.owner_refs)
 
 
 def _merge_due_at(old, new):
@@ -296,24 +343,59 @@ def _obj_name(obj):
 
 
 def _resolve_item(item):
-    scene = bpy.data.scenes.get(item.scene_name)
-    root = bpy.data.objects.get(item.root_name)
-    return _context(root=root, scene=scene), item.request
+    return _scoped_item_context(item), item.request
 
 
-def _flush_pending():
+def _scoped_item_context(item):
+    scene, root = item.owner_refs
+    return _context(root, scene) if _owners_alive(scene, root, item.owner_ids) else None
+
+
+def _request_owners_alive(ctx, request):
+    return ctx is not None and _owners_alive(ctx.scene, ctx.root)
+
+
+def _owners_alive(scene, root, identities=()):
+    try:
+        return (scene is not None and root is not None and bpy.data.scenes.get(scene.name) == scene
+                and bpy.data.objects.get(root.name) == root and scene.objects.get(root.name) == root
+                and (not identities or identities == (_owner_key(scene), _owner_key(root))))
+    except (ReferenceError, AttributeError, TypeError):
+        return False
+
+
+def _timer_flush_pending():
+    try:
+        return _flush_pending(retry_failed=False)
+    except Exception:
+        traceback.print_exc()
+        return _next_timer(_now())
+
+
+def _flush_pending(retry_failed=True):
     now = _now()
     if not _PENDING:
         return _timer_result(None, now)
-    idx = _ready_index(now)
+    idx = _ready_index(now, retry_failed)
     if idx is None:
         return _wait_for_next(now)
     item = _PENDING[idx]
     ctx, request = _resolve_item(item)
     if not _valid_context(ctx):
         return _discard_item(idx, now)
-    if not _run_request(ctx, request):
-        return _timer_result(_RETRY_SECONDS, now)
+    return _flush_ready_item(idx, ctx, request, now)
+
+
+def _flush_ready_item(idx, ctx, request, now):
+    try:
+        if not _run_request(ctx, request):
+            return _timer_result(_RETRY_SECONDS, now)
+    except ControlApplicationFailure:
+        traceback.print_exc()
+    except Exception:
+        if request.progress.completed:
+            _PENDING.pop(idx)
+        raise
     return _finish_item(idx, ctx.scene, now)
 
 
@@ -329,8 +411,10 @@ def _finish_item(idx, scene, now):
     return _next_timer(now)
 
 
-def _ready_index(now):
-    ready = [(i, item.due_at) for i, item in enumerate(_PENDING) if item.due_at <= now]
+def _ready_index(now, retry_failed=True):
+    ready = [(i, item.due_at) for i, item in enumerate(_PENDING)
+             if (retry_failed or not item.failed) and item.due_at <= now
+             and not _earlier_control_pending(item.request)]
     return None if not ready else min(ready, key=lambda value: value[1])[0]
 
 
@@ -341,15 +425,16 @@ def _valid_context(ctx):
 def _wait_for_next(now):
     item = _next_due_item()
     _count(None if item is None else bpy.data.scenes.get(item.scene_name), "delayed")
-    return _timer_result(_next_delay(now), now)
+    return _next_timer(now)
 
 
 def _next_timer(now):
-    return _timer_result(None if not _PENDING else _next_delay(now), now)
+    return _timer_result(None if _next_due_item() is None else _next_delay(now), now)
 
 
 def _next_due_item():
-    return None if not _PENDING else min(_PENDING, key=lambda item: item.due_at)
+    eligible = [item for item in _PENDING if not item.failed and not _earlier_control_pending(item.request)]
+    return None if not eligible else min(eligible, key=lambda item: item.due_at)
 
 
 def _next_delay(now):
@@ -380,7 +465,9 @@ def _request(dirty_hints=None, bake=False, source="manual", event_type="UPDATE",
 
 
 def _runtime_key(ctx, request):
-    return (_owner_key(ctx.scene), _owner_key(ctx.root), str(request.source), str(request.event_type))
+    from ..deps.muscle_control_intents import input_key
+    value = dict(request.payload or {}).get('muscle_control_input')
+    return (_owner_key(ctx.scene), _owner_key(ctx.root), str(request.source), str(request.event_type), input_key(value))
 
 
 def _owner_key(owner):
@@ -394,6 +481,11 @@ def _owner_key(owner):
 
 
 def _enqueue_tail(ctx, request):
+    if not _request_owners_alive(ctx, request):
+        return
+    if _earlier_control_pending(request):
+        _scheduler(ctx, request)
+        return
     key = _runtime_key(ctx, request)
     for index, item in enumerate(_TAIL_PENDING):
         if _runtime_key(item[0], item[1]) == key:
@@ -402,8 +494,31 @@ def _enqueue_tail(ctx, request):
     _TAIL_PENDING.append((ctx, request))
 
 
+def _earlier_control_pending(request):
+    return control_input_pending(dict(request.payload or {}).get('muscle_control_input'))
+
+
+def control_input_pending(value):
+    from ..deps.muscle_control_intents import input_key, input_record
+    if value is None or not _PENDING:
+        return False
+    record = input_record(value)
+    if record is None:
+        return False
+    pending = (dict(item.request.payload or {}).get('muscle_control_input') for item in _PENDING if not item.failed)
+    return any(old is not None and input_key(old)[:-1] == input_key(value)[:-1]
+               and record.handled < old.revision < value.revision
+               and old.revision != record.processing for old in pending)
+
+
 def _pop_tail():
-    return None if not _TAIL_PENDING else _TAIL_PENDING.pop(0)
+    if not _TAIL_PENDING:
+        return None
+    ctx, request = _TAIL_PENDING.pop(0)
+    if _earlier_control_pending(request):
+        _scheduler(ctx, request)
+        return None
+    return ctx, request
 
 
 def _defer_tail_remainder():
@@ -421,8 +536,17 @@ def sync_from_dirty_hints(
 ):
     ctx = _context(root=root, scene=scene)
     request = _request(dirty_hints, bake, source, event_type, payload, full, dirty_aspects, quality)
+    return _dispatch_runtime(ctx, request)
+
+
+def _dispatch_runtime(ctx, request):
+    from ..deps.muscle_control_intents import note_runtime_request
+    note_runtime_request(request)
     if _RUNNING:
         _enqueue_tail(ctx, request)
+        return False
+    if _earlier_control_pending(request):
+        _scheduler(ctx, request)
         return False
     return _run_request(ctx, request)
 
@@ -433,11 +557,17 @@ def schedule_sync_from_dirty_hints(
 ):
     # Defer depsgraph-driven runtime work until Blender finishes the current evaluation pass.
     request = _request(dirty_hints, bake, source, event_type, payload, full, dirty_aspects, quality)
+    from ..deps.muscle_control_intents import note_runtime_request
+    note_runtime_request(request)
     queue_runtime(_context(root=root, scene=scene), request)
 
 
 def clear_pending_runtime(keep_timer=True):
     global _RUNNING, _TIMER_ARMED, _TIMER_DUE_AT
+    from ..deps.muscle_control_intents import reset_control_inputs
+    from ..deps.runtime_intents import clear_muscle_control_intents
+    reset_control_inputs()
+    clear_muscle_control_intents()
     _PENDING.clear()
     _TAIL_PENDING.clear()
     _RUNNING = False
@@ -460,8 +590,8 @@ def _on_history_pre(_dummy):
 def _drop_timer():
     active = getattr(bpy.app.timers, "is_registered", None)
     cancel = getattr(bpy.app.timers, "unregister", None)
-    if callable(active) and callable(cancel) and active(_flush_pending):
-        cancel(_flush_pending)
+    if callable(active) and callable(cancel) and active(_timer_flush_pending):
+        cancel(_timer_flush_pending)
 
 
 def _append_handler(seq, fn):

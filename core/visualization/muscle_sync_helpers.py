@@ -218,33 +218,27 @@ def remove_proxy_obj(obj):
 
 
 def remove_ctrl_obj(obj):
+    from ..deps.muscle_control_intents import retire_control
+    retire_control(obj)
     if obj is not None:
         bpy.data.objects.remove(obj, do_unlink=True)
 
 
-def _surface_bvh(mesh_obj):
-    return surface_bvh_local(mesh_obj)
+def _surface_bvh(mesh_obj, depsgraph=None):
+    return surface_bvh_local(mesh_obj, depsgraph=depsgraph)
 
 
-def nearest_on_mesh_surface(mesh_obj, world_point):
+def nearest_on_mesh_surface(mesh_obj, world_point, depsgraph=None):
     if mesh_obj is None or mesh_obj.type != "MESH":
         return None
     try:
-        bvh = _surface_bvh(mesh_obj)
+        bvh = _surface_bvh(mesh_obj, depsgraph)
     except Exception:
-        bvh = None
+        return None
     if bvh is None:
         return None
-
-    mwi = mesh_obj.matrix_world.inverted()
-    local = mwi @ world_point
-    hit = bvh.find_nearest(local)
-    if hit is None:
-        return None
-    co_local = hit[0]
-    if co_local is None:
-        return None
-    return mesh_obj.matrix_world @ co_local
+    hit = bvh.find_nearest(mesh_obj.matrix_world.inverted() @ world_point)
+    return None if hit is None or hit[0] is None else mesh_obj.matrix_world @ hit[0]
 
 
 def collect_fiber_props(root, muscle):

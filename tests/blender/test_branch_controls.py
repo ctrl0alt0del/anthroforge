@@ -61,3 +61,18 @@ class BranchControlTests(BlenderTestCase):
         self.assertEqual(dirty, {self.muscle.id})
         self.assertEqual(tuple(self.muscle.inflation_ctrl_world), before)
         self.assertAlmostEqual(self.connection.settings.inflation_ctrl_world[2], .4, places=5)
+
+    def test_return_to_same_branch_retires_pending_input(self):
+        from anthroforge.core.deps import muscle_control_intents as inputs
+        from anthroforge.core.visualization.muscle_numeric_runtime import _bind_control
+        from anthroforge.core.visualization import sync_runner as runner
+        control = self._control(); previous = tuple(control.location)
+        control.location = (3, .75, .4)
+        old = inputs.reserve_input(self.root, bpy.context.scene, control)
+        inputs.dispatch_input(self.root, bpy.context.scene, old, deferred=True)
+        _bind_control(self.sync, self.collection, self.root, self.muscle.id, '', 'A')
+        _bind_control(self.sync, self.collection, self.root, self.muscle.id, self.connection.id, 'A')
+        inputs.write_control(self.root, bpy.context.scene, control, previous)
+        self.assertIsNone(inputs.input_record(old))
+        runner._flush_pending()
+        self.assertEqual(tuple(control.location), previous)

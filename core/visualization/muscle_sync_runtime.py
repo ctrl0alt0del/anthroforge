@@ -110,8 +110,9 @@ def ensure_inflation_ctrl(vis_col, root, muscle, find_inflation_ctrl_fn, create_
     ctrl = find_inflation_ctrl_fn(vis_col, root.name, muscle.id)
     if ctrl is None:
         ctrl = create_inflation_ctrl_fn(vis_col, root, muscle.id)
-    ctrl.location = target
-    mark_inflation_ctrl_location(ctrl)
+    from ..deps.muscle_control_intents import write_control
+    from ..utils import scene_for_id
+    write_control(root, scene_for_id(root), ctrl, target)
     ctrl.show_in_front = True
     ctrl.hide_render = True
     return ctrl

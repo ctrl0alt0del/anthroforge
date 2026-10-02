@@ -31,6 +31,12 @@ def enqueue_runtime_intent(root, intent_type, entity_type="", entity_id="", payl
     key = _root_key(root)
     if not key:
         return False
+    if intent_type == 'CONTROL/MUSCLE_INFLATION':
+        from .muscle_control_intents import freeze_payload
+        payload = freeze_payload(root, dict(payload or {}))
+        key = _muscle_root_key(root)
+        if payload.get('muscle_control_input') is None:
+            return False
     _RUNTIME_INTENTS[key].append(_intent(intent_type, entity_type, entity_id, payload, source, event_type))
     return True
 
@@ -50,24 +56,26 @@ def pop_runtime_intents(root):
     key = _root_key(root)
     if not key:
         return []
-    return list(_RUNTIME_INTENTS.pop(key, []))
+    return list(_RUNTIME_INTENTS.pop(key, [])) + list(_RUNTIME_INTENTS.pop(_muscle_root_key(root), []))
 
 
 def dispatch_runtime_intent(root=None, scene=None, intent_type="", entity_type="", entity_id="", payload=None, dirty_hints=None, source="manual", event_type="UPDATE"):
-    dispatch_app_runtime_intent(
-        addon_context(root=root, scene=scene),
-        enqueue_runtime_intent,
-        _sync_fn(),
-        dirty_hints_for,
-        empty_dirty_hints,
-        intent_type=intent_type,
-        entity_type=entity_type,
-        entity_id=entity_id,
-        payload=payload,
-        dirty_hints=dirty_hints,
-        source=source,
-        event_type=event_type,
-    )
+    ctx = addon_context(root=root, scene=scene)
+    if intent_type == 'CONTROL/MUSCLE_INFLATION':
+        return _dispatch_muscle(ctx, payload, dirty_hints, source, event_type)
+    return dispatch_app_runtime_intent(ctx, enqueue_runtime_intent, _sync_fn(), dirty_hints_for,
+        empty_dirty_hints, intent_type=intent_type, entity_type=entity_type, entity_id=entity_id,
+        payload=payload, dirty_hints=dirty_hints, source=source, event_type=event_type)
+
+
+def _dispatch_muscle(ctx, payload, dirty_hints, source, event_type):
+    from .muscle_control_intents import freeze_payload
+    if ctx.root is None or ctx.scene is None:
+        return
+    value = freeze_payload(ctx.root, dict(payload or {})).get('muscle_control_input')
+    if value is not None or dirty_hints:
+        return _sync_fn()(root=ctx.root, scene=ctx.scene, dirty_hints=dirty_hints or {}, full=False,
+                          source=source, event_type=event_type, payload={'muscle_control_input': value})
 
 
 def _sync_fn():
@@ -86,3 +94,17 @@ def _seed_dirty_hints(dirty_hints, entity_type, entity_id):
     if entity_type and entity_id:
         return dirty_hints_for(entity_type, {entity_id})
     return empty_dirty_hints()
+
+
+def clear_muscle_control_intents():
+    for key, values in tuple(_RUNTIME_INTENTS.items()):
+        retained = [value for value in values if value.intent_type != 'CONTROL/MUSCLE_INFLATION']
+        if retained:
+            _RUNTIME_INTENTS[key] = retained
+        else:
+            _RUNTIME_INTENTS.pop(key, None)
+
+
+def _muscle_root_key(root):
+    from .relationship_cache import runtime_identity
+    return ('MUSCLE', runtime_identity(root))

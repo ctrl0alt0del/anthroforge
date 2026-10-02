@@ -1,3 +1,4 @@
+from .control_work import record_source_publication
 from .adapters import build_runtime_graph
 from .drivers import DependencyDriver
 from .runtime_intents import pop_runtime_intents
@@ -117,13 +118,8 @@ class RuntimeIntentDriver(DependencyDriver):
         return ("CONTROL", "SCP", "FIBER", "FIBER_SURFACE", "MUSCLE", "BLOB", "SOFT_TISSUE")
 
     def apply_constraints(self, ctx):
-        merged = {}
-        for intent in pop_runtime_intents(ctx.root):
-            impacts = apply_runtime_intent(ctx.root, ctx.scene, intent) or {}
-            for et, ids in impacts.items():
-                merged.setdefault(et, set())
-                merged[et] |= set(ids or set())
-        return merged
+        from ..visualization.muscle_control_application import apply_request_inputs
+        return apply_request_inputs(ctx, pop_runtime_intents(ctx.root), apply_runtime_intent)
 
 
 class SCPMirrorRoleDriver(DependencyDriver):
@@ -302,10 +298,10 @@ class MuscleSyncDriver(DependencyDriver):
         if _selection_event(gate_meta) or _fiber_update_event(gate_meta):
             return
         ids = set(impacted.get("MUSCLE", set()) or set())
-        if is_full:
-            register_muscle_sync().sync_root_to_scene(root=root, scene=scene)
-        elif ids:
-            register_muscle_sync().sync_root_to_scene(root=root, scene=scene, target_muscle_ids=ids)
+        published = set()
+        if is_full or ids:
+            published = register_muscle_sync().sync_root_to_scene(root, scene, None if is_full else ids)
+        record_source_publication(gate_meta, published)
 
 
 class FiberSurfaceSyncDriver(DependencyDriver):

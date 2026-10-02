@@ -19,6 +19,6 @@ def queue_runtime(ctx, request):
 def run_runtime_now(ctx, request, runner):
     if not _ready(ctx):
         return
-    runner(root=ctx.root, scene=ctx.scene, dirty_hints=request.dirty_hints, bake=request.bake,
+    runner(root=ctx.root, scene=ctx.scene, dirty_hints=request.progress.dirty_hints(request.dirty_hints), bake=request.bake,
            gate_meta=request.gate_meta(), full=request.full, dirty_aspects=request.dirty_aspects,
            quality=request.quality)

@@ -18,19 +18,20 @@ def selected_part(root, muscle):
     return (muscle, '', 0) if connection is None else (connection.settings, connection.id, index+1)
 
 
-def control_part(root, muscle, obj):
-    key = str(obj.get('af_muscle_branch_id', ''))
+def control_part(root, muscle, obj, branch_id=None, side=None):
+    key = str(obj.get('af_muscle_branch_id', '')) if branch_id is None else str(branch_id)
+    side = obj.get('af_inflation_side') if side is None else side
     surface = branch_surface(root, muscle)
     settings = muscle if not key else next((c.settings for c in surface.branches if c.id == key), None) if surface else None
-    return settings.inflation_secondary if settings is not None and obj.get('af_inflation_side') == 'B' else settings
+    return settings.inflation_secondary if settings is not None and side == 'B' else settings
 
 
-def snapped_control(root, scene, muscle, obj, target):
+def snapped_control(root, scene, muscle, obj, target, branch_id=None):
     surface = branch_surface(root, muscle)
     if surface is None:
         return None
     assembly = capture_assembly(root, scene, surface)
-    key = str(obj.get('af_muscle_branch_id', ''))
+    key = str(obj.get('af_muscle_branch_id', '')) if branch_id is None else str(branch_id)
     grid = assembly.main if not key else next(b.grid for b in assembly.branches if b.connection.id == key)
     rows, columns = grid.shape[:2]
     faces = [(r*columns+c, (r+1)*columns+c, (r+1)*columns+c+1, r*columns+c+1)
