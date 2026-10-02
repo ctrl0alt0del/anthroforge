@@ -351,7 +351,8 @@ def _finish_item(idx, scene, now):
 
 
 def _ready_index(now):
-    ready = [(i, item.due_at) for i, item in enumerate(_PENDING) if item.due_at <= now]
+    ready = [(i, item.due_at) for i, item in enumerate(_PENDING)
+             if item.due_at <= now and not _earlier_control_pending(item.request)]
     return None if not ready else min(ready, key=lambda value: value[1])[0]
 
 
@@ -370,7 +371,8 @@ def _next_timer(now):
 
 
 def _next_due_item():
-    return None if not _PENDING else min(_PENDING, key=lambda item: item.due_at)
+    eligible = [item for item in _PENDING if not _earlier_control_pending(item.request)]
+    return None if not eligible else min(eligible, key=lambda item: item.due_at)
 
 
 def _next_delay(now):
@@ -446,7 +448,13 @@ def control_input_pending(value):
 
 
 def _pop_tail():
-    return None if not _TAIL_PENDING else _TAIL_PENDING.pop(0)
+    if not _TAIL_PENDING:
+        return None
+    ctx, request = _TAIL_PENDING.pop(0)
+    if _earlier_control_pending(request):
+        _scheduler(ctx, request)
+        return None
+    return ctx, request
 
 
 def _defer_tail_remainder():

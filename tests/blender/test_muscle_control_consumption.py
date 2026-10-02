@@ -246,3 +246,90 @@ class MuscleControlConsumptionTests(BlenderTestCase):
         with patch.object(self.sync, '_snapped_part_control', side_effect=snap):
             self.observe(self.target())
         self.assertEqual(len(calls), 2); self.assert_visible_authored()
+
+
+    def test_source_invalidation_after_newer_queue_preserves_fifo(self):
+        original, calls = self.sync._resolved_ctrl_world, []
+        def resolve(mid, part, point):
+            calls.append(point)
+            if len(calls) == 1:
+                self.notify(self.target(.3))
+                runner.sync_from_dirty_hints(self.root, self.scene, {'SCP': {'missing'}}, full=False)
+            return original(mid, part, point)
+        with patch.object(self.sync, '_resolved_ctrl_world', side_effect=resolve):
+            with patch.object(self.sync, '_accept_control', wraps=self.sync._accept_control) as accept:
+                self.observe(self.target())
+                while runner._PENDING: runner._flush_pending()
+        self.assertEqual([row.args[3].revision for row in accept.call_args_list], [1, 2])
+
+
+    def test_direct_source_invalidation_keeps_queued_newer_input_in_order(self):
+        original, calls = self.sync._resolved_ctrl_world, []
+        def resolve(mid, part, point):
+            calls.append(point)
+            if len(calls) == 1:
+                self.notify(self.target(.3))
+                runner.sync_from_dirty_hints(self.root, self.scene, {'SCP': {'missing'}}, full=False)
+            return original(mid, part, point)
+        with patch.object(self.sync, '_resolved_ctrl_world', side_effect=resolve):
+            with patch.object(self.sync, '_accept_control', wraps=self.sync._accept_control) as accept:
+                self.ctrl.location = self.target()
+                module.apply_muscle_control_update(self.sync, self.root, self.scene, self.ctrl)
+                while runner._PENDING: runner._flush_pending()
+        self.assertEqual([row.args[3].revision for row in accept.call_args_list], [1, 2])
+
+
+    def test_context_retry_preserves_order_without_starving_other_root(self):
+        self.assert_context_retry_order((1., 2., 3.))
+
+    def test_equal_deadline_retry_preserves_unrelated_arrival_order(self):
+        self.assert_context_retry_order((1., 1., 1.))
+
+    def test_source_invalidation_fifo_across_tail_overflow(self):
+        with patch.object(runner, '_MAX_TAIL_PASSES', 0):
+            self.test_source_invalidation_after_newer_queue_preserves_fifo()
+
+    def test_wait_uses_older_input_deadline_instead_of_blocked_newer(self):
+        self.ctrl.location = self.target(); a = inputs.reserve_input(self.root, self.scene, self.ctrl)
+        self.ctrl.location = self.target(.3); b = inputs.reserve_input(self.root, self.scene, self.ctrl)
+        self.defer_at(b, 1.); self.defer_at(a, 3.)
+        self.assertIsNone(runner._ready_index(2.))
+        self.assertEqual(runner._next_delay(2.), 1.)
+
+    def test_failed_older_input_releases_already_queued_newer(self):
+        self.ctrl.location = self.target(); a = inputs.reserve_input(self.root, self.scene, self.ctrl)
+        self.ctrl.location = self.target(.3); b = inputs.reserve_input(self.root, self.scene, self.ctrl)
+        self.defer_at(b, 1.); self.defer_at(a, 2.)
+        with patch.object(self.sync, '_snapped_part_control', side_effect=RuntimeError('expected older failure')):
+            runner._flush_pending()
+        self.assertEqual(len(runner._PENDING), 1)
+        runner._flush_pending(); self.assert_visible_authored()
+        record = next(iter(inputs._RECORDS.values()))
+        self.assertEqual(record.handled, b.revision); self.assertIsNone(record.failed)
+
+    def assert_context_retry_order(self, deadlines):
+        other = bpy.data.objects.new('OtherRoot', None); self.scene.collection.objects.link(other)
+        self.ctrl.location = self.target(); a = inputs.reserve_input(self.root, self.scene, self.ctrl)
+        self.ctrl.location = self.target(.3); b = inputs.reserve_input(self.root, self.scene, self.ctrl)
+        self.defer_at(b, deadlines[0])
+        with patch.object(runner, '_now', return_value=deadlines[1]):
+            runner.schedule_sync_from_dirty_hints(other, self.scene, {}, full=False, source='unrelated')
+        self.defer_at(a, deadlines[2])
+        with patch.object(runner, '_run_one_request', wraps=runner._run_one_request) as run:
+            while runner._PENDING: runner._flush_pending()
+        values = [getattr(row.args[1].payload.get('muscle_control_input'), 'revision', None) for row in run.call_args_list]
+        self.assertEqual(values, [None, 1, 2]); self.assert_visible_authored()
+
+    def defer_at(self, value, when):
+        with patch.object(runner, '_now', return_value=when):
+            inputs.dispatch_input(self.root, self.scene, value, fresh_context=True)
+
+    def test_distinct_control_identities_do_not_merge_tail_requests(self):
+        other = self.ctrl.copy(); self.scene.collection.objects.link(other)
+        self.ctrl.location = self.target(); a = inputs.reserve_input(self.root, self.scene, self.ctrl)
+        other.location = self.target(.3); b = inputs.reserve_input(self.root, self.scene, other)
+        with patch.object(runner, '_RUNNING', True):
+            inputs.dispatch_input(self.root, self.scene, a)
+            inputs.dispatch_input(self.root, self.scene, b)
+        self.assertEqual(len(runner._TAIL_PENDING), 2)
+        self.assertNotEqual(runner._runtime_key(*runner._TAIL_PENDING[0]), runner._runtime_key(*runner._TAIL_PENDING[1]))
