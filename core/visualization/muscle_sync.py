@@ -2,7 +2,7 @@ import bpy
 from mathutils import Vector
 
 from ..deps.dirty_hints import dirty_hints_for
-from ..deps.controls import classify_control_object, enqueue_control_intent
+from ..deps import muscle_control_intents as control_inputs
 from ..deps.conflict_resolver import resolve_conflict
 from ..utils import get_af_root, scene_for_id
 from ..vcp.fiber_modes import is_loop_fiber
@@ -82,8 +82,8 @@ class MuscleSceneSync:
     def _remove_ctrl_obj(self, obj):
         remove_ctrl_obj(obj)
 
-    def _nearest_on_mesh_surface(self, mesh_obj, world_point):
-        snapped = nearest_on_mesh_surface(mesh_obj, world_point)
+    def _nearest_on_mesh_surface(self, mesh_obj, world_point, depsgraph=None):
+        snapped = nearest_on_mesh_surface(mesh_obj, world_point, depsgraph=depsgraph)
         if snapped is None:
             return None, None
         return snapped, None
@@ -318,22 +318,18 @@ class MuscleSceneSync:
             return False
         return True
 
-    def _inflation_target(self, root, vis_col, obj):
+    def _inflation_target(self, root, vis_col, obj, value=None):
         from .branch_control import control_part
-        muscle_id = self._ctrl_prop(obj, "af_muscle_id")
+        muscle_id = self._ctrl_prop(obj, "af_muscle_id") if value is None else value.muscle_id
         muscle = self._find_muscle(root, muscle_id)
         if muscle is None:
             return None, None, None
         base_obj = self._find_muscle_proxy(vis_col, root.name, muscle_id, "BASE")
-        return muscle_id, control_part(root, muscle, obj), base_obj
+        branch, side = (None, None) if value is None else (value.binding[3], value.binding[4])
+        return muscle_id, control_part(root, muscle, obj, branch, side), base_obj
 
-    def _snapped_ctrl_location(self, base_obj, obj):
-        target = self._ctrl_location(obj)
-        if target is None:
-            return None
-        snapped, _n = self._nearest_on_mesh_surface(base_obj, target)
-        if snapped is None or not self._set_ctrl_location(obj, snapped):
-            return None
+    def _snapped_ctrl_location(self, base_obj, point, depsgraph=None):
+        snapped, _normal = self._nearest_on_mesh_surface(base_obj, Vector(point), depsgraph)
         return snapped
 
     def _resolved_ctrl_world(self, muscle_id, muscle, incoming):
@@ -343,44 +339,55 @@ class MuscleSceneSync:
         except Exception:
             return incoming
 
-    def _process_ctrl_point_update(self, root, vis_col, obj, changed_muscle_ids):
-        muscle_id, muscle, base_obj = self._inflation_target(root, vis_col, obj)
+    def _process_ctrl_point_update(self, root, vis_col, obj, changed_muscle_ids, value, graph):
+        muscle_id, muscle, base_obj = self._inflation_target(root, vis_col, obj, value)
         if base_obj is None or muscle is None:
-            return False
+            raise RuntimeError('Muscle control target disappeared')
         previous = muscle_inflation_ctrl_world(muscle)
-        snapped = self._snapped_part_control(root, muscle_id, base_obj, obj)
-        if snapped is None:
+        new_loc = self._resolve_snapped_input(root, muscle_id, muscle, base_obj, value, graph)
+        if control_inputs.input_record(value) is None:
             return False
-        new_loc = self._resolved_ctrl_world(muscle_id, muscle, (snapped.x, snapped.y, snapped.z))
-        if previous == tuple(new_loc):
-            return False
-        set_muscle_inflation_ctrl_world(muscle, tuple(new_loc))
-        changed_muscle_ids.add(muscle_id)
-        return True
+        return self._accept_control(root, obj, muscle, value, previous, new_loc, changed_muscle_ids)
 
-    def _process_inflation_ctrl_update(self, root, vis_col, obj, changed_muscle_ids):
-        if self._syncing:
-            return False
-        muscle_id, muscle, _ = self._inflation_target(root, vis_col, obj)
-        if muscle is None:
-            return False
-        control = self._inflation_behavior(muscle).control
+    def _resolve_snapped_input(self, root, muscle_id, muscle, base_obj, value, graph):
+        from ..utils import geometry_generation
+        revision, generation = control_inputs.context_revision(), geometry_generation(base_obj)
+        snapped = self._snapped_part_control(root, muscle_id, base_obj, value, graph)
+        if snapped is None:
+            raise RuntimeError('Muscle control snapping failed')
+        point = self._resolved_ctrl_world(muscle_id, muscle, tuple(snapped))
+        control_inputs.require_context(revision, base_obj, generation)
+        return point
+
+    def _accept_control(self, root, obj, muscle, value, previous, point, changed):
+        record = control_inputs.input_record(value)
+        if previous != tuple(point):
+            set_muscle_inflation_ctrl_world(muscle, tuple(point))
+            changed.add(value.muscle_id)
+        if control_inputs.input_record(value) is not None:
+            control_inputs.write_control(root, record.scene, obj, point, value)
+        return previous != tuple(point)
+
+    def _process_inflation_ctrl_update(self, root, vis_col, obj, changed_muscle_ids, value=None, graph=None):
+        if value is None:
+            from .muscle_control_application import apply_input
+            changed = apply_input(self, root, scene_for_id(root), obj, collection=vis_col)
+            if changed:
+                changed_muscle_ids.add(changed)
+            return bool(changed)
         previous, self._syncing = self._syncing, True
         try:
-            return control.process_control_update(self, root, vis_col, obj, changed_muscle_ids)
+            return self._process_ctrl_point_update(root, vis_col, obj, changed_muscle_ids, value, graph)
         finally:
             self._syncing = previous
 
-    def _snapped_part_control(self, root, muscle_id, base_obj, obj):
+    def _snapped_part_control(self, root, muscle_id, base_obj, value, graph):
         from .branch_control import branch_surface, snapped_control
         muscle = self._find_muscle(root, muscle_id)
         if branch_surface(root, muscle) is None:
-            return self._snapped_ctrl_location(base_obj, obj)
-        try:
-            point = snapped_control(root, root.users_scene[0], muscle, obj, self._ctrl_location(obj))
-        except (ValueError, StopIteration, TypeError):
-            return None
-        return point if point is not None and self._set_ctrl_location(obj, point) else None
+            return self._snapped_ctrl_location(base_obj, value.point, graph)
+        record = control_inputs.input_record(value)
+        return snapped_control(root, record.scene, muscle, None, Vector(value.point), branch_id=value.binding[3])
 
     def _depsgraph_ready(self, scene):
         root = get_af_root(scene)
@@ -389,57 +396,40 @@ class MuscleSceneSync:
             return None, None
         return root, vis_col
 
-    def _sync_depsgraph_changes(self, root, scene, changed_muscle_ids):
-        from .sync_runner import sync_from_dirty_hints
-        sync_from_dirty_hints(
-            root=root,
-            scene=scene,
-            dirty_hints=dirty_hints_for("MUSCLE", changed_muscle_ids),
-            source="depsgraph",
-            event_type="TRANSFORM",
-        )
+    def _sync_depsgraph_changes(self, root, scene, values, depsgraph=None):
+        for index, value in enumerate(values):
+            if index == 0 and not self._syncing and not self._runtime_request_active() and not control_inputs.input_busy():
+                with control_inputs.borrowed_graph(root, scene, depsgraph):
+                    control_inputs.dispatch_input(root, scene, value)
+            else:
+                control_inputs.dispatch_input(root, scene, value, deferred=self._syncing or control_inputs.input_busy())
 
-    def _collect_one_depsgraph_update(self, root, vis_col, obj, changed_muscle_ids):
+    def _collect_one_depsgraph_update(self, root, vis_col, obj, values, scene=None):
         if not self._is_relevant_inflation_update(root, vis_col, obj):
             return
-        if not inflation_ctrl_location_changed(obj):
-            return
-        classified = classify_control_object(obj)
-        if not classified or str(classified["control_type"]) != "MUSCLE_INFLATION":
-            return
-        payload = dict(classified["payload"])
-        payload["binding"] = classified.get("binding")
-        if enqueue_control_intent(root, classified["control_type"], payload):
-            changed_muscle_ids |= set(classified["dirty_hints"].get("MUSCLE", set()) or set())
+        value = control_inputs.reserve_input(root, scene or scene_for_id(root), obj)
+        if value is not None:
+            values.append(value)
 
-    def _collect_depsgraph_updates(self, root, vis_col, depsgraph):
-        changed = set()
-        self._syncing = True
-        try:
-            for upd in depsgraph.updates:
-                self._collect_one_depsgraph_update(root, vis_col, upd.id, changed)
-        finally:
-            self._syncing = False
-        return changed
+    def _collect_depsgraph_updates(self, root, vis_col, depsgraph, scene=None):
+        values = []
+        for upd in tuple(depsgraph.updates):
+            self._collect_one_depsgraph_update(root, vis_col, upd.id, values, scene)
+        return values
 
     def on_depsgraph_update(self, scene, depsgraph):
-        if self._syncing:
-            return
+        control_inputs.prune_inputs()
         root, vis_col = self._depsgraph_ready(scene)
         if root is None:
             return
-        changed_muscle_ids = self._collect_depsgraph_updates(root, vis_col, depsgraph)
-        if changed_muscle_ids:
-            self._sync_depsgraph_changes(root, scene, changed_muscle_ids)
+        values = self._collect_depsgraph_updates(root, vis_col, depsgraph, scene)
+        if values:
+            self._sync_depsgraph_changes(root, scene, values, depsgraph)
 
 
-def apply_muscle_control_update(sync, root, scene, obj):
-    vis_col = bpy.data.collections.get(sync.collection_name)
-    if vis_col is None:
-        return None
-    changed = set()
-    sync._process_inflation_ctrl_update(root, vis_col, obj, changed)
-    return next(iter(changed), None)
+def apply_muscle_control_update(sync, root, scene, obj, control_input=None, depsgraph=None):
+    from .muscle_control_application import apply_input
+    return apply_input(sync, root, scene, obj, control_input, depsgraph)
 
 
 _MUSCLE_SYNC = None
@@ -460,6 +450,7 @@ def register_muscle_sync():
 def unregister_muscle_sync():
     from .muscle_envelope_overlay import unregister
     unregister()
+    control_inputs.reset_control_inputs()
     global _MUSCLE_SYNC
     if _MUSCLE_SYNC is None:
         return

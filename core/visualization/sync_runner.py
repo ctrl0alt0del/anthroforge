@@ -49,6 +49,7 @@ class QueuedRuntime:
     request: object = None
     first_seen_at: float = 0.0
     due_at: float = 0.0
+    owner_ids: tuple = ()
 
 
 def _run_request(ctx, request):
@@ -211,7 +212,8 @@ def _enqueue_deferred(ctx, item):
 def _queue_item(ctx, request):
     started = _now()
     due_at = started + (_defer_seconds(request) if _deferable(request) else 0.0)
-    return QueuedRuntime(_obj_name(ctx.scene), _obj_name(ctx.root), request, started, due_at)
+    owner_ids = (_owner_key(ctx.scene), _owner_key(ctx.root)) if request.payload.get('muscle_control_input') else ()
+    return QueuedRuntime(_obj_name(ctx.scene), _obj_name(ctx.root), request, started, due_at, owner_ids)
 
 
 def _coalesce_index(item):
@@ -230,7 +232,7 @@ def _defer_key(item):
 def _merge_item(old, new):
     request = _merge_request(old.request, new.request)
     due_at = _merge_due_at(old, new)
-    return QueuedRuntime(old.scene_name, old.root_name, request, old.first_seen_at, due_at)
+    return QueuedRuntime(old.scene_name, old.root_name, request, old.first_seen_at, due_at, old.owner_ids)
 
 
 def _merge_due_at(old, new):
@@ -296,8 +298,15 @@ def _obj_name(obj):
 
 
 def _resolve_item(item):
+    from ..deps.muscle_control_intents import input_record
+    value = dict(item.request.payload or {}).get('muscle_control_input')
+    if value is not None:
+        record = input_record(value)
+        return (None if record is None else _context(record.root, record.scene)), item.request
     scene = bpy.data.scenes.get(item.scene_name)
     root = bpy.data.objects.get(item.root_name)
+    if item.owner_ids and item.owner_ids != (_owner_key(scene), _owner_key(root)):
+        return None, item.request
     return _context(root=root, scene=scene), item.request
 
 
@@ -312,8 +321,20 @@ def _flush_pending():
     ctx, request = _resolve_item(item)
     if not _valid_context(ctx):
         return _discard_item(idx, now)
-    if not _run_request(ctx, request):
-        return _timer_result(_RETRY_SECONDS, now)
+    return _flush_ready_item(idx, ctx, request, now)
+
+
+def _flush_ready_item(idx, ctx, request, now):
+    try:
+        if not _run_request(ctx, request):
+            return _timer_result(_RETRY_SECONDS, now)
+    except Exception:
+        if not request.payload.get('muscle_control_input'):
+            raise
+        import traceback
+        traceback.print_exc()
+        _PENDING.pop(idx)
+        return _next_timer(now)
     return _finish_item(idx, ctx.scene, now)
 
 
@@ -380,7 +401,9 @@ def _request(dirty_hints=None, bake=False, source="manual", event_type="UPDATE",
 
 
 def _runtime_key(ctx, request):
-    return (_owner_key(ctx.scene), _owner_key(ctx.root), str(request.source), str(request.event_type))
+    from ..deps.muscle_control_intents import input_key
+    value = dict(request.payload or {}).get('muscle_control_input')
+    return (_owner_key(ctx.scene), _owner_key(ctx.root), str(request.source), str(request.event_type), input_key(value))
 
 
 def _owner_key(owner):
@@ -394,12 +417,32 @@ def _owner_key(owner):
 
 
 def _enqueue_tail(ctx, request):
+    if _earlier_control_pending(request):
+        _scheduler(ctx, request)
+        return
     key = _runtime_key(ctx, request)
     for index, item in enumerate(_TAIL_PENDING):
         if _runtime_key(item[0], item[1]) == key:
             _TAIL_PENDING[index] = (ctx, _merge_request(item[1], request))
             return
     _TAIL_PENDING.append((ctx, request))
+
+
+def _earlier_control_pending(request):
+    return control_input_pending(dict(request.payload or {}).get('muscle_control_input'))
+
+
+def control_input_pending(value):
+    from ..deps.muscle_control_intents import input_key, input_record
+    if value is None:
+        return False
+    record = input_record(value)
+    if record is None:
+        return False
+    pending = (dict(item.request.payload or {}).get('muscle_control_input') for item in _PENDING)
+    return any(old is not None and input_key(old)[:-1] == input_key(value)[:-1]
+               and record.handled < old.revision < value.revision
+               and old.revision != record.processing for old in pending)
 
 
 def _pop_tail():
@@ -421,8 +464,17 @@ def sync_from_dirty_hints(
 ):
     ctx = _context(root=root, scene=scene)
     request = _request(dirty_hints, bake, source, event_type, payload, full, dirty_aspects, quality)
+    return _dispatch_runtime(ctx, request)
+
+
+def _dispatch_runtime(ctx, request):
+    from ..deps.muscle_control_intents import note_runtime_request
+    note_runtime_request(request)
     if _RUNNING:
         _enqueue_tail(ctx, request)
+        return False
+    if _earlier_control_pending(request):
+        _scheduler(ctx, request)
         return False
     return _run_request(ctx, request)
 
@@ -433,11 +485,17 @@ def schedule_sync_from_dirty_hints(
 ):
     # Defer depsgraph-driven runtime work until Blender finishes the current evaluation pass.
     request = _request(dirty_hints, bake, source, event_type, payload, full, dirty_aspects, quality)
+    from ..deps.muscle_control_intents import note_runtime_request
+    note_runtime_request(request)
     queue_runtime(_context(root=root, scene=scene), request)
 
 
 def clear_pending_runtime(keep_timer=True):
     global _RUNNING, _TIMER_ARMED, _TIMER_DUE_AT
+    from ..deps.muscle_control_intents import reset_control_inputs
+    from ..deps.runtime_intents import clear_muscle_control_intents
+    reset_control_inputs()
+    clear_muscle_control_intents()
     _PENDING.clear()
     _TAIL_PENDING.clear()
     _RUNNING = False

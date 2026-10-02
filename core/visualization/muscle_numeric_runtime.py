@@ -278,10 +278,21 @@ def _sync_control(sync, vis_col, root, scene, vcp, work, result):
     if work.request.envelope and work.muscle.envelope_edit_side == 'B': spec = work.request.envelope.secondary[index]
     if spec.initialize_control: _store_initial_control(settings, rows)
     points = [[Vector(point) for point in row] for row in rows] if ensure and settings.inflation_mode == "CTRL_POINT" else ()
+    _bind_control(sync, vis_col, root, work.muscle.id, key, work.muscle.envelope_edit_side if work.request.envelope else 'A')
     ctrl = sync._sync_inflation_control(vis_col, root, settings, work.base_obj, points, ensure)
-    if ctrl is not None:
-        ctrl['af_muscle_branch_id'] = key
-        ctrl['af_inflation_side'] = work.muscle.envelope_edit_side if work.request.envelope else 'A'
+    _bind_control(sync, vis_col, root, work.muscle.id, key, work.muscle.envelope_edit_side if work.request.envelope else 'A')
+
+
+def _bind_control(sync, vis_col, root, muscle_id, key, side):
+    from ..deps.muscle_control_intents import retire_control
+    ctrl = sync._find_inflation_ctrl(vis_col, root.name, muscle_id)
+    if ctrl is None:
+        return
+    if str(ctrl.get('af_muscle_branch_id', '')) == key and str(ctrl.get('af_inflation_side', 'A')) == side:
+        return
+    retire_control(ctrl)
+    ctrl['af_muscle_branch_id'], ctrl['af_inflation_side'] = key, side
+    ctrl['af_muscle_ctrl_sync_location'] = tuple(ctrl.location)
 
 
 def _part_control(request, result, index):

@@ -117,13 +117,8 @@ class RuntimeIntentDriver(DependencyDriver):
         return ("CONTROL", "SCP", "FIBER", "FIBER_SURFACE", "MUSCLE", "BLOB", "SOFT_TISSUE")
 
     def apply_constraints(self, ctx):
-        merged = {}
-        for intent in pop_runtime_intents(ctx.root):
-            impacts = apply_runtime_intent(ctx.root, ctx.scene, intent) or {}
-            for et, ids in impacts.items():
-                merged.setdefault(et, set())
-                merged[et] |= set(ids or set())
-        return merged
+        from ..visualization.muscle_control_application import apply_request_inputs
+        return apply_request_inputs(ctx, pop_runtime_intents(ctx.root), apply_runtime_intent)
 
 
 class SCPMirrorRoleDriver(DependencyDriver):

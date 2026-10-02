@@ -91,7 +91,8 @@ def source_identity():
     fingerprint = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
     Path(STATE['args'].output + '.sources.json').write_text(json.dumps(rows, indent=2), encoding='utf8')
     head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=folder, text=True).strip()
-    return dict(head=head, fingerprint=fingerprint, path=str(folder), manifest=STATE['args'].output + '.sources.json')
+    status = subprocess.check_output(['git', 'status', '--porcelain'], cwd=folder, text=True).strip()
+    return dict(head=head, fingerprint=fingerprint, path=str(folder), status=status, manifest=STATE['args'].output + '.sources.json')
 
 
 def wrap(owner, name, label):
@@ -128,6 +129,7 @@ def detail_instrumentation():
                         (sf, ('surface_bvh_local', '_build_surface_uncached', '_surface_route_graph'))):
         for name in names: wrap(owner, name, name)
     control_trace()
+    control_stage_trace()
     bpy.app.handlers.depsgraph_update_post.append(update_inventory)
 
 
@@ -140,16 +142,75 @@ def update_inventory(scene, depsgraph):
 
 def control_trace():
     from anthroforge.core.visualization.muscle_sync import MuscleSceneSync
-    from anthroforge.core.vcp.runtime_state import muscle_inflation_ctrl_world
     original = MuscleSceneSync._process_ctrl_point_update
-    def measured(sync, owner, collection, obj, changed):
-        muscle = sync._find_muscle(owner, obj.get('af_muscle_id'))
-        row = dict(incoming=tuple(obj.location), stored=muscle_inflation_ctrl_world(muscle))
+    def measured(sync, owner, collection, obj, changed, *args):
+        part = trace_part(sync, owner, obj)
+        row = control_trace_row(part, obj, args)
         STATE.setdefault('control_trace', []).append(row)
-        result = original(sync, owner, collection, obj, changed)
-        row.update(result=result, snapped=tuple(obj.location), final=muscle_inflation_ctrl_world(muscle))
+        result = original(sync, owner, collection, obj, changed, *args)
+        row.update(result=result, snapped=tuple(obj.location), final=control_trace_world(part))
         return result
     MuscleSceneSync._process_ctrl_point_update = measured
+
+
+def trace_part(sync, owner, obj):
+    from anthroforge.core.visualization.branch_control import control_part
+    return control_part(owner, sync._find_muscle(owner, obj.get('af_muscle_id')), obj)
+
+
+def control_trace_world(part):
+    from anthroforge.core.vcp.runtime_state import muscle_inflation_ctrl_world
+    return muscle_inflation_ctrl_world(part)
+
+
+def control_trace_row(part, obj, args):
+    value = args[0] if args else None
+    return dict(incoming=tuple(obj.location), stored=control_trace_world(part),
+                branch=str(obj.get('af_muscle_branch_id', '')), side=str(obj.get('af_inflation_side', 'A')),
+                revision=getattr(value, 'revision', None), reserved=getattr(value, 'point', None))
+
+
+def control_stage_trace():
+    from anthroforge.core.visualization import muscle_sync as ms
+    try:
+        from anthroforge.core.deps import muscle_control_intents as ci
+    except ImportError:
+        return
+    _trace_reservations(ci)
+    _trace_control_method(ms.MuscleSceneSync, '_snapped_part_control', 'snapped', 4)
+    _trace_control_method(ms.MuscleSceneSync, '_accept_control', 'accepted', 4)
+    _trace_control_method(ms, 'execute_muscle_work', 'numeric', None)
+    _trace_control_method(ms, 'publish_muscle_work', 'publish', None)
+    for name in ('prune_inputs', 'acquire_graph', 'control_binding'):
+        wrap(ci, name, name)
+
+
+def _input_stage(stage, value=None, point=None, result=None):
+    STATE.setdefault('control_stages', []).append(dict(stage=stage, time=time.perf_counter(),
+        revision=getattr(value, 'revision', None), binding=getattr(value, 'binding', None),
+        point=point, result=result))
+
+
+def _trace_reservations(owner):
+    original = owner.reserve_input
+    def reserve(root, scene, obj):
+        _input_stage('observed', point=tuple(obj.location))
+        value = original(root, scene, obj)
+        if value is not None: _input_stage('reserved', value, value.point)
+        return value
+    owner.reserve_input = reserve
+
+
+def _trace_control_method(owner, name, stage, value_index):
+    original = getattr(owner, name)
+    def traced(*args, **kwargs):
+        value = None if value_index is None else args[value_index]
+        if stage in {'numeric', 'publish'}: _input_stage(stage)
+        result = original(*args, **kwargs)
+        if stage == 'snapped': _input_stage(stage, value, None if result is None else tuple(result))
+        if stage == 'accepted': _input_stage(stage, value, tuple(args[6]), result)
+        return result
+    setattr(owner, name, traced)
 
 
 def select(muscle):
@@ -232,6 +293,7 @@ def measured_event(plan):
     name,index,baseline = plan
     clear_request_telemetry(); COUNTERS.clear()
     STATE['control_trace'] = []
+    STATE['control_stages'] = []
     STATE['update_inventory'] = []
     before = geometry(); started = time.perf_counter()
     value = apply_event(STATE['muscle'], name, index, baseline)
@@ -251,6 +313,7 @@ def complete_event(event):
     event['geometry'] = after; event['telemetry'] = request_telemetry(clear=True)
     event['instrumentation'] = dict(COUNTERS)
     event['control_trace'] = list(STATE.get('control_trace', ()))
+    event['control_stages'] = list(STATE.get('control_stages', ()))
     event['depsgraph_updates'] = list(STATE.get('update_inventory', ()))
     STATE['result']['events'].append(event)
     print('MUSCLE_EDIT', event['property'], round(event['callback_depsgraph_ms'],2), flush=True)

@@ -73,10 +73,14 @@ def _apply_fiber_control(root, scene, intent):
 
 
 def _apply_muscle_control(root, scene, intent):
-    obj = _obj_in_scene(scene, intent.payload.get("object_name"))
+    from .muscle_control_intents import input_record
+    value = intent.payload.get('muscle_control_input')
+    record = input_record(value)
+    obj = record.control if record is not None else _obj_in_scene(scene, intent.payload.get('object_name'))
     if obj is None:
         return {}
-    return _impact("MUSCLE", apply_muscle_control_update(register_muscle_sync(), root, scene, obj))
+    return _impact("MUSCLE", apply_muscle_control_update(register_muscle_sync(), root, scene, obj,
+                                                        control_input=value))
 
 
 def _apply_blob_control(root, scene, intent):
