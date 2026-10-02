@@ -164,10 +164,17 @@ def reconcile_relationships(capture, entry=None):
 
 
 def _graph_size(key, value):
-    graph = value[2][0]
-    internals = (vars(graph), tuple(vars(p) for p in graph.ports.values()),
-                 tuple(vars(e) for e in graph.edges))
-    return utils._bounded_size((key, value, internals))
+    graph = value[2][0]; seen = set()
+    size = utils._bounded_size((key, value), seen)
+    size += utils._bounded_size(vars(graph), seen)
+    for port in graph.ports.values():
+        size += utils._bounded_size(vars(port), seen)
+    for edge in graph.edges:
+        size += utils._bounded_size(vars(edge), seen)
+        # Equal-key port replacements can leave older ports alive in edges.
+        size += utils._bounded_size(vars(edge.src), seen)
+        size += utils._bounded_size(vars(edge.dst), seen)
+    return size
 
 
 def store_graph(capture, generation, data):

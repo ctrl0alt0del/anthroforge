@@ -47,6 +47,17 @@ def canonical(data):
     return graph.ports, graph.edges, entities, dict(adjacency), components
 
 
+def retained_size(value, seen=None):
+    seen = set() if seen is None else seen
+    if id(value) in seen: return 0
+    seen.add(id(value)); size = sys.getsizeof(value)
+    if isinstance(value, dict):
+        return size + sum(retained_size(k, seen) + retained_size(v, seen) for k, v in value.items())
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return size + sum(retained_size(item, seen) for item in value)
+    return size + retained_size(vars(value), seen) if hasattr(value, "__dict__") else size
+
+
 class RelationshipCacheTests(unittest.TestCase):
     def setUp(self):
         self.registry = patch.dict(drivers._DRIVERS, {}, clear=True); self.registry.start()
@@ -151,6 +162,25 @@ class RelationshipCacheTests(unittest.TestCase):
         entry = cache.graph_entry(cap); size = utils.bounded_scene_cache_stats(cache.GRAPH_NAMESPACE)["bytes"]
         self.assertGreater(size, utils._bounded_size((cap.key, entry)))
         self.assertLessEqual(size, cache.GRAPH_BYTES)
+
+    def test_graph_accounting_includes_replaced_edge_ports_once(self):
+        self.root.af_vcp_system.fibers = [fiber(f"F{i}") for i in range(100)]
+        graph = self.get()[0]; cap = cache.capture_relationships(self.root, self.scene)
+        current = {id(port) for port in graph.ports.values()}
+        endpoints = {id(port) for edge in graph.edges for port in (edge.src, edge.dst)}
+        self.assertEqual(len(endpoints - current), 200)
+        entry = cache.graph_entry(cap); expected = retained_size((cap.key, entry))
+        self.assertEqual(utils.bounded_scene_cache_stats(cache.GRAPH_NAMESPACE)["bytes"], expected)
+
+    def test_graph_replaced_edge_ports_exceed_budget(self):
+        self.root.af_vcp_system.fibers = [fiber(f"F{i}") for i in range(100)]
+        data = self.get(); cap = cache.capture_relationships(self.root, self.scene)
+        entry = cache.graph_entry(cap); expected = retained_size((cap.key, entry))
+        with patch.object(cache, "GRAPH_BYTES", expected - 1):
+            self.assertIs(cache.store_graph(cap, entry[1], data), data)
+            self.assertIsNone(cache.graph_entry(cap))
+            self.assertEqual(utils.bounded_scene_cache_stats(cache.GRAPH_NAMESPACE)["bytes"], 0)
+        self.assert_parity()
 
     def test_other_entity_relationship_fields(self):
         vcp = self.root.af_vcp_system
