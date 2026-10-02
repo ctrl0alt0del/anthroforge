@@ -63,10 +63,18 @@ def _add_one_fiber(root, graph, entity_sets, fiber):
     graph.add_edge(Edge(fp_in, fp_local, EDGE_EVAL))
     graph.add_edge(Edge(fp_local, fp_probe, EDGE_EVAL))
     graph.add_edge(Edge(fp_att, fp_probe, EDGE_EVAL))
-    for sid in _fiber_attachment_ids(root, fiber):
+    for sid in _graph_fiber_attachment_ids(root, graph, fiber):
         sp = graph.add_port(PortRef('SCP', sid, 'probe', PHASE_PROBES, MUT_PROBE))
         graph.add_edge(Edge(sp, fp_att, EDGE_ATTACHMENT))
         _add_dependency_edge(graph, ('SCP', sid), ('FIBER', fid))
+
+
+def _graph_fiber_attachment_ids(root, graph, fiber):
+    from .relationship_cache import runtime_identity
+    captured = getattr(graph, "_captured_fiber_owners", None)
+    if captured is not None:
+        return captured[runtime_identity(fiber)]
+    return _fiber_attachment_ids(root, fiber)
 
 
 def _fiber_attachment_ids(root, fiber):

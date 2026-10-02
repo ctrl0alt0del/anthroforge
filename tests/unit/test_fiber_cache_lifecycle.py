@@ -68,13 +68,15 @@ class FiberCacheLifecycleTests(unittest.TestCase):
     def test_full_invalidation_clears_real_global_caches(self):
         scene, root = Pointer(41), Pointer(42)
         utils.scene_cache_set(scene, "('fiber_spatial_index',)", "stale")
-        runtime_context_build._GRAPH_CACHE[root.as_pointer()] = {"stale": True}
+        cache = runtime_context_build.relationships
+        capture = cache.capture_relationships(root, scene)
+        cache.store_graph(capture, 1, (runtime_context_build.RuntimeGraph(), {}, {}, {}, {}))
         DEFAULT_FACTOR_CACHE._entries["stale"] = SimpleNamespace(nbytes=1)
         DEFAULT_FACTOR_CACHE._bytes = 1
         with patch.object(lifecycle, "_cancel_refinements"), patch.object(lifecycle, "_clear_solver_cache"):
             lifecycle.invalidate_fiber_caches(scene, root)
         self.assertIsNone(utils.scene_cache_get(scene, "('fiber_spatial_index',)"))
-        self.assertNotIn(root.as_pointer(), runtime_context_build._GRAPH_CACHE)
+        self.assertIsNone(cache.graph_entry(capture))
         self.assertEqual(factor_cache_stats()["entries"], 0)
 
     def test_target_invalidation_clears_matching_v3_warm_state(self):

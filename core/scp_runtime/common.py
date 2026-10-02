@@ -217,6 +217,11 @@ def _authoring_root_matches(obj, scene, root_name):
 
 
 def instance_geometry_objects(scene, root_name):
+    resolved, duplicates = instance_geometry_index(scene, root_name)
+    return {key: obj for key, obj in resolved.items() if key not in duplicates}
+
+
+def instance_geometry_index(scene, root_name):
     root = scene.objects.get(root_name)
     identity = root.get('af_authoring_id') if root else None
     resolved, duplicates = {}, set()
@@ -228,7 +233,7 @@ def instance_geometry_objects(scene, root_name):
         key = 'AFI_'+obj['af_authoring_id']
         if key in resolved: duplicates.add(key)
         resolved[key] = obj
-    return {key: obj for key, obj in resolved.items() if key not in duplicates}
+    return resolved, frozenset(duplicates)
 
 
 def attachment_dependency_id(root, identity):
