@@ -18,7 +18,7 @@ def capture(owner):
     from anthroforge.core.deps import runtime_context_build as build
     probe.COUNTERS.clear(); started = time.perf_counter()
     data = build._cached_graph_data(owner)
-    return data, dict(milliseconds=(time.perf_counter()-started)*1000, counters=dict(probe.COUNTERS))
+    return data, dict(milliseconds=(time.perf_counter()-started)*1000, counters={key: list(value) for key, value in probe.COUNTERS.items()})
 
 
 def graph_checks():
@@ -35,11 +35,14 @@ def graph_checks():
 def debug_checks():
     owner = probe.root(); objects = tuple(bpy.context.scene.objects)
     fibers = [obj for obj in objects if obj.get('af_root_name') == owner.name and obj.get('af_fiber_proxy')]
+    current_ids = {fiber.id for fiber in owner.af_vcp_system.fibers}
+    orphans = [obj.name for obj in fibers if obj.get('af_fiber_id') not in current_ids]
+    fibers = [obj for obj in fibers if obj.get('af_fiber_id') in current_ids]
     invalid = [obj.name for obj in fibers if obj.hide_get() or obj.hide_viewport or obj.hide_render or obj.display_type == 'WIRE']
     views = [(s.shading.type, s.shading.color_type) for screen in bpy.data.screens for area in screen.areas
              for s in area.spaces if s.type == 'VIEW_3D']
     scps = [obj for obj in objects if obj.get('af_root_name') == owner.name and obj.get('af_scp_geometry')]
-    return dict(fibers=len(fibers), hidden_or_wire=invalid, views=views, scp_colors={obj.name: list(obj.color) for obj in scps})
+    return dict(fibers=len(fibers), orphan_fiber_objects=orphans, hidden_or_wire=invalid, views=views, scp_colors={obj.name: list(obj.color) for obj in scps})
 
 
 def screenshot():
