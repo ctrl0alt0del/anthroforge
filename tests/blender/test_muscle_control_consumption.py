@@ -333,3 +333,40 @@ class MuscleControlConsumptionTests(BlenderTestCase):
             inputs.dispatch_input(self.root, self.scene, b)
         self.assertEqual(len(runner._TAIL_PENDING), 2)
         self.assertNotEqual(runner._runtime_key(*runner._TAIL_PENDING[0]), runner._runtime_key(*runner._TAIL_PENDING[1]))
+
+    def test_rebinding_during_callbacks_rejects_old_input(self):
+        for owner, name in ((inputs, 'acquire_graph'), (self.sync, '_snapped_part_control'),
+                            (self.sync, '_resolved_ctrl_world')):
+            with self.subTest(callback=name):
+                self.assert_callback_rebinding(owner, name)
+
+    def assert_callback_rebinding(self, owner, name):
+        original, previous = getattr(owner, name), muscle_inflation_ctrl_world(self.muscle)
+        def mutate(*args):
+            result = original(*args); self.ctrl['af_inflation_side'] = 'B'
+            return result
+        self.ctrl['af_inflation_side'] = 'A'; inputs.reset_control_inputs()
+        self.ctrl.location = self.target()
+        with patch.object(owner, name, side_effect=mutate):
+            self.assertIsNone(module.apply_muscle_control_update(self.sync, self.root, self.scene, self.ctrl))
+        self.assertEqual(muscle_inflation_ctrl_world(self.muscle), previous)
+
+    def test_deletion_inside_setter_prevents_stale_visible_write(self):
+        original = module.set_muscle_inflation_ctrl_world
+        def setter(part, point):
+            original(part, point); bpy.data.objects.remove(self.ctrl, do_unlink=True)
+        self.ctrl.location = self.target()
+        with patch.object(module, 'set_muscle_inflation_ctrl_world', side_effect=setter):
+            changed = module.apply_muscle_control_update(self.sync, self.root, self.scene, self.ctrl)
+        self.assertEqual(changed, self.muscle.id)
+        self.assertFalse(inputs._RECORDS)
+
+    def test_rebinding_inside_setter_preserves_distinct_visible_point(self):
+        original, marker = module.set_muscle_inflation_ctrl_world, tuple(self.target(.4))
+        def setter(part, point):
+            original(part, point); self.ctrl['af_inflation_side'] = 'B'; self.ctrl.location = marker
+        self.ctrl.location = self.target()
+        with patch.object(module, 'set_muscle_inflation_ctrl_world', side_effect=setter):
+            changed = module.apply_muscle_control_update(self.sync, self.root, self.scene, self.ctrl)
+        self.assertEqual(changed, self.muscle.id)
+        self.assertEqual(tuple(self.ctrl.location), marker)

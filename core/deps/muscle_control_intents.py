@@ -108,20 +108,25 @@ def _record(root, scene, obj):
     return record
 
 
-def reserve_input(root, scene, obj):
-    prune_inputs()
+def reserve_input(root, scene, obj, *, prune=True):
+    if prune:
+        prune_inputs()
     try:
         point = _coordinates(obj.location)
     except ReferenceError:
         return None
     obj = getattr(obj, "original", obj)
-    record = _record(root, scene, obj)
+    return _reserve_record(_record(root, scene, obj), point)
+
+
+def _reserve_record(record, point):
+    # The caller has already checked the binding; no callbacks occur before this snapshot.
     if record is None or record.observed == point:
         return None
     record.observed = point
     record.revision += 1
-    return MuscleControlInput(_EPOCH, owners(root, scene, obj), record.binding,
-                              record.revision, point, record.binding[0], str(obj.name))
+    return MuscleControlInput(_EPOCH, owners(record.root, record.scene, record.control), record.binding,
+                              record.revision, point, record.binding[0], str(record.control.name))
 
 
 def input_record(value):
@@ -203,18 +208,25 @@ def dispatch_input(root, scene, value, deferred=False, fresh_context=False):
 
 
 def _observe_before_write(record):
-    value = reserve_input(record.root, record.scene, record.control)
+    value = _reserve_record(record, _coordinates(record.control.location))
     if value is not None:
         dispatch_input(record.root, record.scene, value, deferred=input_busy())
     return value is None
 
 
 def write_control(root, scene, obj, point, value=None):
+    try:
+        record = _record(root, scene, obj)
+    except ReferenceError:
+        return False
+    if not _write_allowed(record, value):
+        return False
+    return _write_location(obj, point, record)
+
+
+def _write_location(obj, point, record):
     from mathutils import Vector
     from ..visualization.muscle_sync_helpers import mark_inflation_ctrl_location
-    record = _record(root, scene, obj)
-    if record is not None and not _write_allowed(record, value):
-        return False
     revision = 0 if record is None else record.revision
     if record is not None:
         record.observed = tuple(Vector(point))
@@ -227,13 +239,24 @@ def write_control(root, scene, obj, point, value=None):
 
 
 def _write_allowed(record, value):
+    if record is None:
+        return value is None
+    if value is not None and not _input_matches(record, value):
+        return False
+    if not _alive(record):
+        return False
     if record.observed is None and record.revision == 0:
         record.observed = tuple(record.control.location)
         return True
-    if not _alive(record) or not _observe_before_write(record):
+    if not _observe_before_write(record):
         return False
     revision = record.processing or record.handled if value is None else value.revision
-    return record.revision <= revision and (value is None or input_record(value) is record)
+    return record.revision <= revision
+
+
+def _input_matches(record, value):
+    return (value.epoch == _EPOCH and _RECORDS.get(value.owners) is record
+            and record.binding == value.binding)
 
 
 def freeze_payload(root, payload):

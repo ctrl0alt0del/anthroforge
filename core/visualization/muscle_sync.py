@@ -345,8 +345,6 @@ class MuscleSceneSync:
             raise RuntimeError('Muscle control target disappeared')
         previous = muscle_inflation_ctrl_world(muscle)
         new_loc = self._resolve_snapped_input(root, muscle_id, muscle, base_obj, value, graph)
-        if control_inputs.input_record(value) is None:
-            return False
         return self._accept_control(root, obj, muscle, value, previous, new_loc, changed_muscle_ids)
 
     def _resolve_snapped_input(self, root, muscle_id, muscle, base_obj, value, graph):
@@ -361,11 +359,12 @@ class MuscleSceneSync:
 
     def _accept_control(self, root, obj, muscle, value, previous, point, changed):
         record = control_inputs.input_record(value)
+        if record is None:
+            return False
         if previous != tuple(point):
             set_muscle_inflation_ctrl_world(muscle, tuple(point))
             changed.add(value.muscle_id)
-        if control_inputs.input_record(value) is not None:
-            control_inputs.write_control(root, record.scene, obj, point, value)
+        control_inputs.write_control(root, record.scene, obj, point, value)
         return previous != tuple(point)
 
     def _process_inflation_ctrl_update(self, root, vis_col, obj, changed_muscle_ids, value=None, graph=None):
@@ -407,7 +406,7 @@ class MuscleSceneSync:
     def _collect_one_depsgraph_update(self, root, vis_col, obj, values, scene=None):
         if not self._is_relevant_inflation_update(root, vis_col, obj):
             return
-        value = control_inputs.reserve_input(root, scene or scene_for_id(root), obj)
+        value = control_inputs.reserve_input(root, scene or scene_for_id(root), obj, prune=False)
         if value is not None:
             values.append(value)
 

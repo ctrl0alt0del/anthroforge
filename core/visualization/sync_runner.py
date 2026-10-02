@@ -436,7 +436,7 @@ def _earlier_control_pending(request):
 
 def control_input_pending(value):
     from ..deps.muscle_control_intents import input_key, input_record
-    if value is None:
+    if value is None or not _PENDING:
         return False
     record = input_record(value)
     if record is None:

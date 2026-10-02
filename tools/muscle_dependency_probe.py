@@ -192,13 +192,25 @@ def _input_stage(stage, value=None, point=None, result=None):
 
 
 def _trace_reservations(owner):
+    if hasattr(owner, '_reserve_record'):
+        return _trace_record_reservations(owner)
     original = owner.reserve_input
-    def reserve(root, scene, obj):
+    def reserve(root, scene, obj, **options):
         _input_stage('observed', point=tuple(obj.location))
-        value = original(root, scene, obj)
+        value = original(root, scene, obj, **options)
         if value is not None: _input_stage('reserved', value, value.point)
         return value
     owner.reserve_input = reserve
+
+
+def _trace_record_reservations(owner):
+    original = owner._reserve_record
+    def reserve(record, point):
+        _input_stage('observed', point=point)
+        value = original(record, point)
+        if value is not None: _input_stage('reserved', value, value.point)
+        return value
+    owner._reserve_record = reserve
 
 
 def _trace_control_method(owner, name, stage, value_index):
