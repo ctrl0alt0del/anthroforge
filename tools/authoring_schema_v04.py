@@ -5,10 +5,12 @@ try:
     from tools.authoring_profile_schema import operations as profile_operations
     from tools.authoring_domain_schema import operations as domain_operations
     from tools.authoring_envelope_schema import operations as envelope_operations
+    from tools.authoring_pairs_schema import operations as pair_operations
 except ModuleNotFoundError:
     from authoring_profile_schema import operations as profile_operations
     from authoring_domain_schema import operations as domain_operations
     from authoring_envelope_schema import operations as envelope_operations
+    from authoring_pairs_schema import operations as pair_operations
 
 ROOT = Path(__file__).resolve().parents[1] / 'core/authoring/schemas'
 S = {'type': 'string', 'minLength': 1}
@@ -177,7 +179,7 @@ def protocol(definitions):
     patch = array(obj(dict(op=enum('add', 'replace', 'remove'), path=S, value=ref('patch_value')), ['op', 'path']))
     operations = basic_operations(ident, mutation, patch) + candidate_operations(mutation) + visual_operations() + [snap_points_operation(), catalog_operation(), plan_fibers_operation()]
     operations += recompute_operations() + branch_operations() + [base_operation()] + profile_operations(definitions)
-    operations += domain_operations(definitions) + envelope_operations(definitions)
+    operations += domain_operations(definitions) + envelope_operations(definitions) + pair_operations(definitions)
     definitions['patch_value'] = choice({'type': 'string'}, N, B, array(ref('patch_value')), dict(type='object', additionalProperties=ref('patch_value')))
     definitions['document'] = {k: v for k, v in authoring().items() if k != '$defs'}
     extend(definitions, operations, '0.4.0')

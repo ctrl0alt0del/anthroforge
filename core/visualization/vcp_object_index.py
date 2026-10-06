@@ -10,6 +10,28 @@ def build_vcp_object_index(vis_col, root_name):
     return index
 
 
+def build_muscle_object_index(scene, root_name):
+    import bpy
+    index = build_vcp_object_index(scene, root_name)
+    for obj in bpy.data.objects:
+        if obj.get('af_muscle_inflation_ctrl') and obj.get('af_root_name') == root_name:
+            index['inflation'].setdefault(_as_id(obj.get('af_muscle_id')), obj)
+    index['_global_inflation'] = True
+    return index
+
+
+def remember_object(index, obj):
+    if index is not None: _index_obj(index, obj)
+    return obj
+
+
+def forget_object(index, obj):
+    for bucket in (index or {}).values():
+        if not isinstance(bucket, dict): continue
+        for key, value in tuple(bucket.items()):
+            if value is obj: del bucket[key]
+
+
 def _empty_index():
     return {"fiber": {}, "fiber_surface": {}, "endpoint": {}, "touch": {}, "loop": {}, "muscle": {}, "inflation": {}, "fiber_mirror": {}, "muscle_mirror": {}}
 

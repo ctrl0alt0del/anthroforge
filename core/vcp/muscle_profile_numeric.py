@@ -1,11 +1,17 @@
 """Partition profiles before native packing and reuse immutable prepared bases."""
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from time import perf_counter
 from .muscle_section_profile import PROFILE_VERSION, apply_profile, canonical_profile
 from .muscle_profile_frames import direction_field
 from .muscle_profile_cache import cached, content_key
 
 LEGACY_MODES = ("CTRL_POINT", "DISTRIBUTED")
+
+
+@dataclass(frozen=True)
+class PreparedBase:
+    key: str
+    result: object
 
 
 def request_error(request):
@@ -42,10 +48,13 @@ def prepared_key(request, backend):
 
 
 def prepare_profile(request, backend, execute):
+    key = prepared_key(request, backend)
+    prepared = request.prepared_base
+    if prepared is not None and prepared.key == key: return prepared.result
     spec = replace(request.spec, inflation_mode="CTRL_POINT", inflation_enabled=False, initialize_control=False,
                    section_profile=None)
     plain = replace(request, spec=spec, orientation_parity=1, output_domain=None)
-    return cached(prepared_key(request, backend), lambda: execute((plain,)).results[0])
+    return cached(key, lambda: execute((plain,)).results[0])
 
 
 def profile_result(request, backend, execute):

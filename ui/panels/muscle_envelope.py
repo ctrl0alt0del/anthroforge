@@ -4,6 +4,7 @@ from ...core.visualization.branch_control import branch_surface
 
 
 def draw(layout, root, muscle):
+    from .muscle_smoothing import draw as draw_smoothing
     layout.prop(muscle, 'envelope_sides', expand=True)
     if muscle.envelope_sides != 'BOTH_SIDES': return _one_side(layout, muscle)
     box = layout.box(); box.prop(muscle, 'envelope_enabled')
@@ -11,6 +12,7 @@ def draw(layout, root, muscle):
     settings, branch, _ = selected_settings(root, muscle)
     box.label(text=f"Side {muscle.envelope_edit_side} / {branch or 'Main'}: depth from base")
     _settings(box, settings, muscle, branch_surface(root, muscle) is not None)
+    draw_smoothing(box, settings)
     _actions(box, muscle)
     _diagnostics(box, muscle)
     return True

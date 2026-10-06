@@ -3,8 +3,10 @@ from bpy.app.handlers import persistent
 
 try:
     from ...app.runtime_api import sync_scene
+    from ...app.context import selected_objects_for_scene
 except ImportError:
     from app.runtime_api import sync_scene
+    from app.context import selected_objects_for_scene
 from ..deps.controls import classify_control_object, is_control_object
 from ..deps.control_lifecycle import should_remove_control_object_on_load, should_remove_control_object_on_save
 from ..deps.dirty_hints import dirty_hints_for, empty_dirty_hints
@@ -217,7 +219,7 @@ class ControlRuntimeOrchestrator:
         self._last_active = ("NONE", "")
 
     def _sync_state(self, scene, force, active_object=None):
-        update_selection_order(scene, active_object=active_object)
+        update_selection_order(scene, selected_objects_for_scene(scene), active_object=active_object)
         root, current = _root_and_current(scene, active_object)
         if root is None:
             self._clear_last_active()

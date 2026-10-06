@@ -6,7 +6,7 @@ from pathlib import Path
 LIMIT = 15
 BASELINE = Path(__file__).with_name("function_size_baseline.json")
 EXCLUDED = {"backup", "tests", "__pycache__", ".git", ".codex", ".agents",
-            "artifacts", ".artifacts", "dist", "build", "venv", ".env", ".worktrees"}
+            "artifacts", ".artifacts", "dist", "build", "venv", ".env", ".worktrees", "vendor"}
 
 
 def repo_root():

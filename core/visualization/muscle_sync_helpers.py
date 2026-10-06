@@ -18,7 +18,7 @@ def get_vis_collection(scene, collection_name):
 
 
 def _indexed(index, bucket, key):
-    return None if index is None else dict(index.get(bucket, {})).get(key)
+    return None if index is None else index.get(bucket, {}).get(key)
 
 
 def find_muscle_proxy(vis_col, root_name, muscle_id, surface_type="BASE", index=None):
@@ -47,6 +47,7 @@ def find_inflation_ctrl(vis_col, root_name, muscle_id, index=None):
     indexed = _indexed(index, "inflation", str(muscle_id or ""))
     if _live_object(indexed):
         return indexed
+    if index is not None and index.get('_global_inflation'): return None
     return _find_inflation_ctrl_in_collection(vis_col, root_name, muscle_id) or _find_inflation_ctrl_global(root_name, muscle_id)
 
 

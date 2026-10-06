@@ -3,6 +3,7 @@ from .errors import require
 from .profile_config import native_values, wire
 from .legacy_config import FIELDS, legacy_state
 from ..vcp.muscle_section_profile import profile_from_muscle
+from ..vcp.height_smoothing import normalize as smoothing_spec, properties as smoothing_properties, wire as smoothing_wire
 
 SCHEMA = 'muscle_inflation_envelope.v1'
 
@@ -25,7 +26,8 @@ def _part(value):
 
 
 def _side(value):
-    require(isinstance(value, dict) and set(value) == {'enabled', 'mode', 'parameters'}, 'ENVELOPE_SIDE_INVALID')
+    require(isinstance(value, dict) and set(value)-{'smoothing'} == {'enabled', 'mode', 'parameters'}, 'ENVELOPE_SIDE_INVALID')
+    if 'smoothing' in value: smoothing_spec(value['smoothing'])
     require(type(value['enabled']) is bool and isinstance(value['parameters'], dict), 'ENVELOPE_SIDE_INVALID')
     parameters = value['parameters']
     if value['mode'] == 'section_profile':
@@ -50,17 +52,17 @@ def side_values(value):
     values = native_values(side_configuration(value)); values.pop('flip_normals', None)
     if value['mode'] != 'section_profile' and value['parameters']['control'] == 'automatic':
         values['inflation_ctrl_initialized'] = False
-    return values
+    return dict(values, **smoothing_properties(value.get('smoothing')))
 
 
 def side_state(settings):
     if settings.inflation_mode == 'SECTION_PROFILE':
         config = wire(profile_from_muscle(settings)); params = {k: v for k, v in config.items() if k not in ('enabled', 'flip_normals', 'mode')}
-        return dict(enabled=bool(settings.inflation_enabled), mode='section_profile', parameters=params)
+        return dict(enabled=bool(settings.inflation_enabled), mode='section_profile', parameters=params, **smoothing_wire(settings))
     params = legacy_state(settings); initialized = params.pop('inflation_ctrl_initialized')
     control = params.pop('inflation_ctrl_world'); params.pop('flip_normals'); params.pop('inflation_enabled')
     params['control'] = control if initialized else 'automatic'
-    return dict(enabled=bool(settings.inflation_enabled), mode='control_point' if settings.inflation_mode == 'CTRL_POINT' else 'distributed', parameters=params)
+    return dict(enabled=bool(settings.inflation_enabled), mode='control_point' if settings.inflation_mode == 'CTRL_POINT' else 'distributed', parameters=params, **smoothing_wire(settings))
 
 
 def configuration(root, muscle):

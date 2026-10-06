@@ -49,6 +49,8 @@ def remap_state(state, point_ids):
 
 
 def atomic_import(root, scene, snapshot, available, action):
+    from .free_correspondence import validate
+    validate(snapshot)
     validate_snapshot(snapshot, available)
-    if not any(f.props.get('behavior_mode') == 'FREE' for f in snapshot.fibers): return action()
+    if not getattr(snapshot, 'relationships', None) and not any(f.props.get('behavior_mode') == 'FREE' for f in snapshot.fibers): return action()
     return transaction(root, scene, action)

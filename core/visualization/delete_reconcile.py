@@ -235,25 +235,40 @@ def _remove_missing_bound_entries(scp):
 class DeleteReconcileRuntime:
     def __init__(self):
         self._owners = {}
+        self._objects = {}
         self._syncing = False
 
     def reset(self):
         self._owners.clear()
+        self._objects.clear()
 
     def on_depsgraph_update(self, scene, depsgraph):
-        _ = depsgraph
         if not self._syncing:
-            self._sync_scene(scene)
+            self._sync_scene(scene, depsgraph)
 
-    def _sync_scene(self, scene):
+    def _sync_scene(self, scene, depsgraph=None):
         root = get_af_root(scene)
         if root is None:
             return
-        current = _owner_keys(scene, root.name)
-        previous = self._owners.get(root.name)
-        self._owners[root.name] = current
+        key = int(scene.session_uid), int(root.session_uid)
+        current = self._indexed_owners(scene, root, key, depsgraph)
+        previous = self._owners.get(key)
+        self._owners[key] = current
         if previous is not None and previous - current:
             self._apply(scene, root, previous - current)
+
+    def _indexed_owners(self, scene, root, key, depsgraph):
+        previous = self._objects.get(key, {})
+        # Earlier handlers may delete an updated ID; the depsgraph update iterator can then contain freed RNA.
+        # Scene membership is authoritative and is already traversed below.
+        changed = None
+        current = {}
+        for obj in scene.objects:
+            token = int(obj.session_uid)
+            if token in previous and changed is not None and token not in changed: current[token] = previous[token]
+            else: current[token] = _owner_key(obj) if obj.get('af_root_name') == root.name else None
+        self._objects[key] = current
+        return {owner for owner in current.values() if owner is not None}
 
     def _apply(self, scene, root, removed_keys):
         if reconcile_deleted_entities(root, scene, removed_keys):
@@ -285,6 +300,8 @@ def register_delete_reconcile():
         bpy.app.handlers.depsgraph_update_post.append(_DELETE_RECONCILE.on_depsgraph_update)
     if _on_load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load_post)
+    for group in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
+        if _on_load_post not in group: group.append(_on_load_post)
     return _DELETE_RECONCILE
 
 
@@ -296,4 +313,6 @@ def unregister_delete_reconcile():
         bpy.app.handlers.depsgraph_update_post.remove(_DELETE_RECONCILE.on_depsgraph_update)
     if _on_load_post in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_on_load_post)
+    for group in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
+        if _on_load_post in group: group.remove(_on_load_post)
     _DELETE_RECONCILE = None

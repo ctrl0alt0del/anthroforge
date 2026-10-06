@@ -1,5 +1,6 @@
 """Single authoritative warning store; successful reconciliation is scope-atomic."""
 from collections import defaultdict
+from contextlib import contextmanager
 import logging
 
 
@@ -10,6 +11,7 @@ class WarningRepository:
         self.provider_states = {}
         self.index, self.listeners = defaultdict(set), []
         self.discovery = "UNSCANNED"
+        self._batch_depth, self._notification_pending = 0, False
 
     def subscribe(self, callback):
         self.listeners.append(callback)
@@ -17,11 +19,24 @@ class WarningRepository:
 
     def changed(self):
         self.revision += 1
+        self._notification_pending = True
+        if not self._batch_depth: self._notify()
+
+    def _notify(self):
+        self._notification_pending = False
         for listener in tuple(self.listeners):
             try:
                 listener(self)
             except Exception:
                 logging.getLogger(__name__).exception("Warning projection failed")
+
+    @contextmanager
+    def batch(self):
+        self._batch_depth += 1
+        try: yield self
+        finally:
+            self._batch_depth -= 1
+            if not self._batch_depth and self._notification_pending: self._notify()
 
     def clear(self, state="UNSCANNED"):
         self.records.clear(); self.scopes.clear(); self.states.clear(); self.metadata.clear()

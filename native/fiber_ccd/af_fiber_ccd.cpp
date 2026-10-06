@@ -9,6 +9,7 @@
 #include <mutex>
 #include <numeric>
 #include <queue>
+#include <stdexcept>
 #include <unordered_map>
 #include <tuple>
 #include <thread>
@@ -547,12 +548,16 @@ AF_EXPORT int af_candidate_pairs(const double* start, const double* end, const i
 
 #include "af_fiber_planner43.hpp"
 #include "af_fiber_contact3.hpp"
+#include "af_warning_async.hpp"
 #include "af_fiber_v3_session.hpp"
 #include "af_fiber_v3_batch.hpp"
 #include "af_attachment_wave.hpp"
 #include "af_muscle_numeric.hpp"
 #include "af_muscle_envelope_profile.hpp"
 #include "af_muscle_envelope_compose.hpp"
+#include "pair_detection/api.hpp"
+#include "layer_stacking/api.hpp"
+#include "layer_stacking/relationship_api.hpp"
 #include "af_base_spline.hpp"
 #include "af_base_partition.hpp"
 #include "af_transfer_shape.hpp"

@@ -17,8 +17,10 @@ def configured(request, value, part_ids=('main',)):
 
 
 def numeric_spec(spec, side):
+    from ..vcp.height_smoothing import capture
     from ..vcp.muscle_section_profile import profile_from_muscle
     values = side_values(side); updates = {k: v for k, v in values.items() if k in spec.__dataclass_fields__}
+    updates['smoothing'] = capture(SimpleNamespace(**values))
     if 'inflation_ctrl_world' in values: updates['control_world'] = tuple(values['inflation_ctrl_world'])
     if side['mode'] == 'section_profile': updates['section_profile'] = profile_from_muscle(SimpleNamespace(**values))
     else: updates['initialize_control'] = not values.get('inflation_ctrl_initialized', False)
@@ -46,7 +48,9 @@ def evaluate_output(output, envelope, request):
 def measurements(output):
     import numpy as np
     from .metrics import sections
+    from ..vcp.muscle_envelope_native import diagnostics
     rows = sections(output)
-    spans = [row['max_material_span'] for row in rows]
+    spans = [row['max_material_span'] if 'side_a' in output else row['height'] for row in rows]
+    area = diagnostics(output['inflated'], output.get('inflated_faces', output['faces']))['surface_area']
     return dict(height=max(spans), width=max(row['width'] for row in rows),
-                belly_position=rows[int(np.argmax(spans))]['s'], area=output['diagnostics']['surface_area'])
+                belly_position=rows[int(np.argmax(spans))]['s'], area=area)

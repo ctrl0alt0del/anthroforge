@@ -428,6 +428,11 @@ def _register_runtime_hooks():
     _register_warnings()
 
 
+def _register_pairs():
+    from .ui import muscle_pairs
+    muscle_pairs.register()
+
+
 def _register_warnings():
     from .core.visualization import muscle_envelope_overlay
     muscle_envelope_overlay.register(lambda: bpy.context)
@@ -441,6 +446,7 @@ def _register_warnings():
     from .core.visualization import warning_runtime
     warnings.register()
     warning_runtime.register()
+    _register_pairs()
 
 
 def _unregister_runtime_hooks():
@@ -477,6 +483,8 @@ def _unregister_fiber_attachment_runtime():
 
 
 def _shutdown_background_jobs():
+    from .ui import muscle_pairs
+    muscle_pairs.unregister()
     from .adapters.draft_skin.jobs import shutdown_jobs
     from .adapters.topology.jobs import shutdown_jobs as shutdown_topology_jobs
     from .adapters.warm_update.jobs import shutdown_jobs as shutdown_warm_jobs

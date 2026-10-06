@@ -4,6 +4,7 @@ from bpy.app.handlers import persistent
 from ..warnings import session
 from ..warnings.anchors import identity, invalidate
 from . import warning_capture as capture
+from . import warning_pipeline as pipeline
 
 _ENABLED = False
 _TARGETS = {}
@@ -66,7 +67,7 @@ def schedule_root(scene, root, ids=None):
     session.COORDINATOR.metrics["coalesced"] += int(key in _TARGETS)
     _TARGETS[key] = selected
     invalidate(scene, root, selected)
-    token = session.COORDINATOR.enqueue(key, lambda generation: scan_root(key, generation))
+    token = session.COORDINATOR.enqueue(key, lambda generation: scan_root(key, generation), delay=0.150)
     session.REPOSITORY.state(key, "PENDING", token)
     ensure_timer()
 
@@ -84,29 +85,11 @@ def scan_root(key, generation):
     scene, root = resolve_root(key)
     if root is None:
         return remove_root(key)
-    depsgraph, runtime = capture.capture_root(scene, root)
-    colliders = []
-    yield from capture.capture_colliders(scene, root, depsgraph, colliders)
-    world = session.measure("native_world", capture.preflight._collision_world, tuple(colliders), tuple(row.generation for row in colliders))
-    yield
-    yield from scan_fibers(key, generation, scene, root, colliders, world, runtime)
+    valid = lambda: session.COORDINATOR.current(key, generation) and key[0] == session.EPOCH
+    yield from pipeline.run(scene, root, _TARGETS.get(key), generation, valid)
     if session.COORDINATOR.current(key, generation):
         session.REPOSITORY.state(key, "COMPLETE", generation)
         _TARGETS.pop(key, None)
-
-
-def scan_fibers(key, generation, scene, root, colliders, world, runtime):
-    selected, live = _TARGETS.get(key), set()
-    valid = lambda: session.COORDINATOR.current(key, generation) and resolve_root(key)[1] == root
-    for fiber in root.af_vcp_system.fibers:
-        ref, _signature = identity(scene, root, fiber)
-        live.add(ref.scope)
-        if selected is None or str(fiber.id) in selected:
-            yield from capture.check_fiber(scene, root, fiber, colliders, world, runtime, generation, valid)
-        yield
-    for scope in session.scopes_for(scene, root):
-        if scope[3] == "FIBER" and scope not in live:
-            session.REPOSITORY.remove(scope)
 
 
 def remove_root(key):
@@ -144,7 +127,8 @@ def ensure_timer():
 def tick():
     if not _ENABLED:
         return None
-    return 0.01 if session.COORDINATOR.tick() else None
+    active = session.COORDINATOR.tick()
+    return 0.016 if pipeline.reap() or active else None
 
 
 @persistent
@@ -154,6 +138,7 @@ def before_change(_dummy):
     if bpy.app.timers.is_registered(tick):
         bpy.app.timers.unregister(tick)
     _TARGETS.clear(); _MEMBERSHIPS.clear(); session.reset("CANCELLED")
+    if _ENABLED and pipeline.reap(): ensure_timer()
 
 
 @persistent
@@ -183,6 +168,7 @@ def unregister():
     global _ENABLED
     _ENABLED = False
     before_change(None)
+    pipeline.close()
     for name, callback in handlers():
         group = getattr(bpy.app.handlers, name)
         if callback in group:

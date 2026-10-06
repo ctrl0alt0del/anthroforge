@@ -2,6 +2,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+import time
 from unittest.mock import patch
 import bpy
 from _helpers import BlenderTestCase, root
@@ -14,9 +15,11 @@ from anthroforge.core.vcp.prop_update_guard import suppress_vcp_prop_updates
 
 
 def drain():
-    for _index in range(10000):
-        if not session.COORDINATOR.tick(max_steps=32):
-            return
+    deadline = time.perf_counter() + 15
+    while time.perf_counter() < deadline:
+        active = session.COORDINATOR.tick(max_steps=32)
+        if not runtime.pipeline.reap() and not active: return
+        time.sleep(0.002)
     raise AssertionError("Warning scan failed to finish")
 
 

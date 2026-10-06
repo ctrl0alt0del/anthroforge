@@ -5,10 +5,29 @@ from bpy.app.handlers import persistent
 from . import free_fiber_editor as editor
 
 _BUSY = False
+_ROOTS = {}
+
+
+def remember(root):
+    _ROOTS[int(root.session_uid)] = root
+
+
+def rebuild_sessions():
+    _ROOTS.clear()
+    for obj in bpy.data.objects:
+        if any(key.startswith(editor.PREFIX) for key in obj.keys()): remember(obj)
+
+
+def session_roots():
+    for token, root in tuple(_ROOTS.items()):
+        try:
+            if any(key.startswith(editor.PREFIX) for key in root.keys()): yield root
+            else: _ROOTS.pop(token, None)
+        except ReferenceError: _ROOTS.pop(token, None)
 
 
 def sessions():
-    for root in bpy.data.objects:
+    for root in session_roots():
         for key in tuple(root.keys()):
             if key.startswith(editor.PREFIX):
                 fiber = next((f for f in root.af_vcp_system.fibers if f.id == key[len(editor.PREFIX):]), None)
@@ -37,6 +56,7 @@ def reconcile(_unused=None):
 
 
 def _reconcile_sessions():
+    rebuild_sessions()
     live = set()
     for root, key, fiber in list(sessions()):
         if fiber is None: root.pop(key, None); continue
@@ -116,3 +136,4 @@ def unregister():
             for obj in editor.objects(json.loads(root[key])): editor._remove_object(obj)
     for rows, method in _handlers():
         if method in rows: rows.remove(method)
+    _ROOTS.clear()

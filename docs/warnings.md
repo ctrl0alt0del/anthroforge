@@ -8,7 +8,7 @@ the offending endpoint A/B, authored middle touch, or authored loop anchor.
 Generated symmetry pins are not checked as authored controls.
 
 The initial provider is `fiber_hard_anchor.v1`, code
-`FIBER_INVALID_HARD_ANCHOR`. It calls the same AF-6 collision evaluator as
+`FIBER_INVALID_HARD_ANCHOR`. It uses the same native contact kernels as
 production preflight, with the same owner skip, ancestry evidence, clearance
 slack and containment policy. Clear pin preflight does not certify a usable
 route. Overlap/escape checks are separate work (AF-21).
@@ -89,13 +89,24 @@ invalidation boundaries. Selection-only events do not schedule checks.
 
 Load/history pre clears findings, retires incarnations, rotates the file epoch
 and cancels queued work. Post events schedule rediscovery. Enabling on an open
-file also schedules checks; unregister unsubscribes and cancels. Root membership
-changes are reconciled through the existing depsgraph lifecycle. Work captures
-one collider or anchor per cooperative step and checks at most 32 anchors per
-collision call. A tick permits at most 32 steps with an 8 ms soft budget.
-Single-object evaluated mesh capture or native collision-world construction can
-exceed that soft budget; `max_tick_ms` exposes the actual duration. Captured
-colliders/native worlds reuse production numerical caches.
+file also schedules checks; unregister unsubscribes, cancels, and closes the worker.
+Root membership changes are reconciled through the existing depsgraph lifecycle.
+Each new root edit restarts a 150 ms debounce. Capture and publication run on the
+main thread with at most 128 cooperative steps and a 4 ms soft budget per tick.
+An individual evaluated mesh capture can exceed that budget; `max_tick_ms`
+reports the actual duration. Collider snapshots reuse the production capture
+cache. A root index resolves attachment owners once per scan.
+
+`warning_pipeline` owns capture, submission and publication. `Coordinator` owns
+generation tokens, debounce and polling deadlines. `NativeWarningExecutor`
+exposes submit/poll/read/cancel/release operations through the packaged C++17
+library (`af_fiber_ccd_v3_28.dll`, warning ABI 1). Submission copies mesh arrays,
+world-space anchors, owner tokens and clearances before returning. The worker
+builds a private collision world and evaluates the snapshot without Python
+callbacks or Blender references. It does not share the solver's mutable world.
+Cancellation sets an atomic flag without joining. The main-thread timer reaps
+finished cancelled jobs; unregister joins before destroying the executor.
+Missing native support fails explicitly.
 
 Generation checks prevent older root scans from publishing over newer actions;
 successful empty results reconcile only the checked provider/entity. Failed,
@@ -106,7 +117,14 @@ evaluate collisions, repair geometry, or begin planner/solver sessions.
 The RNA list stores warning tokens only, is cleared before save/load, and is
 rebuilt from Python state after save. It is not authoritative, even if a Blender
 version restores WindowManager properties. Load never restores warning payloads.
+Repository notifications are batched per scheduler tick; queries still see each
+state change immediately. Progress refreshes are coalesced to 100 ms, and an
+unchanged token list does not rewrite RNA rows. Completion refreshes immediately.
 Telemetry includes elapsed/max tick time, checked entities/pins, captures/cache
 hits, incrementals, coalescing, cancellations, stale rejections and failures.
+`native_submit_ms` measures main-thread snapshot submission and
+`native_worker_ms` measures completed background jobs. These overlap wall-clock
+time and must not be added as an independent user-visible delay.
 
-Blender lifecycle reference: [Application handlers](https://docs.blender.org/api/current/bpy.app.handlers.html).
+Blender references: [Application handlers](https://docs.blender.org/api/current/bpy.app.handlers.html),
+[Python threading limitations](https://docs.blender.org/api/main/info_gotchas_threading.html).

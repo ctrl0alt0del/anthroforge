@@ -42,6 +42,13 @@ def fractions(points):
 
 
 def prepare(rows, stations, multiplier=4):
+    from .surface_preparation_cache import prepared_rows
+    from .muscle_profile_cache import content_key
+    keys = tuple(content_key(np.asarray(row, dtype=float)) for row in stations)
+    return prepared_rows('stations', rows, (keys, multiplier), lambda: _prepare(rows, stations, multiplier))
+
+
+def _prepare(rows, stations, multiplier):
     from .fiber_surface import _densify_rows, _average_row_step, _row_inserts
     if len(rows) != len(stations): raise ValueError('FREE_CORRESPONDENCE_ROWS')
     values = [np.asarray(s, float) for s in stations]

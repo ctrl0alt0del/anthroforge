@@ -27,7 +27,7 @@ class FiberSurfaceSceneSync:
 
     def _sync_pass(self, root, scene, target_ids):
         collection = get_vis_collection(scene, self.collection_name)
-        index = build_vcp_object_index(collection, root.name)
+        index = build_vcp_object_index(scene, root.name)
         surfaces = tuple(root.af_vcp_system.fiber_surfaces)
         for surface in _target_surfaces(surfaces, target_ids):
             self._sync_surface(root, scene, collection, index, surface)
@@ -36,7 +36,7 @@ class FiberSurfaceSceneSync:
     def _sync_surface(self, root, scene, collection, index, surface):
         started = time.perf_counter()
         try:
-            result = evaluate_surface_record(root, scene, surface)
+            result = evaluate_surface_record(root, scene, surface, index=index)
             proxy = _ensure_proxy(collection, root, surface, index)
             update_mesh(proxy, result.vertices, result.faces)
             _mark_surface_current(proxy)
@@ -51,12 +51,12 @@ def _target_surfaces(surfaces, target_ids):
     return [surface for surface in surfaces if allowed is None or surface.id in allowed]
 
 
-def evaluate_surface_record(root, scene, surface):
+def evaluate_surface_record(root, scene, surface, index=None):
     if surface.construction_mode == "BRANCHED_LOFT":
         return _evaluate_branched(root, scene, surface)
     fibers = _source_fibers(root, surface)
     _validate_sources(surface, fibers)
-    rows = collect_surface_rows(root, scene, surface, fibers)
+    rows = collect_surface_rows(root, scene, surface, fibers, index=index)
     if not rows:
         raise ValueError("Fiber Surface source geometry is unavailable.")
     return evaluate_fiber_surface(rows, _surface_spec(surface, fibers))

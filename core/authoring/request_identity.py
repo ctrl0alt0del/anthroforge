@@ -22,6 +22,9 @@ def reserve(store, request, scopes, receipts=()):
 
 @contextmanager
 def reservation(store, request, scopes, receipts=()):
+    if request.get('op') == 'muscles.stacking_preview':
+        yield
+        return
     created = reserve(store, request, scopes, receipts)
     try: yield
     except BaseException:

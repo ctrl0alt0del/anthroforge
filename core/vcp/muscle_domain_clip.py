@@ -19,6 +19,8 @@ class DomainClipResult:
     faces: np.ndarray
     source_faces: np.ndarray
     face_parts: np.ndarray | None
+    material_indices: np.ndarray
+    material_weights: np.ndarray
 
 
 @dataclass
@@ -331,7 +333,18 @@ def _result(state, labels):
     base = np.asarray(state.base, dtype=np.float64).reshape((-1, 3))[used].copy()
     inflated = np.asarray(state.inflated, dtype=np.float64).reshape((-1, 3))[used].copy()
     parts = None if labels is None else labels[sources].copy()
-    return DomainClipResult(base, inflated, remap[faces], sources, parts)
+    ids, weights = _interpolation(state, used)
+    return DomainClipResult(base, inflated, remap[faces], sources, parts, ids, weights)
+
+
+def _interpolation(state, used):
+    count = len(state.distances)
+    ids = np.repeat(np.arange(len(state.base))[:, None], 2, axis=1)
+    weights = np.tile([1., 0.], (len(state.base), 1))
+    for (a, b), index in state.intersections.items():
+        t = state.distances[a] / (state.distances[a]-state.distances[b])
+        ids[index], weights[index] = (a, b), (1-t, t)
+    return ids[used], weights[used]
 
 
 def clip_domain(base_vertices, inflated_vertices, faces, plane, face_parts=None, *, tolerance=1e-10):

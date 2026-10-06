@@ -21,20 +21,23 @@ def evaluate(request, kind):
 
 
 def _evaluate(request, kind):
-    from .muscle_numeric import _inflate_grid, _initialized_spec, _valid_result
+    from .muscle_numeric import _inflate_grid, _valid_result
     from .fiber_surface import build_loft_topology
     from .free_surface import check_budget
     from mathutils import Vector
     grid = request.points; spec = request.spec
     check_budget(grid.shape[0] * grid.shape[1], 2 * grid.shape[0] * grid.shape[1], 4)
-    vectors = [[Vector(p) for p in row] for row in grid]; spec = _initialized_spec(vectors, spec)
+    if spec.initialize_control:
+        from dataclasses import replace
+        spec = replace(spec, control_world=tuple(Vector(grid[len(grid)//2, len(grid[0])//2])))
     if kind == 'NATIVE': inflated = _native(grid, spec)
-    else: inflated = _inflate_grid(vectors, spec)
+    else: inflated = _inflate_grid([[Vector(p) for p in row] for row in grid], spec)
     faces = build_loft_topology(*grid.shape[:2], spec.close_across_fibers, spec.closed_u, spec.topology_flip_normals)
     return _valid_result(request.muscle_id, grid, inflated, faces)
 
 
 def _native(grid, spec):
+    if not spec.inflation_enabled: return np.array(grid, copy=True)
     from .prepared_inflation_native import inflate_native
     from ..visualization.muscle_inflation import _edge_alpha, _length_fade, _inflation_params
     from .muscle_numeric import _InflationAdapter

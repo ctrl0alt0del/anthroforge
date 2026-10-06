@@ -29,9 +29,8 @@ class AuthoringService:
             return self.dispatch(request, started)
 
     def dispatch(self, request, started):
-        from . import native_profiles
-        if request["op"] in native_profiles.OPS:
-            return native_profiles.dispatch(self, request, started)
+        handler = specialized(request['op'])
+        if handler: return handler(self, request, started)
         check_live_preview(self, request)
         cached = replay_response(self, request)
         if cached:
@@ -54,6 +53,13 @@ class AuthoringService:
             require(record['draft_revision'] == params['expected_draft_revision'], 'STALE_DRAFT_REVISION')
 
 
+def specialized(operation):
+    from . import native_profiles, pairs
+    for module in (native_profiles, pairs):
+        if operation in module.OPS: return module.dispatch
+    return None
+
+
 def operations():
     result = {'anatomy.'+name: getattr(queries, name) for name in ('discover', 'query', 'requirements', 'export', 'inspect', 'explain', 'validate', 'compare')}
     result.update({'anatomy.'+name: getattr(drafts, name) for name in ('initialize', 'draft', 'patch', 'upgrade_regions')})
@@ -66,12 +72,17 @@ def operations():
     from .catalog import catalog
     result.update({'anatomy.cancel': cancel, 'anatomy.resume': construction.compile, 'anatomy.catalog': catalog})
     from .transfers import operations as transfer_operations
-    from .native_profiles import operations as profile_operations
-    return dict(result, **point_operations(), **visual.operations(), **transfer_operations(), **profile_operations())
+    return dict(result, **point_operations(), **visual.operations(), **transfer_operations(), **specialized_operations())
+
+
+def specialized_operations():
+    from . import native_profiles, pairs
+    return {**native_profiles.operations(), **dict.fromkeys(pairs.OPS, pairs.dispatch)}
 
 
 def capabilities():
-    return ['muscle_inflation_envelope.v1', 'transfer_constraints.v1', 'transfer_attachment_bands.v1', 'base_partition.v1', 'continuous_attachment.v1', 'shape_preserving_transfer.v1', 'smooth_native_base.v1', 'transfer_collisions.v1', 'transfer_correction.v1', 'free_fibers.v1', 'muscle_output_domain.v1', 'section_profile.v1', 'muscle_from_surface.v1', 'static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'branched_loft.v1', 'shared_points.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1', 'fiber_layout_planner.v1', 'skeleton_transfer.v1', 'muscle_base.v1', 'native_base.v1', 'skeleton_transfer.experimental.v1', 'muscle_base.experimental.v1']
+    # Relationship controls are additive to the existing protocol and native interfaces.
+    return ['muscle_relationships.v1', 'muscle_layer_order.v1', 'muscle_stacking.v1', 'muscle_pair_detection.v1', 'muscle_height_smoothing.v1', 'muscle_inflation_envelope.v1', 'transfer_constraints.v1', 'transfer_attachment_bands.v1', 'base_partition.v1', 'continuous_attachment.v1', 'shape_preserving_transfer.v1', 'smooth_native_base.v1', 'transfer_collisions.v1', 'transfer_correction.v1', 'free_fibers.v1', 'muscle_output_domain.v1', 'section_profile.v1', 'muscle_from_surface.v1', 'static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'branched_loft.v1', 'shared_points.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1', 'fiber_layout_planner.v1', 'skeleton_transfer.v1', 'muscle_base.v1', 'native_base.v1', 'skeleton_transfer.experimental.v1', 'muscle_base.experimental.v1']
 
 
 def point_operations():

@@ -1,4 +1,5 @@
 import bpy
+from .muscle_smoothing import draw as draw_smoothing
 from ...app.queries.root import root_for_context
 from ...app.queries.vcp import active_muscle_from_context, has_active_entity
 from ...core.visualization.muscle_inflation_modes import CTRL_POINT_MODE, muscle_inflation_mode
@@ -30,11 +31,11 @@ class AF_PT_VCPEditPanel(bpy.types.Panel):
     def _draw_inflation(self, layout, muscle):
         infl = layout.box()
         infl.label(text="Inflation"); infl.prop(muscle, "inflation_enabled", text="Enabled")
+        draw_smoothing(infl, muscle)
         from .muscle_profile import mode_menu, draw_profile
         mode_menu(infl, muscle)
         if muscle.inflation_mode == "SECTION_PROFILE":
-            draw_profile(infl, muscle)
-            return infl
+            draw_profile(infl, muscle); return infl
         col = infl.column()
         col.enabled = muscle.inflation_enabled
         self._draw_shared_inflation(col, muscle)

@@ -91,6 +91,8 @@ def _notify_warnings(root, scene, build, impacted, meta):
     for key, values in impacted.items():
         dirty.setdefault(key, set()).update(values)
     notify_action(root, scene, dirty, meta.get("event_type", ""), build.is_full)
+    from ..muscle_pairs.runtime import notify
+    notify(root, scene, dirty, meta.get("event_type", ""), build.is_full)
 
 
 def _with_dirty_provenance(meta, dirty):

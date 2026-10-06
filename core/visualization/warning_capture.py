@@ -7,11 +7,11 @@ from ..vcp.fiber_modes import is_loop_fiber
 from .fiber_sync_helpers import endpoint_world, touch_world
 
 
-def capture_colliders(scene, root, depsgraph, result):
+def capture_colliders(scene, root, depsgraph, result, objects=None):
     from ..vcp.fiber_collision import _build_collider_entry
     from ..vcp.fiber_v2_runtime import _capture_collider, _CAPTURE_CACHE, _capture_key
     from ..scp_runtime.common import iter_geometry_mesh_scp_objects
-    for obj in iter_geometry_mesh_scp_objects(scene, root.name):
+    for obj in iter_geometry_mesh_scp_objects(scene, root.name) if objects is None else objects:
         source = session.measure("collider_bounds", _build_collider_entry, obj, scene, depsgraph)
         hit = source is not None and _capture_key(source, len(result)) in _CAPTURE_CACHE
         value = None if source is None else session.measure("collider_capture", _capture_collider, source, len(result))
@@ -37,7 +37,7 @@ def pin_specs(fiber):
 def capture_pin(scene, root, runtime, spec):
     from ..vcp.v2.contracts import V2AnchorRole
     role, index, owner, raw, touch = spec
-    if not owner_in_scope(scene, root, owner):
+    if not owner_in_scope(scene, root, owner, runtime):
         raise ValueError(f"Missing or ambiguous parent geometry: {owner}")
     point = endpoint_world(root, scene, runtime, owner, raw) if touch is None else touch_world(root, scene, runtime, touch)
     if point is None:
@@ -45,7 +45,9 @@ def capture_pin(scene, root, runtime, spec):
     return preflight.FiberHardAnchor(tuple(float(v) for v in point), str(owner), V2AnchorRole(role), index)
 
 
-def owner_in_scope(scene, root, owner):
+def owner_in_scope(scene, root, owner, runtime=None):
+    if runtime is not None and 'geometry_by_owner' in runtime:
+        return len(runtime['geometry_by_owner'].get(str(owner), ())) == 1
     from ..scp_runtime.common import iter_geometry_mesh_scp_objects
     rows = [obj for obj in iter_geometry_mesh_scp_objects(scene, root.name)
             if str(obj.get("af_scp_id", "")) == str(owner) and not obj.get("af_scp_mirror")]
@@ -91,4 +93,15 @@ def capture_root(scene, root):
     layer = view_layer_for_scene(scene)
     if layer is None or layer.depsgraph is None:
         raise ValueError("Evaluated geometry is not ready")
-    return layer.depsgraph, attachment_runtime(scene, layer.depsgraph)
+    runtime = attachment_runtime(scene, layer.depsgraph)
+    runtime.update(geometry_index(scene, root))
+    return layer.depsgraph, runtime
+
+
+def geometry_index(scene, root):
+    from ..scp_runtime.common import iter_geometry_mesh_scp_objects
+    objects = tuple(iter_geometry_mesh_scp_objects(scene, root.name))
+    owners = {}
+    for obj in objects:
+        if not obj.get('af_scp_mirror'): owners.setdefault(str(obj.get('af_scp_id', '')), []).append(obj)
+    return dict(geometry_objects=objects, geometry_by_owner=owners)

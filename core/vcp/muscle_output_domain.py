@@ -61,11 +61,13 @@ def apply_result(request, result, face_parts=None):
     if plane is None or result.error:
         return result
     try:
+        if face_parts is None: face_parts = np.zeros(len(result.faces), dtype=int)
         clipped = clip_domain(result.base_vertices, result.inflated_vertices, result.faces, plane, face_parts)
         arrays = {key: _readonly_array(getattr(clipped, key), dtype, shape) for key, dtype, shape in
                   (('base_vertices', float, (-1, 3)), ('inflated_vertices', float, (-1, 3)), ('faces', int, (-1, 3)),
                    ('source_faces', int, (-1,)), ('face_parts', int, (-1,)))}
-        return replace(result, **arrays, row_count=0, column_count=0)
+        return replace(result, **arrays, row_count=0, column_count=0,
+            material_indices=clipped.material_indices, material_weights=clipped.material_weights)
     except (ValueError, RuntimeError) as error:
         return _invalid_result(request.muscle_id, 'DOMAIN_EVALUATION_FAILED: '+str(error))
 

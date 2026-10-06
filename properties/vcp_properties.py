@@ -641,5 +641,7 @@ class AF_VCP_System_Property(bpy.types.PropertyGroup):
 
 
 
+from .muscle_smoothing import install as _install_smoothing
+_install_smoothing(AF_MuscleVCP_Property)
 from .muscle_envelope import install as _install_envelope
 _install_envelope(AF_MuscleVCP_Property)

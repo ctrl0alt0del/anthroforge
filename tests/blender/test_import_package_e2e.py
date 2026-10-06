@@ -89,15 +89,17 @@ def _vcp_target():
     return root_obj, left, right, fiber(root_obj, left.id, right.id)
 
 
-def _source_snapshot():
-    root_obj = root()
-    root_obj.af_draft_skin_settings.collagen_depth_percent = 1.25
+def _source_bones(root_obj):
     left = scp_with_object(root_obj, "Left", mesh_object("Left"))
     right = scp_with_object(root_obj, "Right", mesh_object("Right", (2.0, 0.0, 0.0)))
     left.mirror_enabled, left.mirror_axis = True, "Y"
     set_mirror_status(left, "SOURCE")
     set_mirror_source_id(right, left.id)
     set_mirror_effective_axis(right, "Y")
+    return left, right
+
+
+def _source_fiber(root_obj, left, right):
     item = fiber(root_obj, left.id, right.id)
     item.a_attach_param = capture_mesh_attachment(root_obj, left, 0)
     item.b_attach_param = capture_mesh_attachment(root_obj, right, 0)
@@ -105,7 +107,16 @@ def _source_snapshot():
     touch.parent_id = left.id
     touch.attach_param = capture_mesh_attachment(root_obj, left, 0)
     touch.normal_offset = 0.125
+    from anthroforge.core.visualization.fiber_refinement import drain_fiber_refinements
+    assert bpy.ops.af.recompute_fiber(fiber_id=item.id) == {'FINISHED'}
+    assert drain_fiber_refinements() and item.node_attachments_json
     set_fiber_not_converged(item, True)
+    return item
+
+
+def _source_snapshot():
+    root_obj = root(); root_obj.af_draft_skin_settings.collagen_depth_percent = 1.25
+    left, right = _source_bones(root_obj); item = _source_fiber(root_obj, left, right)
     muscle = _muscle(root_obj, item.id)
     item.muscle_id = muscle.id
     set_muscle_inflation_ctrl_world(muscle, (7.0, 8.0, 9.0))
@@ -114,6 +125,17 @@ def _source_snapshot():
     row.owner_backsolve = False
     upsert_override(row, left.id, "OBJECT_ORIGIN", "KEEP")
     return root_snapshot(root_obj), right
+
+
+def _finish_import():
+    from time import sleep
+    from anthroforge.core.visualization import sync_runner, fiber_refinement
+    for _ in range(40):
+        sync_runner._flush_pending()
+        assert fiber_refinement.drain_fiber_refinements()
+        if not sync_runner._PENDING and not sync_runner._TAIL_PENDING: return
+        sleep(.025)
+    raise AssertionError('Import runtime did not complete')
 
 
 
@@ -128,6 +150,7 @@ class ImportPackageE2ETests(BlenderTestCase):
         reset_scene()
         scp_with_object(root(), "Existing", mesh_object("Existing"))
         result = import_package_from_blend(path, bpy.context)
+        _finish_import()
         root_obj = get_af_root(bpy.context.scene)
         self._assert_imported_relationships(root_obj, result)
         self._assert_imported_shortcuts_and_geometry(root_obj)

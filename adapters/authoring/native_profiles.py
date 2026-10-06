@@ -16,6 +16,16 @@ def inspect(port, target):
         from ...core.authoring.envelope_config import configuration
         state.update(envelope_api_required=True, capability="muscle_inflation_envelope.v1",
                      envelope_configuration_revision=digest(configuration(port.root, captured.muscle)))
+    return _smoothing_revision(port, captured.muscle, state)
+
+
+def _smoothing_revision(port, muscle, state):
+    from ...core.authoring.envelope_config import configuration
+    from ...core.authoring.codec import digest
+    if muscle is None: return state
+    value = configuration(port.root, muscle)
+    if any('smoothing' in part[side] for part in value['parts'] for side in ('a', 'b')):
+        state['envelope_configuration_revision'] = digest(value)
     return state
 
 

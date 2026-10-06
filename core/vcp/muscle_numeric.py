@@ -42,6 +42,7 @@ class MuscleNumericSpec:
     initialize_control: bool = False
     section_profile: object = None
     preserve_samples: bool = False
+    smoothing: object = None
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,7 @@ class MuscleNumericRequest:
     orientation_parity: int = 1
     output_domain: object = None
     envelope: object = None
+    prepared_base: object = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,8 @@ class MuscleNumericResult:
     inflated_sides: object = None
     inflated_sources: object = None
     diagnostics: object = None
+    material_indices: object = None
+    material_weights: object = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +104,14 @@ def resolve_muscle_backend(explicit=None, environment=None):
 
 
 def execute_muscle_batch(requests, backend=None):
+    from .muscle_smoothing import enabled, execute
+    requests = tuple(requests)
+    if any(enabled(r) for r in requests):
+        return execute(requests, backend, _execute_muscle_batch)
+    return _execute_muscle_batch(requests, backend)
+
+
+def _execute_muscle_batch(requests, backend=None):
     from .branched_numeric import BranchedMuscleRequest, execute_mixed
     kind, requests = resolve_muscle_backend(backend), tuple(requests)
     if any(r.envelope is not None for r in requests):

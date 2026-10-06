@@ -63,5 +63,6 @@ def result_for_scope(scope):
 
 
 def invalidate(scene=None, root=None, entity_ids=None):
-    for scope in scopes_for(scene, root, entity_ids):
-        REPOSITORY.state(scope, "PENDING", REPOSITORY.states[scope]["generation"] + 1)
+    with REPOSITORY.batch():
+        for scope in scopes_for(scene, root, entity_ids):
+            REPOSITORY.state(scope, "PENDING", REPOSITORY.states[scope]["generation"] + 1)

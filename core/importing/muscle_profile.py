@@ -8,7 +8,7 @@ def prepared_properties(values, geometry_scale=1):
     result.pop("af_authoring_envelope_receipt", None)
     result.pop("af_authoring_muscle_creation", None)
     result.pop('af_authoring_domain_receipt', None)
-    result = _domain_properties(result, geometry_scale)
+    result = _smoothing_properties(_domain_properties(result, geometry_scale), geometry_scale)
     if result.get("section_profile_version") != 1:
         return result
     spec = SectionProfileSpec(*(result.get(key, getattr(SectionProfileSpec(), field))
@@ -25,3 +25,13 @@ def _domain_properties(values, scale):
     domain = configuration(SimpleNamespace(**values))
     domain['origin'] = [value*float(scale) for value in domain['origin']]
     return dict(values, **native_values(domain))
+
+
+def _smoothing_properties(values, scale):
+    from types import SimpleNamespace
+    from ..vcp.height_smoothing import capture, properties
+    from dataclasses import asdict
+    if not any(key.startswith('inflation_smoothing_') for key in values): return values
+    spec = asdict(capture(SimpleNamespace(**values)))
+    for key in ('radius', 'max_change'): spec[key] *= scale
+    return dict(values, **properties(spec))

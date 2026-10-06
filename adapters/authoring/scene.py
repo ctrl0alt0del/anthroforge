@@ -8,6 +8,34 @@ from ...core.authoring.model import MeshSnapshot, SceneSnapshot, readonly
 
 
 class StaticScene(BlenderScene):
+    def pairs_inspect(self):
+        from .pairs import inspect
+        return inspect(self)
+
+    def pairs_refresh(self):
+        from .pairs import refresh
+        return refresh(self)
+
+    def pairs_footprint(self, index, revision):
+        from .pairs import footprint
+        return footprint(self, index, revision)
+
+    def pairs_order_footprint(self, index, revision):
+        from .pairs import order_footprint
+        return order_footprint(self, index, revision)
+
+    def stacking_preview(self, configuration):
+        from ...core.muscle_stacking.preview import preview
+        return preview((self.scene, self.root), configuration)
+
+    def pairs_mutation(self, configuration, guards=None):
+        from .pairs import mutation
+        return mutation(self, configuration, guards)
+
+    def pairs_receipt(self, request_id, value=None):
+        from .pairs import receipt
+        return receipt(self, request_id, value)
+
     def remember_journal(self, directory):
         self.root['af_authoring_journal'] = str(directory)
 

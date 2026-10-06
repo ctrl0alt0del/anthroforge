@@ -12,7 +12,8 @@ def selection_order(scene):
 
 def set_selection_order(scene, names):
     if scene is not None:
-        scene.af_selection_order_json = json.dumps([str(v) for v in tuple(names or ()) if str(v or "")])
+        value = json.dumps([str(v) for v in tuple(names or ()) if str(v or "")])
+        if getattr(scene, 'af_selection_order_json', '') != value: scene.af_selection_order_json = value
 
 
 def _is_selected(obj):

@@ -110,7 +110,15 @@ def capture_attachment_from_proxy_vertex(root, scene, parent_id, vertex_index, s
 
 
 def _resolved_frame(root, scene, parent_id, raw, runtime):
-    return resolve_surface_frame(_parent_mesh(root, scene, parent_id), raw, runtime, scene)
+    parent = _indexed_parent(root, scene, parent_id, runtime)
+    return resolve_surface_frame(parent, raw, runtime, scene)
+
+
+def _indexed_parent(root, scene, parent_id, runtime):
+    if runtime is not None and 'geometry_by_owner' in runtime:
+        rows = runtime['geometry_by_owner'].get(str(parent_id), ())
+        return rows[0] if len(rows) == 1 else None
+    return _parent_mesh(root, scene, parent_id)
 
 
 def resolve_attachment_world(root, scene, parent_id, raw, runtime=None):

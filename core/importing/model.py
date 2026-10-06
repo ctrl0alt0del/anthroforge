@@ -119,6 +119,7 @@ class FiberSurfaceSnapshot:
     name: str
     props: dict
     fiber_ids: list[str] = field(default_factory=list)
+    material_stations: str = ""
 
     @classmethod
     def from_dict(cls, data):
@@ -200,6 +201,7 @@ class PackageSnapshot:
     draft_skin_settings: dict = field(default_factory=_default_draft_skin_settings)
     topology_settings: dict = field(default_factory=default_topology_settings)
     branching: dict = field(default_factory=dict)
+    relationships: dict | None = None
 
     @classmethod
     def from_dict(cls, data):

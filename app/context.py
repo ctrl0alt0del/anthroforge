@@ -21,6 +21,13 @@ def _active_scene():
     return None if ctx is None else getattr(ctx, "scene", None)
 
 
+def selected_objects_for_scene(scene):
+    context = getattr(bpy, 'context', None)
+    if getattr(context, 'scene', None) == scene:
+        return getattr(context, 'selected_objects', None)
+    return None
+
+
 def addon_context(root=None, scene=None, depsgraph=None, scheduler=None):
     scene = scene or _active_scene()
     root = root or get_af_root(scene)

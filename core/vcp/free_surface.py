@@ -28,6 +28,11 @@ def sample_at(points, target, closed=False):
 
 
 def prepare_rows(rows, closed=False, densify=True, multiplier=1):
+    from .surface_preparation_cache import prepared_rows
+    return prepared_rows('union', rows, (closed, densify, multiplier), lambda: _prepare_rows(rows, closed, densify, multiplier))
+
+
+def _prepare_rows(rows, closed, densify, multiplier):
     from .fiber_surface import _average_row_step, _row_inserts, _densify_rows
     rows = align_closed_rows(rows) if closed else rows
     target = union_stations(rows, closed)

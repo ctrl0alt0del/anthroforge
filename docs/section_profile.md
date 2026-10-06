@@ -38,6 +38,27 @@ ordinary profile to a legacy mode before adding a branch. Directly assigning
 Section Profile to either part reports `PROFILE_DOMAIN_UNSUPPORTED` and clears
 only that muscle's invalid output; it never uses Control Point as a fallback.
 
+## Preparation and cache lifetime
+
+The shared preparation cache uses a 64 MiB accounted-byte budget with LRU
+eviction and no fixed entry-count limit. Arrays are read-only. A rebuild request
+retains its prepared base directly, so eviction cannot force a second base
+preparation within that request. Free surface sampling, prepared bases, profile
+frames and revision strings share this budget. Source geometry, sampling policy,
+backend and numerical version remain part of the relevant cache keys.
+
+Revision strings use the existing persisted hash algorithm. Caching avoids
+repeated list conversion and serialization; it does not change authoring guards
+or the saved schema. Load, undo, redo and unregister clear the cache. Active
+requests may retain arrays after cache eviction until the current pass ends;
+the cache byte count is not a cap on Blender's total process memory.
+
+Capture builds one root object index per muscle pass. Control creation/removal
+updates that index, including known absence. Unchanged mesh checks use bulk RNA
+array reads for vertices and polygon layout. Disabled native Free inflation
+returns the prepared grid before allocating inflation weights. Control-point
+row conversion runs only when initialization or a selected control needs it.
+
 ## Protocol 0.4
 
 `anatomy.discover` advertises `section_profile.v1` and `muscle_from_surface.v1`.

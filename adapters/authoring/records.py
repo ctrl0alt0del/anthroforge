@@ -15,7 +15,8 @@ def record(item):
 
 
 def _record_values(item):
-    values = scalar_dict(item)
+    skip = [p.identifier for p in item.bl_rna.properties if p.identifier.startswith('proxy_')]
+    values = scalar_dict(item, skip if item.bl_rna.identifier == 'AF_DataShortcut_Property' else ())
     if _default_profile(item, values):
         values = {key: value for key, value in values.items() if key not in PROFILE_FIELDS}
     if values.get('output_domain_mode') == 'FULL':

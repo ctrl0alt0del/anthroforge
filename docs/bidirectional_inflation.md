@@ -40,7 +40,7 @@ The previous `profile_preview`, `profile_configure`, and branch inflation mutati
 - `core/vcp/muscle_envelope.py`: prepared-side caching, orientation, crop and result assembly.
 - `native/fiber_ccd/af_muscle_envelope_*.hpp`: native Section Profile evaluation, existing legacy-kernel access, composition and geometry diagnostics.
 
-Build with `native/fiber_ccd/build_windows.ps1`; the default library is `af_fiber_ccd_v3_20.dll`. Missing envelope exports fail explicitly. There is no Python numerical fallback for this feature. Existing branch preparation and connector orchestration are reused; the solver and transfer implementation are unchanged.
+Build with `native/fiber_ccd/build_windows.ps1`; the default library is `af_fiber_ccd_v3_28.dll`. Missing envelope exports fail explicitly. There is no Python numerical fallback for this feature. Existing branch preparation and connector orchestration are reused; the solver and transfer implementation are unchanged.
 
 ## Validation and practical limits
 

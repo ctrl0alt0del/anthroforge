@@ -108,6 +108,7 @@ def faces_for(result, inflated=False):
 
 def geometry(result):
     value = dict(base=result.base_vertices.tolist(), inflated=result.inflated_vertices.tolist(), faces=result.faces.tolist())
+    if result.diagnostics is not None: value['diagnostics'] = result.diagnostics
     if result.side_a is not None:
         value.update(side_a=result.side_a.tolist(), side_b=result.side_b.tolist(),
                      inflated_faces=result.inflated_faces.tolist(), face_sides=result.inflated_sides.tolist(),

@@ -17,7 +17,9 @@ def state(root, fiber):
 
 
 def save_state(root, fiber, value):
+    from .free_fiber_lifecycle import remember
     root[PREFIX + fiber.id] = json.dumps(value, allow_nan=False)
+    remember(root)
 
 
 def fingerprint(root, scene, fiber, depsgraph=None):

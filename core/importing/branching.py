@@ -31,7 +31,13 @@ def restore_graph(state):
     for source, graph in data['surfaces'].items():
         if source in state.fiber_surfaces:
             _restore_surface(state, source, graph, point_ids)
+    _finish_graph(state, point_ids, temporary)
+
+
+def _finish_graph(state, point_ids, temporary):
+    from .free_correspondence import restore
     remap_state(state, point_ids)
+    restore(state)
     _discard_temporary(state.root, temporary)
 
 

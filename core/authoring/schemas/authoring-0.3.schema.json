@@ -1924,6 +1924,39 @@
                   },
                   "parameters": {
                     "type": "object"
+                  },
+                  "smoothing": {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "enum": [
+                          "OFF",
+                          "HEIGHT"
+                        ]
+                      },
+                      "radius": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1000
+                      },
+                      "strength": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1000
+                      },
+                      "max_change": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1000
+                      }
+                    },
+                    "required": [
+                      "mode",
+                      "radius",
+                      "strength",
+                      "max_change"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -1948,6 +1981,39 @@
                   },
                   "parameters": {
                     "type": "object"
+                  },
+                  "smoothing": {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "enum": [
+                          "OFF",
+                          "HEIGHT"
+                        ]
+                      },
+                      "radius": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1000
+                      },
+                      "strength": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1000
+                      },
+                      "max_change": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1000
+                      }
+                    },
+                    "required": [
+                      "mode",
+                      "radius",
+                      "strength",
+                      "max_change"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [

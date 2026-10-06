@@ -6,7 +6,7 @@ from ..vcp.fiber_modes import is_loop_fiber
 from ..vcp.fiber_surface import evaluate_fiber_surface, FiberSurfaceSpec
 from ..vcp.muscle_numeric import execute_muscle_batch, make_muscle_request
 from ..vcp.muscle_section_profile import PROFILE_VERSION
-from ..vcp.muscle_profile_cache import content_key
+from ..vcp.muscle_profile_cache import content_key, cached
 from .fiber_sync_helpers import cached_fiber_points
 from .muscle_sync_runtime import expanded_rows_with_provenance
 from ..vcp.muscle_output_domain import DEFAULTS, revision as domain_revision
@@ -23,6 +23,7 @@ class ProfileTarget:
     current: bool = False
     reasons: tuple = ()
     assembly: object = None
+    prepared_base: object = None
 
     @property
     def eligible(self):
@@ -43,27 +44,27 @@ def find_target(root, muscle_id="", surface_id=""):
     return muscle, source
 
 
-def capture_target(root, scene, muscle_id="", surface_id=""):
+def capture_target(root, scene, muscle_id="", surface_id="", index=None):
     muscle, source = find_target(root, muscle_id, surface_id)
     reasons = _domain_reasons(root, source)
     try:
         if getattr(source, 'construction_mode', '') == 'BRANCHED_LOFT':
-            return _branched_target(root, scene, muscle, source, reasons)
-        fibers, rows = current_rows(root, scene, source)
+            return _branched_target(root, scene, muscle, source, reasons, index)
+        fibers, rows = current_rows(root, scene, source, index)
         rows, chart = expanded_rows_with_provenance(root, source, rows, fibers)
         payload = _payload(source, fibers, rows)
-        revision = domain_revision(_revision(payload, chart, source), muscle)
-        return ProfileTarget(muscle, source, payload, chart, revision, True, reasons)
+        revision, prepared = _prepared_revision(payload, chart, source)
+        return ProfileTarget(muscle, source, payload, chart, domain_revision(revision, muscle), True, reasons, prepared_base=prepared)
     except (ValueError, TypeError) as error:
         return ProfileTarget(muscle, source, reasons=(str(error), *reasons))
 
 
-def _branched_target(root, scene, muscle, source, reasons):
+def _branched_target(root, scene, muscle, source, reasons, index=None):
     from .branched_surface_capture import capture_assembly, source_surface
     from ..vcp.branched_surface import assemble
     sources = (source.main_surface_id, *(c.surface_id for c in source.branches))
     for key in sources:
-        current_rows(root, scene, source_surface(root, key))
+        current_rows(root, scene, source_surface(root, key), index)
     assembly = capture_assembly(root, scene, source)
     vertices, faces = assemble(assembly)
     keys = tuple((c.id, c.boundary_fiber_id, tuple(r.point_id for r in c.roots)) for c in source.branches)
@@ -94,25 +95,28 @@ def validate_domain(source, fibers):
         raise ValueError("PROFILE_GRID_INVALID: source fibers must share a node count.")
 
 
-def current_rows(root, scene, source):
+def current_rows(root, scene, source, index=None):
+    from .vcp_object_index import build_vcp_object_index
+    index = build_vcp_object_index(scene, root.name) if index is None else index
     fibers = _source_fibers(root, source)
     if not fibers or any(item is None for item in fibers):
         raise ValueError("PROFILE_BASE_NOT_CURRENT: Update source fibers first.")
-    _check_source_proxies(root, scene, source, fibers)
-    rows = [cached_fiber_points(scene, root.name, item.id) for item in fibers]
+    _check_source_proxies(root, scene, source, fibers, index)
+    rows = [cached_fiber_points(scene, root.name, item.id, index=index) for item in fibers]
     if any(row is None or len(row) < 2 for row in rows):
         raise ValueError("PROFILE_BASE_NOT_CURRENT: Update source fibers first.")
     return fibers, rows
 
 
-def _check_source_proxies(root, scene, source, fibers):
-    objects = tuple(obj for obj in scene.objects if obj.get("af_root_name") == root.name)
+def _check_source_proxies(root, scene, source, fibers, index=None):
+    from .vcp_object_index import build_vcp_object_index
+    index = build_vcp_object_index(scene, root.name) if index is None else index
     for fiber in fibers:
-        proxy = next((obj for obj in objects if obj.get("af_fiber_proxy") and not obj.get("af_fiber_mirror_proxy")
-                      and obj.get("af_fiber_id") == fiber.id), None)
+        proxy = index['fiber'].get(str(fiber.id))
         if proxy is None or proxy.get("af_fiber_output_state") != "CURRENT":
             raise ValueError("PROFILE_BASE_NOT_CURRENT: Update source fibers first.")
-    stale = any(obj.get("af_fiber_surface_id") == source.id and obj.get("af_fiber_surface_output_state") == "STALE" for obj in objects)
+    stale = any(obj.get('af_fiber_surface_id') == source.id and obj.get('af_fiber_surface_output_state') == 'STALE'
+                for obj in index['fiber_surface'].values())
     if stale:
         raise ValueError("PROFILE_BASE_NOT_CURRENT: Update source fibers first.")
 
@@ -146,14 +150,25 @@ def default_muscle():
 
 
 def _revision(payload, chart, source):
+    return _prepared_revision(payload, chart, source)[0]
+
+
+def _prepared_revision(payload, chart, source):
     from .muscle_numeric_runtime import _make_request
-    request = _make_request(default_muscle(), payload)
-    from ..vcp.muscle_profile_numeric import prepare_profile
+    from ..vcp.muscle_profile_numeric import prepare_profile, prepared_key, PreparedBase
     from ..vcp.muscle_numeric import resolve_muscle_backend
-    result = prepare_profile(request, resolve_muscle_backend().value, execute_muscle_batch)
-    if result.error:
-        raise ValueError(result.error)
+    request = _make_request(default_muscle(), payload)
+    backend = resolve_muscle_backend().value
+    result = prepare_profile(request, backend, execute_muscle_batch)
+    if result.error: raise ValueError(result.error)
     from ..vcp.muscle_section_profile import checked_grid
     checked_grid(result.base_vertices.reshape(result.row_count, result.column_count, 3))
     identities = tuple((row["fiber_id"], row["mirrored"]) for row in chart)
-    return content_key(result.base_vertices, PROFILE_VERSION, source.id, identities, payload[0].tolist(), np.sort(result.faces, axis=1).tolist())
+    key = prepared_key(request, backend)
+    revision = cached(('profile-revision', key, source.id, identities), lambda: _revision_digest(result, payload, source.id, identities))
+    return revision, PreparedBase(key, result)
+
+
+def _revision_digest(result, payload, source_id, identities):
+    return content_key(result.base_vertices, PROFILE_VERSION, source_id, identities,
+                       payload[0].tolist(), np.sort(result.faces, axis=1).tolist())

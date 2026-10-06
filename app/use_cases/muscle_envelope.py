@@ -86,5 +86,6 @@ def _details(target):
     from ...core.authoring.codec import decode
     modes = ['control_point', 'distributed'] + ([] if target.assembly else ['section_profile'])
     return dict(supported_modes=modes, depth_convention='distance_from_unchanged_base',
+                smoothing=dict(capability='muscle_height_smoothing.v1', modes=['OFF', 'HEIGHT'], scope='per_part_per_side'),
                 diagnostics=decode(target.muscle.get('_af_rt_envelope_diagnostics', '{}')),
                 diagnostics_scope='last_published_geometry; inspect eligibility/current before use')

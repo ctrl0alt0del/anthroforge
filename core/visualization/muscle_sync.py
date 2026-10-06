@@ -27,7 +27,7 @@ from .muscle_sync_runtime import collect_muscle_rows, ensure_inflation_ctrl
 from .muscle_numeric_runtime import capture_muscle_work, execute_muscle_work, publish_muscle_work
 from .fiber_surface_sync import evaluate_surface_record
 from .control_runtime import active_entity_id
-from .vcp_object_index import build_vcp_object_index
+from .vcp_object_index import build_muscle_object_index, remember_object, forget_object
 
 
 def _fiber_stale(scene, root_name, fiber_id):
@@ -62,10 +62,10 @@ class MuscleSceneSync:
         return find_inflation_ctrl(vis_col, root_name, muscle_id, index=self._object_index)
 
     def _create_muscle_proxy(self, vis_col, root, muscle_id, surface_type):
-        return create_muscle_proxy(vis_col, root, muscle_id, surface_type)
+        return remember_object(self._object_index, create_muscle_proxy(vis_col, root, muscle_id, surface_type))
 
     def _create_inflation_ctrl(self, vis_col, root, muscle_id):
-        return create_inflation_ctrl(vis_col, root, muscle_id)
+        return remember_object(self._object_index, create_inflation_ctrl(vis_col, root, muscle_id))
 
     def _ensure_material(self, obj, active=False):
         ensure_material(obj, active=active)
@@ -77,9 +77,11 @@ class MuscleSceneSync:
         return collect_fiber_props(root, muscle)
 
     def _remove_proxy_obj(self, obj):
+        forget_object(self._object_index, obj)
         remove_proxy_obj(obj)
 
     def _remove_ctrl_obj(self, obj):
+        forget_object(self._object_index, obj)
         remove_ctrl_obj(obj)
 
     def _nearest_on_mesh_surface(self, mesh_obj, world_point, depsgraph=None):
@@ -150,11 +152,12 @@ class MuscleSceneSync:
         self._set_output_state((base_obj, infl_obj), "STALE")
 
     def _collect_points_with_fallback(self, root, scene, muscle, ordered_fibers):
-        ordered_points = collect_muscle_rows(root, scene, muscle, ordered_fibers)
+        ordered_points = collect_muscle_rows(root, scene, muscle, ordered_fibers, index=self._object_index)
         if ordered_points or self._runtime_request_active():
             return ordered_points
         self._request_fiber_fallback(root, scene, ordered_fibers)
-        return collect_muscle_rows(root, scene, muscle, ordered_fibers)
+        if self._object_index is not None: self._object_index = build_muscle_object_index(scene, root.name)
+        return collect_muscle_rows(root, scene, muscle, ordered_fibers, index=self._object_index)
 
     def _runtime_request_active(self):
         from .sync_runner import runtime_request_active
@@ -245,7 +248,7 @@ class MuscleSceneSync:
 
     def _sync_root_pass(self, root, scene, target_muscle_ids):
         vis_col = self._get_vis_collection(scene)
-        self._object_index = build_vcp_object_index(vis_col, root.name)
+        self._object_index = build_muscle_object_index(scene, root.name)
         vcp = root.af_vcp_system
         all_ids, target_ids = self._muscle_ids_to_sync(vcp, target_muscle_ids)
         active_id = self._selected_muscle_id(vcp, root, scene)

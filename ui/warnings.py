@@ -1,11 +1,20 @@
 """Token-only, save-cleared UI projection of the file-wide Python repository."""
 import bpy
+from time import perf_counter
 from bpy.app.handlers import persistent
 from ..core.warnings.session import REPOSITORY
 from ..core.warnings.repository import sort_key
 
 _UNSUBSCRIBE = None
 _PROJECTING = False
+_LAST_REFRESH = 0.0
+
+
+def request_refresh(repository=None):
+    pending = any(row['status'] in ('PENDING', 'CHECKING') for row in REPOSITORY.states.values())
+    if not pending or perf_counter()-_LAST_REFRESH >= .1: return refresh()
+    if not bpy.app.timers.is_registered(_refresh_when_ready):
+        bpy.app.timers.register(_refresh_when_ready, first_interval=max(0., .1-(perf_counter()-_LAST_REFRESH)))
 
 
 def select_index(manager, context):
@@ -66,12 +75,13 @@ def status_label(status):
 
 
 def refresh(_repository=None):
-    global _PROJECTING
+    global _PROJECTING, _LAST_REFRESH
     if _defer_refresh():
         return
     _PROJECTING = True
     try:
         _project_rows()
+        _LAST_REFRESH = perf_counter()
         redraw()
     finally:
         _PROJECTING = False
@@ -93,11 +103,18 @@ def _refresh_when_ready():
 
 
 def _project_rows():
+    tokens = tuple(warning.id for warning in sorted(REPOSITORY.records.values(), key=sort_key))
     for manager in bpy.data.window_managers:
-        manager.af_warning_rows.clear()
-        for warning in sorted(REPOSITORY.records.values(), key=sort_key):
-            manager.af_warning_rows.add().token = warning.id
-        manager.af_warning_index = -1
+        _project_manager(manager, tokens)
+
+
+def _project_manager(manager, tokens):
+    current = tuple(row.token for row in manager.af_warning_rows)
+    if current == tokens: return
+    selected = current[manager.af_warning_index] if 0 <= manager.af_warning_index < len(current) else None
+    manager.af_warning_rows.clear()
+    for token in tokens: manager.af_warning_rows.add().token = token
+    manager.af_warning_index = tokens.index(selected) if selected in tokens else -1
 
 
 def _cancel_deferred_refresh():
@@ -139,7 +156,7 @@ def register():
     wm.af_warning_rows = bpy.props.CollectionProperty(type=AF_WarningRow, options={"SKIP_SAVE"})
     wm.af_warning_index = bpy.props.IntProperty(default=-1, update=select_index, options={"SKIP_SAVE"})
     wm.af_warnings_expanded = bpy.props.BoolProperty(default=False, options={"SKIP_SAVE"})
-    _UNSUBSCRIBE = REPOSITORY.subscribe(refresh)
+    _UNSUBSCRIBE = REPOSITORY.subscribe(request_refresh)
     for name, callback in projection_handlers():
         getattr(bpy.app.handlers, name).append(callback)
     refresh()

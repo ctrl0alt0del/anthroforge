@@ -625,12 +625,14 @@ def apply_snapshot(snapshot, stage_root, root, context):
 
 
 def _apply_snapshot(snapshot, stage_root, root, context):
+    from ..muscle_relationships.importing import merge
     state = MergeState(root, context.scene, _target_collection(context), snapshot, stage_root, stage_bound_map(stage_root))
     _apply_draft_skin_settings(state)
     _apply_topology_settings(state)
     _create_scps(state)
     _set_scp_parents(state)
     _create_vcps(state)
+    merge(state)
     _create_shortcuts(state)
     sync_all_scp_roles(root)
     cleanup_scp_dependents(root)
@@ -645,11 +647,13 @@ def apply_scp_diff_snapshot(snapshot, stage_root, root, context):
 
 
 def _apply_scp_diff_snapshot(snapshot, stage_root, root, context):
+    from ..muscle_relationships.importing import merge
     state = MergeState(root, context.scene, _target_collection(context), snapshot, stage_root, stage_bound_map(stage_root))
     _seed_existing_scps(state)
     _create_missing_scps(state)
     _set_imported_scp_parents(state)
     _create_diff_vcps(state)
+    merge(state)
     _create_diff_shortcuts(state)
     sync_all_scp_roles(root)
     cleanup_scp_dependents(root)

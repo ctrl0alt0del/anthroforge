@@ -1,4 +1,4 @@
-param([string]$OutputName = "af_fiber_ccd_v3_20.dll")
+param([string]$OutputName = "af_fiber_ccd_v3_28.dll")
 $ErrorActionPreference = "Stop"
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $VsWhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -17,12 +17,22 @@ $Define = if ($OutputName -match "experiment") { "/DAF_V3_OPERATION_EXPERIMENT=1
 if (-not (Test-Path $Clang)) { throw "C++ Clang Compiler for Windows is unavailable" }
 if (-not (Test-Path $VcVars)) { throw "Visual C++ x64 build tools are unavailable" }
 if (-not (Test-Path $Runtime)) { throw "LLVM OpenMP runtime is unavailable" }
-$Command = 'call "{0}" && "{1}" /nologo /O2 /openmp /EHsc /std:c++17 /LD {2} "{3}" /Fo:"{4}" /Fe:"{5}" /clang:-ffp-model=precise /link /NOIMPLIB' -f $VcVars, $Clang, $Define, $Source, $Object, $Staged
+$Smoothing = Join-Path $Here '../smoothing'
+$CoreObject = Join-Path $Here "$Stem.smoothing.obj"
+$Flags = '/MD /DNOMINMAX /DEIGEN_DONT_PARALLELIZE /DEIGEN_MPL2_ONLY /I"{0}/include" /I"{0}/vendor"' -f $Smoothing
+$Command = 'call "{0}" && "{1}" /nologo /O2 /EHsc /std:c++17 {2} /c "{3}/src/core.cpp" /Fo:"{4}"' -f $VcVars,$Clang,$Flags,$Smoothing,$CoreObject
+cmd.exe /d /s /c $Command
+if ($LASTEXITCODE -ne 0) { throw "Stacking smoothing core build failed: $LASTEXITCODE" }
+$Command = 'call "{0}" && "{1}" /nologo /O2 /openmp /EHsc /std:c++17 /c {2} {5} "{3}" /Fo:"{4}" /clang:-ffp-model=precise' -f $VcVars,$Clang,$Define,$Source,$Object,$Flags
 cmd.exe /d /s /c $Command
 if ($LASTEXITCODE -ne 0) { throw "Native Fiber CCD build failed: $LASTEXITCODE" }
+$Command = 'call "{0}" && "{1}" /LD /MD /openmp "{2}" "{3}" /Fe:"{4}" /link /NOIMPLIB' -f $VcVars,$Clang,$Object,$CoreObject,$Staged
+cmd.exe /d /s /c $Command
+if ($LASTEXITCODE -ne 0) { throw "Native stacking link failed: $LASTEXITCODE" }
 Move-Item -LiteralPath $Staged -Destination $Output -Force
 $RuntimeTarget = Join-Path $Here "libomp.dll"
 $RuntimeMatches = (Test-Path $RuntimeTarget) -and ((Get-FileHash $Runtime).Hash -eq (Get-FileHash $RuntimeTarget).Hash)
 if (-not $RuntimeMatches) { Copy-Item -LiteralPath $Runtime -Destination $RuntimeTarget -Force }
 Remove-Item -LiteralPath $Object -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $Export -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $CoreObject -ErrorAction SilentlyContinue

@@ -8,7 +8,7 @@ from .muscle_sync_helpers import mark_inflation_ctrl_location
 from .mirror_rules import axis_index, effective_rule_for_muscle
 
 
-def collect_fiber_points(root, scene, fiber_props):
+def collect_fiber_points(root, scene, fiber_props, index=None):
     from .fiber_sync import register_fiber_sync
 
     fsync = register_fiber_sync()
@@ -17,25 +17,25 @@ def collect_fiber_points(root, scene, fiber_props):
         return None
     out = []
     for f in fiber_props:
-        pts = _fiber_points(scene, root, fsync, vis_col, f)
+        pts = _fiber_points(scene, root, fsync, vis_col, f, index)
         if pts is None or len(pts) < 2:
             return None
         out.append(pts)
     return out
 
 
-def _fiber_points(scene, root, fsync, vis_col, fiber):
+def _fiber_points(scene, root, fsync, vis_col, fiber, index=None):
     _ = fsync, vis_col
-    return cached_fiber_points(scene, root.name, fiber.id)
+    return cached_fiber_points(scene, root.name, fiber.id, index=index)
 
 
-def collect_muscle_rows(root, scene, muscle, fiber_props):
-    rows = collect_fiber_points(root, scene, fiber_props)
+def collect_muscle_rows(root, scene, muscle, fiber_props, index=None):
+    rows = collect_fiber_points(root, scene, fiber_props, index=index)
     return _expanded_rows(root, muscle, rows)
 
 
-def collect_surface_rows(root, scene, surface, fiber_props):
-    rows = collect_fiber_points(root, scene, fiber_props)
+def collect_surface_rows(root, scene, surface, fiber_props, index=None):
+    rows = collect_fiber_points(root, scene, fiber_props, index=index)
     return _expanded_rows(root, surface, rows)
 
 

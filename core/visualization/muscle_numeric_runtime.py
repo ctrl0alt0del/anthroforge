@@ -1,6 +1,6 @@
 """Blender capture and publication around the backend-neutral Muscle batch."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from mathutils import Vector
@@ -178,9 +178,11 @@ def _free_legacy_input(sync, root, scene, muscle, fibers, missing):
 
 
 def _numeric_spec(muscle, config, target, densify, closed_u, initialize=False):
+    from ..vcp.height_smoothing import capture
     values = _topology_values(config, target, densify, closed_u)
     values.update(_inflation_values(muscle))
     values["initialize_control"] = bool(initialize)
+    values['smoothing'] = capture(muscle)
     if muscle.inflation_mode == "SECTION_PROFILE":
         from ..vcp.muscle_section_profile import profile_from_muscle
         values["section_profile"] = profile_from_muscle(muscle)
@@ -234,10 +236,19 @@ def _profile_unchanged(sync, vis_col, root, work, result):
 
 def mesh_matches(obj, values, faces):
     import numpy as np
-    actual = np.empty(len(obj.data.vertices)*3, dtype=np.float32)
-    obj.data.vertices.foreach_get("co", actual)
-    return (np.array_equal(actual.reshape(-1, 3), np.asarray(values, dtype=np.float32)) and
-            np.array_equal([tuple(face.vertices) for face in obj.data.polygons], faces))
+    mesh = obj.data
+    if len(mesh.vertices) != len(values) or len(mesh.polygons) != len(faces): return False
+    actual = np.empty((len(mesh.vertices), 3), dtype=np.float32)
+    mesh.vertices.foreach_get("co", actual.ravel())
+    if not np.array_equal(actual, np.asarray(values, dtype=np.float32)): return False
+    loops = np.empty(len(mesh.loops), dtype=np.int32)
+    counts = np.empty(len(mesh.polygons), dtype=np.int32)
+    starts = np.empty(len(mesh.polygons), dtype=np.int32)
+    mesh.loops.foreach_get("vertex_index", loops)
+    mesh.polygons.foreach_get("loop_total", counts); mesh.polygons.foreach_get("loop_start", starts)
+    lengths = np.asarray([len(face) for face in faces], dtype=np.int32)
+    flat = np.concatenate(faces) if len(faces) else np.empty(0, dtype=np.int32)
+    return np.array_equal(counts, lengths) and np.array_equal(starts, np.cumsum(lengths)-lengths) and np.array_equal(loops, flat)
 
 
 def _publish_missing(sync, vcp, work):
@@ -257,6 +268,8 @@ def _publish_valid(sync, vis_col, root, scene, vcp, work, result, batch):
     _domain_metadata(work, result)
     _envelope_metadata(work, result)
     _mark_valid(sync, vcp, work, batch)
+    from ..muscle_pairs.capture import remember
+    remember(root, work, result, scene)
 
 
 def _domain_metadata(work, result):
@@ -277,8 +290,9 @@ def _sync_control(sync, vis_col, root, scene, vcp, work, result):
     ensure = sync._selected_muscle_id(vcp, root, scene) == work.muscle.id
     settings, key, index = selected_settings(root, work.muscle)
     settings.id = work.muscle.id
-    rows, spec = _part_control(work.request, result, index)
+    spec = work.request.part_specs[index] if hasattr(work.request, 'assembly') else work.request.spec
     if work.request.envelope and work.muscle.envelope_edit_side == 'B': spec = work.request.envelope.secondary[index]
+    rows = _part_control(work.request, result, index)[0] if spec.initialize_control or (ensure and settings.inflation_mode == 'CTRL_POINT') else ()
     if spec.initialize_control: _store_initial_control(settings, rows)
     points = [[Vector(point) for point in row] for row in rows] if ensure and settings.inflation_mode == "CTRL_POINT" else ()
     _bind_control(sync, vis_col, root, work.muscle.id, key, work.muscle.envelope_edit_side if work.request.envelope else 'A')
@@ -335,10 +349,10 @@ def _capture_profile_work(sync, vis_col, root, scene, muscle):
     base, inflated = sync._find_muscle_proxy(vis_col, root.name, muscle.id), sync._find_muscle_proxy(vis_col, root.name, muscle.id, "INFL")
     try:
         profile_from_muscle(muscle)
-        target = capture_target(root, scene, muscle.id)
+        target = capture_target(root, scene, muscle.id, index=sync._object_index)
         if not target.eligible:
             raise ValueError("; ".join(target.reasons))
-        request = _make_request(muscle, target.payload)
+        request = replace(_make_request(muscle, target.payload), prepared_base=target.prepared_base)
         return MuscleNumericWork(muscle, base, inflated, request)
     except (ValueError, TypeError) as error:
         return MuscleNumericWork(muscle, base, inflated, error=str(error))
@@ -362,10 +376,11 @@ def _face_metadata(work, result, obj):
 def _capture_envelope_work(sync, vis_col, root, scene, muscle):
     from .muscle_profile_capture import capture_target
     try:
-        target = capture_target(root, scene, muscle.id)
+        target = capture_target(root, scene, muscle.id, index=sync._object_index)
         if not target.current or (target.assembly is None and not target.eligible):
             raise ValueError('; '.join(target.reasons))
         request = _make_branched_request(muscle, target.source, target.assembly) if target.assembly else _make_request(muscle, target.payload, _initialize_control(muscle))
+        if target.prepared_base is not None: request = replace(request, prepared_base=target.prepared_base)
         base, inflated = sync._ensure_muscle_meshes(vis_col, root, muscle.id)
         return MuscleNumericWork(muscle, base, inflated, request)
     except (ValueError, TypeError) as error:

@@ -220,8 +220,8 @@ def _fiber_points_key(root_name, fiber_id):
     return f"fiber_points:{str(root_name or '')}:{str(fiber_id or '')}"
 
 
-def cached_fiber_points(scene, root_name, fiber_id):
-    proxy = _fiber_proxy(scene, root_name, fiber_id)
+def cached_fiber_points(scene, root_name, fiber_id, index=None):
+    proxy = _fiber_proxy(scene, root_name, fiber_id) if index is None else index.get('fiber', {}).get(str(fiber_id))
     if proxy is not None and proxy.get("af_fiber_output_state") == "STALE":
         return None
     raw = scene_cache_get(scene, _fiber_points_key(root_name, fiber_id))

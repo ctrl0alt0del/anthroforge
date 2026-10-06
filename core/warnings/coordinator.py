@@ -1,6 +1,17 @@
 """One resumable, generation-checked scheduler for all warning factories."""
 from collections import OrderedDict, Counter
 from time import perf_counter
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class WakeAfter:
+    seconds: float
+
+
+def close_iterator(iterator):
+    close = getattr(iterator, 'close', None)
+    if close is not None and not getattr(iterator, 'gi_running', False): close()
 
 
 class Coordinator:
@@ -8,6 +19,7 @@ class Coordinator:
         self.repository, self.clock = repository, clock
         self.factories, self.jobs, self.generations = {}, OrderedDict(), {}
         self.metrics = Counter()
+        self.ready_at = {}
 
     def register(self, provider):
         if provider.name in self.factories:
@@ -22,11 +34,12 @@ class Coordinator:
         for factory in self.factories.values():
             factory.on_action(event, context)
 
-    def enqueue(self, scope, builder):
+    def enqueue(self, scope, builder, delay=0.0):
         self.cancel(scope)
         token = self.generations.get(scope, 0) + 1
         self.generations[scope] = token
         self.jobs[scope] = (token, iter(builder(token)))
+        self.ready_at[scope] = self.clock() + delay if delay > 0 else 0.
         return token
 
     def current(self, scope, token):
@@ -34,11 +47,10 @@ class Coordinator:
 
     def cancel(self, scope):
         job = self.jobs.pop(scope, None)
+        self.ready_at.pop(scope, None)
         self.generations[scope] = self.generations.get(scope, 0) + 1
         if job is not None:
-            close = getattr(job[1], "close", None)
-            if close is not None and not getattr(job[1], "gi_running", False):
-                close()
+            close_iterator(job[1])
             self.metrics["cancelled"] += 1
 
     def cancel_all(self):
@@ -47,13 +59,16 @@ class Coordinator:
         for (scope, provider), state in tuple(self.repository.provider_states.items()):
             self.repository.state(scope, "CANCELLED", state["generation"], provider=provider)
 
-    def tick(self, budget_ms=8.0, max_steps=32):
+    def tick(self, budget_ms=4.0, max_steps=128):
         started, steps = self.clock(), 0
-        while self.jobs and steps < max_steps:
-            if steps and (self.clock() - started) * 1000 >= budget_ms:
-                break
-            scope = next(iter(self.jobs))
-            self._step(scope); steps += 1
+        with self.repository.batch():
+            while self.jobs and steps < max_steps:
+                now = self.clock() if steps else started
+                if steps and (now - started) * 1000 >= budget_ms: break
+                scope = next((key for key in self.jobs if self.ready_at.get(key, 0) <= now), None)
+                if scope is None: break
+                self._step(scope)
+                steps += 1
         elapsed = (self.clock() - started) * 1000
         self.metrics["duration_ms"] += elapsed
         self.metrics["max_tick_ms"] = max(elapsed, self.metrics["max_tick_ms"])
@@ -62,12 +77,19 @@ class Coordinator:
     def _step(self, scope):
         token, iterator = self.jobs[scope]
         try:
-            next(iterator)
+            value = next(iterator)
+            if not self.current(scope, token): return close_iterator(iterator)
+            if isinstance(value, WakeAfter): self.ready_at[scope] = self.clock()+value.seconds
         except StopIteration:
-            if self.current(scope, token):
-                self.jobs.pop(scope, None)
+            if self.current(scope, token): self._discard(scope)
         except Exception as error:
-            self.jobs.pop(scope, None); self.metrics["failures"] += 1
-            if scope[3] == "FILE":
-                self.repository.discovery = "FAILED"
-            self.repository.state(scope, "FAILED", token, error)
+            if self.current(scope, token): self._fail(scope, token, error)
+
+    def _discard(self, scope):
+        self.jobs.pop(scope, None)
+        self.ready_at.pop(scope, None)
+
+    def _fail(self, scope, token, error):
+        self._discard(scope); self.metrics['failures'] += 1
+        if scope[3] == 'FILE': self.repository.discovery = 'FAILED'
+        self.repository.state(scope, 'FAILED', token, error)

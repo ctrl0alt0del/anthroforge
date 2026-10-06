@@ -125,9 +125,10 @@ def _muscle_snapshot(muscle):
 
 
 def _fiber_surface_snapshot(surface):
+    from ..vcp.free_surface_stations import KEY
     ids = [str(ref.fiber_id or "") for ref in surface.fiber_refs if str(ref.fiber_id or "")]
     return FiberSurfaceSnapshot(str(surface.id or ""), str(surface.name or ""),
-                                scalar_dict(surface, _FIBER_SURFACE_SKIP), ids)
+                                scalar_dict(surface, _FIBER_SURFACE_SKIP), ids, str(surface.get(KEY, '')))
 
 
 def _blob_snapshot(root, blob):
@@ -157,12 +158,12 @@ def _shortcut_overrides(shortcut):
 
 
 def root_snapshot(root):
+    from ..muscle_relationships.importing import export
     from .branching import capture_graph; vcp = root.af_vcp_system
     return PackageSnapshot(
-        root_name=str(root.name or "AF_ROOT"), branching=capture_graph(root),
+        root_name=str(root.name or "AF_ROOT"), branching=capture_graph(root), relationships=export(root),
         unit_contract=unit_contract_payload(root),
-        draft_skin_settings=scalar_dict(root.af_draft_skin_settings),
-        topology_settings=scalar_dict(root.af_topology_settings),
+        draft_skin_settings=scalar_dict(root.af_draft_skin_settings), topology_settings=scalar_dict(root.af_topology_settings),
         scps=[_scp_snapshot(scp) for scp in root.af_scp_system.scps],
         fibers=[_fiber_snapshot(fiber) for fiber in vcp.fibers],
         fiber_surfaces=[_fiber_surface_snapshot(surface) for surface in getattr(vcp, "fiber_surfaces", ())],

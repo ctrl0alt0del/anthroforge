@@ -14,14 +14,20 @@ from build_draft_skin_vendor import ROOT, VENDOR, build_bundle
 
 PACKAGE_DIRS = {"adapters", "app", "core", "native", "operators",
                 "properties", "ui", "vendor", "workers"}
-REQUIRED_NATIVE = ("af_fiber_ccd_v3_20.dll", "libomp.dll")
+REQUIRED_NATIVE = ("af_fiber_ccd_v3_28.dll", "libomp.dll")
 
 
 def tracked_package_files(source):
     raw = subprocess.check_output(["git", "-C", str(source), "ls-files", "-z"])
     names = [Path(x.decode()) for x in raw.split(b"\0") if x]
-    return [p for p in names if p.as_posix() == "__init__.py" or
-            (p.parts[0] in PACKAGE_DIRS and not p.as_posix().startswith("vendor/draft_skin/wheels/"))]
+    return [p for p in names if production_file(p)]
+
+
+def production_file(path):
+    if path.parts[:2] == ('native', 'fiber_ccd') and path.suffix == '.dll':
+        return path.name in REQUIRED_NATIVE
+    return path.as_posix() == '__init__.py' or (path.parts[0] in PACKAGE_DIRS and
+        not path.as_posix().startswith('vendor/draft_skin/wheels/'))
 
 
 def stage_files(source, target):
@@ -36,10 +42,43 @@ def stage_files(source, target):
 
 def native_inventory(stage):
     paths = [stage / "native" / "fiber_ccd" / name for name in REQUIRED_NATIVE]
+    paths.append(stage / 'native/smoothing/af_height_smoothing_v1.dll')
     if any(not path.is_file() for path in paths):
-        raise ValueError("Package lacks required production Fiber CCD DLLs")
+        raise ValueError("Package lacks required production native DLLs")
+    verify_pair_abi(stage)
+    verify_auxiliary_abi(stage)
     return {path.name: {"size": path.stat().st_size,
                         "sha256": hashlib.sha256(path.read_bytes()).hexdigest()} for path in paths}
+
+
+def verify_pair_abi(stage):
+    import sys
+    directory = stage / 'native/fiber_ccd'
+    script = ('import ctypes, os, sys\n'
+        'with os.add_dll_directory(sys.argv[1]):\n'
+        ' library = ctypes.CDLL(sys.argv[2])\n'
+        ' assert library.af_pair_version() == 1 and library.af_pair_storage_version() == 1, "Missing muscle_pair_detection.v1 storage"\n'
+        ' assert library.af_layer_order_version() == 1, "Missing muscle_layer_order.v1"\n'
+        ' assert library.af_stacking_version() == 1, "Missing muscle_stacking.v1"\n'
+        ' assert library.af_relationship_policy_version() == 1, "Missing muscle_relationships.v1"\n'
+        ' getattr(library, "af_stack_submit_relationships_v1"); getattr(library, "af_layer_storage_stats")\n'
+        ' for name in sys.argv[3:]: getattr(library, "af_pair_" + name)\n')
+    names = ('create', 'destroy', 'submit', 'poll', 'cancel', 'release', 'summary', 'footprint',
+             'build_field', 'limiting', 'blend_directions', 'orientation', 'storage_stats')
+    subprocess.run([sys.executable, '-c', script, str(directory), str(directory / REQUIRED_NATIVE[0]), *names], check=True)
+
+
+def verify_auxiliary_abi(stage):
+    import sys
+    fiber = stage / 'native/fiber_ccd' / REQUIRED_NATIVE[0]
+    height = stage / 'native/smoothing/af_height_smoothing_v1.dll'
+    script = ('import ctypes, os, sys\n'
+        'with os.add_dll_directory(os.path.dirname(sys.argv[1])):\n'
+        ' fiber = ctypes.CDLL(sys.argv[1]); height = ctypes.CDLL(sys.argv[2])\n'
+        ' assert fiber.af_warning_async_version() == 1, "Missing warning worker ABI"\n'
+        ' assert height.af_height_version() == 1, "Missing height smoothing ABI"\n'
+        ' getattr(height, "af_height_smooth")\n')
+    subprocess.run([sys.executable, '-c', script, str(fiber), str(height)], check=True)
 
 
 def add_file(archive, path, name):

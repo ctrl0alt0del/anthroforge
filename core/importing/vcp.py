@@ -361,6 +361,7 @@ def apply_vcp_snapshot(snapshot, root, context, stage_root=None):
 
 
 def _apply_vcp_snapshot(snapshot, root, context, stage_root=None):
+    from ..muscle_relationships.importing import merge
     from .branching import restore_graph
     state = VcpImportState(root, context.scene, snapshot, _compatible_scp_ids(snapshot, root), stage_root=stage_root)
     with suppress_vcp_prop_updates():
@@ -370,6 +371,7 @@ def _apply_vcp_snapshot(snapshot, root, context, stage_root=None):
         restore_graph(state)
         _create_blobs(state)
         _create_soft_tissues(state)
+        merge(state)
     cleanup_scp_dependents(root)
     _schedule_imported_sync(state)
     return _result(state)
