@@ -107,20 +107,30 @@ def _on_depsgraph_update(scene, depsgraph):
 
 
 def _invalidate_anchor_geometry(scene, depsgraph):
-    updates = tuple(getattr(depsgraph, "updates", ()) or ())
-    if any(_relevant_anchor_update(scene, update) for update in updates):
+    updates = tuple(update for update in getattr(depsgraph, 'updates', ()) or () if _geometry_update(update))
+    if not updates:
+        return
+    geometry_data = _anchor_geometry_data(scene)
+    if any(_relevant_anchor_update(scene, update, geometry_data) for update in updates):
         _invalidate_anchor_caches(scene, None, None)
         _notify_warnings(scene, None)
 
 
-def _relevant_anchor_update(scene, update):
+def _anchor_geometry_data(scene):
+    # Retain references so identity keys exactly preserve the former `is` comparison.
+    objects = getattr(scene, 'objects', ()) or ()
+    return {id(data): data for obj in objects if obj.get('af_scp_geometry')
+            for data in (getattr(obj, 'data', None),)}
+
+
+def _relevant_anchor_update(scene, update, geometry_data=None):
     if not _geometry_update(update):
         return False
     item = getattr(update, "id", None)
     if callable(getattr(item, "get", None)) and item.get("af_scp_geometry"):
         return True
-    objects = tuple(getattr(scene, "objects", ()) or ())
-    return any(obj.get("af_scp_geometry") and getattr(obj, "data", None) is item for obj in objects)
+    geometry_data = _anchor_geometry_data(scene) if geometry_data is None else geometry_data
+    return id(item) in geometry_data
 
 
 def _geometry_update(update):

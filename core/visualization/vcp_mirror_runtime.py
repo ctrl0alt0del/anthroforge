@@ -7,8 +7,8 @@ from ..vcp.surface_target import SurfaceTargetKind, effective_tissue_target
 from .mirror_objects import (create_mirror_from_source, ensure_obj_type, ensure_private_data,
                              remove_obj, restore_curve_snapshot, share_source_data)
 from .fiber_sync_helpers import persisted_fiber_points, show_curve_preview
-from .muscle_sync_helpers import resolve_muscle_surface
 from .mirror_rules import mirror_world_matrix, authored_mirror_rule, mirror_parent_ids
+from .vcp_object_index import build_vcp_object_index, forget_object, remember_object
 
 
 def _as_id(value):
@@ -207,12 +207,13 @@ def _ensure_vcp_collection(scene, name="AF_VCP_VIS"):
     return col
 
 
-def _ensure_mirror_from_source(collection, src_obj, existing):
+def _ensure_mirror_from_source(collection, src_obj, existing, index=None):
     mir = existing or create_mirror_from_source(collection, src_obj, f"{src_obj.name}_MIR")
     if mir is None:
         return None
     if ensure_obj_type(mir, src_obj) is not None:
         return mir
+    forget_object(index, mir)
     remove_obj(mir)
     return create_mirror_from_source(collection, src_obj, f"{src_obj.name}_MIR")
 
@@ -220,11 +221,13 @@ def _ensure_mirror_from_source(collection, src_obj, existing):
 def _copy_mirror_transform(src_obj, mirror_obj, axis, origin):
     share_source_data(src_obj, mirror_obj)
     mirror_obj.matrix_world = mirror_world_matrix(src_obj.matrix_world, axis=axis, origin=origin)
-    mirror_obj.hide_select = True
+    if not mirror_obj.hide_select:
+        mirror_obj.hide_select = True
 
 
-def _find_source_fiber_obj(vis_col, root_name, fiber_id):
+def _find_source_fiber_obj(vis_col, root_name, fiber_id, index=None):
     fid = _as_id(fiber_id)
+    if index is not None: return index['fiber'].get(fid)
     for obj in vis_col.objects:
         if (
             obj.get("af_fiber_proxy")
@@ -236,8 +239,9 @@ def _find_source_fiber_obj(vis_col, root_name, fiber_id):
     return None
 
 
-def _find_mirror_fiber_obj(vis_col, root_name, source_fiber_id):
+def _find_mirror_fiber_obj(vis_col, root_name, source_fiber_id, index=None):
     fid = _as_id(source_fiber_id)
+    if index is not None: return index['fiber_mirror'].get(fid)
     for obj in vis_col.objects:
         if (
             obj.get("af_fiber_proxy")
@@ -317,7 +321,8 @@ def _find_mirror_soft_obj(vis_col, root_name, tissue_id):
                  and _as_id(obj.get("af_source_soft_tissue_id")) == _as_id(tissue_id)), None)
 
 
-def _sync_fiber_mirrors(root, vis_col, fibers_by_id, scp_by_id, target_fiber_ids=None):
+def _sync_fiber_mirrors(root, vis_col, fibers_by_id, scp_by_id, target_fiber_ids=None, index=None):
+    if index is None: index = build_vcp_object_index(vis_col, root.name, first_match=True)
     target_ids = None if target_fiber_ids is None else {_as_id(v) for v in set(target_fiber_ids)}
     affected = set(target_ids) if target_ids is not None else set()
     desired = set()
@@ -325,24 +330,25 @@ def _sync_fiber_mirrors(root, vis_col, fibers_by_id, scp_by_id, target_fiber_ids
         if target_ids is not None and fid not in target_ids:
             continue
         affected.add(fid)
-        if _sync_one_fiber_mirror(root, vis_col, fiber, fid, fibers_by_id, scp_by_id):
+        if _sync_one_fiber_mirror(root, vis_col, fiber, fid, fibers_by_id, scp_by_id, index):
             desired.add(fid)
-    _remove_stale_fiber_mirrors(vis_col, root.name, desired, affected, target_ids)
+    _remove_stale_fiber_mirrors(vis_col, root.name, desired, affected, target_ids, index)
 
 
-def _sync_one_fiber_mirror(root, vis_col, fiber, fid, fibers_by_id, scp_by_id):
+def _sync_one_fiber_mirror(root, vis_col, fiber, fid, fibers_by_id, scp_by_id, index):
     rule = _rule_for_fiber(fiber, fibers_by_id, scp_by_id)
-    src = _find_source_fiber_obj(vis_col, root.name, fid)
-    mir = _find_mirror_fiber_obj(vis_col, root.name, fid)
+    src = _find_source_fiber_obj(vis_col, root.name, fid, index)
+    mir = _find_mirror_fiber_obj(vis_col, root.name, fid, index)
     if rule is None or src is None:
         return False
     if src.get("af_fiber_output_state") != "CURRENT":
         return _retain_stale_fiber_mirror(root, fiber, src, mir)
-    mir = _ensure_mirror_from_source(vis_col, src, mir)
+    mir = _ensure_mirror_from_source(vis_col, src, mir, index)
     if mir is None:
         return False
     _copy_mirror_transform(src, mir, *rule)
     _tag_fiber_mirror(mir, root.name, fid)
+    remember_object(index, mir)
     return True
 
 
@@ -365,7 +371,7 @@ def _tag_fiber_mirror(mirror, root_name, fid):
     mirror["af_fiber_id"] = fid
 
 
-def _remove_stale_fiber_mirrors(vis_col, root_name, desired, affected, target_ids):
+def _remove_stale_fiber_mirrors(vis_col, root_name, desired, affected, target_ids, index=None):
     for obj in list(vis_col.objects):
         if not _owned_fiber_mirror(obj, root_name):
             continue
@@ -374,6 +380,7 @@ def _remove_stale_fiber_mirrors(vis_col, root_name, desired, affected, target_id
             continue
         if target_ids is not None and fid not in affected:
             continue
+        forget_object(index, obj)
         remove_obj(obj)
 
 
@@ -382,55 +389,55 @@ def _owned_fiber_mirror(obj, root_name):
                 and obj.get("af_root_name") == root_name)
 
 
-def _sync_muscle_mirrors(root, vis_col, muscles_by_id, fibers_by_id, scp_by_id, target_muscle_ids=None):
+def _sync_muscle_mirrors(root, vis_col, muscles_by_id, fibers_by_id, scp_by_id, target_muscle_ids=None, index=None):
+    if index is None: index = build_vcp_object_index(vis_col, root.name, first_match=True)
     target_ids = None if target_muscle_ids is None else {_as_id(v) for v in set(target_muscle_ids)}
     desired = set()
-    affected = set()
-    if target_ids is not None:
-        for mid in target_ids:
-            affected.add((mid, "BASE"))
-            affected.add((mid, "INFL"))
-
     for mid, muscle in muscles_by_id.items():
         if target_ids is not None and mid not in target_ids:
             continue
         rule = _rule_for_muscle(muscle, fibers_by_id, scp_by_id)
         for surf in ("BASE", "INFL"):
-            key = (mid, surf)
-            affected.add(key)
-            src = resolve_muscle_surface(root, mid, surf)
-            mir = _find_mirror_muscle_obj(vis_col, root.name, mid, surf)
-            if rule is None or src is None:
-                if target_ids is None and mir is not None:
-                    remove_obj(mir)
-                continue
+            if _sync_muscle_surface(root, vis_col, (mid, surf), rule, index):
+                desired.add((mid, surf))
+    _remove_stale_muscle_mirrors(vis_col, root.name, desired, target_ids, index)
 
-            axis, origin = rule
-            mir = _ensure_mirror_from_source(vis_col, src, mir)
-            if mir is None:
-                continue
-            _copy_mirror_transform(src, mir, axis, origin)
-            mir["af_muscle_proxy"] = True
-            mir["af_muscle_mirror_proxy"] = True
-            mir["af_root_name"] = root.name
-            mir["af_source_muscle_id"] = mid
-            mir["af_muscle_id"] = mid
-            mir["af_muscle_surface"] = surf
-            desired.add(key)
 
+def _sync_muscle_surface(root, vis_col, key, rule, index):
+    src, mir = index['muscle'].get(key), index['muscle_mirror'].get(key)
+    if rule is None or src is None:
+        return False
+    mir = _ensure_mirror_from_source(vis_col, src, mir, index)
+    if mir is None:
+        return False
+    _copy_mirror_transform(src, mir, *rule)
+    _tag_muscle_mirror(mir, root.name, *key)
+    remember_object(index, mir)
+    return True
+
+
+def _tag_muscle_mirror(mirror, root_name, mid, surface):
+    mirror['af_muscle_proxy'] = True
+    mirror['af_muscle_mirror_proxy'] = True
+    mirror['af_root_name'] = root_name
+    mirror['af_source_muscle_id'] = mid
+    mirror['af_muscle_id'] = mid
+    mirror['af_muscle_surface'] = surface
+
+
+def _remove_stale_muscle_mirrors(vis_col, root_name, desired, target_ids, index):
     for obj in list(vis_col.objects):
         if not obj.get("af_muscle_proxy") or not obj.get("af_muscle_mirror_proxy"):
             continue
-        if obj.get("af_root_name") != root.name:
+        if obj.get("af_root_name") != root_name:
             continue
-        key = (
-            _as_id(obj.get("af_source_muscle_id") or obj.get("af_muscle_id")),
-            _as_id(obj.get("af_muscle_surface")),
-        )
+        mid = _as_id(obj.get("af_source_muscle_id") or obj.get("af_muscle_id"))
+        key = (mid, _as_id(obj.get("af_muscle_surface")))
         if key in desired:
             continue
-        if target_ids is not None and key not in affected:
+        if target_ids is not None and (mid not in target_ids or key[1] not in {'BASE', 'INFL'}):
             continue
+        forget_object(index, obj)
         remove_obj(obj)
 
 
@@ -533,12 +540,13 @@ def sync_vcp_mirrors(root=None, scene=None, target_fiber_ids=None, target_muscle
 
 def _sync_all_mirror_types(root, scene, targets):
     vis_col = _ensure_vcp_collection(scene, name="AF_VCP_VIS")
+    index = build_vcp_object_index(vis_col, root.name, first_match=True)
     scp_by_id = _scp_map(root)
     fibers_by_id = _fiber_map(root)
     muscles_by_id = _muscle_map(root)
     blobs_by_id = _blob_map(root)
     tissues_by_id = _soft_tissue_map(root)
-    _sync_fiber_mirrors(root, vis_col, fibers_by_id, scp_by_id, target_fiber_ids=targets[0])
-    _sync_muscle_mirrors(root, vis_col, muscles_by_id, fibers_by_id, scp_by_id, target_muscle_ids=targets[1])
+    _sync_fiber_mirrors(root, vis_col, fibers_by_id, scp_by_id, target_fiber_ids=targets[0], index=index)
+    _sync_muscle_mirrors(root, vis_col, muscles_by_id, fibers_by_id, scp_by_id, target_muscle_ids=targets[1], index=index)
     _sync_blob_mirrors(root, vis_col, blobs_by_id, muscles_by_id, fibers_by_id, scp_by_id, target_blob_ids=targets[2])
     _sync_soft_tissue_mirrors(root, vis_col, tissues_by_id, muscles_by_id, fibers_by_id, scp_by_id, targets[3])

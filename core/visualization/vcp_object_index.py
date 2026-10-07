@@ -2,9 +2,11 @@ def _as_id(value):
     return str(value or "")
 
 
-def build_vcp_object_index(vis_col, root_name):
+def build_vcp_object_index(vis_col, root_name, *, first_match=False):
     index = _empty_index()
-    for obj in tuple(getattr(vis_col, "objects", ()) or ()):
+    objects = tuple(getattr(vis_col, "objects", ()) or ())
+    # Mirror synchronization historically selected the first matching object.
+    for obj in reversed(objects) if first_match else objects:
         if _as_id(obj.get("af_root_name")) == _as_id(root_name):
             _index_obj(index, obj)
     return index

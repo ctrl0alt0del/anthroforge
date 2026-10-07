@@ -321,8 +321,9 @@ def _restore_poly_spline(curve, row):
 
 def _remove_orphan_data(data):
     if data is None or data.users: return
-    if isinstance(data, bpy.types.Mesh): bpy.data.meshes.remove(data)
-    elif isinstance(data, bpy.types.Curve): bpy.data.curves.remove(data)
+    # Zero-user data needs no global unlink pass (which dirties collection caches).
+    if isinstance(data, bpy.types.Mesh): bpy.data.meshes.remove(data, do_unlink=False)
+    elif isinstance(data, bpy.types.Curve): bpy.data.curves.remove(data, do_unlink=False)
 
 
 def ensure_mirror_material(obj, alpha_mult=0.35):

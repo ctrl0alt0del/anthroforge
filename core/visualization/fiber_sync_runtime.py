@@ -534,11 +534,13 @@ def _apply_loop_anchor_target(sync, fiber, anchor, index, target, changed_ids, c
     return _apply_handle_target(sync, fiber, changed_ids, setters, anchor.parent_id, current, target, context)
 
 
-def _is_relevant_update_obj(sync, root, vis_col, obj):
+def _is_relevant_update_obj(sync, root, vis_col, obj, object_names=None):
     if not isinstance(obj, bpy.types.Object):
         return False
     if obj.get("af_root_name") != root.name:
         return False
+    if object_names is not None:
+        return obj.name in object_names
     return vis_col.objects.get(obj.name) is not None
 
 
@@ -597,13 +599,15 @@ def _collect_depsgraph_runtime(sync, root, vis_col, depsgraph):
 
 def _depsgraph_changed_fibers(sync, root, vis_col, depsgraph):
     changed = set()
+    # Evaluated IDs can be distinct objects; collection lookup has name semantics.
+    object_names = {obj.name for obj in vis_col.objects}
     for upd in depsgraph.updates:
-        _merge_changed_fibers(sync, root, vis_col, changed, upd.id)
+        _merge_changed_fibers(sync, root, vis_col, changed, upd.id, object_names)
     return changed
 
 
-def _merge_changed_fibers(sync, root, vis_col, changed, obj):
-    if not _is_relevant_update_obj(sync, root, vis_col, obj):
+def _merge_changed_fibers(sync, root, vis_col, changed, obj, object_names=None):
+    if not _is_relevant_update_obj(sync, root, vis_col, obj, object_names):
         return
     if is_runtime_applied_matrix(obj):
         return

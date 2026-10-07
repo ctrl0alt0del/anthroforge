@@ -5,7 +5,7 @@ from mathutils import Matrix, Vector
 
 from ..deps.runtime_trace import trace_line
 from ..utils import depsgraph_for_scene, update_scene_view_layer
-from ..visualization.mirror_objects import remove_obj
+from ..visualization.mirror_objects import _remove_orphan_data, remove_obj
 from .common import as_axis, as_id
 from .runtime_state import mirror_effective_axis, mirror_source_id, mirror_status
 from .tree import children_map
@@ -118,15 +118,24 @@ class MirrorSceneSync:
         self.desired_ids = set()
         self.depsgraph = None
         self.mirror_col = sync._get_mirror_collection(scene)
+        self.mirrors_by_id = {}
 
     def run(self):
         trace_line(f"mirror run targets={sorted(self.target_ids or set())}") if _mirror_trace_enabled() else None
         update_scene_view_layer(self.scene)
         self.depsgraph = depsgraph_for_scene(self.scene)
+        self._index_mirrors()
         for sid, scp in self.scp_by_id.items():
             self._sync_target(sid, scp)
         self._remove_stale()
         update_scene_view_layer(self.scene)
+
+    def _index_mirrors(self):
+        self.mirrors_by_id = {}
+        for obj in self.scene.objects:
+            if obj.get('af_scp_mirror') and obj.get('af_root_name') == self.root.name:
+                sid = as_id(obj.get('af_source_scp_id'))
+                self.mirrors_by_id.setdefault(sid, []).append(obj)
 
     def _sync_target(self, sid, scp):
         if not self._should_sync_target(sid, scp):
@@ -142,7 +151,6 @@ class MirrorSceneSync:
 
     def _rebuild_target_mirror(self, sid, scp):
         metadata = self._mirror_authoring_metadata(sid)
-        self._remove_target_cluster(sid)
         mirror_obj = self._build_target_mirror(sid, scp)
         if mirror_obj is not None:
             for key, value in metadata.items():
@@ -150,7 +158,7 @@ class MirrorSceneSync:
         self.desired_ids.add(sid) if mirror_obj is not None else None
 
     def _mirror_authoring_metadata(self, sid):
-        objects = [obj for obj in self.scene.objects if self._is_target_mirror(obj, sid)]
+        objects = self.mirrors_by_id.get(sid, ())
         if len(objects) != 1:
             return {}
         obj = objects[0]
@@ -161,26 +169,45 @@ class MirrorSceneSync:
         source_obj = self._target_geometry(scp)
         mesh = None if source_obj is None else _copy_eval_mesh(source_obj, self.depsgraph)
         if mesh is None:
+            self._remove_target_cluster(sid)
             return None
-        obj = bpy.data.objects.new(f"{source_obj.name}_AF_MIR", mesh)
-        self.mirror_col.objects.link(obj)
+        obj = self._reuse_or_create_mirror(sid, source_obj, mesh)
         self._copy_object_state(source_obj, obj)
         self._tag_mirror_object(obj, sid)
         self._apply_object_mirror(scp, source_obj, obj)
         _trace_mirror("build", source_obj, obj)
         return obj
 
+    def _reuse_or_create_mirror(self, sid, source_obj, mesh):
+        targets = self.mirrors_by_id.get(sid, ())
+        if len(targets) == 1 and self._can_reuse_mirror(targets[0]):
+            obj = targets[0]
+            previous = obj.data
+            obj.data = mesh
+            _remove_orphan_data(previous)
+            return obj
+        self._remove_target_cluster(sid)
+        obj = bpy.data.objects.new(f'{source_obj.name}_AF_MIR', mesh)
+        self.mirror_col.objects.link(obj)
+        self.mirrors_by_id[sid] = [obj]
+        return obj
+
+    def _can_reuse_mirror(self, obj):
+        # Legacy or modified objects must become a single unmodified baked mesh.
+        return bool(obj.type == 'MESH' and not obj.modifiers and not obj.constraints
+                    and obj.animation_data is None and obj.library is None
+                    and obj.name in self.mirror_col.objects)
+
     def _target_geometry(self, scp):
         obj = getattr(scp, "geometry_object_ref", None)
         return None if obj is None or obj.type == "EMPTY" else obj
 
     def _copy_object_state(self, source_obj, obj):
-        obj.color = source_obj.color
-        obj.display_type = source_obj.display_type
-        obj.show_all_edges = source_obj.show_all_edges
-        obj.show_in_front = source_obj.show_in_front
-        obj.show_wire = source_obj.show_wire
-        obj.hide_render = source_obj.hide_render
+        for name in ('color', 'display_type', 'show_all_edges', 'show_in_front', 'show_wire', 'hide_render'):
+            value = tuple(source_obj.color) if name == 'color' else getattr(source_obj, name)
+            current = tuple(obj.color) if name == 'color' else getattr(obj, name)
+            if current != value:
+                setattr(obj, name, value)
 
     def _tag_mirror_object(self, obj, sid):
         self._clear_mirror_tags(obj)
@@ -189,7 +216,8 @@ class MirrorSceneSync:
         obj["af_source_scp_id"] = sid
         obj["af_scp_geometry"] = True
         obj["af_scp_transform"] = False
-        obj.hide_select = True
+        if not obj.hide_select:
+            obj.hide_select = True
 
     def _clear_mirror_tags(self, obj):
         for key in ("af_scp_bound", "af_scp_bound_id", "af_scp_id", "af_scp_transform", "af_scp_geometry", "af_scp_mirror", "af_source_scp_id", "af_source_bound_id"):
@@ -211,16 +239,17 @@ class MirrorSceneSync:
         return axis if axis in {"X", "Y", "Z"} else as_axis(getattr(source_scp, "mirror_axis", "X"))
 
     def _remove_target_cluster(self, sid):
-        for obj in tuple(self.scene.objects):
-            remove_obj(obj) if self._is_target_mirror(obj, sid) else None
+        for obj in self.mirrors_by_id.pop(sid, ()):
+            remove_obj(obj)
 
     def _is_target_mirror(self, obj, sid):
         same_root = obj.get("af_root_name") == self.root.name
         return bool(obj.get("af_scp_mirror") and same_root and as_id(obj.get("af_source_scp_id")) == sid)
 
     def _remove_stale(self):
-        for obj in tuple(self.scene.objects):
-            remove_obj(obj) if not self._should_keep_existing(obj) else None
+        for sid, objects in tuple(self.mirrors_by_id.items()):
+            if objects and not self._should_keep_existing(objects[0]):
+                self._remove_target_cluster(sid)
 
     def _should_keep_existing(self, obj):
         sid = as_id(obj.get("af_source_scp_id"))
