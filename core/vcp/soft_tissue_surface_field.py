@@ -17,7 +17,9 @@ def boundary_vertex_indices(edges, faces):
 
 def boundary_edges(edges, faces):
     counts = _edge_face_counts(faces)
-    return tuple(tuple(edge) for edge in edges if counts.get(_key(edge), 0) == 1)
+    return tuple((face[index], face[(index + 1) % len(face)])
+                 for face in faces for index in range(len(face))
+                 if counts[_key((face[index], face[(index + 1) % len(face)]))] == 1)
 
 
 def _edge_face_counts(faces):

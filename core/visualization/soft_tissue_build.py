@@ -1,10 +1,9 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from types import SimpleNamespace
 
 from mathutils import Vector
 
-from ..vcp.blob_solver import BlobSolver
 from ..vcp.soft_tissue_curve_inflation import (
     CurveRidgeProfile, backing_vertex_indices as curve_backing,
     commissure_vertex_indices, geometric_curve_relaxation, inflate_curve_ridge,
@@ -31,6 +30,7 @@ class RestShape:
     vertices: tuple
     faces: tuple
     groups: dict
+    weights: dict = None
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,7 @@ class FinalShape:
     vertices: tuple
     iterations: int = 0
     max_displacement: float = 0.0
+    report: dict = None
 
 
 def build_rest_shape(tissue, sample):
@@ -53,8 +54,18 @@ def relax_shape(tissue, rest, target_obj=None, anchors=()):
     if mode == "NONE":
         return FinalShape(rest.vertices)
     if mode == "GEOMETRIC":
-        return _geometric_shape(tissue, rest, target_obj)
+        result = _geometric_shape(tissue, rest, target_obj)
+        return _finish_geometric(rest, result, anchors)
     return _static_shape(tissue, rest, anchors)
+
+
+def _finish_geometric(rest, result, anchors):
+    from ..vcp.soft_tissue_report import solve_report
+    vertices = _apply_geometric_anchors(result.vertices, anchors)
+    displacement = max(((Vector(a)-Vector(b)).length for a, b in zip(vertices, rest.vertices)), default=0.0)
+    report = solve_report(result.report)
+    report["max_displacement"] = displacement
+    return replace(result, vertices=vertices, max_displacement=displacement, report=report)
 
 
 def capture_attachment_payload(root, scene, tissue, rest, capture_fn):
@@ -101,7 +112,12 @@ def _capture_target_region_row(rest, row, target, runtime, core):
     raw = capture_surface_param(target.mesh_object, Vector(rest.vertices[index]), runtime)
     if raw is None:
         return None
-    return {"index": int(index), "influence": float(influence), "core": int(index) in core, "raw": raw}
+    frame = resolve_surface_frame(target.mesh_object, raw, runtime)
+    if frame is None:
+        return None
+    offset = frame["basis_world"].transposed() @ (Vector(rest.vertices[index]) - frame["point_world"])
+    return {"index": int(index), "influence": float(influence), "core": int(index) in core,
+            "raw": raw, "offset": tuple(offset)}
 
 
 def _resolve_target_attachment(rest, attachment, target, runtime, raw, rest_signature):
@@ -117,10 +133,38 @@ def _resolve_target_region_row(rest, attachment, target, runtime, row):
     frame = resolve_surface_frame(target.mesh_object, row.get("raw", ""), runtime)
     if frame is None:
         raise ValueError("Attachment binding no longer resolves.")
-    anchor = frame["point_world"] + frame["normal_world"] * float(attachment.normal_offset)
+    anchor = _region_goal(frame, row, attachment, rest.vertices[index])
     mode = "FIXED" if str(attachment.mode) == "FIXED" and bool(row.get("core")) else "SOFT"
     strength = float(attachment.strength) * float(row.get("influence", 1.0))
     return mode, index, tuple(anchor), strength
+
+
+def _region_goal(frame, row, attachment, rest_point):
+    if "offset" not in row:
+        raise ValueError("Attachment reference offset is missing. Use Rebind.")
+    point = frame["point_world"] + frame["basis_world"] @ Vector(row["offset"])
+    return point + frame["normal_world"] * float(attachment.normal_offset)
+
+
+def _fixed_goals(anchors):
+    goals = {}
+    for mode, index, anchor, _strength in anchors:
+        if mode != "FIXED":
+            continue
+        if index in goals and (Vector(goals[index]) - Vector(anchor)).length > 1.0e-6:
+            raise ValueError("Conflicting fixed attachment goals.")
+        goals[index] = tuple(anchor)
+    return goals
+
+
+def _apply_geometric_anchors(vertices, anchors):
+    points, fixed = list(vertices), _fixed_goals(anchors)
+    for mode, index, anchor, strength in anchors:
+        if mode == "SOFT" and index not in fixed:
+            points[index] = tuple(Vector(points[index]).lerp(Vector(anchor), strength))
+    for index, anchor in fixed.items():
+        points[index] = anchor
+    return tuple(points)
 
 
 def _point_rest(tissue, sample):
@@ -151,7 +195,8 @@ def _surface_rest(tissue, sample):
     groups = {"ALL": tuple(range(len(mesh.vertices))), "BACKING": surface_backing(mesh),
               "BOUNDARY": boundary, "SUSPENSION": suspension}
     groups.update(_mapped_surface_groups(sample.groups, mesh.base_vertex_count))
-    return RestShape(mesh.vertices, mesh.faces, groups)
+    weights = {str(name).upper(): tuple(values) * 2 for name, values in dict(sample.groups or {}).items()}
+    return RestShape(mesh.vertices, mesh.faces, groups, weights)
 
 
 def _mapped_surface_groups(groups, count):
@@ -175,10 +220,9 @@ def _geometric_shape(tissue, rest, target_obj):
 
 
 def _geometric_point(tissue, rest, target_obj):
-    runtime = _blob_runtime(tissue)
-    points = [Vector(value) for value in rest.vertices]
-    result = BlobSolver().solve(runtime, target_obj, points, rest.faces)
-    return FinalShape(tuple(tuple(value) for value in result.points), result.iterations_used, result.max_disp)
+    from ..vcp.soft_tissue_point_native import solve_point
+    points, report = solve_point(tissue, rest, target_obj)
+    return FinalShape(points, report["iterations"], report["max_displacement"], report)
 
 
 def _geometric_surface(tissue, rest):
@@ -204,8 +248,8 @@ def _static_shape(tissue, rest, anchors):
     )
     fixed = _fixed_indices(tissue, rest)
     tethers = tuple(_tether(item, rest) for item in anchors if item[0] == "SOFT")
-    result = solve_static_tissue(rest.vertices, rest.faces, fixed, settings, tethers, tissue.tolerance)
-    return FinalShape(result.vertices, result.iterations, result.max_displacement)
+    result = solve_static_tissue(rest.vertices, rest.faces, fixed, settings, tethers, tissue.tolerance, _fixed_goals(anchors))
+    return FinalShape(result.vertices, result.iterations, result.max_displacement, result.report)
 
 
 def _static_envelope_shape(tissue, rest, anchors):
@@ -217,8 +261,9 @@ def _static_envelope_shape(tissue, rest, anchors):
     fixed = _fixed_indices(tissue, rest)
     tethers = tuple(_tether(item, rest) for item in anchors if item[0] == "SOFT")
     count = len(rest.groups.get("BACKING", ()))
-    result = solve_static_envelope(rest.vertices, rest.faces, fixed, count, settings, tethers, tissue.tolerance)
-    return FinalShape(result.vertices, result.iterations, result.max_displacement)
+    goals = {index: goal for index, goal in _fixed_goals(anchors).items() if index < count}
+    result = solve_static_envelope(rest.vertices, rest.faces, fixed, count, settings, tethers, tissue.tolerance, goals)
+    return FinalShape(result.vertices, result.iterations, result.max_displacement, result.report)
 
 
 def _fixed_indices(tissue, rest):
@@ -231,16 +276,21 @@ def _fixed_indices(tissue, rest):
 
 def _tether(item, rest):
     _mode, index, anchor, strength = item
-    distance = (Vector(rest.vertices[index]) - Vector(anchor)).length
-    return StaticTether(index, tuple(anchor), distance, float(strength))
+    return StaticTether(index, tuple(anchor), 0.0, float(strength))
 
 
 def _attachment_influences(rest, attachment):
     mask = str(attachment.mask_attribute).upper()
+    if mask not in rest.groups:
+        raise ValueError(f"Attachment mask '{attachment.mask_attribute}' is unavailable on this base.")
     core = tuple(rest.groups.get(mask, ()))
     core_set = set(core)
     scale = tuple(rest.groups.get("BACKING", ()))
     weights = attachment_feather_weights(rest.vertices, rest.faces, core, attachment.feather, scale)
+    painted = dict(rest.weights or {}).get(mask)
+    if painted is not None:
+        weights = tuple(weight * float(painted[index]) if index in core_set else weight
+                        for index, weight in enumerate(weights))
     return tuple(_influence_row(attachment.mode, index, weight, core_set)
                  for index, weight in enumerate(weights) if weight > 1.0e-8)
 

@@ -146,7 +146,16 @@ def _soft_tissue_snapshot(tissue):
         attachment_target_surface=str(getattr(tissue, "attachment_target_surface", "AUTO")),
         base_object_name="" if base is None else str(base.name),
         base_source_type=str(getattr(tissue, "base_source_type", "OBJECT")),
-        base_source_id=str(getattr(tissue, "base_source_id", "") or ""), attachments=rows)
+        base_source_id=str(getattr(tissue, "base_source_id", "") or ""), attachments=rows,
+        cache_object_names=_soft_cache_names(tissue))
+
+
+def _soft_cache_names(tissue):
+    if int(getattr(tissue, "evaluation_revision", 0)) >= 1:
+        return []
+    return [obj.name for obj in bpy.data.objects if obj.get("af_root_name") == tissue.id_data.name
+            and obj.get("af_soft_tissue_id") == tissue.id
+            and (obj.get("af_soft_tissue_proxy") or obj.get("af_soft_tissue_rest_proxy"))]
 
 
 def _shortcut_snapshot(root, shortcut):

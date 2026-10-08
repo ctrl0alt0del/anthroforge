@@ -1,4 +1,5 @@
 import bpy
+from ..app.use_cases.soft_tissue_attachments import edit_attachment, mask_choices, select_mask
 
 from ..app.use_cases.soft_tissue_create import apply_soft_tissue_preset, create_soft_tissue_vcp
 from ..app.use_cases.soft_tissue_tools import duplicate_soft_tissue_snapshot, recompute_soft_tissue, select_soft_tissue_base
@@ -12,6 +13,41 @@ def _finish(operator, result):
     if result.message:
         operator.report({result.level}, result.message)
     return {"FINISHED"} if result.ok else {"CANCELLED"}
+
+
+class AF_OT_AddSoftTissueAttachment(bpy.types.Operator):
+    bl_idname = "af.add_soft_tissue_attachment"
+    bl_label = "Add Attachment"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        return _finish(self, edit_attachment(context))
+
+
+class AF_OT_SelectSoftTissueAttachmentMask(bpy.types.Operator):
+    bl_idname = "af.select_soft_tissue_attachment_mask"
+    bl_label = "Choose Attachment Mask"
+    bl_options = {"REGISTER", "UNDO"}
+    bl_property = "mask"
+    index: bpy.props.IntProperty(default=-1)
+    mask: bpy.props.EnumProperty(items=mask_choices)
+
+    def invoke(self, context, event):
+        context.window_manager.invoke_search_popup(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        return _finish(self, select_mask(context, self.index, self.mask))
+
+
+class AF_OT_RemoveSoftTissueAttachment(bpy.types.Operator):
+    bl_idname = "af.remove_soft_tissue_attachment"
+    bl_label = "Remove Attachment"
+    bl_options = {"REGISTER", "UNDO"}
+    index: bpy.props.IntProperty(default=-1)
+
+    def execute(self, context):
+        return _finish(self, edit_attachment(context, self.index))
 
 
 class AF_OT_AddSoftTissueVCP(bpy.types.Operator):

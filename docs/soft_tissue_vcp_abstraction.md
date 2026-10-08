@@ -30,12 +30,15 @@ add-on are owned controls.
 
 ## Inflation and relaxation
 
-- Point uses radial inflation and reuses the Blob icosphere and geometric solver.
+- Point uses radial inflation and the Blob icosphere. Its legacy-compatible geometric
+  iterations, nearest queries, and segment clamps run in C++.
 - Curve uses profile width, depth, power, segments, and endpoint taper. Its rest
   shape is unsagged; geometric relaxation moves only the free bulge.
 - Surface uses minimum/maximum thickness, a power curve, and
   `AF_ST_INFLATION`. If that group is absent, an open surface receives normalized
   shortest-edge distance from its boundary; a closed surface receives weight 1.
+  An existing group, including an all-zero group, is authoritative. Evaluation
+  never creates a default group on the artist's source.
 - A boundary-only Surface base, including a single Plane, is deterministically
   refined in the evaluated sample using Base Resolution. The artist's source
   mesh remains unchanged while the generated tissue gains free interior vertices.
@@ -73,22 +76,43 @@ then rest and final meshes rebuild.
 
 Bézier control points are bound individually. Left/right handle vectors are
 stored in the captured surface frame so host rotation does not collapse the
-handles onto the surface.
+handles onto the surface. NURBS uses Blender's evaluated unbeveled centerline,
+including rational weights, order, and cyclic closure. Temporary evaluation data
+is discarded without changing the source. Surface inflation normals come from
+resolved base geometry before publication, so the first host rotation is current.
 
 Attachment masks can be `ALL`, `BACKING`, `BOUNDARY`, `ENDPOINTS`,
 `SUSPENSION`, or a custom Mesh vertex group mapped to generated front/back
-vertices. `FIXED` rows set zero inverse mass; `SOFT` rows create weighted target
-tethers.
+vertices. Rows can be added, removed, and assigned masks through the mask picker.
+`FIXED` cores reach their resolved goals, with feathered exterior vertices treated
+as Soft. `SOFT` strength multiplies continuous painted influence and feathers;
+zero strength is inactive. Captured region offsets preserve the reference shape
+in the target frame; live Normal Offset moves its goal along the current normal.
+Soft constraints are point tethers to that goal, not changing rest-length tethers.
+Geometric mode blends directly toward Soft goals and applies Fixed goals last.
+Contradictory Fixed goals are errors. With no target, Fixed masks retain rest
+positions and target offsets/tethers are inactive.
+
+Surface Static PBD always pins its structural backing. Backing-only controls are
+disabled and broader masks explicitly retain their pinned backing vertices.
+`NONE` is inflation-only; unsupported solver/material controls are hidden.
 
 If target topology changes, the last valid final mesh is retained and the VCP
 enters `ERROR` until explicit Rebind. Missing base or target objects behave the
 same way. A guarded target-driven base rewrite is not treated as an artist edit;
 an artist edit schedules one coalesced recapture.
 
-Schema-1 SCP tissues remain on a compatibility adapter until the user explicitly
-changes their target. New schema-2 bindings include target type, entity ID,
+Schema-1 SCP identities are accepted by the common target adapter. Schema-2 bindings include target type, entity ID,
 surface role, exact evaluated triangle topology, and rest topology. Constraint
 mode, strength, and normal offset remain live settings and do not require recapture.
+
+Evaluation revision 1 is assigned explicitly to newly created tissues. Missing
+revisions are legacy: load, dependency updates, and import retain their cached
+appearance and show **Upgrade required: Recompute or Rebind**. A forced automatic
+sync is not upgrade authorization. Explicit Recompute upgrades only when stored
+target topology still matches; changed topology requires Rebind. Both import
+paths preserve and remap legacy caches. Failed evaluation/publication restores
+the previous caches, source pose, bindings, and evaluation revision together.
 
 ## Fiber Surface sources
 
@@ -132,7 +156,44 @@ Manual conversion accepts centered sphere/ellipsoid Blobs with `NONE` or `SCP`
 targets, builds a Closed Bulk candidate, and removes the Blob only after topology,
 vertex (`≤2e-6`), and volume (`≤1e-6`) equivalence checks pass.
 
-## Accepted references
+## Native solver and diagnostics
+
+The existing `af_fiber_ccd_v3_32.dll` exposes tissue interface version 1 and
+capability bit `536870912`. Envelope, generic static, and Point geometric
+iterations are batched native calls. A missing/incompatible library is an error;
+there is no Python optimization fallback. Build with
+`native/fiber_ccd/build_windows.ps1`. Frozen Python envelope code lives only in
+the test tree for migration comparisons.
+
+Shell walls follow directed face boundaries; backing faces reverse the source
+winding. Inconsistent/nonmanifold face winding is rejected. Signed volume uses
+centered double-precision coordinates, including opposite cavity orientation.
+
+`soft_tissue_diagnostic` retains its four-value API. `soft_tissue_solve_report`
+adds termination state, iterations, final change, total displacement, relative
+volume error, fixed-goal error, and native timing. States are `NOT_APPLICABLE`,
+`CONVERGED`, `ITERATION_LIMIT`, `INVALID_INPUT`, `NUMERICAL_FAILURE`, and
+`NATIVE_UNAVAILABLE`. `CLEAN` means the output is current; iteration-limit output
+is usable and visibly warned about. Convergence includes the final projections.
+Failed Recompute/Rebind and failed creation/preset evaluation return failure.
+
+## Regression fixtures
+
+`artifacts/soft_tissue_native_regression/v1` contains native lip, abdominal Layer,
+breast Pouch, Closed Bulk, and Muscle-attachment scenes, reopened renders, and
+measured receipts. Build them with `tools/build_soft_tissue_native_fixtures.py`.
+They use the existing prototype input geometry with production native records.
+They are functional geometry fixtures, not anatomical validation of a finished avatar.
+All five reopened with zero cached-vertex difference. The Muscle fixture retains
+both source fibers in normal curve display; all scenes retain Solid/Object SCP colors.
+
+`tools/benchmark_soft_tissue_native.py` measures five warmed runs per size.
+The recorded solver-call medians improved 17.9× at 2,178 vertices and 13.1× at
+8,450 vertices, with maximum reference deviation `1.49e-8`. This measures solver
+calls, not full Blender recompute. Default Pouches still report `ITERATION_LIMIT`;
+the migration preserves their algorithm and does not claim convergence.
+
+## Historical prototypes
 
 The immutable experiment artifacts remain under:
 
@@ -141,9 +202,10 @@ The immutable experiment artifacts remain under:
 - `artifacts/soft_tissue_breast`
 - `artifacts/soft_tissue_closed_bulk`
 
-Their accepted checks are 33 samples per lip curve, abdominal thickness
-`0.008–0.28` with centroid drop `0.10222`, breast relative volume error below
-`5e-5` with centroid drop `0.12342`, and Closed Bulk vertex error below `2e-6`.
+Those files contain prototype meshes rather than native tissue records. Their
+historical numerical results are not evidence for the current production path.
+Current checks include 33 lip samples, `0.008–0.28` abdominal rest thickness,
+Pouch volume error below `5e-5`, and legacy Blob compatibility within `2e-6`.
 
 ## Future work (not shipped)
 

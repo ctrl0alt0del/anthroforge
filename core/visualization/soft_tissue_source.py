@@ -3,6 +3,7 @@ import json
 import math
 
 import bmesh
+import bpy
 from mathutils import Vector
 from mathutils.geometry import interpolate_bezier
 
@@ -73,6 +74,23 @@ def sample_base(obj, tissue, resolved=None, scene=None):
     return _surface_sample(obj, tissue, resolved, scene)
 
 
+def sample_control_pose(obj, tissue, pose, scene):
+    temp = obj.copy()
+    temp.data = None if obj.data is None else obj.data.copy()
+    data = temp.data
+    try:
+        for key in tuple(temp.keys()):
+            if str(key).startswith("af_"):
+                del temp[key]
+        scene.collection.objects.link(temp)
+        apply_control_pose(temp, pose)
+        return sample_base(temp, tissue, scene=scene)
+    finally:
+        bpy.data.objects.remove(temp, do_unlink=True)
+        if data is not None:
+            bpy.data.batch_remove(ids=(data,))
+
+
 def sample_entity_base(root, scene, tissue):
     source_type = str(getattr(tissue, "base_source_type", "OBJECT") or "OBJECT")
     if source_type == "FIBER":
@@ -117,8 +135,8 @@ def _mesh_proxy_sample(proxy, tissue):
     faces = tuple(tuple(poly.vertices) for poly in proxy.data.polygons)
     edges = tuple(tuple(edge.vertices) for edge in proxy.data.edges)
     bounds = boundary_edges(edges, faces)
-    weights = boundary_falloff_weights(len(points), edges, faces, points)
-    return BaseSample(points, normals, faces, bounds, weights, False, {})
+    weights = _surface_field_weights(proxy, tissue.field_attribute, points, edges, faces)
+    return BaseSample(points, normals, faces, bounds, weights, False, _custom_groups(proxy, tissue))
 
 
 def _entity_by_id(items, entity_id):
@@ -384,6 +402,7 @@ def _surface_sample_from_bmesh(source, evaluated, bm, tissue, resolved):
     points = points if resolved is None else resolved[0]
     edges = tuple(tuple(vertex.index for vertex in edge.verts) for edge in bm.edges)
     faces = tuple(tuple(vertex.index for vertex in face.verts) for face in bm.faces)
+    normals = normals if resolved is None else _resolved_surface_normals(points, faces)
     bounds = boundary_edges(edges, faces)
     weights = _refined_field_weights(source, bm, tissue.field_attribute, points, edges, faces)
     groups = _refined_custom_groups(source, bm, tissue)
@@ -405,8 +424,7 @@ def _refined_field_weights(source, bm, name, points, edges, faces):
 
 
 def _generated_surface_field(source, name):
-    values = _group_weights(source, name)
-    return source.vertex_groups.get(str(name or "")) is None or not any(value > 1.0e-8 for value in values)
+    return source.vertex_groups.get(str(name or "")) is None
 
 
 def _refined_custom_groups(source, bm, tissue):
@@ -430,10 +448,29 @@ def _surface_sample_from_mesh(source, evaluated, mesh, tissue, resolved):
     if resolved is not None:
         points = resolved[0]
     faces = tuple(tuple(poly.vertices) for poly in mesh.polygons)
+    normals = normals if resolved is None else _resolved_surface_normals(points, faces)
     edges = tuple(tuple(edge.vertices) for edge in mesh.edges)
-    weights = _group_weights(source, tissue.field_attribute)
+    weights = _surface_field_weights(source, tissue.field_attribute, points, edges, faces)
     groups = _custom_groups(source, tissue)
     return BaseSample(tuple(points), tuple(normals), faces, boundary_edges(edges, faces), weights, False, groups)
+
+
+def _surface_field_weights(source, name, points, edges, faces):
+    if source.vertex_groups.get(str(name or "")) is not None:
+        return _group_weights(source, name)
+    return boundary_falloff_weights(len(points), edges, faces, points)
+
+
+def _resolved_surface_normals(points, faces):
+    bm = bmesh.new()
+    try:
+        vertices = [bm.verts.new(point) for point in points]
+        for face in faces:
+            bm.faces.new([vertices[index] for index in face])
+        bm.normal_update()
+        return tuple(tuple(vertex.normal) for vertex in vertices)
+    finally:
+        bm.free()
 
 
 def _custom_groups(obj, tissue):
@@ -451,9 +488,53 @@ def _curve_world_points(obj, resolution, scene=None):
     evaluated = obj.evaluated_get(depsgraph_for_scene(scene)) if scene is not None else obj
     spline = evaluated.data.splines[0]
     local = _bezier_points(spline, resolution) if spline.type == "BEZIER" else _spline_points(spline)
+    if spline.type == "NURBS":
+        local = _nurbs_centerline(evaluated, resolution, scene)
     cyclic = bool(spline.use_cyclic_u)
     sampled = _resample_curve(local, int(resolution), cyclic)
     return tuple(tuple(evaluated.matrix_world @ point) for point in sampled), cyclic
+
+
+def _nurbs_centerline(evaluated, resolution, scene):
+    data = evaluated.data.copy()
+    temp = bpy.data.objects.new("AF_TissueCenterline", data)
+    try:
+        data.bevel_depth, data.extrude, data.bevel_object = 0.0, 0.0, None
+        data.dimensions, data.resolution_u = "3D", max(32, int(resolution))
+        (scene or bpy.context.scene).collection.objects.link(temp)
+        depsgraph = depsgraph_for_scene(scene or bpy.context.scene)
+        depsgraph.update()
+        return _mesh_centerline(temp.evaluated_get(depsgraph))
+    finally:
+        bpy.data.objects.remove(temp, do_unlink=True)
+        bpy.data.curves.remove(data)
+
+
+def _mesh_centerline(evaluated):
+    mesh = evaluated.to_mesh()
+    try:
+        graph = _mesh_adjacency(mesh)
+        endpoints = [index for index, links in enumerate(graph) if len(links) == 1]
+        if not graph or any(len(links) not in {1, 2} for links in graph):
+            raise ValueError("NURBS evaluation did not produce a single centerline.")
+        order = _walk_centerline(graph, endpoints[0] if endpoints else 0)
+        return tuple(mesh.vertices[index].co.copy() for index in order)
+    finally:
+        evaluated.to_mesh_clear()
+
+
+def _walk_centerline(graph, start):
+    order, seen, current = [], set(), start
+    while current not in seen:
+        order.append(current)
+        seen.add(current)
+        candidates = sorted(graph[current] - seen)
+        if not candidates:
+            break
+        current = candidates[0]
+    if len(order) != len(graph):
+        raise ValueError("NURBS evaluation produced disconnected centerlines.")
+    return order
 
 
 def _resample_curve(points, resolution, cyclic):

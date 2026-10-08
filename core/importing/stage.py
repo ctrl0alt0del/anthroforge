@@ -34,12 +34,14 @@ def _alive(obj):
     return obj is not None
 
 
-def append_stage_root(filepath, root_name):
+def append_stage_root(filepath, root_name, cache_names=()):
     before = _object_ptrs()
     with bpy.data.libraries.load(filepath, link=False) as (data_from, data_to):
         if root_name not in data_from.objects:
             return StageBundle()
-        data_to.objects = [root_name]
+        data_to.objects = [root_name] + [name for name in cache_names if name in data_from.objects]
+    for obj in data_to.objects[1:]:
+        obj["af_import_stage_root"] = data_to.objects[0].name
     return StageBundle(root=data_to.objects[0], objects=_new_objects(before))
 
 

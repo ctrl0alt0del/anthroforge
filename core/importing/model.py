@@ -148,6 +148,7 @@ class SoftTissueSnapshot:
     base_source_type: str = "OBJECT"
     base_source_id: str = ""
     attachments: list[SoftTissueAttachmentSnapshot] = field(default_factory=list)
+    cache_object_names: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data):

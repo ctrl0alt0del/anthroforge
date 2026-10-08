@@ -2,7 +2,7 @@ import bpy
 
 from ...app.queries.root import root_for_context
 from ...app.queries.vcp import active_soft_tissue_from_context, has_active_entity
-from ...core.vcp.runtime_state import soft_tissue_diagnostic, soft_tissue_status
+from ...core.vcp.runtime_state import soft_tissue_diagnostic, soft_tissue_status, soft_tissue_solve_report
 from ...core.vcp.surface_target import effective_tissue_target
 
 
@@ -96,6 +96,9 @@ def _inflation_fields(tissue):
 def _draw_relaxation(layout, tissue):
     box = layout.box()
     box.label(text="Relaxation")
+    if tissue.relaxation_mode == "NONE":
+        box.prop(tissue, "relaxation_mode")
+        return
     fields = ("relaxation_mode", "sagginess", "gravity")
     fields += () if _is_surface_static(tissue) else ("sag_limit",)
     for key in fields:
@@ -112,15 +115,22 @@ def _is_surface_static(tissue):
 
 
 def _draw_material(layout, tissue):
+    if tissue.relaxation_mode == "NONE" or (tissue.relaxation_mode == "GEOMETRIC" and tissue.base_domain != "POINT"):
+        return
     box = layout.box()
     box.label(text="Material")
     box.prop(tissue, "shape_retention")
-    box.prop(tissue, "volume_retention")
+    if tissue.relaxation_mode == "STATIC_PBD":
+        box.prop(tissue, "volume_retention")
     if _is_surface_static(tissue):
         box.prop(tissue, "surface_slack")
 
 
 def _draw_solver(layout, tissue):
+    if tissue.relaxation_mode != "STATIC_PBD":
+        if tissue.relaxation_mode == "GEOMETRIC" and tissue.base_domain == "POINT":
+            layout.prop(tissue, "iterations")
+        return
     box = layout.box()
     box.label(text="Solver")
     for key in ("iterations", "constraint_passes", "tolerance"):
@@ -138,14 +148,27 @@ def _effective_tolerance(tissue):
 def _draw_attachments(layout, tissue):
     box = layout.box()
     box.label(text="Attachments")
-    for row in tissue.attachments:
-        col = box.column(align=True)
-        col.prop(row, "mode")
-        col.prop(row, "mask_attribute")
-        col.prop(row, "strength")
-        if tissue.relaxation_mode == "STATIC_PBD":
-            col.prop(row, "feather")
-        col.prop(row, "normal_offset")
+    box.operator("af.add_soft_tissue_attachment", icon="ADD")
+    if _is_surface_static(tissue):
+        box.label(text="Backing is structurally fixed; overlapping masks stay pinned.", icon="INFO")
+    for index, row in enumerate(tissue.attachments):
+        _draw_attachment_row(box, tissue, row, index)
+
+
+def _draw_attachment_row(box, tissue, row, index):
+    col = box.column(align=True)
+    col.prop(row, "mask_attribute")
+    col.operator("af.select_soft_tissue_attachment_mask", icon="VIEWZOOM").index = index
+    col.operator("af.remove_soft_tissue_attachment", icon="REMOVE").index = index
+    controls = col.column(align=True)
+    controls.enabled = tissue.relaxation_mode != "NONE" and not (_is_surface_static(tissue) and row.mask_attribute.upper() == "BACKING")
+    controls.prop(row, "mode")
+    tether = controls.column(align=True)
+    tether.enabled = effective_tissue_target(tissue).kind.value != "NONE"
+    if row.mode == "SOFT" or row.feather > 0:
+        tether.prop(row, "strength")
+    tether.prop(row, "feather")
+    tether.prop(row, "normal_offset")
 
 
 def _draw_actions(layout, tissue):
@@ -162,6 +185,9 @@ def _draw_status(layout, tissue):
     milliseconds, iterations, displacement, error = soft_tissue_diagnostic(tissue)
     box = layout.box()
     box.label(text=f"Status: {soft_tissue_status(tissue)}")
+    report = soft_tissue_solve_report(tissue)
+    if report["status"] == "ITERATION_LIMIT":
+        box.label(text="Iteration limit reached; output is current but unconverged.", icon="ERROR")
     box.label(text=f"{milliseconds:.1f} ms, {iterations} iterations")
     box.label(text=f"Max displacement: {displacement:.6g}")
     if error:

@@ -362,6 +362,7 @@ def _create_one_soft_tissue(state, snap):
 
 
 def _add_soft_tissue_record(state, snap, host, target_type, target_id, source_type, source_id, base):
+    from .soft_tissue_cache import preserve_legacy_cache
     dst = _new_vcp_item(state.root.af_vcp_system.soft_tissues, "TISSUE")
     state.soft_tissues[str(snap.source_id or "")] = str(dst.id or "")
     dst.name = str(snap.name or dst.id)
@@ -372,6 +373,7 @@ def _add_soft_tissue_record(state, snap, host, target_type, target_id, source_ty
     dst.attachment_target_surface = str(getattr(snap, "attachment_target_surface", "AUTO"))
     _copy_soft_attachments(dst, snap)
     _remap_soft_payloads(dst, snap, target_type, target_id)
+    preserve_legacy_cache(state, snap, dst)
     if base is not None:
         _keep_tissue_base(state, base, dst)
 

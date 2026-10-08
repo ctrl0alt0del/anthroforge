@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from .soft_tissue_model import Vec3
+from .soft_tissue_surface_field import boundary_edges as oriented_boundary_edges
 
 
 Face = tuple[int, ...]
@@ -32,9 +33,20 @@ def validate_surface_layer(points, normals, faces, boundary_edges, weights, prof
     if profile.thickness_power <= 0.0:
         errors.append("thickness power must be positive")
     errors += _topology_errors(len(points), faces, boundary_edges)
+    errors += _orientation_errors(faces)
     if any(not 0.0 <= float(value) <= 1.0 for value in weights):
         errors.append("thickness weights must be between zero and one")
     return tuple(errors)
+
+
+def _orientation_errors(faces):
+    uses = {}
+    for face in faces:
+        for a, b in zip(face, face[1:] + face[:1]):
+            uses.setdefault(tuple(sorted((a, b))), []).append((a, b))
+    if any(len(rows) > 2 or len(rows) == 2 and rows[0] != rows[1][::-1] for rows in uses.values()):
+        return ["surface faces require consistent manifold winding"]
+    return []
 
 
 def inflate_surface_layer(points, normals, faces, boundary_edges, weights, profile):
@@ -45,7 +57,7 @@ def inflate_surface_layer(points, normals, faces, boundary_edges, weights, profi
     backing = tuple(_vec(point) for point in points)
     count = len(points)
     shell_faces = tuple(tuple(face) for face in faces) + tuple(_back_face(face, count) for face in faces)
-    sides = tuple(_side_face(edge, count) for edge in boundary_edges)
+    sides = tuple(_side_face(edge, count) for edge in oriented_boundary_edges((), faces))
     thicknesses = tuple(surface_thickness(weight, profile) for weight in weights)
     return SurfaceLayerMesh(front + backing, shell_faces + sides, count, thicknesses)
 
@@ -88,7 +100,7 @@ def _back_face(face, count):
 
 def _side_face(edge, count):
     first, second = int(edge[0]), int(edge[1])
-    return first, second, second + count, first + count
+    return second, first, first + count, second + count
 
 
 def _vec(value):

@@ -11,6 +11,7 @@ from ...core.visualization.soft_tissue_source import infer_base_domain, validate
 from ...core.visualization.vcp_mirror_runtime import surface_target_mirror_rule, tissue_source_mirror_rule
 from ...core.vcp.surface_target import target_ref
 from .soft_tissue_target import target_ref_from_object
+from .soft_tissue_tools import evaluation_result
 
 
 def create_soft_tissue_vcp(context):
@@ -20,10 +21,9 @@ def create_soft_tissue_vcp(context):
         return failure(error)
     source, owned = _ensure_source(context, source, preset) if source_type == "OBJECT" else (None, False)
     tissue = _create_record(root, source, owned, target, preset, source_type, source_id, domain)
-    _ensure_surface_field(source, tissue.field_attribute)
     _activate(root, tissue)
     _sync_tissue(root, context.scene, tissue.id, True)
-    return success(f"Added {tissue.id}", value=tissue)
+    return evaluation_result(tissue, f"Added {tissue.id}")
 
 
 def _preflight_creation(root, source, domain, target_obj, preset, source_type, source_id):
@@ -72,7 +72,7 @@ def apply_soft_tissue_preset(context, preset, tissue=None):
         if str(preset) == "CUSTOM":
             _assign_custom_domain(tissue)
     _sync_tissue(root_for_context(context), context.scene, tissue.id, True)
-    return success(f"Applied {preset} preset.", value=tissue)
+    return evaluation_result(tissue, f"Applied {preset} preset.")
 
 
 def _preflight_source(root, source, domain, preset, source_type="OBJECT", source_id=""):
@@ -144,6 +144,7 @@ def _create_record(root, source, owned, target, preset, source_type="OBJECT", so
 def _assign_record_identity(tissue, tissues, source, owned, source_type, source_id, domain):
     tissue.id = next_prefixed_id(tissues, "TISSUE")
     tissue.name, tissue.schema_version = tissue.id, 2
+    tissue.evaluation_revision = 1
     tissue.base_source_type, tissue.base_source_id = str(source_type), str(source_id)
     tissue.base_object_ref, tissue.base_owned = source, bool(owned)
     tissue.base_domain = str(domain or infer_base_domain(source))

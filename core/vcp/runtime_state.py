@@ -190,6 +190,18 @@ def soft_tissue_diagnostic(tissue):
             float(_read(tissue, _SOFT_DISP, 0.0)), str(_read(tissue, _SOFT_ERROR, "") or ""))
 
 
+def soft_tissue_solve_report(tissue):
+    import json
+    from .soft_tissue_report import solve_report
+    return solve_report(json.loads(str(_read(tissue, "_af_rt_soft_tissue_report", "{}"))))
+
+
+def set_soft_tissue_solve_report(tissue, report=None):
+    import json
+    from .soft_tissue_report import solve_report
+    _write(tissue, "_af_rt_soft_tissue_report", json.dumps(solve_report(report)))
+
+
 def set_soft_tissue_diagnostic(tissue, milliseconds=0.0, iterations=0, displacement=0.0, error=""):
     _write(tissue, _SOFT_MS, float(milliseconds))
     _write(tissue, _SOFT_ITERS, int(iterations))
@@ -200,6 +212,7 @@ def set_soft_tissue_diagnostic(tissue, milliseconds=0.0, iterations=0, displacem
 def reset_soft_tissue_runtime(tissue):
     set_soft_tissue_status(tissue, "DIRTY")
     set_soft_tissue_diagnostic(tissue)
+    set_soft_tissue_solve_report(tissue)
 
 
 def reset_vcp_runtime_state(root):

@@ -536,6 +536,7 @@ class AF_SoftTissueAttachment_Property(bpy.types.PropertyGroup):
 
 
 class AF_SoftTissueVCP_Property(bpy.types.PropertyGroup):
+    evaluation_revision: bpy.props.IntProperty(name="Evaluation revision", default=0, min=0)
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="Soft Tissue", update=_on_soft_tissue_prop_update)
     schema_version: bpy.props.IntProperty(name="Schema", default=2, min=1, max=2)

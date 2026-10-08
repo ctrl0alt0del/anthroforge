@@ -3,6 +3,7 @@ import bpy
 from ..queries.root import root_for_context
 from ..queries.vcp import active_soft_tissue_from_context, soft_tissue_proxy_for_context
 from .results import failure, success
+from ...core.vcp.runtime_state import soft_tissue_status, soft_tissue_diagnostic, soft_tissue_solve_report
 
 
 def recompute_soft_tissue(context, rebind=False):
@@ -10,7 +11,17 @@ def recompute_soft_tissue(context, rebind=False):
     if tissue is None:
         return failure("Soft Tissue VCP not found.")
     _sync(context, tissue.id, bool(rebind))
-    return success("Soft tissue rebound." if rebind else "Soft tissue recomputed.")
+    if soft_tissue_status(tissue) != "CLEAN":
+        return failure(soft_tissue_diagnostic(tissue)[3] or "Soft tissue evaluation failed.")
+    return evaluation_result(tissue, "Soft tissue rebound." if rebind else "Soft tissue recomputed.")
+
+
+def evaluation_result(tissue, message):
+    if soft_tissue_status(tissue) != "CLEAN":
+        return failure(soft_tissue_diagnostic(tissue)[3] or "Soft tissue evaluation failed.")
+    if soft_tissue_solve_report(tissue)["status"] == "ITERATION_LIMIT":
+        return success(message + " Iteration limit reached; output is unconverged.", level="WARNING", value=tissue)
+    return success(message, value=tissue)
 
 
 def select_soft_tissue_base(context):
@@ -48,7 +59,7 @@ def _sync(context, tissue_id, rebind):
     from ...app.runtime_api import sync_scene
     from ...core.deps.dirty_hints import dirty_hints_for
     root = root_for_context(context)
-    payload = {"soft_tissue_force": True}
+    payload = {"soft_tissue_force": True, "soft_tissue_upgrade": True}
     if rebind:
         payload["soft_tissue_recapture_ids"] = [str(tissue_id)]
     sync_scene(root, context.scene, dirty_hints_for("SOFT_TISSUE", {tissue_id}), source="operator",

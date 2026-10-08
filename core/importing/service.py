@@ -56,7 +56,8 @@ def _load_snapshot(filepath):
 
 
 def _stage_snapshot(filepath, snapshot):
-    stage = append_stage_root(filepath, snapshot.root_name)
+    cache_names = [name for tissue in snapshot.soft_tissues for name in tissue.cache_object_names]
+    stage = append_stage_root(filepath, snapshot.root_name, cache_names)
     if stage.root is None:
         raise RuntimeError(f"Could not append source root '{snapshot.root_name}'.")
     return stage

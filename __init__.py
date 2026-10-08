@@ -70,6 +70,8 @@ from .operators.muscle_tools import (
 )
 from .operators.blob_tools import AF_OT_SelectBlobControl
 from .operators.soft_tissue import (
+    AF_OT_SelectSoftTissueAttachmentMask,
+    AF_OT_AddSoftTissueAttachment, AF_OT_RemoveSoftTissueAttachment,
     AF_OT_AddSoftTissueVCP,
     AF_OT_AssignSoftTissueTarget,
     AF_OT_ApplySoftTissuePreset,
@@ -313,6 +315,8 @@ classes = (
     AF_OT_ApplySoftTissuePreset,
     AF_OT_ClearSoftTissueTarget,
     AF_OT_RecomputeSoftTissue,
+    AF_OT_AddSoftTissueAttachment, AF_OT_RemoveSoftTissueAttachment,
+    AF_OT_SelectSoftTissueAttachmentMask,
     AF_OT_RebindSoftTissue,
     AF_OT_SelectSoftTissueBase,
     AF_OT_SelectSoftTissueTarget,

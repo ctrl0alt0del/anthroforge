@@ -222,6 +222,7 @@ def _stage_tissue_base(state, source_id):
 
 
 def _create_one_soft_tissue(state, snap):
+    from .soft_tissue_cache import preserve_legacy_cache
     values = _soft_tissue_import_values(state, snap)
     error = _soft_tissue_import_missing(*values)
     if error:
@@ -229,6 +230,7 @@ def _create_one_soft_tissue(state, snap):
     dst = _new_vcp_item(state.root.af_vcp_system.soft_tissues, "TISSUE")
     state.soft_tissues[str(snap.source_id or "")] = str(dst.id or "")
     _populate_soft_tissue(dst, snap, values)
+    preserve_legacy_cache(state, snap, dst)
     base = values[4]
     if base is not None:
         _keep_base(state, base, dst)

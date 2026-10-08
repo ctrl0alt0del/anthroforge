@@ -24,7 +24,7 @@ def _quad(name):
     return obj
 
 
-def _source_file():
+def _source_file(legacy=False):
     host = _quad("SourceHost")
     scp = scp_with_object(root(), "Source Host", host)
     base = _quad("SourceBase")
@@ -34,6 +34,8 @@ def _source_file():
     if bpy.ops.af.add_soft_tissue_vcp() != {"FINISHED"}:
         raise AssertionError("Could not create source tissue")
     path = temp_blend_path()
+    if legacy:
+        root().af_vcp_system.soft_tissues[-1].evaluation_revision = 0
     bpy.ops.wm.save_as_mainfile(filepath=path)
     return path, scp.id
 
@@ -44,6 +46,28 @@ def _proxy(tissue_id):
 
 
 class SoftTissueImportTests(BlenderTestCase):
+    def test_full_import_preserves_legacy_cache_until_explicit_upgrade(self):
+        path, _host_id = _source_file(True)
+        self.addCleanup(lambda: os.remove(path) if os.path.exists(path) else None)
+        before = tuple(tuple(v.co) for v in _proxy("TISSUE_1").data.vertices)
+        reset_scene()
+        import_package_from_blend(path, bpy.context)
+        tissue = root().af_vcp_system.soft_tissues[-1]
+        self.assertEqual(tissue.evaluation_revision, 0)
+        self.assertEqual(tuple(tuple(v.co) for v in _proxy(tissue.id).data.vertices), before)
+        self.assertEqual(soft_tissue_status(tissue), "DIRTY")
+
+    def test_vcp_import_preserves_legacy_cache(self):
+        path, _host_id = _source_file(True)
+        self.addCleanup(lambda: os.remove(path) if os.path.exists(path) else None)
+        before = tuple(tuple(v.co) for v in _proxy("TISSUE_1").data.vertices)
+        reset_scene()
+        scp_with_object(root(), "Target", _quad("TargetHost"))
+        import_vcp_from_blend(path, bpy.context)
+        tissue = root().af_vcp_system.soft_tissues[-1]
+        self.assertEqual(tissue.evaluation_revision, 0)
+        self.assertEqual(tuple(tuple(v.co) for v in _proxy(tissue.id).data.vertices), before)
+
     def test_vcp_import_skips_incompatible_soft_tissue_host(self):
         path, host_id = _source_file()
         self.addCleanup(lambda: os.remove(path) if os.path.exists(path) else None)

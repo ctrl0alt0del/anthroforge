@@ -71,6 +71,7 @@ def _map_blob(tissue, tissues, point, blob):
     tissue.id = next_prefixed_id(tissues, "TISSUE")
     tissue.name, tissue.preset = model.name, model.preset.value
     tissue.schema_version = 2
+    tissue.evaluation_revision = 1
     tissue.base_domain, tissue.base_object_ref, tissue.base_owned = "POINT", point, True
     tissue.boundary_mode = model.boundary.value
     tissue.attachment_target_type = "SCP" if blob.attach_target_type == "SCP" else "NONE"
