@@ -8609,6 +8609,12 @@
                 },
                 "offset": {
                   "type": "number"
+                },
+                "stacking_fixed": {
+                  "type": "boolean"
+                },
+                "protected_crease": {
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -8635,6 +8641,12 @@
                 },
                 "offset": {
                   "type": "number"
+                },
+                "stacking_fixed": {
+                  "type": "boolean"
+                },
+                "protected_crease": {
+                  "type": "boolean"
                 },
                 "attachment": {
                   "type": "object",
@@ -9970,6 +9982,18 @@
                   "type": "number",
                   "minimum": 0
                 },
+                "blend_distance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "preservation_weight": {
+                  "type": "number",
+                  "minimum": 1
+                },
+                "smoothing_max_adjustment": {
+                  "type": "number",
+                  "minimum": 0
+                },
                 "exclusions": {
                   "type": "array",
                   "items": {
@@ -9989,60 +10013,147 @@
                 "relationships": {
                   "type": "array",
                   "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "excluded": {
-                        "type": "boolean"
-                      },
-                      "cover": {
-                        "oneOf": [
-                          {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "minItems": 3,
-                            "maxItems": 3
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
                           },
-                          {
+                          "excluded": {
+                            "type": "boolean"
+                          },
+                          "mode": {
                             "enum": [
-                              null
+                              "automatic",
+                              "requested",
+                              "explicit"
+                            ]
+                          },
+                          "cover": {
+                            "oneOf": [
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 3,
+                                "maxItems": 3
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "region": {
+                            "oneOf": [
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 2
+                                },
+                                "minItems": 1,
+                                "maxItems": 2000000
+                              }
                             ]
                           }
-                        ]
+                        },
+                        "required": [
+                          "id"
+                        ],
+                        "additionalProperties": false
                       },
-                      "region": {
-                        "oneOf": [
-                          {
+                      {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "excluded": {
+                            "type": "boolean"
+                          },
+                          "mode": {
                             "enum": [
-                              null
+                              "automatic",
+                              "requested",
+                              "explicit"
                             ]
                           },
-                          {
+                          "cover": {
+                            "oneOf": [
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 3,
+                                "maxItems": 3
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "region": {
+                            "oneOf": [
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 2
+                                },
+                                "minItems": 1,
+                                "maxItems": 2000000
+                              }
+                            ]
+                          },
+                          "pair": {
                             "type": "array",
                             "items": {
                               "type": "array",
                               "items": {
-                                "type": "integer",
-                                "minimum": 0
+                                "type": "string"
                               },
-                              "minItems": 2,
-                              "maxItems": 2
+                              "minItems": 3,
+                              "maxItems": 3
                             },
-                            "minItems": 1,
-                            "maxItems": 2000000
+                            "minItems": 2,
+                            "maxItems": 2
                           }
-                        ]
+                        },
+                        "required": [
+                          "pair"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "id"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 }
               },
@@ -10269,6 +10380,18 @@
                   "type": "number",
                   "minimum": 0
                 },
+                "blend_distance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "preservation_weight": {
+                  "type": "number",
+                  "minimum": 1
+                },
+                "smoothing_max_adjustment": {
+                  "type": "number",
+                  "minimum": 0
+                },
                 "exclusions": {
                   "type": "array",
                   "items": {
@@ -10288,60 +10411,147 @@
                 "relationships": {
                   "type": "array",
                   "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "excluded": {
-                        "type": "boolean"
-                      },
-                      "cover": {
-                        "oneOf": [
-                          {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "minItems": 3,
-                            "maxItems": 3
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
                           },
-                          {
+                          "excluded": {
+                            "type": "boolean"
+                          },
+                          "mode": {
                             "enum": [
-                              null
+                              "automatic",
+                              "requested",
+                              "explicit"
+                            ]
+                          },
+                          "cover": {
+                            "oneOf": [
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 3,
+                                "maxItems": 3
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "region": {
+                            "oneOf": [
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 2
+                                },
+                                "minItems": 1,
+                                "maxItems": 2000000
+                              }
                             ]
                           }
-                        ]
+                        },
+                        "required": [
+                          "id"
+                        ],
+                        "additionalProperties": false
                       },
-                      "region": {
-                        "oneOf": [
-                          {
+                      {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "excluded": {
+                            "type": "boolean"
+                          },
+                          "mode": {
                             "enum": [
-                              null
+                              "automatic",
+                              "requested",
+                              "explicit"
                             ]
                           },
-                          {
+                          "cover": {
+                            "oneOf": [
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 3,
+                                "maxItems": 3
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "region": {
+                            "oneOf": [
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 2
+                                },
+                                "minItems": 1,
+                                "maxItems": 2000000
+                              }
+                            ]
+                          },
+                          "pair": {
                             "type": "array",
                             "items": {
                               "type": "array",
                               "items": {
-                                "type": "integer",
-                                "minimum": 0
+                                "type": "string"
                               },
-                              "minItems": 2,
-                              "maxItems": 2
+                              "minItems": 3,
+                              "maxItems": 3
                             },
-                            "minItems": 1,
-                            "maxItems": 2000000
+                            "minItems": 2,
+                            "maxItems": 2
                           }
-                        ]
+                        },
+                        "required": [
+                          "pair"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "id"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 }
               },
@@ -10453,6 +10663,18 @@
                   "type": "number",
                   "minimum": 0
                 },
+                "blend_distance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "preservation_weight": {
+                  "type": "number",
+                  "minimum": 1
+                },
+                "smoothing_max_adjustment": {
+                  "type": "number",
+                  "minimum": 0
+                },
                 "exclusions": {
                   "type": "array",
                   "items": {
@@ -10472,65 +10694,227 @@
                 "relationships": {
                   "type": "array",
                   "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "excluded": {
-                        "type": "boolean"
-                      },
-                      "cover": {
-                        "oneOf": [
-                          {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "minItems": 3,
-                            "maxItems": 3
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
                           },
-                          {
+                          "excluded": {
+                            "type": "boolean"
+                          },
+                          "mode": {
                             "enum": [
-                              null
+                              "automatic",
+                              "requested",
+                              "explicit"
+                            ]
+                          },
+                          "cover": {
+                            "oneOf": [
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 3,
+                                "maxItems": 3
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "region": {
+                            "oneOf": [
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 2
+                                },
+                                "minItems": 1,
+                                "maxItems": 2000000
+                              }
                             ]
                           }
-                        ]
+                        },
+                        "required": [
+                          "id"
+                        ],
+                        "additionalProperties": false
                       },
-                      "region": {
-                        "oneOf": [
-                          {
+                      {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "excluded": {
+                            "type": "boolean"
+                          },
+                          "mode": {
                             "enum": [
-                              null
+                              "automatic",
+                              "requested",
+                              "explicit"
                             ]
                           },
-                          {
+                          "cover": {
+                            "oneOf": [
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 3,
+                                "maxItems": 3
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "region": {
+                            "oneOf": [
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 2
+                                },
+                                "minItems": 1,
+                                "maxItems": 2000000
+                              }
+                            ]
+                          },
+                          "pair": {
                             "type": "array",
                             "items": {
                               "type": "array",
                               "items": {
-                                "type": "integer",
-                                "minimum": 0
+                                "type": "string"
                               },
-                              "minItems": 2,
-                              "maxItems": 2
+                              "minItems": 3,
+                              "maxItems": 3
                             },
-                            "minItems": 1,
-                            "maxItems": 2000000
+                            "minItems": 2,
+                            "maxItems": 2
                           }
-                        ]
+                        },
+                        "required": [
+                          "pair"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "id"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 }
               },
               "required": [],
               "additionalProperties": false
+            }
+          },
+          "required": [
+            "scene_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "dsl",
+        "version",
+        "message_type",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "muscles.base_intersections"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tolerance": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "witness_limit": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 64
+            },
+            "include_mirrors": {
+              "type": "boolean"
+            },
+            "muscle_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
             }
           },
           "required": [

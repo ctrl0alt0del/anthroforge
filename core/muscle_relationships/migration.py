@@ -19,12 +19,20 @@ def rollback(root):
 
 def ensure(root):
     with rollback(root):
-        document = store.initialize(root); raw = json.loads(root.get(CONFIG, '{}'))
+        document = upgrade(root, store.initialize(root)); raw = json.loads(root.get(CONFIG, '{}'))
         if 'exclusions' not in raw: return document
         value = with_exclusions(document, raw.pop('exclusions'))
         with store.transaction(root, value, document['revision']) as result:
             root[CONFIG] = json.dumps(raw, sort_keys=True)
             return result
+
+
+def upgrade(root, document):
+    if document['schema'] == 2: return document
+    value = deepcopy(document); value['schema'] = 2
+    for row in value['records'].values():
+        if row['intent'].get('cover'): row['intent']['mode'] = 'requested'
+    with store.transaction(root, value, document['revision']) as result: return result
 
 
 def with_exclusions(document, pairs):

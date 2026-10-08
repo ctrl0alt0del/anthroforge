@@ -46,15 +46,15 @@ class MultiProvider(unittest.TestCase):
         self.check_support(chain(), settings())
         values = [inflated('lower', 0, .38), inflated('middle', .07, .17), inflated('top', .14, .22)]
         surfaces = self.check_support(values, settings())
-        for name, peak in [('lower', .38), ('middle', .48), ('top', .56)]:
+        for name, peak in [('lower', .38), ('middle', .55), ('top', .70)]:
             np.testing.assert_allclose(surfaces[name][:, 2].max(), peak, atol=2e-6)
 
     def test_joint_envelope_is_maximum_not_sum(self):
         values = providers(); flat = []
         for d, height in zip(values, (.4, .44, .055)):
             flat.append(replace(d, own=d.base+[0, 0, height], material=replace(d.material, fixed=np.array([], dtype='int64'))))
-        surfaces = self.check_support(flat, settings())
-        np.testing.assert_allclose(surfaces['cover'][len(flat[-1].base)//2, 2], .520, atol=2e-6)
+        surfaces = self.check_support(flat, settings(strength=0))
+        np.testing.assert_allclose(surfaces['cover'][len(flat[-1].base)//2, 2], .595, atol=2e-6)
 
     def test_duplicate_and_redundant_ancestor(self):
         values = providers(); _, baseline = solve(values, settings())
@@ -74,11 +74,11 @@ class MultiProvider(unittest.TestCase):
                 for key, points in engine.surfaces().items():
                     np.testing.assert_array_equal(points, fresh[key.muscle])
 
-    def test_fixed_conflict_and_displacement_exhaustion(self):
-        for values, config in [(fixed_conflict(providers()), settings()), (providers(), replace(settings(), displacement=.05))]:
-            report, surfaces = solve(values, config)
-            self.assertEqual(report['stacking']['status'], 'incomplete')
-            np.testing.assert_array_equal(surfaces['cover'], values[-1].own)
+    def test_fixed_conflict_and_search_allowance(self):
+        values = fixed_conflict(providers()); report, surfaces = solve(values, settings())
+        self.assertEqual(report['stacking']['status'], 'incomplete')
+        np.testing.assert_array_equal(surfaces['cover'], values[-1].own)
+        self.check_support(providers(), replace(settings(), displacement=.05))
 
     def test_resolution_strength_and_zero_intrinsic_height(self):
         self.check_support(providers(n=27), settings(radius=.4))

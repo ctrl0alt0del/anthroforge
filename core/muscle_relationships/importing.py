@@ -21,7 +21,7 @@ def remap_record(row, new_namespace, mapping, source_namespace):
     if intent.get('cover'): intent['cover'] = translate(intent['cover'])
     if intent.get('region'): intent['region']['domain'] = translate(intent['region']['domain'])
     if any(tuple(k) not in mapping for k in row['pair']): value['unresolved_import'] = dict(namespace=source_namespace, pair=row['pair'])
-    value.pop('evidence_signature', None); value.pop('policy', None)
+    value.pop('evidence_signature', None); value.pop('policy', None); value.pop('effective_order', None)
     return value
 
 

@@ -16,17 +16,24 @@ class AF_PairSettings(bpy.types.PropertyGroup):
     search: bpy.props.FloatProperty(name='Search distance', min=0, precision=4,
         description='Search distance in current geometry units',
         get=lambda s: configuration.read(s.id_data)['search_distance'], set=lambda s, v: set_value(s, 'search_distance', v))
-    displacement: bpy.props.FloatProperty(name='Maximum bonus / search allowance', min=0, precision=4,
-        description='Additional displacement in current geometry units',
+    displacement: bpy.props.FloatProperty(name='Pair search allowance', min=0, precision=4,
+        description='Pair discovery allowance; this does not cap stacked displacement',
         get=lambda s: configuration.read(s.id_data)['displacement'], set=lambda s, v: set_value(s, 'displacement', v))
     stacking: bpy.props.BoolProperty(name='Auto Stacking',
         get=lambda s: configuration.read(s.id_data)['stacking'], set=lambda s, v: set_value(s, 'stacking', v))
     clearance: bpy.props.FloatProperty(name='Stack clearance', min=0, precision=4,
         get=lambda s: configuration.read(s.id_data)['clearance'], set=lambda s, v: set_value(s, 'clearance', v))
-    radius: bpy.props.FloatProperty(name='Bonus smoothing radius', min=0, precision=4,
+    radius: bpy.props.FloatProperty(name='Vector smoothing radius', min=0, precision=4,
         get=lambda s: configuration.read(s.id_data)['smoothing_radius'], set=lambda s, v: set_value(s, 'smoothing_radius', v))
-    strength: bpy.props.FloatProperty(name='Bonus smoothing strength', min=0,
+    strength: bpy.props.FloatProperty(name='Vector smoothing strength', min=0,
         get=lambda s: configuration.read(s.id_data)['smoothing_strength'], set=lambda s, v: set_value(s, 'smoothing_strength', v))
+    blend: bpy.props.FloatProperty(name='Blend distance', min=0, precision=4,
+        get=lambda s: configuration.read(s.id_data)['blend_distance'], set=lambda s,v: set_value(s,'blend_distance',v))
+    preservation: bpy.props.FloatProperty(name='Maximum preservation weight', min=1,
+        get=lambda s: configuration.read(s.id_data)['preservation_weight'], set=lambda s,v: set_value(s,'preservation_weight',v))
+    adjustment: bpy.props.FloatProperty(name='Smoothing adjustment per axis', min=0, precision=4,
+        description='Maximum change around raw vector stacking, per world coordinate; not a total movement cap',
+        get=lambda s: configuration.read(s.id_data)['smoothing_max_adjustment'], set=lambda s,v: set_value(s,'smoothing_max_adjustment',v))
 
 
 class AF_OT_pair_refresh(bpy.types.Operator):
@@ -95,6 +102,7 @@ def draw_stacking(layout, props, state):
     layout.prop(props, 'stacking')
     if props.stacking:
         layout.prop(props, 'clearance'); layout.prop(props, 'radius'); layout.prop(props, 'strength')
+        layout.prop(props, 'blend'); layout.prop(props, 'preservation'); layout.prop(props, 'adjustment')
     stack = state.get('stacking', {})
     layout.label(text='Stacking: '+stack.get('status', 'not evaluated').replace('_', ' '))
     for domain in stack.get('domains', ()):

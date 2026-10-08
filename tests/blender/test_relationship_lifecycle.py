@@ -36,12 +36,22 @@ class RelationshipLifecycle(BlenderTestCase):
 
     def test_rapid_edits_publish_latest_and_deletion_keeps_record(self):
         root, _, _ = fixture(); state = refresh(root); before = set(store.read(root)['records'])
-        for i in range(12): root.af_pair_settings.radius = .2 + i*.001
+        for i in range(12): root.af_pair_settings.radius = .5 + i*.001
         finish(); state = runtime.inspect(bpy.context.scene, root)
-        self.assertEqual(state['status'], 'complete'); self.assertAlmostEqual(root.af_pair_settings.radius, .211)
+        self.assertEqual(state['status'], 'complete', state); self.assertAlmostEqual(root.af_pair_settings.radius, .511)
         root.af_vcp_system.muscles.remove(0); runtime.refresh(bpy.context.scene, root, True); finish()
         self.assertTrue(before <= set(store.read(root)['records']))
         self.assertEqual(next(iter(store.read(root)['records'].values()))['state'], 'missing_reference')
+
+    def test_rapid_edits_reject_current_fold_without_stale_surface(self):
+        import numpy as np
+        from test_muscle_section_profile import mesh
+        root, _, cover = fixture(); own = mesh(root, cover).copy(); refresh(root)
+        for i in range(12): root.af_pair_settings.radius = .2 + i*.001
+        finish(); state = runtime.inspect(bpy.context.scene, root)
+        self.assertEqual(state['status'], 'incomplete', state)
+        self.assertIn('STACK_NEW_SURFACE_INTERSECTION', str(state['stacking']))
+        np.testing.assert_array_equal(mesh(root, cover), own)
 
     def test_replay_after_automatic_evidence_refresh(self):
         root, _, _ = fixture(); state = refresh(root)

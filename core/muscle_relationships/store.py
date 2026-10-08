@@ -7,7 +7,7 @@ from . import validation
 
 
 def empty(root_id):
-    return dict(schema=1, namespace=root_id, revision=0, manifest={}, records={})
+    return dict(schema=2, namespace=root_id, revision=0, manifest={}, records={})
 
 
 def encode(document):

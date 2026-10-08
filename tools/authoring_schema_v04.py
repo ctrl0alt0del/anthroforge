@@ -273,9 +273,9 @@ def branch_operations():
 
 
 def point_edit_operation():
-    fields = dict(expected_scene_revision=S, point_id=S, position=ref('xyz'), scp_id=S, offset=N)
+    fields = dict(expected_scene_revision=S, point_id=S, position=ref('xyz'), scp_id=S, offset=N, stacking_fixed=B, protected_crease=B)
     result = operation('points.edit', fields, ['expected_scene_revision', 'point_id'])
-    retained = dict(scene_id=S, expected_scene_revision=S, point_id=S, offset=N,
+    retained = dict(scene_id=S, expected_scene_revision=S, point_id=S, offset=N, stacking_fixed=B, protected_crease=B,
                     attachment=obj(dict(parent_id=S, attach_param=S)))
     variants = [result['properties']['params'], obj(retained, ['scene_id', 'expected_scene_revision', 'point_id', 'attachment'])]
     result['properties']['params'] = dict(oneOf=variants)

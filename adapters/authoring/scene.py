@@ -8,6 +8,10 @@ from ...core.authoring.model import MeshSnapshot, SceneSnapshot, readonly
 
 
 class StaticScene(BlenderScene):
+    def base_intersections(self, params):
+        from .base_intersections import diagnose
+        return diagnose(self, params)
+
     def pairs_inspect(self):
         from .pairs import inspect
         return inspect(self)

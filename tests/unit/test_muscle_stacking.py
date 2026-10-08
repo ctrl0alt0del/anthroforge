@@ -18,15 +18,15 @@ class Stacking(unittest.TestCase):
         result, out = solve([inflated('under', 0, .3), inflated('cover', .1, .2)])
         self.assertEqual(result['pairs'][0]['order']['status'], 'supported')
         self.assertEqual(result['stacking']['status'], 'complete')
-        np.testing.assert_allclose(out['cover'][:, 2], .4, atol=2e-6)
+        np.testing.assert_allclose(out['cover'][:, 2], .5, atol=2e-6)
 
     def test_joint_envelope_and_ancestry(self):
         values = [inflated('a', 0, .3), inflated('b', .1, .4), inflated('c', .2, .25)]
         result, out = solve(values)
         self.assertEqual(result['stacking']['status'], 'complete')
-        # Provider final + intrinsic layer thickness; redundant ancestors do not add twice.
-        np.testing.assert_allclose(out['b'][:, 2], .6, atol=2e-6)
-        np.testing.assert_allclose(out['c'][:, 2], .65, atol=2e-6)
+        # Own + provider's full displacement; simultaneous ancestors are not summed.
+        np.testing.assert_allclose(out['b'][:, 2], .7, atol=2e-6)
+        np.testing.assert_allclose(out['c'][:, 2], .85, atol=2e-6)
 
     def test_off_is_intrinsic(self):
         config = DetectionSettings(stacking=StackingSettings(enabled=False))
@@ -40,10 +40,10 @@ class Stacking(unittest.TestCase):
         self.assertEqual(result['stacking']['status'], 'incomplete')
         np.testing.assert_array_equal(out['b'], b.own)
 
-    def test_bound_failure_not_clipping(self):
+    def test_pair_search_allowance_does_not_cap_displacement(self):
         result, out = solve([inflated('a', 0, .9), inflated('b', .1, .2)])
-        self.assertEqual(result['stacking']['status'], 'incomplete')
-        np.testing.assert_array_equal(out['b'][:, 2], .2)
+        self.assertEqual(result['stacking']['status'], 'complete')
+        np.testing.assert_allclose(out['b'][:, 2], 1.1, atol=2e-6)
 
     def test_coincident(self):
         result, _ = solve([inflated('a', 0, .2), inflated('b', 0, .3)])

@@ -36,7 +36,7 @@ class StackingLifecycle(unittest.TestCase):
         np.testing.assert_array_equal(first['cover'], second['cover'])
         self.assertEqual(report['timings']['stack_solve_ms'], 0)
         self.values[0] = replace(self.values[0], own=self.values[0].own+[0, 0, .1])
-        _, edited = self.run_job(); np.testing.assert_allclose(edited['cover'][:, 2], .5, atol=2e-6)
+        _, edited = self.run_job(); np.testing.assert_allclose(edited['cover'][:, 2], .6, atol=2e-6)
         _, deleted = self.run_job(self.values[1:]); np.testing.assert_array_equal(deleted['cover'], self.values[1].own)
 
     def test_local_order_cache_tracks_base_direction_group(self):
@@ -53,16 +53,16 @@ class StackingLifecycle(unittest.TestCase):
         for _ in range(2):
             report, repeated = self.run_job(settings=config)
             np.testing.assert_allclose(repeated['cover'], out['cover'], atol=2e-6)
-        report, failed = self.run_job(settings=replace(config, displacement=.01))
-        self.assertEqual(report['stacking']['status'], 'incomplete')
-        np.testing.assert_array_equal(failed['cover'], self.values[1].own)
+        report, unchanged = self.run_job(settings=replace(config, displacement=.01))
+        self.assertEqual(report['stacking']['status'], 'complete')
+        np.testing.assert_allclose(unchanged['cover'], out['cover'], atol=2e-6)
 
     def test_invalid_domain_blocks_dependents_but_not_unrelated(self):
         a, b = self.values; independent = [inflated('c', 0, .3, (5, 7, 0, 2)), inflated('d', .1, .2, (5, 7, 0, 2))]
         report, out = self.run_job([replace(a, valid=False), b, *independent])
         self.assertEqual(report['stacking']['status'], 'incomplete')
         np.testing.assert_array_equal(out['cover'], b.own)
-        np.testing.assert_allclose(out['d'][:, 2], .4, atol=2e-6)
+        np.testing.assert_allclose(out['d'][:, 2], .5, atol=2e-6)
 
     def test_cycle_blocks_only_component(self):
         cycle = [islands('a', [(-4, 0), (4, .1)]), islands('b', [(-4, .1), (0, 0)]), islands('c', [(0, .1), (4, 0)])]
@@ -71,7 +71,7 @@ class StackingLifecycle(unittest.TestCase):
         states = {r['domain']['muscle']: r['status'] for r in report['stacking']['domains']}
         self.assertEqual([states[k] for k in ('a', 'b', 'c')], ['blocked']*3)
         for side in cycle: np.testing.assert_array_equal(out[side.key.muscle], side.own)
-        np.testing.assert_allclose(out['e'][:, 2], .4, atol=2e-6)
+        np.testing.assert_allclose(out['e'][:, 2], .5, atol=2e-6)
 
     def test_cancel_stale_export_and_recovery(self):
         self.engine.submit(self.values, self.settings, 900); self.engine.cancel()
@@ -96,7 +96,7 @@ class StackingLifecycle(unittest.TestCase):
         values = [replace(v, faces=v.faces[:, ::-1], material=replace(v.material, faces=v.material.faces[:, ::-1])) for v in (a, b)]
         report, out = self.run_job(values)
         self.assertEqual(report['stacking']['status'], 'complete')
-        np.testing.assert_allclose(out['cover'][:, 2], .4, atol=2e-6)
+        np.testing.assert_allclose(out['cover'][:, 2], .5, atol=2e-6)
 
     def test_invalid_interpolation_shape_rejected_before_pointer_use(self):
         a, b = self.values; b = replace(b, material=replace(b.material, weights=b.material.weights[:-1]))
@@ -108,4 +108,4 @@ class StackingLifecycle(unittest.TestCase):
         values[0].own[:]=500; values[1].material.vertices[:]=700
         result=wait(self.engine); self.assertEqual(result['stacking']['status'], 'complete')
         surface=next(v for k,v in self.engine.surfaces().items() if k.muscle=='cover')
-        np.testing.assert_allclose(surface[:,2], .4, atol=2e-6)
+        np.testing.assert_allclose(surface[:,2], .5, atol=2e-6)

@@ -23,7 +23,8 @@ bool Session::step(const Field& f,ConstraintSource& source,Vector& x,Result& r) 
     if (!box_feasible(rows,f)) { r.status=Status::infeasible; r.message="Support conflicts with fixed values or bounds"; return true; }
     double begin=now_ms(); auto p=assemble(energy_,f,rows); r.metrics.assembly_ms+=now_ms()-begin;
     auto s=solver_->solve(p,options_,r.metrics);
-    if (s.status!=QpStatus::solved) { r.status=s.status==QpStatus::infeasible?Status::infeasible:Status::solver_failure; r.message="QP solver did not solve the constrained problem"; return true; }
+    if (s.status!=QpStatus::solved) { r.status=s.status==QpStatus::infeasible?Status::infeasible:Status::solver_failure;
+        r.message="QP solver failure: status="+std::to_string(r.metrics.solver_status)+", round="+std::to_string(r.metrics.rounds)+", iterations="+std::to_string(s.iterations)+r.metrics.solver_detail; return true; }
     exact_pins(s.x,f);
     if (!certify(p,s,options_.tolerance,r.metrics)) { r.status=Status::validation_failure; r.message="Independent KKT verification failed"; return true; }
     double change=max_abs(x-s.x); x=s.x; auto current=map_rows(source,x,r.metrics);
@@ -31,8 +32,11 @@ bool Session::step(const Field& f,ConstraintSource& source,Vector& x,Result& r) 
     return r.metrics.violation<=options_.tolerance && (same_rows(rows,current) || change<=options_.tolerance);
 }
 Result Session::run(const Field& f,ConstraintSource& source) {
+    return run(f,source,f.target);
+}
+Result Session::run(const Field& f,ConstraintSource& source,const Vector& initial) {
     Result r; r.metrics.energy_ms=energy_ms_; double begin=now_ms();
-    try { validate_field(f,int(energy_.mass.size())); Vector x=f.target.cwiseMax(f.lower).cwiseMin(f.upper);
+    try { validate_field(f,int(energy_.mass.size())); require(initial.size()==f.target.size()&&initial.allFinite(),"Invalid initial field"); Vector x=initial.cwiseMax(f.lower).cwiseMin(f.upper);
         for (int i=0;i<options_.max_rounds;++i) {
             r.metrics.rounds=i+1;
             if (step(f,source,x,r)) { if (r.status==Status::success) r.values=x; break; }

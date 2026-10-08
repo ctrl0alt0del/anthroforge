@@ -57,8 +57,15 @@ static void objective_scale_test() {
     s.z_lower.setConstant(1e6); s.z_upper.setConstant(1e6);
     require(!certify(p,s,2e-7,d),"Noncomplementary duals accepted");
 }
+static void initial_field_test() {
+    CotangentBiharmonic builder;Session session(fixture(),builder,make_piqp(),{});StaticRows source;
+    auto baseline=session.run(field(),source);auto result=session.run(field(),source,Vector::Constant(5,.7));
+    require(result.status==Status::success&&baseline.status==Status::success&&max_abs(result.values-baseline.values)<2e-7,"Seed changed objective target");
+    result=session.run(field(),source,Vector::Zero(4));
+    require(result.status==Status::invalid_input&&result.values.size()==0,"Invalid seed accepted");
+}
 int main() {
-    try { energy_test(); constrained_test(); certification_test(); validation_test(); objective_scale_test();
-        std::cout<<"5 native core test groups passed\n"; return 0;
+    try { energy_test(); constrained_test(); certification_test(); validation_test(); objective_scale_test();initial_field_test();
+        std::cout<<"6 native core test groups passed\n"; return 0;
     } catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

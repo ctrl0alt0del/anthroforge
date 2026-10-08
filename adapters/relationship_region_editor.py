@@ -67,10 +67,11 @@ def footprint(draft):
     data = runtime.footprint(draft.scene, draft.root, pair['index'], draft.result_revision, order=True)
     cover = next(int(k) for k, v in data['domains'].items() if token(v['key']) == token(vars(draft.domain.key)))
     points, faces = [], []
+    explicit = store.read(draft.root)['records'][draft.relationship]['intent'].get('mode') == 'explicit'
     for fragment in data['fragment_array']:
-        if int(fragment['provider']) != cover or fragment['gap_max'] <= 1e-6: continue
+        if int(fragment['receiver' if explicit else 'provider']) != cover or (not explicit and fragment['gap_max'] <= 1e-6): continue
         start, count = int(fragment['start']), int(fragment['count'])
-        values = data['point_array'][start:start+count]['world_provider']
+        values = data['point_array'][start:start+count]['world_receiver' if explicit else 'world_provider']
         faces.append(tuple(range(len(points), len(points)+count))); points.extend(values.tolist())
     overlay = temporary_mesh(draft, 'Overlap footprint', points, faces, (1., .6, .1, 1.))
     overlay.display_type = 'WIRE'; overlay.hide_select = True

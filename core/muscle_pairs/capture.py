@@ -98,6 +98,7 @@ def mirror_domains(domains, source, mirror):
 
 
 def capture_muscle(root, scene, muscle, settings, objects):
+    from ..muscle_stacking.constraint_capture import apply
     from ..muscle_stacking.publication import expected
     from ..visualization.muscle_sync_helpers import resolve_muscle_surface
     request = request_for(root, scene, muscle); result = evaluate(root, request)
@@ -106,6 +107,7 @@ def capture_muscle(root, scene, muscle, settings, objects):
     group = str(muscle.get('af_pair_group_id', '') or muscle.id)
     revision = sha256(repr(fingerprint(request)).encode()).hexdigest()
     domains = cached_fields(root, muscle.id, group, revision, request, result, settings.displacement)
+    domains = apply(root, scene, muscle, request, domains)
     mirrors = [o for o in objects if o.get('af_muscle_mirror_proxy') and o.get('af_source_muscle_id') == muscle.id and o.get('af_muscle_surface') == 'INFL']
     if len(mirrors) > 1: raise ValueError('PAIR_DUPLICATE_MIRROR')
     if mirrors: validate_mirror(outer, mirrors[0], result.inflated_vertices, root, muscle.id)

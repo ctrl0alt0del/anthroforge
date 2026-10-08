@@ -37,6 +37,7 @@ def draw(layout, context, root, state):
     if state.get('relationship_error'): layout.label(text=state['relationship_error'], icon='ERROR'); recovery(layout); return
     if 'af_experiment_relationships_v1' in root: actions(layout, [('MIGRATE', 'Import experimental records')])
     if any('IDENTITY_CONFLICT' in i.get('message', '') for i in state['issues']): recovery(layout)
+    layout.operator('af.muscle_explicit_order', text='Assign muscle pair…')
     if not state['relationships']: return
     layout.prop(context.window_manager, 'af_relationship_selection', text='Relationship')
     row = selected(context, state)
@@ -65,8 +66,9 @@ def controls(layout, row):
     intent = row['intent']
     actions(layout, [('EXCLUDE', 'Include' if intent.get('excluded') else 'Exclude'), ('AUTO', 'Automatic order')])
     actions(layout, [('FIRST', 'Request first as cover'), ('SECOND', 'Request second as cover')])
+    actions(layout, [('ASSIGN_FIRST', 'Assign first as cover'), ('ASSIGN_SECOND', 'Assign second as cover')])
     actions(layout, [('EDIT', 'Edit support region'), ('CLEAR', 'Clear region')])
-    if intent.get('cover'): layout.label(text='Requested cover: ' + intent['cover'][0])
+    if intent.get('cover'): layout.label(text=intent.get('mode', 'requested').title() + ' cover: ' + intent['cover'][0])
     if intent.get('region'): layout.label(text=f"Selected source faces: {len(intent['region']['faces'])}")
     if row.get('policy', {}).get('diagnostic'): layout.label(text=row['policy']['diagnostic'], icon='ERROR')
 
@@ -90,8 +92,10 @@ def perform(context, action):
 
 
 def mutation_value(row, action):
-    return {'EXCLUDE': dict(excluded=not row['intent'].get('excluded', False)), 'AUTO': dict(cover=None),
-        'FIRST': dict(cover=row['pair'][0], region=None), 'SECOND': dict(cover=row['pair'][1], region=None), 'CLEAR': dict(region=None)}[action]
+    return {'EXCLUDE': dict(excluded=not row['intent'].get('excluded', False)), 'AUTO': dict(cover=None, mode='automatic'),
+        'FIRST': dict(cover=row['pair'][0], mode='requested'), 'SECOND': dict(cover=row['pair'][1], mode='requested'),
+        'ASSIGN_FIRST': dict(cover=row['pair'][0], mode='explicit'), 'ASSIGN_SECOND': dict(cover=row['pair'][1], mode='explicit'),
+        'CLEAR': dict(region=None)}[action]
 
 
 class AF_OT_relationship_action(bpy.types.Operator):
@@ -108,6 +112,8 @@ class AF_OT_relationship_action(bpy.types.Operator):
 
 def register():
     from ..adapters import relationship_lifecycle
+    from . import muscle_explicit_order
+    muscle_explicit_order.register()
     bpy.utils.register_class(AF_OT_relationship_action)
     bpy.types.WindowManager.af_relationship_selection = bpy.props.EnumProperty(items=items, options={'SKIP_SAVE'})
     relationship_lifecycle.register()
@@ -115,6 +121,8 @@ def register():
 
 def unregister():
     from ..adapters import relationship_lifecycle
+    from . import muscle_explicit_order
+    muscle_explicit_order.unregister()
     relationship_lifecycle.unregister()
     if hasattr(bpy.types.WindowManager, 'af_relationship_selection'): del bpy.types.WindowManager.af_relationship_selection
     bpy.utils.unregister_class(AF_OT_relationship_action)

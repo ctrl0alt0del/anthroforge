@@ -5,7 +5,7 @@ import json
 import numpy as np
 from .identity import token
 
-ALGORITHM = 'base-ray-material-policy-1'
+ALGORITHM = 'base-ray-vector-localized-policy-3'
 
 
 def digest(value):
@@ -26,6 +26,7 @@ def domain_stamp(domain, obstacles=None):
     order = digest((topology, array(domain.base), array(domain.direction), domain.group, domain.enabled, domain.valid))
     material = domain.material
     constraints = digest([array(getattr(material, k)) for k in ('vertices', 'faces', 'interpolation', 'weights', 'fixed')])
+    constraints = digest((constraints, [asdict(c) for c in material.constraints]))
     if obstacles is None: obstacles = obstacle_stamp(domain.obstacles, {})
     return dict(topology=topology, order=order, own=array(domain.own), material=constraints,
         allowance=domain.displacement, obstacles=obstacles)
@@ -57,6 +58,14 @@ def affected(changes, records):
     for _ in range(len(records) + 1):
         previous = len(dirty)
         for row in records.values():
-            if row.get('underlying') and token(row['underlying']) in dirty: dirty.add(token(row['covering']))
+            edge = row.get('effective_order') or row
+            if edge.get('underlying'):
+                underlying, cover = edge['underlying'], edge['covering']
+                if isinstance(underlying, dict): underlying, cover = key_record(underlying), key_record(cover)
+                if token(underlying) in dirty: dirty.add(token(cover))
         if len(dirty) == previous: break
     return sorted(dirty)
+
+
+def key_record(value):
+    return [value[k] for k in ('muscle', 'instance', 'side')]

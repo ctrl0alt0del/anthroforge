@@ -7,6 +7,12 @@ _POINT_INDEX = {}
 _USER_INDEX = {}
 
 
+def stacking_protection_updated(point, context):
+    if vcp_prop_updates_suppressed() or not point.id or context is None: return
+    from ..muscle_pairs.runtime import refresh
+    refresh(context.scene, point.id_data)
+
+
 def clear_indexes(_unused=None, _context=None):
     _POINT_INDEX.clear()
     _USER_INDEX.clear()

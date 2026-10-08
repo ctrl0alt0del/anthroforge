@@ -15,7 +15,8 @@ def intent_status(intent, manifest):
     if not region: return None
     stamp = manifest['domains'].get(token(region['domain']))
     if stamp is None: return 'missing_reference'
-    if region['version'] != manifest['version']: return 'selection_algorithm_changed'
+    compatible = region['version'] == 'base-ray-material-policy-1' and manifest['version'] == 'base-ray-material-policy-2'
+    if region['version'] != manifest['version'] and not compatible: return 'selection_algorithm_changed'
     if stamp['topology'] != region['topology']: return 'selection_topology_changed'
     return None
 
@@ -28,6 +29,9 @@ def state(row, manifest):
     problem = intent_status(intent, manifest)
     if problem: return problem
     if row.get('policy', {}).get('status') not in (None, 'allowed'): return row['policy']['status']
+    if intent.get('mode') == 'explicit':
+        effective = row.get('effective_order', {})
+        return 'active' if effective.get('status') == 'supported' else 'geometric_' + row.get('status', 'not_detected')
     if row.get('status') != 'supported': return 'geometric_' + row.get('status', 'not_detected')
     if intent.get('cover') and intent['cover'] != row['covering']: return 'manual_order_conflict'
     return 'active'
@@ -40,7 +44,7 @@ def evidence_row(document, pair, manifest):
     value.update(status=order['status'], diagnostic=order.get('diagnostic', ''),
         underlying=domain_key(order['underlying']) if order['underlying'] else None,
         covering=domain_key(order['covering']) if order['covering'] else None,
-        policy=deepcopy(pair.get('policy', {})), evidence_signature=signature,
+        policy=deepcopy(pair.get('policy', {})), effective_order=deepcopy(pair.get('effective_order', {})), evidence_signature=signature,
         evidence_reused=old.get('evidence_signature') == signature and old.get('status') == order['status'])
     return value
 
@@ -51,7 +55,7 @@ def reconcile(document, manifest, summary):
         row = evidence_row(document, pair, manifest); rows[row['id']] = row; seen.add(row['id'])
         pair['relationship_id'] = row['id']
     for identity, row in rows.items():
-        if identity not in seen: row.update(status='not_detected', evidence_reused=False)
+        if identity not in seen: row.update(status='not_detected', effective_order={}, policy={}, evidence_reused=False)
         row['state'] = state(row, manifest)
     value['manifest'] = manifest
     return value

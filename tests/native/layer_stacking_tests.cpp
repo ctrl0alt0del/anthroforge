@@ -43,7 +43,7 @@ static void invalid_direction_is_local_test() {
 }
 static State ordered_pair(const Side& a,const Side& b) {
     State state;Evidence e;e.summary.first=a.id;e.summary.second=b.id;e.summary.status=0;
-    e.summary.underlying=a.id;e.summary.covering=b.id;state.orders.push_back(e);return state;
+    e.summary.underlying=a.id;e.summary.covering=b.id;state.orders.push_back(e);state.effective.push_back(e);return state;
 }
 static void supported_crossing_rejected() {
     auto a=triangle(),b=triangle();b.id=2;for(auto& p:b.base)p.z=1;b.own=b.base;prepare_snapshot(b,nullptr);
@@ -59,7 +59,7 @@ static void supported_contact_allowed() {
     validate_contact_pair(a,a,b,final,state,cancel);
 }
 static void unsupported_contact_not_bypassed() {
-    auto a=triangle(),b=triangle();b.id=2;auto state=ordered_pair(a,b);state.orders.clear();std::atomic<bool> cancel{false};
+    auto a=triangle(),b=triangle();b.id=2;auto state=ordered_pair(a,b);state.orders.clear();state.effective.clear();std::atomic<bool> cancel{false};
     require(!final_support_separated(a,b,state,cancel),"Unordered pair bypassed validation");
 }
 

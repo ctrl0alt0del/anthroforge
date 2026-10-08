@@ -22,7 +22,7 @@ def reserve(store, request, scopes, receipts=()):
 
 @contextmanager
 def reservation(store, request, scopes, receipts=()):
-    if request.get('op') == 'muscles.stacking_preview':
+    if request.get('op') in ('muscles.stacking_preview', 'muscles.base_intersections'):
         yield
         return
     created = reserve(store, request, scopes, receipts)

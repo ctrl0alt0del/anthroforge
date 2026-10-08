@@ -41,7 +41,8 @@ static Evidence resolve(const Session& bases,int a,int b,std::atomic<bool>& canc
     order.first=bases.sides[a].id;order.second=bases.sides[b].id;double incompatible=0;
     out.geometry=order_geometry(bases,a,b,cancelled,exhaustive);
     order.warnings=int(out.geometry->stats[4]);
-    for(const auto& f:out.geometry->fragments)accumulate(order,f,*out.geometry,bases,incompatible);
+    for(const auto& f:out.geometry->fragments){accumulate(order,f,*out.geometry,bases,incompatible);
+        if(dot(mean_direction(bases.sides[f.receiver],int(f.receiver_face)),mean_direction(bases.sides[f.provider],int(f.provider_face)))<0)out.compatible=false;}
     order.crossings+=crossing_count(bases.sides[a],bases.sides[b],cancelled);
     order.status=int(classify(order,incompatible,bases.settings.area));
     order.fragments=out.geometry->fragments.size();order.points=out.geometry->points.size();return out;
@@ -64,10 +65,10 @@ static Evidence cached_order(State& state,uint64_t a,uint64_t b,std::atomic<bool
     int ai=state.bases.indices.at(a),bi=state.bases.indices.at(b);auto& sa=state.bases.sides[ai];auto& sb=state.bases.sides[bi];
     auto key=std::make_pair(a,b);auto it=state.cache.find(key);
     if(it!=state.cache.end()&&it->second.a==sa.revision&&it->second.b==sb.revision){
-        it->second.used=++state.clock;++state.order_reused;return {it->second.summary,{}};}
+        it->second.used=++state.clock;++state.order_reused;return {it->second.summary,{},it->second.compatible};}
     auto result=safe_resolve(state.bases,ai,bi,cancelled);++state.order_computed;
     if(result.geometry)state.order_peak=std::max(state.order_peak,result.geometry->allocation_peak);
-    state.cache[key]={sa.revision,sb.revision,++state.clock,result.summary};result.geometry.reset();return result;
+    state.cache[key]={sa.revision,sb.revision,++state.clock,result.summary,result.compatible};result.geometry.reset();return result;
 }
 static uint64_t order_cache_bytes(const State& state){return state.cache.size()*(sizeof(CachedOrder)+64);}
 static void evict_orders(State& state) {
@@ -82,8 +83,9 @@ static void order_pairs(State& state,Session& detection,std::atomic<bool>& cance
     synchronize(state.bases,incoming,detection.settings);state.orders.clear();state.order_peak=state.order_computed=state.order_reused=0;
     require(detection.published.pairs.size()*sizeof(Evidence)<=detection.settings.result_bytes,"LAYER_RESULT_BUDGET");
     state.orders.reserve(detection.published.pairs.size());
-    for(const auto& pair:detection.published.pairs){auto key=std::minmax(uint64_t(pair.first),uint64_t(pair.second));live.insert(key);
-        Evidence value;if(!pair.count||state.exclusions.count(key)){value.summary.first=pair.first;value.summary.second=pair.second;value.summary.status=int(pair.count?OrderStatus::excluded:OrderStatus::no_upward);}
+    for(const auto& pair:detection.published.pairs){auto key=std::minmax(uint64_t(pair.first),uint64_t(pair.second));live.emplace(pair.first,pair.second);
+        bool explicit_pair=state.policies.count(key)&&state.policies.at(key).mode==2;
+        Evidence value;if((!pair.count&&!explicit_pair)||state.exclusions.count(key)){value.summary.first=pair.first;value.summary.second=pair.second;value.summary.status=int(state.exclusions.count(key)?OrderStatus::excluded:OrderStatus::no_upward);}
         else value=cached_order(state,pair.first,pair.second,cancelled);
         state.orders.push_back(value);}
     for(auto it=state.cache.begin();it!=state.cache.end();)if(!live.count(it->first))it=state.cache.erase(it);else ++it;

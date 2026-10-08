@@ -1,23 +1,28 @@
 #pragma once
 #include "af_smoothing/model.hpp"
+#include "../vector_stacking/cache.hpp"
 namespace af_layer {
 using namespace af_pair;
 enum class OrderStatus { supported, no_upward, coincident, intersecting, conflicting, incompatible, projection, excluded };
 enum class StackStatus { own_only, stacked, blocked, failed };
 struct Settings { int enabled=1;double clearance=0,radius=.2,strength=.8,maximum=.5; };
+struct VectorSettings { double blend=1,preservation=100,adjustment=4; };
+struct ExactInput { uint64_t id;const int64_t* indices;const double* weights;int count,width; };
 struct Order {
     uint64_t first=0,second=0,underlying=0,covering=0;
     int status=1,warnings=0;double positive[2]{},negative[2]{},coincident=0,minimum=INFINITY,maximum=-INFINITY;
     int64_t fragments=0,points=0,crossings=0;char diagnostic[128]{};
 };
-struct Evidence { Order summary;std::shared_ptr<Result> geometry; };
-struct CachedOrder { uint64_t a,b,used;Order summary; };
+struct Evidence { Order summary;std::shared_ptr<Result> geometry;bool compatible=true; };
+struct CachedOrder { uint64_t a,b,used;Order summary;bool compatible=true; };
 struct ConstraintInput {
     uint64_t id;const double* material;const int64_t* faces;const int64_t* interpolation;
     const double* weights;const int64_t* fixed;int vertices,triangles,samples,width,pins,valid;
 };
 struct Material {
     afs::Mesh mesh;std::vector<int64_t> interpolation,fixed;std::vector<double> weights;int width=0;std::string error;
+    std::map<int,int64_t> original_pins;
+    std::vector<afs::Row> constraints;
 };
 struct ObstacleInput { const double* vertices;const int64_t* faces;int count,triangles; };
 struct Output {
@@ -25,16 +30,20 @@ struct Output {
     int64_t baseline_self=0,baseline_bone_crossings=0,open_obstacles=0;double baseline_penetration=0;
     char message[256]{};
 };
-struct Solved { Output summary;std::vector<Vec> points;afs::Vector bonus; };
+struct Solved { Output summary;std::vector<Vec> points;afs::Vector bonus;double vector_metrics[24]{}; };
 struct Evaluated { std::string signature;Solved result;uint64_t used=0; };
 struct PolicyInput { uint64_t first,second,cover;int excluded,invalid,offset,count; };
-struct Policy { uint64_t cover=0;bool excluded=false,invalid=false;std::set<std::pair<int64_t,int64_t>> faces; };
+struct PolicyInputV2 { PolicyInput legacy;int mode; };
+struct Policy { int mode=1;uint64_t cover=0;bool excluded=false,invalid=false;std::set<std::pair<int64_t,int64_t>> faces; };
 struct PolicyResult { uint64_t first=0,second=0;int status=0;char diagnostic[128]{}; };
 struct State {
     Session bases;Settings settings;std::map<uint64_t,Material> materials;
+    VectorSettings vector_settings;
+    std::shared_ptr<af_stack_vector::Cache> vector_cache=std::make_shared<af_stack_vector::Cache>();
+    std::set<uint64_t> invalid_directions;
     std::set<std::pair<uint64_t,uint64_t>> exclusions;
     std::map<std::pair<uint64_t,uint64_t>,CachedOrder> cache;
-    std::vector<Evidence> orders;std::map<uint64_t,Solved> outputs;
+    std::vector<Evidence> orders,effective;std::map<uint64_t,Solved> outputs;
     std::vector<Side> obstacles,incoming_obstacles;
     std::map<uint64_t,Evaluated> solved_cache;uint64_t clock=0;
     std::map<std::pair<uint64_t,uint64_t>,Policy> policies;

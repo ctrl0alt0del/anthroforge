@@ -11,6 +11,7 @@ class RelationshipPolicy:
     excluded: bool = False
     region: tuple = ()
     invalid: bool = False
+    mode: str = 'requested'
 
 
 def capture(document, manifest, domains):
@@ -22,5 +23,6 @@ def capture(document, manifest, domains):
         faces = tuple(tuple(f) for f in region['faces']) if region else ()
         invalid = bool(intent_status(intent, manifest))
         if region: invalid |= bool(set(faces) - set(zip(available[cover].parts.tolist(), available[cover].sources.tolist())))
-        result.append(RelationshipPolicy(pair, cover, bool(intent.get('excluded')), faces, invalid))
+        result.append(RelationshipPolicy(pair, cover, bool(intent.get('excluded')), faces, invalid,
+            intent.get('mode', 'requested' if cover else 'automatic')))
     return tuple(result)

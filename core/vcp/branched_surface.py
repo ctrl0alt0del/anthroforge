@@ -21,6 +21,7 @@ class PreparedBranch:
     seam: np.ndarray
     across: np.ndarray
     along: np.ndarray
+    source_across: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -134,7 +135,7 @@ def _prepare_branch(main, grid, along, branch, stations):
     correction = grid[branch.boundary, seam] - result[:, 0]
     result += correction[:, None] * (1 - smooth(longitudinal))[None, :, None]
     result[:, 0] = grid[branch.boundary, seam]
-    return PreparedBranch(branch, result, seam, across, longitudinal)
+    return PreparedBranch(branch, result, seam, across, longitudinal, tuple(map(float, root_u)))
 
 
 def quads(shape, flip=False):

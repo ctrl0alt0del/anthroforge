@@ -2,8 +2,10 @@
 
 `muscle_relationships.v1` adds durable intent to the existing pair detection and
 stacking service. It preserves the existing defaults, base-ray ordering, native
-support mapper and PIQP solver. An order request must agree with current geometry;
-it cannot force a reversed order or repair intersecting bases.
+support mapper and PIQP solver. Ordering has three modes: `automatic`,
+`requested` (must agree with geometric ordering), and `explicit` (a user-assigned
+cover, including intersecting bases). Explicit assignment does not repair authored
+bases or bypass incompatible directions, fixed constraints, bounds or validation.
 
 ## Identity and storage
 
@@ -11,7 +13,7 @@ Each skeleton root owns `af_relationship_namespace`, a UUID independent of Blend
 session handles. A domain key is `[muscle_id, source|mirror, A|B]`. The relationship
 ID is UUID5 of the root namespace and its sorted domain keys, independent of order.
 
-`af_muscle_relationships` contains a checksummed schema-1 JSON document with a
+`af_muscle_relationships` contains a checksummed schema-2 JSON document with a
 document revision, exact dependency fingerprints, algorithm version and records.
 Records separate intent (exclusion, requested cover, selected source faces) from
 last evidence and current validation state. Disappeared relationships stay inactive
@@ -30,16 +32,18 @@ invalidate the corresponding dependency fingerprint.
 
 Legacy exclusions migrate atomically into the document. The old `exclusions`
 configuration field remains a compatibility view of that single authoritative
-state. Unknown schemas, invalid identities, damaged checksums and malformed records
+state. Schema-1 cover requests migrate to `requested`, never `explicit`.
+Unknown schemas, invalid identities, damaged checksums and malformed records
 are preserved and reported; the affected root cannot publish stacked output.
 
 ## Runtime and transactions
 
 The existing coordinator still owns one background job, the 150 ms debounce,
 cancellation and generation checks. Capture produces owned immutable arrays and
-intent. The versioned `af_stack_submit_relationships_v1` C ABI validates and copies
+intent. The versioned `af_stack_submit_relationships_v2` C ABI validates and copies
 the complete batch before replacing native state. There is no Python numerical
-fallback. Missing relationship ABI support reports unavailable.
+fallback. The v1 interface remains supported. Missing required native support
+reports unavailable; explicit assignments cannot silently become automatic orders.
 
 Native policy status is separate from raw geometric order. Exclusions suppress
 activation; `manual_order_conflict` and `stale_selected_region` block affected
@@ -71,16 +75,25 @@ Both configure operations accept a `configuration.relationships` array:
     "id": "stable-relationship-uuid",
     "excluded": false,
     "cover": ["muscle-id", "source", "A"],
+    "mode": "explicit",
     "region": [[0, 12], [0, 13]]
   }]
 }
 ```
+
+An assignment need not already appear in the candidate list. Replace `id` with
+`"pair": [["under-id", "source", "A"], ["cover-id", "source", "A"]]` using
+current captured domain identities. Explicit pairs receive native detailed queries
+even outside automatic broad-phase bounds. No projected overlap leaves the
+relationship inactive. A selected region limits support; compatibility diagnostics
+still apply to the pair. Raw `order` and policy `effective_order` remain distinct.
 
 Mutations require `expected_scene_revision`, `expected_configuration_revision` and
 `expected_relationship_revision`. Setting a region additionally requires
 `expected_result_revision`. Regions must contain known source faces and cannot be
 empty. `region: null` clears only the region; `cover: null` restores automatic
 ordering and clears its dependent region. Omitted choices stay unchanged.
+Omitting `mode` for a new cover request retains the legacy `requested` semantics.
 Do not combine legacy `exclusions` and `relationships` in one request.
 
 `muscles.stacking_preview` accepts the same configuration without allocating
@@ -95,6 +108,12 @@ refresh advanced the document revision.
 **Muscle overlap candidates** includes a stable relationship selector, inactive
 records, raw geometric order, requested order, exclusion and region state, and
 separate policy/solve/publication diagnostics.
+
+**Assign explicit pair** selects any two current domains and their covering side.
+For a listed pair, **Assign first/second cover** uses explicit mode. Existing
+request-order controls retain geometry-validated semantics; **Auto** clears the
+assignment. The API advertises `muscle_explicit_order.v1` only with compatible
+native interfaces.
 
 **Edit support region** creates a temporary selectable covering-base copy. Displayed
 triangles with the same source-face provenance select together. Orange wire geometry

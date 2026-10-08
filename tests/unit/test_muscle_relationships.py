@@ -8,7 +8,7 @@ from unittest.mock import patch
 import numpy as np
 from core.muscle_relationships import store, migration, fingerprints, reconcile, policy, changes, importing
 from core.muscle_relationships.identity import pair_id, token
-from core.muscle_relationships.native import PolicyInput
+from core.muscle_relationships.native import PolicyInput, PolicyInputV2
 from core.muscle_stacking.native import NativeStackEngine
 from pair_fixture_adapter import wait
 from stack_multi_fixtures import settings
@@ -41,6 +41,24 @@ def comparison(test, first, second):
 
 
 class RelationshipTests(unittest.TestCase):
+    def test_schema_one_requests_never_become_explicit(self):
+        value = deepcopy(self.document); value['schema'] = 1
+        row = value['records'][self.identity]; row['intent'] = dict(cover=row['covering'])
+        self.root[store.KEY] = store.encode(value)
+        upgraded = migration.ensure(self.root)
+        self.assertEqual(upgraded['schema'], 2)
+        self.assertEqual(upgraded['records'][self.identity]['intent']['mode'], 'requested')
+
+    def test_explicit_intent_survives_import_but_not_stale_evidence(self):
+        row = self.document['records'][self.identity]; row['intent'] = dict(cover=row['covering'], mode='explicit')
+        mapping = {tuple(k): ('copy_'+k[0], k[1], k[2]) for k in row['pair']}
+        imported = importing.remap(self.document, str(uuid4()), mapping)
+        new = next(iter(imported['records'].values()))
+        self.assertEqual(new['intent']['mode'], 'explicit'); self.assertNotIn('effective_order', new)
+        row['effective_order'] = dict(status='supported')
+        absent = reconcile.reconcile(self.document, self.stamp, dict(pairs=[]))
+        self.assertNotEqual(absent['records'][self.identity]['state'], 'active')
+
     def setUp(self):
         self.root, self.document, self.domains, self.stamp = initial()
         self.identity = next(iter(self.document['records']))
@@ -133,7 +151,7 @@ class RelationshipTests(unittest.TestCase):
         from core.muscle_relationships import native
         with NativeStackEngine() as engine:
             evaluate(engine, self.domains, settings()); before = engine.summary()
-            with patch.object(native, 'arrays', return_value=((PolicyInput*1)(PolicyInput(1, 1, 0, 0, 0, 0, 0)), (C.c_int64*0)())):
+            with patch.object(native, 'arrays', return_value=((PolicyInputV2*1)(PolicyInputV2(PolicyInput(1, 1, 0, 0, 0, 0, 0), 0)), (C.c_int64*0)())):
                 with self.assertRaises(ValueError): engine.submit(self.domains, settings(), 2)
             self.assertEqual(engine.summary()['generation'], before['generation'])
 
@@ -159,7 +177,7 @@ class PolicyRepresentations(unittest.TestCase):
                     faces = sorted({(int(p), int(s)) for p, s in zip(values[1].parts, values[1].sources)})
                     document = changes.apply(document, [dict(id=identity, region=[list(f) for f in faces])], stamp, values)
                     result, output, _ = evaluate(engine, values, settings(), 2, document)
-                    self.assertEqual(result['stacking']['status'], 'complete'); np.testing.assert_allclose(output['b'][:, 2], .6, atol=2e-6)
+                    self.assertEqual(result['stacking']['status'], 'complete'); np.testing.assert_allclose(output['b'][:, 2], .7, atol=2e-6)
 
     def test_cropped_material_selection(self):
         from test_muscle_pairs_fields import evaluate as field, FieldTests

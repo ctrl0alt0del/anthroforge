@@ -38,6 +38,7 @@ def inspect(root, params):
     points = root.af_vcp_system.authored_points
     selected = [p for p in points if not params.get('point_id') or p.id == params['point_id']]
     return [dict(id=p.id, scp_id=p.parent_id, binding=p.attach_param, offset=p.normal_offset,
+                 stacking_fixed=p.stacking_fixed, protected_crease=p.protected_crease,
                  users=[dict(fiber_id=f.id, index=i, role=r) for f, i, r in point_users(root, p.id)]) for p in selected]
 
 
@@ -74,7 +75,12 @@ def _transaction(root, request):
 def _free_mutation(root, request):
     import bpy
     from ..use_cases.free_point_edit import graph_action
+    if protection_only(request['op'], request['params']): return _mutate(root, request['op'], request['params'])
     return graph_action(root, bpy.context.scene, lambda: _mutate(root, request['op'], request['params']))
+
+
+def protection_only(op, params):
+    return op == 'points.edit' and bool({'stacking_fixed', 'protected_crease'} & params.keys()) and not bool({'position', 'attachment', 'offset', 'scp_id'} & params.keys())
 
 
 def _restore(root, saved):
@@ -209,6 +215,9 @@ def _link(root, point, params):
 
 
 def _edit(root, point, params):
+    for key in ('stacking_fixed', 'protected_crease'):
+        if key in params:
+            require(type(params[key]) is bool, 'INVALID_PARAMETER'); setattr(point, key, params[key])
     if 'attachment' in params:
         _edit_retained(root, point, params)
     elif 'position' in params:
@@ -283,9 +292,10 @@ def _edit_offset(root, point, offset):
 
 def _notify(root, op, params, result):
     import bpy
-    from ...core.vcp.shared_point_storage import point_updated
+    from ...core.vcp.shared_point_storage import point_updated, stacking_protection_updated
     if 'point_id' in result:
-        point_updated(next(p for p in root.af_vcp_system.authored_points if p.id == result['point_id']), bpy.context)
+        notify = stacking_protection_updated if protection_only(op, params) else point_updated
+        notify(next(p for p in root.af_vcp_system.authored_points if p.id == result['point_id']), bpy.context)
     else:
         muscle = use.find_muscle(root, params['muscle_id'])
         surface = use.muscle_surface(root, muscle)

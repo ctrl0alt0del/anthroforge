@@ -23,7 +23,10 @@ def region(value, pair):
 
 
 def intent(value, pair):
-    require(isinstance(value, dict) and not set(value) - {'excluded', 'cover', 'region'}, 'RELATIONSHIP_INTENT')
+    require(isinstance(value, dict) and not set(value) - {'excluded', 'cover', 'region', 'mode'}, 'RELATIONSHIP_INTENT')
+    mode = value.get('mode', 'requested' if value.get('cover') else 'automatic')
+    require(mode in ('automatic', 'requested', 'explicit'), 'RELATIONSHIP_ORDER_MODE')
+    require(bool(value.get('cover')) == (mode != 'automatic'), 'RELATIONSHIP_ORDER_COVER')
     require(type(value.get('excluded', False)) is bool, 'RELATIONSHIP_EXCLUDED')
     if value.get('cover') is not None: require(value['cover'] in pair, 'RELATIONSHIP_COVER')
     if value.get('region') is not None:
@@ -42,7 +45,17 @@ def record(value, identity, namespace):
     intent(value.get('intent', {}), pair)
     for name in ('underlying', 'covering'):
         if value.get(name) is not None: require(value[name] in pair, 'RELATIONSHIP_EVIDENCE_DOMAIN')
+    effective(value.get('effective_order', {}), pair)
     evidence(value)
+
+
+def effective(value, pair):
+    require(isinstance(value, dict), 'RELATIONSHIP_EFFECTIVE_ORDER')
+    for name in ('underlying', 'covering'):
+        if value.get(name) is None: continue
+        key = value[name]
+        require(isinstance(key, dict), 'RELATIONSHIP_EFFECTIVE_DOMAIN')
+        require([key.get(k) for k in ('muscle', 'instance', 'side')] in pair, 'RELATIONSHIP_EFFECTIVE_DOMAIN')
 
 
 def evidence(value):
@@ -60,7 +73,7 @@ def evidence(value):
 
 
 def document(value):
-    require(isinstance(value, dict) and value.get('schema') == 1, 'RELATIONSHIP_SCHEMA')
+    require(isinstance(value, dict) and value.get('schema') in (1, 2), 'RELATIONSHIP_SCHEMA')
     try: UUID(value['namespace'])
     except (KeyError, ValueError, TypeError, AttributeError) as error: raise ValueError('RELATIONSHIP_NAMESPACE') from error
     require(type(value.get('revision')) is int and value['revision'] >= 0, 'RELATIONSHIP_REVISION')
@@ -69,6 +82,7 @@ def document(value):
     manifest(value['manifest'])
     token(value)
     for identity, row in value['records'].items(): record(row, identity, value['namespace'])
+    require(value['schema'] != 1 or all('mode' not in r['intent'] for r in value['records'].values()), 'RELATIONSHIP_SCHEMA_ONE_MODE')
     return value
 
 

@@ -51,8 +51,8 @@ class StackingMaterialTests(unittest.TestCase):
 
     def test_new_bone_penetration_rejects_and_restores_own(self):
         a, b = inflated('under', 0, .3), inflated('cover', .1, .2)
-        # The retained-thickness final surface is z=.4; place the obstacle across it.
-        bone = box((-.25, -.25, .35), (.25, .25, .45))
+        # Vector addition produces z=.5; place the obstacle across that result.
+        bone = box((-.25, -.25, .45), (.25, .25, .55))
         report, out = solve([replace(a, obstacles=(bone,)), replace(b, obstacles=(bone,))])
         self.assertEqual(report['stacking']['status'], 'incomplete')
         self.assertIn('BONE', str(report['stacking']['domains']))

@@ -558,6 +558,8 @@ AF_EXPORT int af_candidate_pairs(const double* start, const double* end, const i
 #include "pair_detection/api.hpp"
 #include "layer_stacking/api.hpp"
 #include "layer_stacking/relationship_api.hpp"
+#include "vector_stacking/api.hpp"
+#include "base_intersections/api.hpp"
 #include "af_base_spline.hpp"
 #include "af_base_partition.hpp"
 #include "af_transfer_shape.hpp"

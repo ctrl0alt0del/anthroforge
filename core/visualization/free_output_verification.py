@@ -59,7 +59,8 @@ def _mirrors(root, scene, fiber_ids, muscles):
     for muscle in muscles:
         rule = mirror._rule_for_muscle(muscle, fibers, scps)
         for role in ('BASE', 'INFL'):
-            source = mirror.resolve_muscle_surface(root, muscle.id, role, scene)
+            from .muscle_sync_helpers import resolve_muscle_surface
+            source = resolve_muscle_surface(root, muscle.id, role, scene)
             _mirror(source, mirror._find_mirror_muscle_obj(collection, root.name, muscle.id, role), rule)
 
 

@@ -54,8 +54,8 @@ class AuthoringService:
 
 
 def specialized(operation):
-    from . import native_profiles, pairs
-    for module in (native_profiles, pairs):
+    from . import native_profiles, pairs, base_intersections
+    for module in (native_profiles, pairs, base_intersections):
         if operation in module.OPS: return module.dispatch
     return None
 
@@ -76,13 +76,22 @@ def operations():
 
 
 def specialized_operations():
-    from . import native_profiles, pairs
-    return {**native_profiles.operations(), **dict.fromkeys(pairs.OPS, pairs.dispatch)}
+    from . import native_profiles, pairs, base_intersections
+    return {**native_profiles.operations(), **dict.fromkeys(pairs.OPS, pairs.dispatch),
+            **dict.fromkeys(base_intersections.OPS, base_intersections.dispatch)}
 
 
 def capabilities():
     # Relationship controls are additive to the existing protocol and native interfaces.
-    return ['muscle_relationships.v1', 'muscle_layer_order.v1', 'muscle_stacking.v1', 'muscle_pair_detection.v1', 'muscle_height_smoothing.v1', 'muscle_inflation_envelope.v1', 'transfer_constraints.v1', 'transfer_attachment_bands.v1', 'base_partition.v1', 'continuous_attachment.v1', 'shape_preserving_transfer.v1', 'smooth_native_base.v1', 'transfer_collisions.v1', 'transfer_correction.v1', 'free_fibers.v1', 'muscle_output_domain.v1', 'section_profile.v1', 'muscle_from_surface.v1', 'static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'branched_loft.v1', 'shared_points.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1', 'fiber_layout_planner.v1', 'skeleton_transfer.v1', 'muscle_base.v1', 'native_base.v1', 'skeleton_transfer.experimental.v1', 'muscle_base.experimental.v1']
+    return explicit_capabilities() + ['muscle_vector_stacking.v1', 'muscle_base_intersections.v1', 'muscle_relationships.v1', 'muscle_layer_order.v1', 'muscle_stacking.v1', 'muscle_pair_detection.v1', 'muscle_height_smoothing.v1', 'muscle_inflation_envelope.v1', 'transfer_constraints.v1', 'transfer_attachment_bands.v1', 'base_partition.v1', 'continuous_attachment.v1', 'shape_preserving_transfer.v1', 'smooth_native_base.v1', 'transfer_collisions.v1', 'transfer_correction.v1', 'free_fibers.v1', 'muscle_output_domain.v1', 'section_profile.v1', 'muscle_from_surface.v1', 'static_avatar.v1', 'box.v1', 'landmark_box.v1', 'ellipsoid.sampled.v1', 'guide_band.sampled.v1', 'region_boolean.v1', 'requirements.v1', 'existing_control.v1', 'authored_definition.v1', 'construction_rule.v1', 'fusiform.v1', 'fan.v1', 'strap.v1', 'loop.v1', 'branched_loft.v1', 'shared_points.v1', 'route_override.v1', 'cancellation.v1', 'visual_inspection.v1', 'visual_selection.v1', 'surface_patch.v1', 'surface_point_picker.v1', 'fiber_layout_planner.v1', 'skeleton_transfer.v1', 'muscle_base.v1', 'native_base.v1', 'skeleton_transfer.experimental.v1', 'muscle_base.experimental.v1']
+
+
+def explicit_capabilities():
+    from ...core.muscle_pairs.abi import library
+    try:
+        native = library()
+        return ['muscle_explicit_order.v1'] if native.af_explicit_order_version() == native.af_stack_constraint_capture_version() == 1 else []
+    except (AttributeError, OSError, RuntimeError): return []
 
 
 def point_operations():

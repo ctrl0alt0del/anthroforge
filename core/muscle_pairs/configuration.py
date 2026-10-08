@@ -8,7 +8,8 @@ from ..authoring.codec import digest
 
 KEY = 'af_pair_detection_configuration'
 DEFAULT = dict(automatic=True, search_distance=.05, displacement=.5, stacking=True,
-               clearance=0., smoothing_radius=.2, smoothing_strength=.8, exclusions=[])
+               clearance=0., smoothing_radius=.5, smoothing_strength=.8, exclusions=[],
+               blend_distance=1., preservation_weight=100., smoothing_max_adjustment=4.)
 
 
 def read(root):
@@ -25,7 +26,8 @@ def settings(root):
 def from_values(value):
     from ..muscle_stacking.model import StackingSettings
     stack = StackingSettings(value['stacking'], value['clearance'], value['smoothing_radius'],
-        value['smoothing_strength'], tuple(tuple(tuple(k) for k in pair) for pair in value['exclusions']))
+        value['smoothing_strength'], tuple(tuple(tuple(k) for k in pair) for pair in value['exclusions']),
+        value['blend_distance'], value['preservation_weight'], value['smoothing_max_adjustment'])
     return DetectionSettings(search_distance=value['search_distance'], displacement=value['displacement'], stacking=stack)
 
 
@@ -42,9 +44,10 @@ def validate(root, change):
     if set(change) - (set(DEFAULT) | {'groups'}): raise ValueError('PAIR_SETTING_UNKNOWN')
     value = dict(read(root), **{k: v for k, v in change.items() if k != 'groups'})
     if any(type(value[k]) is not bool for k in ('automatic', 'stacking')): raise ValueError('PAIR_AUTOMATIC_INVALID')
-    for key in ('search_distance', 'displacement', 'clearance', 'smoothing_radius', 'smoothing_strength'):
+    for key in ('search_distance', 'displacement', 'clearance', 'smoothing_radius', 'smoothing_strength', 'blend_distance', 'preservation_weight', 'smoothing_max_adjustment'):
         if isinstance(value[key], bool) or not isinstance(value[key], (int, float)) or not math.isfinite(value[key]) or value[key] < 0:
             raise ValueError('PAIR_DISTANCE_INVALID')
+    if value['preservation_weight'] < 1: raise ValueError('STACK_PRESERVATION_WEIGHT_INVALID')
     groups = change.get('groups', {}); known = {m.id for m in root.af_vcp_system.muscles}
     if not isinstance(groups, dict) or set(groups)-known: raise ValueError('PAIR_GROUP_TARGET_INVALID')
     if any(not isinstance(v, str) or len(v) > 256 for v in groups.values()): raise ValueError('PAIR_GROUP_INVALID')

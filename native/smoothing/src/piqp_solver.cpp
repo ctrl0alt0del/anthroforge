@@ -1,5 +1,6 @@
 #include "af_smoothing/model.hpp"
 #include <piqp/piqp.hpp>
+#include <sstream>
 namespace afs {
 static QpStatus status_of(piqp::Status status) {
     if (status==piqp::PIQP_SOLVED) return QpStatus::solved;
@@ -17,6 +18,8 @@ class PiqpSolver final : public QpSolver {
         auto& s=solver_->settings(); s.verbose=false; s.max_iter=o.max_iterations;
         s.eps_abs=s.eps_rel=s.eps_duality_gap_abs=s.eps_duality_gap_rel=std::min(1e-8,o.tolerance*.01);
         s.check_duality_gap=true;
+        s.preconditioner_scale_cost=o.robust_linear_solve;
+        s.iterative_refinement_always_enabled=o.robust_linear_solve;
     }
     bool reusable(const Quadratic& p) const {
         return solver_ && same_pattern(p.P,previous_.P) && same_pattern(p.A,previous_.A) && same_pattern(p.G,previous_.G);
@@ -33,6 +36,8 @@ public:
         prepare(p,o,d); double begin=now_ms(); auto status=solver_->solve();
         d.solve_ms+=now_ms()-begin; auto& r=solver_->result();
         d.iterations+=int(r.info.iter); d.solver_status=int(status);
+        std::ostringstream detail;detail<<" primal="<<r.info.primal_res<<" dual="<<r.info.dual_res<<" gap="<<r.info.duality_gap;
+        d.solver_detail=detail.str();
         return {r.x,r.y,r.z_l,r.z_u,status_of(status),int(r.info.iter)};
     }
 };

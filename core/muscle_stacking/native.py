@@ -6,6 +6,7 @@ from ..muscle_pairs import abi as pairs
 from ..muscle_pairs.native import NativePairEngine, live_identities, owned
 from . import abi
 from .model import StackingSettings, material
+from . import vector
 from ..muscle_relationships import native as relationships
 
 ORDER = ('supported', 'no_upward_evidence', 'coincident_bases', 'intersecting_bases',
@@ -22,16 +23,38 @@ def order_record(row, domains):
         projection_warnings=row.warnings, fragments=row.fragments, points=row.points, diagnostic=row.diagnostic.decode())
 
 
-def output_record(row, domains):
-    return dict(domain=asdict(domains[row.id].key), status=STACK[row.status], maximum_bonus=row.maximum,
+def output_record(row, domains, metrics):
+    return dict(domain=asdict(domains[row.id].key), status=STACK[row.status], maximum_displacement=row.maximum,
+        maximum_bonus=row.maximum, maximum_bonus_deprecated=True,
+        constraint_witness=constraint_witness(row.message.decode(), domains[row.id]),
         diagnostics=row.message.decode(), existing_defects=dict(self_intersections=row.baseline_self,
         bone_crossings=row.baseline_bone_crossings, sampled_bone_penetration=row.baseline_penetration,
-        open_obstacles_without_volume_test=row.open_obstacles, assessed=row.maximum > 0), support_ms=row.map_ms, solve_ms=row.solve_ms, validation_ms=row.validation_ms)
+        open_obstacles_without_volume_test=row.open_obstacles, assessed=bool(metrics['baseline_assessed'])),
+        vector=metrics, support_ms=row.map_ms, solve_ms=row.solve_ms, validation_ms=row.validation_ms)
+
+
+def constraint_witness(message, domain):
+    import re
+    matched = re.search(r'material_pin=(\d+)', message)
+    if matched is None: return None
+    index = int(matched.group(1)); material = domain.material
+    labels = [row.identity for row in material.constraints if any(i == index and w > 0 for i, w in zip(row.indices, row.weights))]
+    return dict(material_vertex=index, identities=labels)
 
 
 class NativeStackEngine(NativePairEngine):
+    def code(self, kind, value):
+        if kind != 'domain': return super().code(kind, value)
+        from hashlib import sha256
+        import json
+        identity = int.from_bytes(sha256(json.dumps(asdict(value), sort_keys=True).encode()).digest()[:8], 'little') & ((1 << 63)-1) or 1
+        if any(k != (kind, value) and k[0] == kind and v == identity for k, v in self.identities.items()):
+            raise ValueError('STACK_DOMAIN_ID_COLLISION')
+        self.identities[kind, value] = identity
+        return identity
+
     def __init__(self):
-        library = relationships.bind(abi.library()); super().__init__(); self.library = library; self.orders, self.outputs = (), ()
+        library = vector.bind(relationships.bind(abi.library())); super().__init__(); self.library = library; self.orders, self.outputs = (), ()
 
     def _material(self, domain):
         value = domain.material
@@ -48,8 +71,8 @@ class NativeStackEngine(NativePairEngine):
         stack = settings.stacking or StackingSettings()
         native = abi.Settings(stack.enabled, stack.clearance, stack.radius, stack.strength, settings.displacement)
         exclusions = self._exclusions(values, stack.exclusions); obstacles = self._obstacles(values)
-        status = relationships.submit(self, values, settings.relationships, (self.handle, inputs, len(values), C.byref(config), materials,
-            C.byref(native), exclusions, len(exclusions)//2, obstacles, len(obstacles), generation))
+        status = vector.submit(self, values, settings.relationships, (self.handle, inputs, len(values), C.byref(config), materials,
+            C.byref(native), exclusions, len(exclusions)//2, obstacles, len(obstacles), generation), stack)
         if status: raise ValueError('STACK_BUSY' if status == 2 else 'STACK_SUBMISSION_INVALID')
         self.domains = {self.code('domain', v.key): v for v in values}; self.generation, self.rows = generation, None
         self.identities = {k: v for k, v in self.identities.items() if k in live_identities(values)}
@@ -72,8 +95,8 @@ class NativeStackEngine(NativePairEngine):
         result['pairs'] = tuple(dict(pair, order=order_record(order, self.domains)) for pair, order in zip(result['pairs'], self.orders))
         result['timings'].update(zip(('ordering_ms', 'support_ms', 'stack_solve_ms', 'stack_validation_ms', 'stack_preparation_ms'), timings))
         result['timings'].update(order_storage_stats(self))
-        records = tuple(output_record(row, self.domains) for row in self.outputs)
-        result['stacking'] = dict(status='incomplete' if any(r['status'] in ('blocked', 'failed') for r in records) else 'complete', domains=records)
+        records = tuple(output_record(row, self.domains, vector.metrics(self, row.id)) for row in self.outputs)
+        result['stacking'] = dict(algorithm='vector-localized-v1', status='incomplete' if any(r['status'] in ('blocked', 'failed') for r in records) else 'complete', domains=records)
         relationships.enrich(self, result)
         return result
 
@@ -118,6 +141,6 @@ def order_storage_stats(engine):
 def owned_domain(domain, bones):
     value = domain.material
     if value is None: raise ValueError('STACK_MATERIAL_MISSING')
-    m = material(value.vertices, value.faces, value.interpolation, value.weights, value.fixed)
+    m = material(value.vertices, value.faces, value.interpolation, value.weights, value.fixed, value.constraints)
     if len(m.interpolation) != len(domain.base) or m.weights.shape != m.interpolation.shape: raise ValueError('STACK_MATERIAL_SIZE')
     return replace(owned(domain), material=m, output_indices=domain.output_indices, obstacles=bones, valid=domain.valid)

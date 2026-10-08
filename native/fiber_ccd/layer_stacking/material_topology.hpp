@@ -24,8 +24,11 @@ static void compact_material(Material& material,const std::vector<int>& parents,
     for(int i=0;i<int(faces.size());++i)for(int j=0;j<3;++j)mesh.faces(i,j)=ids.at(faces[i][j]);
     for(size_t i=0;i<material.interpolation.size();++i){auto it=ids.find(parents[material.interpolation[i]]);
         require(it!=ids.end()||std::abs(material.weights[i])<1e-15,"STACK_ISOLATED_MATERIAL_SAMPLE");material.interpolation[i]=it==ids.end()?0:it->second;}
-    std::set<int64_t> pins;for(auto pin:material.fixed)if(ids.count(parents[pin]))pins.insert(ids.at(parents[pin]));
+    std::set<int64_t> pins;for(auto pin:material.fixed)if(ids.count(parents[pin])){
+        int mapped=ids.at(parents[pin]);pins.insert(mapped);material.original_pins.emplace(mapped,pin);}
     material.fixed.assign(pins.begin(),pins.end());material.mesh=std::move(mesh);
+    for(auto& row:material.constraints)for(auto& term:row.terms){
+        require(ids.count(parents[term.first]),"STACK_ISOLATED_ATTACHMENT");term.first=ids.at(parents[term.first]);}
 }
 static void normalize_material(Material& material) {
     double scale=(material.mesh.vertices.colwise().maxCoeff()-material.mesh.vertices.colwise().minCoeff()).norm();

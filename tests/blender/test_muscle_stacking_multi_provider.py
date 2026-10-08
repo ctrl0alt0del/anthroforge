@@ -15,6 +15,7 @@ from anthroforge.adapters.authoring.scene import StaticScene
 class MultiProviderBlender(BlenderTestCase):
     def check_layers(self, kind):
         owner, muscles = fixture(kind); before = bindings(owner)
+        owner.af_pair_settings.blend = .35
         own = {m.id: mesh(owner, m).copy() for m in muscles}
         bases = {m.id: mesh(owner, m, 'BASE').copy() for m in muscles}
         state = refresh(owner); self.assertEqual(state['stacking']['status'], 'complete', state)
@@ -45,3 +46,15 @@ class MultiProviderBlender(BlenderTestCase):
 
     def test_serial_layers(self):
         self.check_layers('chain')
+
+    def test_default_band_rejects_attachment_anchor_crossings(self):
+        for kind in ('overlap', 'chain'):
+            self.setUp(); owner, muscles = fixture(kind)
+            own = {m.id: mesh(owner, m).copy() for m in muscles}
+            state = refresh(owner)
+            self.assertEqual(state['stacking']['status'], 'incomplete')
+            self.assertIn('INTERSECTION', str(state['stacking']['domains']))
+            for row in state['stacking']['domains']:
+                if row['status'] not in ('blocked', 'failed'): continue
+                m = next(m for m in muscles if m.id == row['domain']['muscle'])
+                np.testing.assert_array_equal(mesh(owner, m), own[m.id])

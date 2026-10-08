@@ -1,14 +1,18 @@
 #pragma once
 #include "model.hpp"
 #include "relationship_policy.hpp"
+#include "explicit_pairs.hpp"
 #include "intersections.hpp"
 #include "ordering.hpp"
 #include "material_topology.hpp"
 #include "material.hpp"
+#include "constraint_capture.hpp"
 #include "support.hpp"
 #include "collision.hpp"
+#include "explicit_geometry.hpp"
 #include "contact_validation.hpp"
 #include "validation.hpp"
+#include "../vector_stacking/engine.hpp"
 #include "reuse.hpp"
 #include "graph.hpp"
 namespace af_layer {
@@ -26,12 +30,14 @@ static std::shared_ptr<State> configuration(Engine& engine,const Work& work,cons
     if(material)for(size_t i=0;i<work.incoming.size();++i){require(material[i].id==work.incoming[i].id,"STACK_MATERIAL_ID");materials.emplace(material[i].id,checked_material(material[i],work.incoming[i]));}
     std::set<std::pair<uint64_t,uint64_t>> excluded;for(int i=0;i<count;++i)excluded.insert(std::minmax(exclusions[2*i],exclusions[2*i+1]));
     auto state=std::make_shared<State>();
+    for(const auto& side:work.incoming)if(!intrinsic_directions_valid(side))state->invalid_directions.insert(side.id);
     state->settings=settings;state->materials=std::move(materials);state->exclusions=std::move(excluded);return state;
 }
 static void retain_caches(State& next,Engine& engine) {
     if(!engine.extension)return;auto& old=*std::static_pointer_cast<State>(engine.extension);
     next.bases=std::move(old.bases);next.cache=std::move(old.cache);next.solved_cache=std::move(old.solved_cache);
     next.obstacles=std::move(old.obstacles);next.clock=old.clock;
+    next.vector_cache=std::move(old.vector_cache);
 }
 static void prepare_inputs(State& state,std::atomic<bool>& cancelled) {
     auto start=Clock::now();
@@ -44,7 +50,7 @@ static void prepare_inputs(State& state,std::atomic<bool>& cancelled) {
     state.obstacles=std::move(state.incoming_obstacles);state.input_ms=milliseconds(start);
 }
 static void pipeline(State& state,Session& session,std::atomic<bool>& cancelled) {
-    state.generation=0;prepare_inputs(state,cancelled);order_pairs(state,session,cancelled);apply_policies(state);stack(state,session,cancelled);evict_solved(state,session);state.generation=session.published.generation;
+    state.generation=0;prepare_inputs(state,cancelled);include_explicit_pairs(state,session,cancelled);order_pairs(state,session,cancelled);apply_policies(state);stack(state,session,cancelled);evict_solved(state,session);state.generation=session.published.generation;
 }
 static std::vector<Side> capture_obstacles(const ObstacleInput* inputs,int count) {
     require(count>=0&&(count==0||inputs),"STACK_OBSTACLES");std::vector<Side> result;
@@ -75,15 +81,7 @@ AF_EXPORT int af_stack_boundary_pins(const int64_t* faces,int count,int vertices
     return 0;
 }
 AF_EXPORT int af_stack_submit(void* handle,const af_pair::Input* inputs,int count,const af_pair::Settings* detection,const af_layer::ConstraintInput* material,const af_layer::Settings* settings,const uint64_t* excluded,int exclusions,const af_layer::ObstacleInput* obstacles,int obstacle_count,uint64_t generation) {
-    using namespace af_pair;auto* engine=static_cast<Engine*>(handle);if(!engine||!settings||!detection)return 1;
-    if(engine->work&&engine->work->state<2)return 2;
-    try{auto work=capture_work(inputs,count,*detection,generation,false);auto bones=af_layer::capture_obstacles(obstacles,obstacle_count);
-        auto state=af_layer::configuration(*engine,*work,*settings,material,excluded,exclusions);
-        state->policies.clear();state->policy_results.clear();
-        stop(*engine);af_layer::retain_caches(*state,*engine);
-        state->incoming_obstacles=std::move(bones);engine->extension=state;engine->pipeline=[state](Session& s,std::atomic<bool>& c){af_layer::pipeline(*state,s,c);};
-        engine->work=work;engine->worker=std::thread([engine,work]{run(*engine,work);});return 0;
-    }catch(...){return 1;}
+    return 4; // STACK_SCALAR_SUBMISSION_RETIRED; use af_vector_stack_submit_v1.
 }
 AF_EXPORT int af_layer_summary(void* handle,uint64_t generation,af_layer::Order* orders,int count,double* timings) {
     auto* state=af_layer::ready_state(handle,generation);if(!state)return 1;

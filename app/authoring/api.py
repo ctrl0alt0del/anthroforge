@@ -1,5 +1,10 @@
 """Composition root. Call execute(request, root, scene, journal_directory).
 
+Read-only base diagnostics: muscles.base_intersections scans all published native
+BASE meshes on the requested root, including hidden and mirrored instances.
+Returns intersecting pairs, separate contacts, triangle witnesses and explicit
+incompleteness without regeneration or stacking. See docs/muscle_base_intersections.md.
+
 Adjacent base repair: anatomy.partition_base_surfaces takes two directed path
 grids, facing sides and a local chart, returns a common local border, preserved
 endpoints, bounded outline error and actual native mesh checks. Optional existing

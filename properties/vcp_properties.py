@@ -1,6 +1,6 @@
 import bpy
 
-from ..core.vcp.shared_point_storage import binding_getter, binding_setter, point_updated, clear_indexes
+from ..core.vcp.shared_point_storage import binding_getter, binding_setter, point_updated, clear_indexes, stacking_protection_updated
 
 from ..app.runtime_api import schedule_context, sync_context
 from ..core.deps.dirty_hints import dirty_hints_for
@@ -366,6 +366,8 @@ class AF_AuthoredPoint_Property(bpy.types.PropertyGroup):
     parent_id: bpy.props.StringProperty(name="SCP ID", update=point_updated)
     attach_param: bpy.props.StringProperty(name="Indexed binding", default="0.0", update=point_updated)
     normal_offset: bpy.props.FloatProperty(name="Normal Offset", update=point_updated)
+    stacking_fixed: bpy.props.BoolProperty(name="Fix stacking displacement", default=False, update=stacking_protection_updated)
+    protected_crease: bpy.props.BoolProperty(name="Protect crease from stacking", default=False, update=stacking_protection_updated)
 
 
 def _binding_string(slot, field, legacy, label, default=""):

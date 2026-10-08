@@ -28,4 +28,4 @@ def attach(domain, reference, result, selected):
 
 def transformed(value, matrix):
     points = value.vertices @ matrix[:3, :3].T + matrix[:3, 3]
-    return material(points, value.faces, value.interpolation, value.weights, value.fixed)
+    return material(points, value.faces, value.interpolation, value.weights, value.fixed, value.constraints)

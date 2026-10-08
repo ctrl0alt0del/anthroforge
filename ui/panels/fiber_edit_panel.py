@@ -33,6 +33,16 @@ _STATUS_LABELS = {
 }
 
 
+def _draw_stacking_protection(layout, owner, slot, label):
+    from ...core.vcp.shared_point_storage import point_record
+    point = point_record(owner, slot)
+    if point is None: return
+    row = layout.row(align=True); row.label(text=label + ' stacking')
+    if point.parent_id: row.label(text='Fixed attachment')
+    else: row.prop(point, 'stacking_fixed', text='Fixed')
+    row.prop(point, 'protected_crease', text='Protect crease')
+
+
 class AF_PT_FiberEditPanel(bpy.types.Panel):
     bl_label = "Edit Fiber VCP"
     bl_idname = "AF_PT_fiber_edit_panel"
@@ -50,6 +60,8 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         endpoints_box.label(text="Endpoints")
         endpoints_box.label(text=f"Origin: {scp_label(root, fiber.a_parent_id)}")
         endpoints_box.label(text=f"Insertion: {scp_label(root, fiber.b_parent_id)}")
+        _draw_stacking_protection(endpoints_box, fiber, 'a_point_id', 'Origin')
+        _draw_stacking_protection(endpoints_box, fiber, 'b_point_id', 'Insertion')
 
     def _draw_loop_anchors(self, layout, root, fiber):
         box = layout.box()
@@ -57,6 +69,7 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         box.label(text=f"Seam: {scp_label(root, fiber.loop_anchors[0].parent_id) if fiber.loop_anchors else 'Missing'}")
         for i, anchor in enumerate(fiber.loop_anchors):
             box.label(text=f"{i + 1}. {scp_label(root, anchor.parent_id)}")
+            _draw_stacking_protection(box, anchor, 'point_id', str(i + 1))
 
     def _draw_solver(self, layout, fiber):
         solver_box = layout.box()
@@ -99,6 +112,7 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         op = row.operator("af.remove_fiber_touch_point", text="", icon="X")
         op.fiber_id, op.touch_index = fiber.id, index
         self._draw_touch_offset(layout, touch)
+        _draw_stacking_protection(layout, touch, 'point_id', str(index + 1))
 
     def _draw_touch_move_button(self, row, fiber, index, direction, icon, enabled):
         slot = row.row(align=True)

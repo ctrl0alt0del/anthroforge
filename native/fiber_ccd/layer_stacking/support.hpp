@@ -9,10 +9,19 @@ static void append_mask(std::vector<Mask>& masks,const Result& raw,const Fragmen
     for(int64_t i=0;i<f.count;++i)mask.barycentrics.push_back(load3(raw.points[f.start+i].provider));
     used+=mask.barycentrics.capacity()*sizeof(Vec);masks.push_back(std::move(mask));
 }
+static void explicit_masks(std::vector<Mask>& result,const State& state,uint64_t cover,uint64_t provider) {
+    const auto& side=state.bases.sides[state.bases.indices.at(cover)];
+    require((result.size()+side.faces.size()/3)*(2*sizeof(Mask)+3*sizeof(Vec))<=state.bases.settings.result_bytes,"STACK_MASK_MEMORY_BUDGET");
+    for(size_t f=0;f<side.faces.size()/3;++f)if(selected_material(state,cover,provider,int(f)))
+        result.push_back({provider,int(f),{{1,0,0},{0,1,0},{0,0,1}}});
+    require(result.size()*(sizeof(Mask)+3*sizeof(Vec))<=state.bases.settings.result_bytes,"STACK_MASK_MEMORY_BUDGET");
+}
 static std::vector<Mask> material_masks(const State& state,uint64_t cover,std::atomic<bool>& cancelled) {
     std::vector<Mask> result;uint64_t used=0;
-    for(const auto& order:state.orders){const auto& o=order.summary;if(o.status!=0||o.covering!=cover)continue;
+    for(const auto& order:state.effective){const auto& o=order.summary;if(o.status!=0||o.covering!=cover)continue;
         if(!policy_allowed(state,o.first,o.second))continue;
+        auto policy=state.policies.find(relationship_key(o.first,o.second));
+        if(policy!=state.policies.end()&&policy->second.mode==2){explicit_masks(result,state,cover,o.underlying);continue;}
         auto geometry=order_geometry(state.bases,state.bases.indices.at(o.first),state.bases.indices.at(o.second),cancelled,false,used+result.capacity()*sizeof(Mask));const auto& raw=*geometry;
         for(const auto& f:raw.fragments){if(state.bases.sides[f.receiver].id!=o.underlying||f.gap_max<=1e-6)continue;
             if(!selected_material(state,cover,o.underlying,int(f.provider_face)))continue;
@@ -48,14 +57,16 @@ class SupportSource final : public afs::ConstraintSource {
     std::vector<Mask> masks_;std::map<uint64_t,Side> providers_;
     void map_mask(const Side& receiver,const Mask& mask,std::vector<afs::Row>& rows);
 public:
-    SupportSource(const Side& side,const Material& material,const State& state,std::atomic<bool>& cancelled);
+    SupportSource(const Side& side,const Material& material,const State& state,std::atomic<bool>& cancelled,double load=1);
     std::vector<afs::Row> map(const afs::Vector& bonus) override;
 };
-SupportSource::SupportSource(const Side& side,const Material& material,const State& state,std::atomic<bool>& cancelled)
+SupportSource::SupportSource(const Side& side,const Material& material,const State& state,std::atomic<bool>& cancelled,double load)
     :original_(side),material_(material),state_(state),cancelled_(cancelled),masks_(material_masks(state,side.id,cancelled)) {
     for(const auto& mask:masks_)if(!providers_.count(mask.provider)){
         const auto& source=state.bases.sides[state.bases.indices.at(mask.provider)];Side provider=base_copy(source);
-        provider.own=state.outputs.at(mask.provider).points;prepare_snapshot(provider,nullptr);providers_.emplace(mask.provider,std::move(provider));}
+        provider.own=state.outputs.at(mask.provider).points;
+        if(load!=1)for(size_t i=0;i<provider.own.size();++i)provider.own[i]=add(provider.base[i],mul(sub(provider.own[i],provider.base[i]),load));
+        prepare_snapshot(provider,nullptr);providers_.emplace(mask.provider,std::move(provider));}
 }
 void SupportSource::map_mask(const Side& receiver,const Mask& mask,std::vector<afs::Row>& rows) {
     require(!cancelled_,"PAIR_CANCELLED");const auto& provider=providers_.at(mask.provider);auto settings=state_.bases.settings;
@@ -67,8 +78,15 @@ void SupportSource::map_mask(const Side& receiver,const Mask& mask,std::vector<a
     size_t bytes=rows.capacity()*sizeof(afs::Row);for(const auto& row:rows)bytes+=row.terms.capacity()*sizeof(std::pair<int,double>);
     require(bytes<=settings.result_bytes,"STACK_CONSTRAINT_MEMORY_BUDGET");
 }
+static std::vector<afs::Row> unique_support(std::vector<afs::Row> rows) {
+    std::sort(rows.begin(),rows.end(),[](const afs::Row& a,const afs::Row& b){return a.terms<b.terms;});
+    size_t end=0;for(size_t i=0;i<rows.size();++i){
+        if(end&&rows[end-1].terms==rows[i].terms){if(rows[i].lower>rows[end-1].lower)rows[end-1]=std::move(rows[i]);}
+        else {if(end!=i)rows[end]=std::move(rows[i]);++end;}}
+    rows.resize(end);return rows;
+}
 std::vector<afs::Row> SupportSource::map(const afs::Vector& bonus) {
-    Side receiver=base_copy(original_);receiver.base=displaced(original_,material_,bonus);receiver.own=receiver.base;
-    std::vector<afs::Row> rows;for(const auto& mask:masks_)map_mask(receiver,mask,rows);return rows;
+    Side receiver=base_copy(original_);receiver.base=displaced(receiver,material_,bonus);receiver.own=receiver.base;
+    std::vector<afs::Row> rows;for(const auto& mask:masks_)map_mask(receiver,mask,rows);return unique_support(std::move(rows));
 }
 }

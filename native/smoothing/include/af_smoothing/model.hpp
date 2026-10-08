@@ -17,11 +17,12 @@ struct Row { std::vector<std::pair<int,double>> terms; double lower; int provide
 struct Field { Vector target, lower, upper; double radius=.183, strength=.8; };
 enum class Status { success, invalid_input, infeasible, invalid_contact, solver_failure, validation_failure, budget_exhausted };
 class ContactError : public std::runtime_error { using std::runtime_error::runtime_error; };
-struct Options { double tolerance=2e-7; int max_iterations=250, max_rounds=12; };
+struct Options { double tolerance=2e-7; int max_iterations=250, max_rounds=12;bool robust_linear_solve=false; };
 struct Diagnostics {
     double energy_ms=0, assembly_ms=0, map_ms=0, setup_ms=0, solve_ms=0, total_ms=0;
     double violation=0, stationarity=0, complementarity=0, objective=0, complementarity_relative=0;
     int rounds=0, iterations=0, setups=0, updates=0, rows=0, solver_status=0;
+    std::string solver_detail;
 };
 struct Result { Status status=Status::success; Vector values; Diagnostics metrics; std::string message; };
 struct Quadratic { Sparse P,A,G; Vector q,b,lower,upper; };
@@ -77,6 +78,7 @@ class Session {
 public:
     Session(const Mesh&, const EnergyBuilder&, std::unique_ptr<QpSolver>, Options);
     Result run(const Field&, ConstraintSource&);
+    Result run(const Field&, ConstraintSource&, const Vector& initial);
     const Energy& energy() const { return energy_; }
 };
 }

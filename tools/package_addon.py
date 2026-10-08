@@ -14,7 +14,7 @@ from build_draft_skin_vendor import ROOT, VENDOR, build_bundle
 
 PACKAGE_DIRS = {"adapters", "app", "core", "native", "operators",
                 "properties", "ui", "vendor", "workers"}
-REQUIRED_NATIVE = ("af_fiber_ccd_v3_28.dll", "libomp.dll")
+REQUIRED_NATIVE = ("af_fiber_ccd_v3_32.dll", "libomp.dll")
 
 
 def tracked_package_files(source):
@@ -60,12 +60,13 @@ def verify_pair_abi(stage):
         ' assert library.af_pair_version() == 1 and library.af_pair_storage_version() == 1, "Missing muscle_pair_detection.v1 storage"\n'
         ' assert library.af_layer_order_version() == 1, "Missing muscle_layer_order.v1"\n'
         ' assert library.af_stacking_version() == 1, "Missing muscle_stacking.v1"\n'
+        ' assert library.af_vector_stacking_version() == 1, "Missing muscle_vector_stacking.v1"\n'
         ' assert library.af_relationship_policy_version() == 1, "Missing muscle_relationships.v1"\n'
-        ' getattr(library, "af_stack_submit_relationships_v1"); getattr(library, "af_layer_storage_stats")\n'
+        ' assert library.af_explicit_order_version() == 1 and library.af_stack_constraint_capture_version() == 1, "Missing muscle_explicit_order.v1"\n'
+        ' for name in ("af_vector_stack_submit_v1", "af_vector_stack_metrics", "af_stack_legacy_diagnostic", "af_relationship_effective_summary", "af_layer_storage_stats"): getattr(library, name)\n'
         ' for name in sys.argv[3:]: getattr(library, "af_pair_" + name)\n')
-    names = ('create', 'destroy', 'submit', 'poll', 'cancel', 'release', 'summary', 'footprint',
-             'build_field', 'limiting', 'blend_directions', 'orientation', 'storage_stats')
-    subprocess.run([sys.executable, '-c', script, str(directory), str(directory / REQUIRED_NATIVE[0]), *names], check=True)
+    subprocess.run([sys.executable, '-c', script, str(directory), str(directory / REQUIRED_NATIVE[0]),
+        'create', 'destroy', 'submit', 'poll', 'cancel', 'release', 'summary', 'footprint', 'build_field', 'limiting', 'blend_directions', 'orientation', 'storage_stats'], check=True)
 
 
 def verify_auxiliary_abi(stage):
