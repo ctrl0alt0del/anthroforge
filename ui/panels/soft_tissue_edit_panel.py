@@ -4,6 +4,8 @@ from ...app.queries.root import root_for_context
 from ...app.queries.vcp import active_soft_tissue_from_context, has_active_entity
 from ...core.vcp.runtime_state import soft_tissue_diagnostic, soft_tissue_status, soft_tissue_solve_report
 from ...core.vcp.surface_target import effective_tissue_target
+from ...app.queries.soft_tissue_target import target_label
+from .soft_tissue_create_panel import draw_target_picker
 
 
 class AF_PT_SoftTissueEditPanel(bpy.types.Panel):
@@ -58,12 +60,13 @@ def _draw_base(layout, tissue):
 
 def _draw_target(layout, context, tissue):
     box, target = layout.box(), effective_tissue_target(tissue)
+    if tissue.constraint_reference == 'SOURCE':
+        box.label(text='Constraints follow the Fiber-defined base', icon='LINKED')
+        return
     box.label(text="Attachment Target")
-    label = "None" if target.kind.value == "NONE" else f"{target.kind.value}: {target.entity_id}"
+    label = "None" if target.kind.value == "NONE" else target_label(root_for_context(context), target)
     box.label(text=label)
-    if target.kind.value != "NONE":
-        box.label(text=target.surface.value.replace("_", " ").title())
-    box.prop(context.scene, "af_new_soft_tissue_target_obj", text="Assign From")
+    draw_target_picker(box, context)
     row = box.row(align=True)
     _target_operator(row, "af.assign_soft_tissue_target", "LINKED", tissue.id)
     _target_operator(row, "af.select_soft_tissue_target", "RESTRICT_SELECT_OFF", tissue.id)
@@ -164,7 +167,7 @@ def _draw_attachment_row(box, tissue, row, index):
     controls.enabled = tissue.relaxation_mode != "NONE" and not (_is_surface_static(tissue) and row.mask_attribute.upper() == "BACKING")
     controls.prop(row, "mode")
     tether = controls.column(align=True)
-    tether.enabled = effective_tissue_target(tissue).kind.value != "NONE"
+    tether.enabled = tissue.constraint_reference == 'SOURCE' or effective_tissue_target(tissue).kind.value != "NONE"
     if row.mode == "SOFT" or row.feather > 0:
         tether.prop(row, "strength")
     tether.prop(row, "feather")

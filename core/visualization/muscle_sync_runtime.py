@@ -26,24 +26,40 @@ def collect_fiber_points(root, scene, fiber_props, index=None):
 
 def _fiber_points(scene, root, fsync, vis_col, fiber, index=None):
     _ = fsync, vis_col
-    return cached_fiber_points(scene, root.name, fiber.id, index=index)
+    from .geometry_instance import row
+    points = cached_fiber_points(scene, root.name, fiber.id, index=index)
+    return None if points is None else row(root, scene, fiber, points)
 
 
 def collect_muscle_rows(root, scene, muscle, fiber_props, index=None):
     rows = collect_fiber_points(root, scene, fiber_props, index=index)
-    return _expanded_rows(root, muscle, rows)
+    return _expanded_rows(root, muscle, rows, scene, fiber_props)
 
 
 def collect_surface_rows(root, scene, surface, fiber_props, index=None):
     rows = collect_fiber_points(root, scene, fiber_props, index=index)
-    return _expanded_rows(root, surface, rows)
+    return _expanded_rows(root, surface, rows, scene, fiber_props)
 
 
-def _expanded_rows(root, muscle, rows):
+def _expanded_rows(root, muscle, rows, scene=None, fibers=()):
     rule = _mirror_rule(root, muscle)
     if not _use_mirrored_rows(muscle) or not rows or rule is None or _rows_span_plane(rows, *rule):
         return rows
-    return _mirror_expanded_rows(rows, *rule)
+    if scene is None: return _mirror_expanded_rows(rows, *rule)
+    return _actual_expanded_rows(root, scene, rows, fibers, rule)
+
+
+def _actual_expanded_rows(root, scene, rows, fibers, rule):
+    ordered = sorted(zip(rows, fibers), key=lambda item: abs(_row_signed_distance(item[0], *rule)))
+    mirrors = [_evaluated_mirror_row(root, scene, fiber, row, rule) for row, fiber in ordered
+               if abs(_row_signed_distance(row, *rule)) > 1e-6]
+    return list(reversed(mirrors)) + [row for row, _fiber in ordered]
+
+
+def _evaluated_mirror_row(root, scene, fiber, row, rule):
+    from .fiber_instance_runtime import actual_rows
+    actual = actual_rows(root, scene, fiber)
+    return _mirror_row(row, *rule) if actual is None else actual
 
 
 def _use_mirrored_rows(muscle):
@@ -119,12 +135,14 @@ def ensure_inflation_ctrl(vis_col, root, muscle, find_inflation_ctrl_fn, create_
 
 
 def expanded_rows_with_provenance(root, source, rows, fibers):
+    from ..utils import scene_for_id
     tagged = [(row, dict(fiber_id=fiber.id, name=fiber.name, mirrored=False)) for row, fiber in zip(rows, fibers)]
     rule = _mirror_rule(root, source)
     if not _use_mirrored_rows(source) or not rows or rule is None or _rows_span_plane(rows, *rule):
         return rows, tuple(tag for _, tag in tagged)
     tagged.sort(key=lambda item: abs(_row_signed_distance(item[0], *rule)))
-    mirrors = [(_mirror_row(row, *rule), dict(tag, mirrored=True)) for row, tag in tagged
+    lookup = {f.id: f for f in fibers}
+    mirrors = [(_evaluated_mirror_row(root, scene_for_id(root), lookup[tag['fiber_id']], row, rule), dict(tag, mirrored=True)) for row, tag in tagged
                if abs(_row_signed_distance(row, *rule)) > 1e-6]
     combined = list(reversed(mirrors)) + tagged
     return [row for row, _ in combined], tuple(tag for _, tag in combined)

@@ -11,7 +11,8 @@ from ...adapters.authoring.inventory import capture
 from ...adapters.free_fiber_transaction import run
 from ..use_cases import free_fiber as service
 
-OPERATIONS = ('fibers.create_controlled', 'fibers.create_free', 'fibers.path_inspect', 'fibers.path_update', 'fibers.mode_configure')
+OPERATIONS = ('fibers.create_controlled', 'fibers.create_free', 'fibers.path_inspect', 'fibers.path_update',
+              'fibers.mode_configure', 'fibers.supports_configure', 'fibers.rebind', 'fibers.symmetry_configure')
 
 
 def execute(port, request, store):
@@ -29,7 +30,7 @@ def execute(port, request, store):
 
 def _execute_mutation(root, scene, request, store):
     fiber = mutate(root, scene, request['op'], request['params'])
-    result = _response(request, root, scene, fiber); result['published'] = True
+    result = _response(request, root, scene, fiber); result['published'] = result['entities'][0]['output_state'] == 'CURRENT'
     receipt = dict(digest=digest(request), response=result, fiber_id=fiber.id, postcondition=postcondition(root, scene, fiber))
     rows = decode(root.get('af_free_receipts', '{}')); rows[request['request_id']] = receipt
     key = [root.get('af_authoring_id') or root.name, request['request_id']]
@@ -52,9 +53,17 @@ def inspect(root, scene, fiber):
     else:
         from ...core.visualization.fiber_sync_helpers import persisted_fiber_points
         points = persisted_fiber_points(scene, root.name, fiber.id) or ()
-    return dict(fiber_id=fiber.id, behavior_mode=fiber.behavior_mode, path_revision=fiber.free_path_revision,
+    return dict(_output_state(root, scene, fiber), fiber_id=fiber.id, behavior_mode=fiber.behavior_mode, path_revision=fiber.free_path_revision,
                 path=payload, points_world=[list(p) for p in points], attachment_error=error,
                 geometry_sample_count=len(points), controlled_node_count=fiber.node_count)
+
+
+def _output_state(root, scene, fiber):
+    from ...core.visualization.vcp_object_index import build_vcp_object_index
+    from ...core.vcp.runtime_state import fiber_invalid_reason, fiber_recompute_status
+    obj = build_vcp_object_index(scene, root.name)['fiber'].get(fiber.id)
+    return dict(output_state=obj.get('af_fiber_output_state', 'PENDING') if obj else 'PENDING',
+                recompute_status=fiber_recompute_status(fiber), diagnostic=fiber_invalid_reason(fiber))
 
 
 def _response(request, root, scene, fiber):
@@ -80,6 +89,8 @@ def replay(root, scene, request):
 def mutate(root, scene, op, params):
     if op.startswith('fibers.create_'): return create(root, scene, params, op.endswith('_free'))
     fiber = _fiber(root, params['fiber_id'])
+    if op in ('fibers.supports_configure', 'fibers.rebind', 'fibers.symmetry_configure'):
+        _attachment_mutation(root, scene, fiber, op, params); return fiber
     require(params['expected_path_revision'] == fiber.free_path_revision, 'STALE_PATH_REVISION')
     if op == 'fibers.mode_configure': return service.configure_mode(root, scene, fiber, params['mode'])
     require(free_path.is_free(fiber), 'FIBER_NOT_FREE')
@@ -108,13 +119,33 @@ def create(root, scene, params, free):
         fiber.behavior_mode = 'FREE' if free else 'CONTROLLED'; fiber.name = params.get('name', fiber.id)
         fiber.topology_mode = params.get('topology', 'OPEN'); _attachments(root, fiber, params['attachments'])
         _settings(fiber, params.get('settings', {}))
+        _supports(fiber, params.get('supports', ()))
+    from ...core.deps.surface_dependencies import require_acyclic
+    require_acyclic(root)
     if free:
         payload, points = _input(root, fiber, params['path']); service.commit(root, scene, fiber, payload, points)
     else:
-        runtime.qualify(root, scene, fiber)
-        from ...core.visualization.fiber_refinement import request_fiber_refinement
-        request_fiber_refinement(root, scene, fiber, quality='FINAL')
+        _controlled(root, scene, fiber)
     return fiber
+
+
+def _attachment_mutation(root, scene, fiber, op, params):
+    from ..use_cases.fiber_attachment import set_supports, rebind_fiber, set_symmetry
+    if op == 'fibers.supports_configure': return set_supports(root, scene, fiber, params['supports'])
+    if op == 'fibers.rebind': return rebind_fiber(root, scene, fiber)
+    return set_symmetry(root, scene, fiber, params['mode'], params.get('axis', 'X'), params.get('origin', (0., 0., 0.)))
+
+
+def _controlled(root, scene, fiber):
+    from ...core.visualization.fiber_refinement import request_fiber_refinement
+    runtime.qualify(root, scene, fiber)
+    result = request_fiber_refinement(root, scene, fiber, quality='FINAL')
+    if not result.ok: raise ValueError(result.error)
+
+
+def _supports(fiber, targets):
+    from ...core.vcp.surface_reference import key
+    for target in dict.fromkeys(key(value) for value in targets): fiber.attachment_supports.add().target_id = target
 
 
 def _settings(fiber, settings):
@@ -135,12 +166,26 @@ def _attachments(root, fiber, attachments):
 
 
 def _attachment(root, attachment):
+    from ...core.vcp.surface_reference import key
+    if 'target' in attachment: attachment = dict(attachment, parent_id=key(attachment['target']))
     identity = attachment['point_id']; points = root.af_vcp_system.authored_points
     point = next((row for row in points if row.id == identity), None)
     if point is not None:
         require(set(attachment) == {'point_id'}, 'SHARED_BINDING_IS_AUTHORITATIVE')
         return identity
+    attachment = _capture_position(root, attachment)
     require(bool(attachment.get('parent_id') and attachment.get('attach_param')), 'MANDATORY_BINDING_MISSING')
     point = points.add(); point.id = identity; point.parent_id = attachment['parent_id']
     point.attach_param = attachment['attach_param']; point.normal_offset = attachment.get('normal_offset', 0.)
     return identity
+
+
+def _capture_position(root, attachment):
+    if 'position' not in attachment: return attachment
+    require('attach_param' not in attachment, 'AMBIGUOUS_BINDING_INPUT')
+    from ...core.utils import scene_for_id
+    from ...core.vcp.fiber_pin_snapping import capture_attachment_from_world
+    value = dict(attachment)
+    value['attach_param'] = capture_attachment_from_world(root, scene_for_id(root), value.get('parent_id', ''), Vector(value['position']))
+    require(bool(value['attach_param']), 'INVALID_ATTACHMENT')
+    return value

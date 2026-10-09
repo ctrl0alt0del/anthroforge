@@ -22,6 +22,12 @@ def _poll_geometry_scp_mesh(self, obj):
     return bool(root and is_geometry_mesh_scp_obj(obj, root.name))
 
 
+def _poll_fiber_surface(self, obj):
+    from ..core.vcp.surface_reference import from_object
+    root = get_af_root(getattr(bpy.context, 'scene', None))
+    return bool(root and obj and obj.get('af_root_name') == root.name and from_object(obj).entity_id)
+
+
 def _poll_parent_proxy(self, obj):
     scene = getattr(bpy.context, "scene", None)
     root = get_af_root(scene)
@@ -84,8 +90,8 @@ def _register_scene_pointer_props():
     bpy.types.Scene.af_scp_parent_obj = bpy.props.PointerProperty(name="SCP Parent", type=bpy.types.Object, poll=_poll_parent_proxy)
     bpy.types.Scene.af_scp_object_picker = bpy.props.PointerProperty(name="SCP Object", type=bpy.types.Object, poll=_poll_any_obj)
     bpy.types.Scene.af_control_scp_obj = bpy.props.PointerProperty(name="Control SCP", type=bpy.types.Object, poll=_poll_scp_obj)
-    bpy.types.Scene.af_new_fiber_origin_obj = bpy.props.PointerProperty(name="Fiber Origin", type=bpy.types.Object, poll=_poll_geometry_scp_mesh)
-    bpy.types.Scene.af_new_fiber_insertion_obj = bpy.props.PointerProperty(name="Fiber Insertion", type=bpy.types.Object, poll=_poll_geometry_scp_mesh)
+    bpy.types.Scene.af_new_fiber_origin_obj = bpy.props.PointerProperty(name="Fiber Origin", type=bpy.types.Object, poll=_poll_fiber_surface)
+    bpy.types.Scene.af_new_fiber_insertion_obj = bpy.props.PointerProperty(name="Fiber Insertion", type=bpy.types.Object, poll=_poll_fiber_surface)
     bpy.types.Scene.af_new_blob_target_obj = bpy.props.PointerProperty(name="Blob Target", type=bpy.types.Object, poll=_poll_any_obj)
     bpy.types.Scene.af_new_soft_tissue_base_obj = bpy.props.PointerProperty(name="Soft Tissue Base", type=bpy.types.Object, poll=_poll_soft_tissue_base)
     bpy.types.Scene.af_new_soft_tissue_target_obj = bpy.props.PointerProperty(name="Soft Tissue Target", type=bpy.types.Object, poll=_poll_soft_tissue_target)

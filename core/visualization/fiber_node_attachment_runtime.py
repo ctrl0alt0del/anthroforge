@@ -18,9 +18,21 @@ def apply_fiber_node_attachments(root, scene, fiber_ids):
 
 
 def _apply_fiber_node_attachments_serial(root, scene, fiber_ids):
+    from ..vcp.attachment_surface import muscle_backed
+    from .muscle_fiber_attachment import apply_batch
     fibers = _selected_fibers(root, fiber_ids); handled = {fiber.id for fiber in fibers}
     if not fibers: return handled
     sync = register_fiber_sync(); runtime = attachment_runtime(scene, depsgraph_for_scene(scene))
+    muscle_fibers = tuple(f for f in fibers if muscle_backed(f))
+    if muscle_fibers: apply_batch(sync, root, scene, muscle_fibers)
+    fibers = tuple(f for f in fibers if not muscle_backed(f))
+    _apply_scp_batch(sync, root, scene, fibers, runtime)
+    sync.refresh_selection(root=root, scene=scene, fiber_ids=handled, sync_handles=True)
+    return handled
+
+
+def _apply_scp_batch(sync, root, scene, fibers, runtime):
+    if not fibers: return
     from ..vcp.fiber_node_attachment import _surface_objects
     runtime['node_attachment_objects'] = _surface_objects(scene, root)
     sync.begin_point_batch()
@@ -28,8 +40,6 @@ def _apply_fiber_node_attachments_serial(root, scene, fiber_ids):
         for fiber in fibers: _apply_one(sync, root, scene, fiber, runtime)
     finally:
         sync.end_point_batch()
-    sync.refresh_selection(root=root, scene=scene, fiber_ids=handled, sync_handles=True)
-    return handled
 
 
 def capture_missing_fiber_node_attachments(root, scene, fiber_ids=None):
@@ -40,6 +50,8 @@ def capture_missing_fiber_node_attachments(root, scene, fiber_ids=None):
 def _capture_missing_one(root, scene, fiber, depsgraph):
     if is_free(fiber): return False
     if _binding_current(fiber): return False
+    from ..vcp.attachment_surface import muscle_backed
+    if muscle_backed(fiber): return False
     if _binding_version_matches(fiber, 1): return upgrade_fiber_node_attachments(root, scene, fiber, depsgraph)
     points = persisted_fiber_points(scene, root.name, fiber.id) or ()
     return capture_fiber_node_attachments(root, scene, fiber, points, depsgraph).ok
@@ -57,7 +69,9 @@ def _selected_fibers(root, fiber_ids):
 
 
 def _binding_current(fiber):
-    return _binding_version_matches(fiber, NODE_ATTACHMENT_VERSION)
+    payload = decode_node_attachments(getattr(fiber, 'node_attachments_json', ''))
+    return bool(payload is not None and payload.version in (1, 2, NODE_ATTACHMENT_VERSION)
+                and payload.point_count == fiber_geometry_point_count(fiber) and payload.cyclic == is_loop_fiber(fiber))
 
 
 def _binding_version_matches(fiber, version):

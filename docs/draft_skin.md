@@ -92,7 +92,13 @@ then expands dependencies and native libraries into the add-on ZIP at
 `vendor/draft_skin/bundles/win64-cp311-v2`. The release ZIP omits the source
 wheels but retains wheel metadata, licenses, and a locked hash for every
 installed bundle file. The worker validates the complete bundle before
-modifying its module search path. It does not download, run pip, or extract a
+modifying its module search path. Generated `__pycache__/*.pyc` files are allowed
+only when their corresponding Python source is in the verified inventory.
+The bundle's Python modules load directly from verified source, bypassing those
+caches without reading, writing, or deleting them. Missing files, altered source
+or native libraries, links, and other unexpected files still fail validation;
+inventory errors identify the offending paths and counts.
+It does not download, run pip, or extract a
 runtime cache. Temporary job input/output is separate and still uses TEMP.
 
 Build the installable ZIP with `python tools/package_addon.py --output

@@ -64,9 +64,22 @@ def _add_one_fiber(root, graph, entity_sets, fiber):
     graph.add_edge(Edge(fp_local, fp_probe, EDGE_EVAL))
     graph.add_edge(Edge(fp_att, fp_probe, EDGE_EVAL))
     for sid in _graph_fiber_attachment_ids(root, graph, fiber):
-        sp = graph.add_port(PortRef('SCP', sid, 'probe', PHASE_PROBES, MUT_PROBE))
-        graph.add_edge(Edge(sp, fp_att, EDGE_ATTACHMENT))
-        _add_dependency_edge(graph, ('SCP', sid), ('FIBER', fid))
+        _add_fiber_parent(root, graph, fid, fp_att, sid)
+        kind, identity = _attachment_dependency(root, sid)
+        if kind == 'MUSCLE': entity_sets['MUSCLE'].add(identity)
+
+
+def _add_fiber_parent(root, graph, fid, port, target):
+    kind, owner = _attachment_dependency(root, target)
+    sp = graph.add_port(PortRef(kind, owner, 'probe', PHASE_PROBES, MUT_PROBE))
+    graph.add_edge(Edge(sp, port, EDGE_ATTACHMENT))
+    _add_dependency_edge(graph, (kind, owner), ('FIBER', fid))
+
+
+def _attachment_dependency(root, value):
+    try: from ..vcp.surface_reference import dependency
+    except ImportError: from core.vcp.surface_reference import dependency
+    return dependency(value, root)
 
 
 def _graph_fiber_attachment_ids(root, graph, fiber):
@@ -79,13 +92,10 @@ def _graph_fiber_attachment_ids(root, graph, fiber):
 
 def _fiber_attachment_ids(root, fiber):
     values = list(fiber_parent_ids(fiber))
+    values.extend(row.target_id for row in getattr(fiber, 'attachment_supports', ()))
     values.extend(node_attachment_target_ids(fiber))
     values = tuple(dict.fromkeys(str(v) for v in values if v))
-    if not any(value.startswith('AFI_') for value in values):
-        return values
-    try: from ..scp_runtime.common import attachment_dependency_id
-    except ImportError: from core.scp_runtime.common import attachment_dependency_id
-    return tuple(dict.fromkeys(attachment_dependency_id(root, value) for value in values if value))
+    return tuple(dict.fromkeys(_attachment_dependency(root, v)[1] if v.startswith('AFI_') else v for v in values))
 
 
 def _add_muscle_entities(root, graph, entity_sets):
@@ -210,18 +220,13 @@ def _add_soft_tissue_target(graph, tissue, evaluated):
 
 
 def build_runtime_graph(root, graph):
-    entity_sets = {
-        "SCP": set(),
-        "FIBER": set(),
-        "FIBER_SURFACE": set(),
-        "MUSCLE": set(),
-        "BLOB": set(),
-        "SOFT_TISSUE": set(),
-    }
+    from .surface_dependencies import _stacking_edges
+    entity_sets = {kind: set() for kind in ('SCP', 'FIBER', 'FIBER_SURFACE', 'MUSCLE', 'BLOB', 'SOFT_TISSUE')}
     _add_scp_entities(root, graph, entity_sets)
     _add_fiber_entities(root, graph, entity_sets)
     _add_fiber_surface_entities(root, graph, entity_sets)
     _add_muscle_entities(root, graph, entity_sets)
     _add_blob_entities(root, graph, entity_sets)
     _add_soft_tissue_entities(root, graph, entity_sets)
+    _stacking_edges(root, graph)
     return entity_sets

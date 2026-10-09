@@ -103,30 +103,39 @@ def _set_copied_roles(root, src, dst, local):
 
 def _copy_scps(root, scene, scps, maps):
     pairs = []
-    for src in scps:
+    for source_id in tuple(src.id for src in scps):
+        src = find_scp_by_id(root, source_id)
         dst = create_scp(root, getattr(src, "name", ""))
+        src = find_scp_by_id(root, source_id)
         maps["scps"][as_id(src.id)] = as_id(dst.id)
         _copy_scp_props(src, dst), _copy_scp_objects(root, scene, src, dst, maps)
-        pairs.append((src, dst))
+        pairs.append((source_id, dst.id))
     return pairs
 
 
-def _apply_scp_links(pairs, scp_map):
-    for src, dst in pairs:
+def _apply_scp_links(root, pairs, scp_map):
+    for source_id, target_id in pairs:
+        src, dst = find_scp_by_id(root, source_id), find_scp_by_id(root, target_id)
         set_parent_id_raw(dst, scp_map.get(as_id(getattr(src, "parent_id", "")), as_id(getattr(src, "parent_id", ""))))
 
 
-def _copyable_fiber(fiber, scp_ids, fiber_ids=None):
-    _ = fiber_ids
-    values = tuple(fiber_parent_ids(fiber)) + tuple(node_attachment_target_ids(fiber))
-    parent_ids = {as_id(pid) for pid in values if as_id(pid)}
-    return bool(parent_ids) and parent_ids <= set(scp_ids or set())
+def _copyable_fiber(fiber, scp_ids, muscle_ids=()):
+    from ..vcp.attachment_surface import support_keys
+    from ..vcp.surface_reference import dependency
+    values = (*support_keys(fiber), *node_attachment_target_ids(fiber))
+    parents = {dependency(value, fiber.id_data) for value in values if value}
+    allowed = {('SCP', value) for value in scp_ids} | {('MUSCLE', value) for value in muscle_ids}
+    return bool(parents) and parents <= allowed
 
 
 def _new_item(collection, prefix):
     item = collection.add()
     item.id = next_prefixed_id(collection, prefix)
     return item
+
+
+def _item_by_id(collection, identity):
+    return next(item for item in collection if item.id == identity)
 
 
 def _copy_touches(src, dst, scp_map):
@@ -144,7 +153,9 @@ def _copy_loop_anchors(src, dst, scp_map):
 
 
 def _copy_fiber_item(root, src, maps):
+    source_id = src.id
     dst = _new_item(root.af_vcp_system.fibers, "FIBER")
+    src = _item_by_id(root.af_vcp_system.fibers, source_id)
     maps["fibers"][as_id(src.id)] = as_id(dst.id)
     _copy_scalars(src, dst, skip=_FIBER_SKIP), _copy_name(src, dst, dst.id)
     _remap_node_attachment_copy(dst, maps["scps"])
@@ -160,8 +171,10 @@ def _remap_node_attachment_copy(fiber, scp_map):
 
 
 def _copy_fibers(root, scp_ids, maps):
-    for fiber in tuple(root.af_vcp_system.fibers):
-        _copy_fiber_item(root, fiber, maps) if _copyable_fiber(fiber, scp_ids) else None
+    for identity in tuple(f.id for f in root.af_vcp_system.fibers):
+        fiber = _item_by_id(root.af_vcp_system.fibers, identity)
+        if fiber.id not in maps['fibers'] and _copyable_fiber(fiber, scp_ids, maps['muscles']):
+            _copy_fiber_item(root, fiber, maps)
 
 
 def _copyable_muscle(muscle, fiber_map):
@@ -182,7 +195,9 @@ def _fiber_by_id(root, fiber_id):
 
 
 def _copy_muscle_item(root, src, maps):
+    source_id = src.id
     dst = _new_item(root.af_vcp_system.muscles, "MUSCLE")
+    src = _item_by_id(root.af_vcp_system.muscles, source_id)
     maps["muscles"][as_id(src.id)] = as_id(dst.id)
     _copy_scalars(src, dst, skip=_MUSCLE_SKIP), _copy_name(src, dst, dst.id)
     _copy_fiber_refs(src, dst, maps["fibers"]), _assign_muscle(dst.id, dst.fiber_refs, root)
@@ -195,8 +210,10 @@ def _assign_muscle(muscle_id, refs, root):
 
 
 def _copy_muscles(root, maps):
-    for muscle in tuple(root.af_vcp_system.muscles):
-        _copy_muscle_item(root, muscle, maps) if _copyable_muscle(muscle, maps["fibers"]) else None
+    for identity in tuple(m.id for m in root.af_vcp_system.muscles):
+        muscle = _item_by_id(root.af_vcp_system.muscles, identity)
+        if muscle.id not in maps['muscles'] and _copyable_muscle(muscle, maps['fibers']):
+            _copy_muscle_item(root, muscle, maps)
 
 
 def _remapped_blob_target(blob, maps):
@@ -214,15 +231,16 @@ def _copy_blob_item(root, src, maps):
     remap = _remapped_blob_target(src, maps)
     if remap is None:
         return
-    dst = _new_item(root.af_vcp_system.blobs, "BLOB")
+    source_id = src.id; dst = _new_item(root.af_vcp_system.blobs, "BLOB")
+    src = _item_by_id(root.af_vcp_system.blobs, source_id)
     maps["blobs"][as_id(src.id)] = as_id(dst.id)
     _copy_scalars(src, dst, skip=_BLOB_SKIP), _copy_name(src, dst, dst.id)
     dst.attach_target_type, dst.attach_target_id, dst.attach_target_object_name = remap
 
 
 def _copy_blobs(root, maps):
-    for blob in tuple(root.af_vcp_system.blobs):
-        _copy_blob_item(root, blob, maps)
+    for identity in tuple(blob.id for blob in root.af_vcp_system.blobs):
+        _copy_blob_item(root, _item_by_id(root.af_vcp_system.blobs, identity), maps)
 
 
 def _rewritten_path(raw, name_map):
@@ -234,7 +252,9 @@ def _rewritten_path(raw, name_map):
 
 
 def _add_shortcut(root, shortcut, data_path, owner_type, owner_id, scp_map):
+    source_id = shortcut.id
     item = root.af_shortcut_system.shortcuts.add()
+    shortcut = _item_by_id(root.af_shortcut_system.shortcuts, source_id)
     item.id = next_prefixed_id(root.af_shortcut_system.shortcuts, "SHORTCUT")
     item.name, item.data_path = str(shortcut.name or item.id), data_path
     item.owner_type, item.owner_id = owner_type, owner_id
@@ -244,7 +264,8 @@ def _add_shortcut(root, shortcut, data_path, owner_type, owner_id, scp_map):
 
 
 def _copy_shortcuts(root, maps):
-    for shortcut in tuple(root.af_shortcut_system.shortcuts):
+    for identity in tuple(shortcut.id for shortcut in root.af_shortcut_system.shortcuts):
+        shortcut = _item_by_id(root.af_shortcut_system.shortcuts, identity)
         owner_type, owner_id = remapped_shortcut_owner(shortcut, maps)
         if owner_type != "NONE":
             _add_shortcut(root, shortcut, _rewritten_path(getattr(shortcut, "data_path", ""), maps["names"]), owner_type, owner_id, maps["scps"])
@@ -261,7 +282,7 @@ def _copy_scp_subtree(root, scene, scp_id, child_ids=None):
     if not source_ids:
         return ""
     pairs = _copy_scps(root, scene, _source_scps(root, source_ids), maps)
-    _apply_scp_links(pairs, maps["scps"])
+    _apply_scp_links(root, pairs, maps["scps"])
     _copy_fibers(root, set(source_ids), maps), _copy_muscles(root, maps)
     from .free_copy import finish_graph
     finish_graph(root, scene, maps)

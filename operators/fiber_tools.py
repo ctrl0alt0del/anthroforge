@@ -55,7 +55,7 @@ def _raycast_scp(context, event, candidates=()):
 
 def _pick_candidates(context):
     root = root_for_context(context)
-    return pick_candidates(context, root)
+    return pick_candidates(context, root, include_muscles=True)
 
 
 def _set_modal_cursor(context):

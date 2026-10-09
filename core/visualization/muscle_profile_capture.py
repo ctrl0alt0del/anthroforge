@@ -105,7 +105,8 @@ def current_rows(root, scene, source, index=None):
     rows = [cached_fiber_points(scene, root.name, item.id, index=index) for item in fibers]
     if any(row is None or len(row) < 2 for row in rows):
         raise ValueError("PROFILE_BASE_NOT_CURRENT: Update source fibers first.")
-    return fibers, rows
+    from .geometry_instance import row
+    return fibers, [row(root, scene, fiber, points) for fiber, points in zip(fibers, rows)]
 
 
 def _check_source_proxies(root, scene, source, fibers, index=None):

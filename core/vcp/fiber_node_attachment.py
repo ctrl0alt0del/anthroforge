@@ -69,19 +69,23 @@ def _capture_payload(root, scene, fiber, points, depsgraph, indices=None):
 
 
 def _surface_objects(scene, root):
+    from .attachment_surface import typed_objects
     values = tuple(iter_geometry_mesh_scp_objects(scene, root.name))
     objects = {str(obj.get("af_scp_id", "") or ""): obj for obj in values
                if str(obj.get("af_scp_id", "") or "")}
     objects.update(instance_geometry_objects(scene, root.name))
+    objects.update(typed_objects(scene, root))
     return objects
 
 
 def _candidate_objects(root, scene, fiber, points, runtime):
+    from .attachment_surface import muscle_backed, support_objects
+    if muscle_backed(fiber): return support_objects(root, scene, fiber, runtime)
     objects = _surface_objects(scene, root)
     wanted = _nearby_surface_ids(root, scene, fiber, points, runtime)
     wanted.update(str(value or "") for value in fiber_parent_ids(fiber))
     selected = {key: value for key, value in objects.items() if key in wanted}
-    return selected or objects
+    return selected or {key: obj for key, obj in objects.items() if not obj.get('af_muscle_proxy')}
 
 
 def _nearby_surface_ids(root, scene, fiber, points, runtime):
@@ -129,6 +133,8 @@ def _forced_nodes(root, scene, fiber, points, runtime, indices=None):
 
 def _anchor_specs(root, scene, fiber, runtime):
     from .shared_point_storage import endpoint_record
+    if hasattr(fiber, 'attachment_records'):
+        return tuple(row for point in fiber.attachment_records if (row := _touch_spec(root, scene, runtime, point)) is not None)
     if is_free(fiber): return _free_specs(root, scene, fiber, runtime)
     if is_loop_fiber(fiber): return _loop_specs(root, scene, fiber, runtime)
     first = _touch_spec(root, scene, runtime, endpoint_record(fiber, "a"))

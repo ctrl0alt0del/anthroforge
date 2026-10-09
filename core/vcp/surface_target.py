@@ -21,6 +21,7 @@ class SurfaceTargetRef:
     kind: SurfaceTargetKind = SurfaceTargetKind.NONE
     entity_id: str = ""
     surface: SurfaceRole = SurfaceRole.AUTO
+    instance: str = "source"
 
 
 @dataclass(frozen=True)
@@ -62,8 +63,8 @@ TARGET_CONTRACTS = MappingProxyType({
 })
 
 
-def target_ref(kind="NONE", entity_id="", surface="AUTO"):
-    return SurfaceTargetRef(SurfaceTargetKind(str(kind)), str(entity_id or ""), SurfaceRole(str(surface)))
+def target_ref(kind="NONE", entity_id="", surface="AUTO", instance="source"):
+    return SurfaceTargetRef(SurfaceTargetKind(str(kind)), str(entity_id or ""), SurfaceRole(str(surface)), str(instance))
 
 
 def target_ref_errors(ref):
@@ -73,6 +74,8 @@ def target_ref_errors(ref):
         errors.append(f"{ref.surface.value} is invalid for {ref.kind.value}.")
     if ref.kind != SurfaceTargetKind.NONE and not ref.entity_id:
         errors.append("Surface target ID is required.")
+    if ref.instance not in {"source", "mirror"}:
+        errors.append("Unknown surface instance.")
     return tuple(errors)
 
 
@@ -90,12 +93,14 @@ def _legacy_tissue_target(tissue):
 
 
 def target_payload(ref):
-    return {"type": ref.kind.value, "id": ref.entity_id, "surface": ref.surface.value}
+    value = {"type": ref.kind.value, "id": ref.entity_id, "surface": ref.surface.value}
+    if ref.instance != "source": value["instance"] = ref.instance
+    return value
 
 
 def target_from_payload(value):
     data = dict(value or {})
-    return target_ref(data.get("type", "NONE"), data.get("id", ""), data.get("surface", "AUTO"))
+    return target_ref(data.get("type", "NONE"), data.get("id", ""), data.get("surface", "AUTO"), data.get("instance", "source"))
 
 
 def target_dependency(ref):

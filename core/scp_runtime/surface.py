@@ -720,7 +720,7 @@ def _frame_from_surface(parent_obj, verts, param, tangent_hint, tangent_strategy
 
 def _frame_from_tri(parent_obj, verts, tri, weights, tangent_hint, tangent_strategy, flow_param):
     abc = _tri_points(verts, tri)
-    if abc is None:
+    if abc is None or (abc[1] - abc[0]).cross(abc[2] - abc[0]).length <= 1e-12:
         return None
     point = _weighted_point(abc, weights)
     normal = _frame_normal(parent_obj, *abc)

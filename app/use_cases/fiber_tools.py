@@ -313,7 +313,17 @@ def _resolved_touch(context, root, fiber_id=""):
 
 def _append_touch_result(context, root, fiber, touch_specs):
     if getattr(fiber, 'behavior_mode', 'CONTROLLED') == 'FREE': return failure('Edit Free path samples without adding routing anchors.')
-    _append_touch_specs(fiber, touch_specs)
+    try: from ...adapters.free_fiber_transaction import run
+    except ImportError: from adapters.free_fiber_transaction import run
+    try: return run(root, context.scene, lambda: _append_acyclic_touch(context, root, fiber, touch_specs))
+    except ValueError as exc: return failure(str(exc))
+
+
+def _append_acyclic_touch(context, root, fiber, specs):
+    try: from ...core.deps.surface_dependencies import require_acyclic
+    except ImportError: from core.deps.surface_dependencies import require_acyclic
+    _append_touch_specs(fiber, specs)
+    require_acyclic(root)
     return _touch_order_changed(context, root, fiber)
 
 
@@ -420,9 +430,11 @@ def _proxy_edit_target(context):
 
 
 def _geometry_edit_target(context, root_name):
+    try: from ...core.vcp.surface_reference import key, from_object
+    except ImportError: from core.vcp.surface_reference import key, from_object
     obj = getattr(context, "active_object", None)
     valid = getattr(context, "mode", "") == "EDIT_MESH" and _single_edit_target(context, obj)
-    return bool(valid and _is_geometry_scp_obj()(obj, root_name))
+    return bool(valid and obj and obj.get('af_root_name') == root_name and key(from_object(obj)))
 
 
 def _single_edit_target(context, obj):
@@ -472,7 +484,10 @@ def _default_touch_specs(context, root, radius=.002):
 
 
 def _touch_parent_id(context, root):
+    try: from ...core.vcp.surface_reference import key, from_object
+    except ImportError: from core.vcp.surface_reference import key, from_object
     obj = getattr(context, "active_object", None)
+    if obj and obj.get('af_root_name') == root.name and key(from_object(obj)): return key(from_object(obj))
     if _is_bound_scp_obj()(obj, root.name):
         return obj.get("af_scp_id", "")
     index = root.af_scp_system.active_scp_index
@@ -481,19 +496,25 @@ def _touch_parent_id(context, root):
 
 
 def _first_attach_param(scene, root, scp_id, radius=.002):
-    parent_obj = _find_geometry_mesh_scp_obj()(scene, root.name, scp_id)
+    try: from ...core.vcp.attachment_backend import _parent_mesh
+    except ImportError: from core.vcp.attachment_backend import _parent_mesh
+    parent_obj = _parent_mesh(root, scene, scp_id)
     point = None if parent_obj is None else parent_obj.matrix_world.translation.copy()
     return None if point is None else _capture_attachment_from_world()(root, scene, scp_id, point, radius=radius)
 
 
 def _mesh_spec(root, scene, obj, index, radius=.002):
-    scp_id = str(obj.get("af_scp_id", "") or "")
+    try: from ...core.vcp.surface_reference import key, from_object
+    except ImportError: from core.vcp.surface_reference import key, from_object
+    scp_id = key(from_object(obj))
     raw = None if not scp_id else _capture_attachment_from_mesh_vertex()(root, scene, scp_id, index, radius=radius)
     return None if raw is None else (scp_id, raw)
 
 
 def _world_touch_spec(root, scene, scp_id, point, radius=.002):
-    sid = str(scp_id or "")
+    try: from ...core.vcp.surface_reference import key
+    except ImportError: from core.vcp.surface_reference import key
+    sid = key(scp_id)
     raw = None if not sid else _capture_attachment_from_world()(root, scene, sid, point, radius=radius)
     return None if raw is None else (sid, raw)
 

@@ -169,11 +169,11 @@ def _free_source(root, source):
 
 
 def _free_legacy_input(sync, root, scene, muscle, fibers, missing):
-    from ..vcp.free_surface import prepare_rows
+    from ..vcp.free_surface_stations import prepare_record
     if missing or len(fibers) < 2: return None
     points = sync._collect_points_with_fallback(root, scene, muscle, fibers)
     if not points or len({f.topology_mode for f in fibers}) != 1: return None
-    closed = sync._closed_u(fibers); rows = prepare_rows(points, closed, multiplier=4)
+    closed = sync._closed_u(fibers); rows = prepare_record(muscle, fibers, points, closed)
     return rows, len(rows[0]), False, closed, muscle, True
 
 
@@ -190,18 +190,20 @@ def _numeric_spec(muscle, config, target, densify, closed_u, initialize=False):
 
 
 def _topology_values(config, target, densify, closed_u):
+    from .geometry_instance import active
     close = bool(getattr(config, "close_across_fibers", getattr(config, "closed_v", False)))
     return dict(target_count=int(target), densify=bool(densify), closed_u=bool(closed_u),
-                close_across_fibers=close, topology_flip_normals=bool(getattr(config, "flip_normals", False)))
+                close_across_fibers=close, topology_flip_normals=bool(getattr(config, "flip_normals", False)) != active())
 
 
 def _inflation_values(muscle):
+    from .geometry_instance import point, active
     return dict(inflation_enabled=bool(muscle.inflation_enabled), inflation_mode=str(muscle.inflation_mode),
         inflation_max_value=float(muscle.inflation_max_value), inflation_falloff_type=str(muscle.inflation_falloff_type),
         inflation_falloff_radius=float(muscle.inflation_falloff_radius), inflation_direction_depth=float(muscle.inflation_direction_depth),
         inflation_boundary_strength=float(muscle.inflation_boundary_strength), inflation_boundary_band=float(muscle.inflation_boundary_band),
         inflation_boundary_power=float(muscle.inflation_boundary_power), inflation_length_taper_band=float(muscle.inflation_length_taper_band),
-        closed_v=bool(muscle.closed_v), flip_normals=bool(muscle.flip_normals), control_world=(0., 0., 0.) if muscle.inflation_mode == "SECTION_PROFILE" else muscle_inflation_ctrl_world(muscle))
+        closed_v=bool(muscle.closed_v), flip_normals=bool(muscle.flip_normals) != active(), control_world=(0., 0., 0.) if muscle.inflation_mode == "SECTION_PROFILE" else point(muscle_inflation_ctrl_world(muscle)))
 
 
 def _initialize_control(muscle):

@@ -169,8 +169,14 @@ class SCPSyncDriver(DependencyDriver):
             return
         ids = set(impacted.get("SCP", set()) or set())
         fibers = _propagated_fiber_ids(impacted, gate_meta, is_full)
+        fibers = _scp_wave_fibers(root, fibers)
         report = _sync_scp_scene(root, scene, ids, is_full, gate_meta, fibers)
         _record_wave_fibers(gate_meta, report)
+
+
+def _scp_wave_fibers(root, ids):
+    from ..vcp.attachment_surface import muscle_backed
+    return {f.id for f in root.af_vcp_system.fibers if f.id in ids and not muscle_backed(f)}
 
 
 class FiberSyncDriver(DependencyDriver):

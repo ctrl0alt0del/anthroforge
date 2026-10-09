@@ -37,7 +37,7 @@ _SURFACE_OFFSET_FACTORS = (1.0, 2.0, 2.5, 3.0, 3.5, 4.0)
 
 
 class CollisionOracle:
-    def __init__(self, root, scene, depsgraph, margin=0.0, surface_offset=0.002):
+    def __init__(self, root, scene, depsgraph, margin=0.0, surface_offset=0.002, supports=()):
         self.root, self.scene, self.depsgraph = root, scene, depsgraph
         self.margin = max(0.0, float(margin))
         self.clearance = max(0.01, self.margin * 2.0, float(surface_offset) * 4.0)
@@ -47,10 +47,11 @@ class CollisionOracle:
         self._push_cache = OrderedDict()
         self._active_cache = OrderedDict()
         self._required_ids = ()
+        self.supports = tuple(supports)
 
     def colliders(self):
         if self._colliders is None:
-            self._colliders = _build_colliders(self.root, self.scene, self.depsgraph)
+            self._colliders = _build_colliders(self.root, self.scene, self.depsgraph, self.supports)
         return self._colliders
 
     def collider_by_id(self, owner_id):
@@ -151,20 +152,21 @@ class CollisionOracle:
         return bool(owner and _surface_polyline_clear(self, owner, points, _merge_collider_sets(active, (owner,))))
 
 
-def _build_colliders(root, scene, depsgraph):
+def _build_colliders(root, scene, depsgraph, supports=()):
     start = perf_timer()
     try:
-        return _build_colliders_uncached(root, scene, depsgraph)
+        return _build_colliders_uncached(root, scene, depsgraph, supports)
     finally:
         perf_time(scene, "collider_build", start)
 
 
-def _build_colliders_uncached(root, scene, depsgraph):
+def _build_colliders_uncached(root, scene, depsgraph, supports=()):
     items = []
     for obj in iter_geometry_mesh_scp_objects(scene, root.name):
         item = _build_collider_entry(obj, scene, depsgraph)
         if item is not None:
             items.append(item)
+    items.extend(_muscle_colliders(root, scene, depsgraph, supports))
     perf_count(scene, "collider_records_built", len(items))
     return sorted(items, key=lambda item: item["sid"])
 
@@ -176,15 +178,29 @@ def _build_collider_entry(obj, scene, depsgraph):
 
 
 def _collider_entry(obj, bounds, depsgraph, scene=None):
+    from .surface_reference import key, from_object
     if not bounds:
         return None
     return {
-        "sid": str(obj.get("af_scp_id", "") or ""), "obj": obj, "depsgraph": depsgraph, "scene": scene,
+        "sid": key(from_object(obj)), "obj": obj, "depsgraph": depsgraph, "scene": scene,
         "bvh": None, "surface": None,
         "m_inv": obj.matrix_world.inverted(), "m": obj.matrix_world.copy(), "m3": obj.matrix_world.to_3x3(),
         "orientation": _matrix_orientation(obj.matrix_world.to_3x3()),
         "mn": bounds[0], "mx": bounds[1], "stamp": _collider_stamp(obj),
     }
+
+
+def _muscle_colliders(root, scene, depsgraph, supports):
+    from .attachment_surface import resolve_object
+    from .surface_reference import is_muscle
+    result = []
+    for value in dict.fromkeys(supports):
+        if not is_muscle(value): continue
+        obj = resolve_object(root, scene, value)
+        item = None if obj is None else _build_collider_entry(obj, scene, depsgraph)
+        if item is None: raise ValueError('Selected muscle support is unavailable.')
+        result.append(item)
+    return result
 
 
 def _collider_surface(collider):
@@ -378,7 +394,7 @@ def _collider_stamp(obj):
     data = getattr(obj, "data", None)
     counts = len(getattr(data, "vertices", ())), len(getattr(data, "polygons", ()))
     matrix = tuple(float(value) for row in obj.matrix_world for value in row)
-    generations = _collider_generation(obj), _collider_generation(data)
+    generations = _collider_generation(obj), _collider_generation(data), int(obj.get('af_surface_generation', 0))
     return _id_token(obj), _id_token(data), counts, matrix, generations
 
 

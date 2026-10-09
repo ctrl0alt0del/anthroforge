@@ -3,8 +3,11 @@
 import hashlib
 import json
 import platform
+import re
 import sys
 from pathlib import Path, PurePosixPath
+
+from .source_imports import enable_source_imports
 
 
 ADDON_ROOT = Path(__file__).resolve().parents[2]
@@ -122,12 +125,32 @@ def _verify_files(path, payload):
     expected = {item["path"] for item in items} | {"bundle.json"}
     for name in expected:
         _validate_name(name)
-    if _actual_files(path) != expected:
-        _failure("bundle has missing or unexpected files")
+    _verify_inventory(_actual_files(path), expected)
     for item in items:
         member = _io_root(path).joinpath(*PurePosixPath(item["path"]).parts)
         if member.stat().st_size != item.get("size") or _digest(member.read_bytes()) != item.get("sha256"):
             _failure(f"bundle file checksum failed: {item['path']}")
+
+
+def _generated_bytecode(name, expected):
+    path = PurePosixPath(name)
+    if path.parent.name != "__pycache__":
+        return False
+    match = re.fullmatch(r"([^.]+)\.[^.]+(?:\.opt-[a-zA-Z0-9]+)?\.pyc", path.name)
+    if match is None:
+        return False
+    return (path.parent.parent / (match[1] + ".py")).as_posix() in expected
+
+
+def _verify_inventory(actual, expected):
+    missing = expected - actual
+    extra = {name for name in actual - expected if not _generated_bytecode(name, expected)}
+    details = []
+    for label, names in (("missing", missing), ("unexpected", extra)):
+        if names:
+            details.append(f"{label} files ({len(names)}): " + ", ".join(sorted(names)[:3]))
+    if details:
+        _failure("bundle has " + "; ".join(details))
 
 
 def _preloaded(path):
@@ -148,6 +171,7 @@ def ensure_worker_dependencies():
         _failure("bundle wheel provenance differs")
     _verify_files(path, payload)
     _preloaded(path)
+    enable_source_imports(path)
     sys.dont_write_bytecode = True
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))

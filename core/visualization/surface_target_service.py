@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from ..scp_runtime.common import find_geometry_mesh_scp_obj
-from ..vcp.attachment_backend import surface_binding_topology
+from ..vcp.surface_topology import signature as connectivity_signature
 from ..vcp.surface_target import SurfaceRole, SurfaceTargetKind, SurfaceTargetRef, target_ref_errors
 from .muscle_sync_helpers import resolve_muscle_surface
 
@@ -12,6 +12,9 @@ class ResolvedSurfaceTarget:
     reference: SurfaceTargetRef
     mesh_object: object
     topology_signature: str
+    generation: tuple = ()
+    readiness: str = 'CURRENT'
+    reason: str = ''
 
 
 class SurfaceTargetProvider(Protocol):
@@ -26,6 +29,7 @@ class SCPSurfaceTargetProvider:
 
     def resolve(self, root, scene, target_ref, runtime):
         obj = find_geometry_mesh_scp_obj(scene, root.name, target_ref.entity_id)
+        if target_ref.instance == 'mirror': obj = _scp_mirror(root, scene, target_ref.entity_id)
         return _resolved_target(target_ref, obj, runtime, scene, "SCP geometry")
 
 
@@ -34,8 +38,12 @@ class MuscleSurfaceTargetProvider:
 
     def resolve(self, root, scene, target_ref, runtime):
         role = _muscle_role(target_ref.surface)
-        obj = resolve_muscle_surface(root, target_ref.entity_id, role, scene)
-        return _resolved_target(target_ref, obj, runtime, scene, f"Muscle {role}")
+        obj = _muscle_object(root, scene, target_ref, role)
+        from dataclasses import replace
+        from .surface_publication import state
+        result = _resolved_target(target_ref, obj, runtime, scene, f"Muscle {role}")
+        status, reason = state(root, scene, target_ref, obj)
+        return replace(result, readiness=status, reason=reason)
 
 
 class SurfaceTargetService:
@@ -68,9 +76,27 @@ def _muscle_role(surface):
 def _resolved_target(reference, obj, runtime, scene, label):
     if obj is None:
         raise ValueError(f"{label} target is missing.")
-    if obj.type != "MESH" or obj.get("af_muscle_mirror_proxy"):
-        raise ValueError(f"{label} is not an original mesh target.")
-    signature = surface_binding_topology(obj, runtime, scene)
+    if obj.type != "MESH":
+        raise ValueError(f"{label} is not a mesh target.")
+    signature = connectivity_signature(obj, runtime, scene)
     if not signature:
         raise ValueError(f"{label} evaluated surface is unavailable.")
-    return ResolvedSurfaceTarget(reference, obj, signature)
+    from .surface_publication import generation
+    return ResolvedSurfaceTarget(reference, obj, signature, generation(obj))
+
+
+def _muscle_object(root, scene, ref, role):
+    if not any(m.id == ref.entity_id for m in root.af_vcp_system.muscles): return None
+    found = [o for o in scene.objects if o.get('af_root_name') == root.name
+             and o.get('af_muscle_proxy') and bool(o.get('af_muscle_mirror_proxy')) == (ref.instance == 'mirror')
+             and o.get('af_source_muscle_id' if ref.instance == 'mirror' else 'af_muscle_id') == ref.entity_id
+             and o.get('af_muscle_surface') == role]
+    if len(found) > 1: raise ValueError('Ambiguous muscle surface identity.')
+    return found[0] if found else None
+
+
+def _scp_mirror(root, scene, identity):
+    found = [o for o in scene.objects if o.get('af_root_name') == root.name and o.get('af_scp_geometry')
+             and o.get('af_scp_mirror') and o.get('af_source_scp_id') == identity]
+    if len(found) > 1: raise ValueError('Ambiguous mirrored SCP surface.')
+    return found[0] if found else None

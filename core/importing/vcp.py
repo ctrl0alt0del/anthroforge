@@ -3,7 +3,8 @@ from dataclasses import dataclass, field
 from ..deps.dirty_hints import DirtyHints
 from ..id_utils import next_prefixed_id
 from ..vcp.prop_update_guard import suppress_vcp_prop_updates
-from ..vcp.attachment_backend import attachment_runtime, surface_binding_topology
+from ..vcp.attachment_backend import attachment_runtime
+from ..vcp.surface_topology import matches as surface_topology_matches
 from ..vcp.surface_binding_codec import remap_binding_target
 from ..visualization.delete_reconcile import cleanup_scp_dependents
 from ..visualization.sync_runner import schedule_sync_from_dirty_hints
@@ -73,10 +74,11 @@ def _warn_skip(state, kind, source_id, missing):
 
 
 def _fiber_scp_ids(snap):
+    from .surface_attachments import skeletal_ids
     ids = {snap.a_parent_id, snap.b_parent_id}
     ids |= {touch.parent_id for touch in snap.touches}
     ids |= {anchor.parent_id for anchor in getattr(snap, "loop_anchors", ())}
-    return {str(sid or "") for sid in ids if str(sid or "")}
+    return skeletal_ids(ids)
 
 
 def _incompatible_scps(state, scp_ids):
@@ -289,8 +291,7 @@ def _stored_target_topology_matches(state, snap, target_id):
     expected = str(dict(snap.props or {}).get("attachment_topology_signature", "") or "")
     scp = _scp_map(state.root).get(str(target_id))
     obj = None if scp is None else getattr(scp, "geometry_object_ref", None)
-    current = surface_binding_topology(obj, attachment_runtime(state.scene), state.scene)
-    return bool(current and (not expected or current == expected))
+    return surface_topology_matches(obj, expected, attachment_runtime(state.scene), state.scene)
 
 
 def _remap_soft_payloads(dst, snap, target_type, target_id):

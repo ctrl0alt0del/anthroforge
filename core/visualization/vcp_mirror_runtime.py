@@ -95,6 +95,9 @@ def _rule_for_scp(scp_id, scp_by_id):
 
 
 def _rule_for_fiber(fiber, fibers_by_id, scp_by_id):
+    from ..vcp.attachment_surface import muscle_backed
+    from .attachment_mirror_rules import for_fiber
+    if muscle_backed(fiber): return for_fiber(fiber, scp_by_id)
     _ = fibers_by_id
     if hasattr(fiber,"get") and fiber.get("af_authoring_symmetry") == "explicit":
         return None
@@ -221,8 +224,18 @@ def _ensure_mirror_from_source(collection, src_obj, existing, index=None):
 def _copy_mirror_transform(src_obj, mirror_obj, axis, origin):
     share_source_data(src_obj, mirror_obj)
     mirror_obj.matrix_world = mirror_world_matrix(src_obj.matrix_world, axis=axis, origin=origin)
+    _copy_output_state(src_obj, mirror_obj)
+    mirror_obj.pop('af_independent_surface_instance', None)
     if not mirror_obj.hide_select:
         mirror_obj.hide_select = True
+
+
+def _copy_output_state(source, mirror):
+    for kind in ('fiber', 'muscle', 'soft_tissue'):
+        name = 'af_' + kind + '_output_state'
+        if name in source: mirror[name] = source[name]
+    if source.get('af_attachment_error'): mirror['af_attachment_error'] = source['af_attachment_error']
+    else: mirror.pop('af_attachment_error', None)
 
 
 def _find_source_fiber_obj(vis_col, root_name, fiber_id, index=None):
@@ -346,14 +359,20 @@ def _sync_one_fiber_mirror(root, vis_col, fiber, fid, fibers_by_id, scp_by_id, i
     mir = _ensure_mirror_from_source(vis_col, src, mir, index)
     if mir is None:
         return False
-    _copy_mirror_transform(src, mir, *rule)
     _tag_fiber_mirror(mir, root.name, fid)
+    _copy_fiber_instance(root, fiber, src, mir, rule)
     remember_object(index, mir)
     return True
 
 
+def _copy_fiber_instance(root, fiber, source, mirror, rule):
+    from .fiber_instance_runtime import update
+    if not update(root, scene_for_id(root), fiber, mirror): _copy_mirror_transform(source, mirror, *rule)
+
+
 def _retain_stale_fiber_mirror(root, fiber, source, mirror):
     if mirror is None: return False
+    mirror['af_fiber_output_state'] = 'STALE'
     if not bool(mirror.get("af_mirror_shared_data")): return True
     points = persisted_fiber_points(scene_for_id(root), root.name, fiber.id)
     restored = restore_curve_snapshot(mirror)
@@ -410,10 +429,23 @@ def _sync_muscle_surface(root, vis_col, key, rule, index):
     mir = _ensure_mirror_from_source(vis_col, src, mir, index)
     if mir is None:
         return False
-    _copy_mirror_transform(src, mir, *rule)
     _tag_muscle_mirror(mir, root.name, *key)
+    _copy_muscle_instance(root, src, mir, key, rule)
     remember_object(index, mir)
     return True
+
+
+def _copy_muscle_instance(root, source, mirror, key, rule):
+    from ..muscle_stacking.publication import FINAL, identity, write
+    values = FINAL.get((identity(root), key[0], 'mirror')) if key[1] == 'INFL' else None
+    if values is not None:
+        write(mirror, values); mirror['af_stacked_output'] = True
+        _copy_output_state(source, mirror)
+        return
+    from .volume_instance_runtime import muscle_mirror
+    muscle = next(m for m in root.af_vcp_system.muscles if m.id == key[0])
+    if muscle_mirror(root, scene_for_id(root), muscle, mirror, key[1], rule): return
+    _copy_mirror_transform(source, mirror, *rule)
 
 
 def _tag_muscle_mirror(mirror, root_name, mid, surface):
@@ -500,10 +532,21 @@ def _sync_one_soft_mirror(root, vis_col, tissue_id, tissue, muscles, fibers, scp
         if mirror is not None:
             remove_obj(mirror)
         return
-    mirror = _ensure_vcp_mirror(vis_col, source, mirror, rule)
+    mirror = _ensure_soft_instance(root, vis_col, source, mirror, tissue, rule)
     if mirror is not None:
         _tag_soft_mirror(mirror, root.name, tissue_id)
         desired.add(tissue_id)
+
+
+def _ensure_soft_instance(root, collection, source, mirror, tissue, rule):
+    from .volume_instance_runtime import tissue_mirror
+    mirror = _ensure_mirror_from_source(collection, source, mirror)
+    if source.get('af_soft_tissue_output_state', 'CURRENT') != 'CURRENT':
+        if mirror is not None: mirror['af_soft_tissue_output_state'] = 'STALE'
+        return mirror
+    if mirror is not None and not tissue_mirror(root, scene_for_id(root), tissue, mirror, rule):
+        _copy_mirror_transform(source, mirror, *rule)
+    return mirror
 
 
 def _ensure_vcp_mirror(vis_col, source, mirror, rule):
@@ -535,7 +578,8 @@ def sync_vcp_mirrors(root=None, scene=None, target_fiber_ids=None, target_muscle
     if root is None:
         return
     targets = target_fiber_ids, target_muscle_ids, target_blob_ids, target_soft_tissue_ids
-    _sync_all_mirror_types(root, scene, targets)
+    from ..vcp.attachment_surface import support_scope
+    with support_scope(): _sync_all_mirror_types(root, scene, targets)
 
 
 def _sync_all_mirror_types(root, scene, targets):

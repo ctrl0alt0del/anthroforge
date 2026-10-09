@@ -40,11 +40,23 @@ def create_fiber_from_proxy_vertices(context):
     root = root_for_context(context)
     if root is None:
         return failure("No AF_ROOT found.")
+    if _geometry_edit_target(context, root.name):
+        resolved, error = _mesh_open_inputs(context, root)
+        return _create_fiber(context, root, resolved, error, surface=True)
     picks, error = _selected_proxy_vertices()(context)
     if error:
         return failure(error)
     resolved, error = _resolved_proxy_inputs(root, context.scene, picks)
     return _create_fiber(context, root, resolved, error, surface=True)
+
+
+def _mesh_open_inputs(context, root):
+    obj = context.active_object; indices = _selected_mesh_indices(obj)
+    if len(indices) < 2: return None, 'Select at least two ordered mesh vertices.'
+    specs = _mesh_specs(root, context.scene, obj, indices)
+    if len(specs) != len(indices): return None, 'A selected vertex has no qualified attachment.'
+    a, b = specs[0], specs[-1]
+    return _fiber_spec(a[0], b[0], a[1], b[1], specs[1:-1]), ''
 
 
 def create_loop_fiber_from_selected_vertices(context):
@@ -318,11 +330,13 @@ def _validate_symmetric_interior(distances):
 
 
 def _endpoint_ids(context):
+    try: from ...core.vcp.surface_reference import key, from_object
+    except ImportError: from core.vcp.surface_reference import key, from_object
     origin = getattr(context.scene, "af_new_fiber_origin_obj", None)
     insert = getattr(context.scene, "af_new_fiber_insertion_obj", None)
     if not origin or not insert:
         return None, None
-    return origin.get("af_scp_id", ""), insert.get("af_scp_id", "")
+    return key(from_object(origin)), key(from_object(insert))
 
 
 def _first_attach_param(scene, root, parent_id):
@@ -443,9 +457,11 @@ def _proxy_edit_target(context):
 
 
 def _geometry_edit_target(context, root_name):
+    try: from ...core.vcp.surface_reference import from_object
+    except ImportError: from core.vcp.surface_reference import from_object
     obj = getattr(context, "active_object", None)
     valid = getattr(context, "mode", "") == "EDIT_MESH" and _single_edit_target(context, obj)
-    return bool(valid and _is_geometry_scp_obj()(obj, root_name))
+    return bool(valid and obj and obj.get('af_root_name') == root_name and from_object(obj).entity_id)
 
 
 def _single_edit_target(context, obj):
@@ -471,7 +487,9 @@ def _mesh_specs(root, scene, obj, indices):
 
 
 def _mesh_spec(root, scene, obj, index):
-    scp_id = str(obj.get("af_scp_id", "") or "")
+    try: from ...core.vcp.surface_reference import key, from_object
+    except ImportError: from core.vcp.surface_reference import key, from_object
+    scp_id = key(from_object(obj))
     raw = None if not scp_id else _capture_attachment_from_mesh_vertex()(root, scene, scp_id, index)
     return None if raw is None else (scp_id, raw)
 

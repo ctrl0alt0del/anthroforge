@@ -63,6 +63,16 @@ def _driver_sync(driver, root, scene, is_full, impacted, bake, gate_meta, profil
 
 
 def run_sync_drivers(root, scene, is_full, impacted, bake, gate_meta=None, profile=None):
+    try: from ..vcp.attachment_surface import support_scope
+    except ImportError: from core.vcp.attachment_surface import support_scope
+    with support_scope(): return _sync_drivers(root, scene, is_full, impacted, bake, gate_meta, profile)
+
+
+def _sync_drivers(root, scene, is_full, impacted, bake, gate_meta, profile):
+    from .surface_dependencies import has_muscle_parents
+    if has_muscle_parents(root):
+        from .mixed_sync import run
+        return run(root, scene, is_full, impacted, bake, gate_meta, profile, get_dependency_drivers(), _driver_sync, _run_post_sync)
     for driver in get_dependency_drivers():
         _driver_sync(driver, root, scene, is_full, impacted, bake, gate_meta, profile)
     for driver in get_dependency_drivers():

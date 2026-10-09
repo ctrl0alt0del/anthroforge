@@ -20,6 +20,17 @@ def refresh(scene, root, entities):
     if blobs or tissues: sync_vcp_mirrors(root, scene, (), (), blobs, tissues)
 
 
+def resume_fibers(scene, root, muscles):
+    from ..deps.surface_dependencies import has_muscle_parents
+    if not has_muscle_parents(root): return
+    from ..deps.runtime_sync_phase import run_sync_drivers
+    entities = affected(root, muscles) - {('MUSCLE', key) for key in muscles}
+    impacted = {}
+    for kind, identity in entities: impacted.setdefault(kind, set()).add(identity)
+    if impacted: run_sync_drivers(root, scene, False, impacted, False,
+        dict(source='surface_publication', event_type='PARENT_SURFACE_READY', payload={}))
+
+
 @contextmanager
 def transaction(scene, root, muscles):
     import bpy

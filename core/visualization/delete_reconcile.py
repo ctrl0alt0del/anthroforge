@@ -124,6 +124,8 @@ def _fiber_orphan_ids(root, live_scp_ids):
 
 
 def _missing_fiber_parent(fiber, live_scp_ids):
+    from ..vcp.attachment_surface import muscle_backed
+    if muscle_backed(fiber): return False
     return any(_missing_scp_id(parent_id, live_scp_ids) for parent_id in fiber_parent_ids(fiber))
 
 
@@ -169,6 +171,8 @@ def _live_attachment_ids(root):
 def _clear_orphan_node_attachments(root, live_ids):
     changed = False
     for fiber in root.af_vcp_system.fibers:
+        from ..vcp.attachment_surface import muscle_backed
+        if muscle_backed(fiber): continue
         missing = set(node_attachment_target_ids(fiber)) - set(live_ids or ())
         if missing: clear_fiber_node_attachments(fiber); changed = True
     return changed

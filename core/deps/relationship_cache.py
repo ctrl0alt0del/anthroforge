@@ -77,7 +77,8 @@ def _binding_records(fiber):
     ends = _fields(fiber, "a_point_id", "a_parent_id", "b_point_id", "b_parent_id")
     touches = tuple(_fields(item, "point_id", "parent_id") for item in getattr(fiber, "mid_touches", ()))
     loops = tuple(_fields(item, "point_id", "parent_id", "attach_param") for item in getattr(fiber, "loop_anchors", ()))
-    return ends, touches, loops
+    supports = tuple(str(row.target_id) for row in getattr(fiber, 'attachment_supports', ()))
+    return ends, touches, loops, supports
 
 
 def _fiber_records(root, scene):
@@ -85,7 +86,8 @@ def _fiber_records(root, scene):
     shared_point_storage.clear_indexes()  # Reconcile same-count shared point replacements before getters.
     for fiber in _items(root, "fibers"):
         nodes = node_owner_ids(root, scene, fiber)
-        parents = tuple(dict.fromkeys((*fiber_parent_ids(fiber), *nodes)))
+        supports = tuple(row.target_id for row in getattr(fiber, 'attachment_supports', ()))
+        parents = tuple(dict.fromkeys((*fiber_parent_ids(fiber), *nodes, *supports)))
         owners.append((runtime_identity(fiber), tuple(str(v) for v in parents if v)))
         records.append((_member(fiber), _fields(fiber, "topology_mode"), _binding_records(fiber), nodes))
     return tuple(records), tuple(owners)
@@ -143,11 +145,12 @@ def _ambiguous(root):
 
 
 def capture_relationships(root, scene=None):
+    from .surface_dependencies import stacking_signature
     started = perf_counter(); ownership_scene = utils.scene_for_id(root)
     fibers, owners = _fiber_records(root, scene)
     mappings, owners = _resolve_instances(root, owners, ownership_scene)
     records = (dependency_driver_generation(), fibers, _surface_records(root), _muscle_records(root),
-               _other_records(root), runtime_identity(ownership_scene), mappings)
+               _other_records(root), runtime_identity(ownership_scene), mappings, stacking_signature(root))
     result = Capture(f"{GRAPH_NAMESPACE}:{_scope(root, scene)}", records, owners, _ambiguous(root))
     telemetry_timing("dependency_capture", (perf_counter() - started) * 1000)
     return result

@@ -22,7 +22,12 @@ def _runtime_cache(runtime):
     return {} if data is None else data.setdefault("surface_cache", {})
 
 
-def _parent_mesh(root, scene, parent_id):
+def _parent_mesh(root, scene, parent_id, runtime=None):
+    from .surface_reference import is_typed
+    if root is not None and is_typed(parent_id):
+        from .attachment_surface import resolve_object
+        try: return resolve_object(root, scene, parent_id, runtime)
+        except ValueError: return None
     return None if root is None else find_geometry_mesh_scp_obj(scene, root.name, parent_id)
 
 
@@ -39,8 +44,9 @@ def _capture_ray_param(parent_obj, ray_origin, ray_direction, scene, runtime):
 
 
 def _capture_raw(parent_obj, world_point, scene, runtime):
+    from .attachment_surface import seal_binding
     param = None if parent_obj is None else _capture_param(parent_obj, world_point, scene, runtime)
-    return None if param is None else encode_fiber_surface_param(param)
+    return None if param is None else seal_binding(parent_obj, encode_fiber_surface_param(param), runtime, scene)
 
 
 def capture_surface_param(mesh_object, world_point, runtime=None, scene=None):
@@ -51,26 +57,33 @@ def capture_surface_param(mesh_object, world_point, runtime=None, scene=None):
 
 
 def capture_surface_param_from_ray(mesh_object, ray_origin, ray_direction, runtime=None, scene=None):
+    from .attachment_surface import seal_binding
     if mesh_object is None:
         return None
     actual_scene = scene or scene_for_id(mesh_object)
     param = _capture_ray_param(mesh_object, ray_origin, ray_direction, actual_scene, runtime)
-    return None if param is None else encode_fiber_surface_param(param)
+    return None if param is None else seal_binding(mesh_object, encode_fiber_surface_param(param), runtime, actual_scene)
 
 
 def resolve_surface_frame(mesh_object, binding, runtime=None, scene=None):
+    from .attachment_surface import binding_matches
     actual_scene = scene or scene_for_id(mesh_object)
     param = fiber_surface_param(binding)
     depsgraph = _runtime_depsgraph(actual_scene, runtime)
     valid = mesh_object is not None and param is not None and depsgraph is not None
+    if valid and not binding_matches(mesh_object, binding, runtime, actual_scene): return None
     return None if not valid else frame_from_parent_param(mesh_object, param, depsgraph, cache=_runtime_cache(runtime))
 
 
 def surface_binding_topology(mesh_object, runtime=None, scene=None):
     actual_scene = scene or scene_for_id(mesh_object)
     depsgraph = _runtime_depsgraph(actual_scene, runtime)
-    surface = None if mesh_object is None or depsgraph is None else build_mesh_surface_data(mesh_object, depsgraph, _runtime_cache(runtime))
-    return "" if surface is None else triangulated_topology_signature(len(surface["verts_world"]), surface["triangles"])
+    if mesh_object is None or depsgraph is None: return ''
+    cache = _runtime_cache(runtime); key = ('legacy_surface_topology', mesh_object.as_pointer())
+    if key not in cache:
+        mesh = mesh_object.evaluated_get(depsgraph).data; mesh.calc_loop_triangles()
+        cache[key] = triangulated_topology_signature(len(mesh.vertices), (tri.vertices for tri in mesh.loop_triangles))
+    return cache[key]
 
 
 def triangulated_topology_signature(vertex_count, triangles):
@@ -80,7 +93,7 @@ def triangulated_topology_signature(vertex_count, triangles):
 
 
 def capture_attachment_from_world(root, scene, parent_id, world_point, runtime=None):
-    return capture_surface_param(_parent_mesh(root, scene, parent_id), world_point, runtime, scene)
+    return capture_surface_param(_parent_mesh(root, scene, parent_id, runtime), world_point, runtime, scene)
 
 
 def _mesh_vertex_world(parent_obj, vertex_index):
@@ -89,7 +102,7 @@ def _mesh_vertex_world(parent_obj, vertex_index):
 
 
 def capture_attachment_from_mesh_vertex(root, scene, parent_id, vertex_index, runtime=None):
-    parent_obj = _parent_mesh(root, scene, parent_id)
+    parent_obj = _parent_mesh(root, scene, parent_id, runtime)
     world = None if parent_obj is None else _mesh_vertex_world(parent_obj, vertex_index)
     return None if world is None else _capture_raw(parent_obj, world, scene, runtime)
 
@@ -104,7 +117,7 @@ def _eval_vertex_world(parent_obj, scene, vertex_index, signature, runtime):
 
 
 def capture_attachment_from_proxy_vertex(root, scene, parent_id, vertex_index, signature="", runtime=None):
-    parent_obj = _parent_mesh(root, scene, parent_id)
+    parent_obj = _parent_mesh(root, scene, parent_id, runtime)
     world = None if parent_obj is None else _eval_vertex_world(parent_obj, scene, vertex_index, signature, runtime)
     return None if world is None else _capture_raw(parent_obj, world, scene, runtime)
 
@@ -115,6 +128,8 @@ def _resolved_frame(root, scene, parent_id, raw, runtime):
 
 
 def _indexed_parent(root, scene, parent_id, runtime):
+    from .surface_reference import is_typed
+    if is_typed(parent_id): return _parent_mesh(root, scene, parent_id, runtime)
     if runtime is not None and 'geometry_by_owner' in runtime:
         rows = runtime['geometry_by_owner'].get(str(parent_id), ())
         return rows[0] if len(rows) == 1 else None

@@ -2,9 +2,50 @@
 
 Controlled fibers use the existing routing planner and solver. Free fibers store
 an explicitly authored sampled path and never request either. Both modes retain
-the existing SCP attachment deformation. Behavior is independent of OPEN/LOOP
+SCP and explicitly selected Muscle attachment deformation. Behavior is independent of OPEN/LOOP
 topology, symmetry and solver version. Legacy files and human creation methods
 default to Controlled.
+
+## Muscle parents
+
+Select a native muscle surface in the normal attachment pickers or vertex selection
+workflow. The displayed target includes its muscle name, BASE/INFL role, and
+original/mirror instance. INFL is the default for typed authoring targets and uses
+the published surface, including completed stacking displacement. BASE is explicit.
+Endpoints, intermediate touches, loop anchors and shared junctions use the same
+binding service. Muscle and Soft Tissue remain separate volume types.
+
+The Fiber panel provides **Assign**, **Rebind**, **Rebind All Retained**, and
+additional-support Add/Remove/Select controls. **Assign Surface** and **Add Support** open a surface chooser while the
+fiber remains selected; Assign uses the 3D cursor as the proposed surface position.
+Original and mirrored BASE/INFL surfaces are listed separately. Structural parents are always
+supports; additional supports constrain routing even if their current blend
+weight is zero. SCP obstacles remain active. Interior influences of a
+muscle-backed fiber use only its selected support set. Unchanged SCP-only fibers
+retain their previous automatic influence selection.
+
+After deformation, valid retained bindings resolve without recapture. Controlled
+fibers automatically reroute through native V3 when the resolved route collides;
+structural bindings stay fixed and accepted geometry/interior bindings commit
+together. Free fibers retain their authored paths, report collisions, and block
+dependent volumes. Failed routes retain the previous geometry marked stale.
+Diagnostic engine overrides that cannot support muscle parents fail explicitly.
+
+Topology changes, missing targets and degenerate triangles invalidate bindings.
+Only an explicit Assign/Rebind captures new triangles. These operations are
+transactions, including shared points, Free pairing digests and downstream tissue
+geometry. Referenced muscles cannot be deleted through the normal delete command.
+
+Automatic mirror instances evaluate against the actual mirrored parent surface.
+An explicitly selected mirrored muscle instead defines an independent authored
+fiber. **Symmetry Settings** selects inherited symmetry, an explicit plane, or
+independent geometry. Conflicting inherited rules require an explicit setting.
+Fiber Surface `use_mirrored_rows` consumes evaluated rows where available.
+
+Open all-Free lofts retain material stations and across-row sampling from the
+authored sample coordinates. Stations indistinguishable at float mesh precision
+are coalesced to avoid degenerate slivers; deformation does not resample the
+authored paths. Explicit path edits may intentionally change loft topology.
 
 Open two-fiber lofts include at least one interpolated interior row when
 densification is enabled, including authored material-station lofts. This keeps
@@ -83,6 +124,9 @@ All requests use `version: "0.4.0"`, `message_type: "request"`, a unique
 | `fibers.path_inspect` | `fiber_id` |
 | `fibers.path_update` | `fiber_id`, `expected_scene_revision`, `expected_path_revision`, `path` |
 | `fibers.mode_configure` | `fiber_id`, `expected_scene_revision`, `expected_path_revision`, `mode: "FREE"` or `"CONTROLLED"` |
+| `fibers.supports_configure` | `fiber_id`, `expected_scene_revision`, `supports` (typed target array) |
+| `fibers.rebind` | `fiber_id`, `expected_scene_revision` |
+| `fibers.symmetry_configure` | `fiber_id`, `expected_scene_revision`, `mode` (`INHERIT`, `NONE`, `EXPLICIT`); explicit `axis`, `origin` |
 
 Creation accepts optional `name`, `topology` (`OPEN` default or `LOOP`) and
 `settings`. Allowed settings are `node_count`, `solver_version`,
@@ -93,6 +137,17 @@ Attachments are ordered START, MID..., END for OPEN (at least two), or LOOP
 anchors for LOOP (at least three). An existing shared point uses only
 `{"point_id": "existing-id"}`; its binding is authoritative. A new point supplies
 `point_id`, native `parent_id` and `attach_param`, with optional `normal_offset`.
+Alternatively supply `target` and `position`, or `target` and a retained
+`attach_param`. Plain `parent_id` remains an SCP identifier. For example:
+
+```json
+{"target": {"type": "MUSCLE", "id": "MUSCLE_1", "surface": "MUSCLE_INFL", "instance": "mirror"}, "position": [-0.3, 0.2, 0.1]}
+```
+
+Omitting muscle `surface` selects INFL; omitting `instance` selects `source`.
+`fibers.path_inspect` reports output state and diagnostics. A creation response
+with `published: false` can represent pending native Controlled work; inspect its
+state before consuming geometry.
 Bindings must qualify at their exact retained positions. Shape samples may keep
 offsets from bone surfaces; capture does not project the entire curve onto bone.
 

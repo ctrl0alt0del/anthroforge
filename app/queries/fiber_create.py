@@ -18,6 +18,8 @@ def proxy_fiber_create_state(context):
     root = root_for_context(context)
     if root is None:
         return ProxyFiberCreateState(False, "No AF_ROOT found.")
+    if _mesh_target(context, root.name):
+        return _count_state(_selected_mesh_indices(context), '', 2, 'Connect selected surface vertices with a Fiber.')
     if not active_session(root):
         return ProxyFiberCreateState(False, "Switch to proxy view first.")
     picks, error = selected_proxy_vertices(context)
@@ -71,9 +73,11 @@ def _proxy_target(context):
 
 
 def _mesh_target(context, root_name):
+    try: from ...core.vcp.surface_reference import key, from_object
+    except ImportError: from core.vcp.surface_reference import key, from_object
     obj = getattr(context, "active_object", None)
     valid = getattr(context, "mode", "") == "EDIT_MESH" and len(tuple(getattr(context, "objects_in_mode", ()) or (obj,))) == 1
-    return bool(valid and _is_geometry_scp_obj()(obj, root_name))
+    return bool(valid and obj and obj.get('af_root_name') == root_name and key(from_object(obj)))
 
 
 def _selected_mesh_indices(context):

@@ -25,6 +25,7 @@ from .runtime_state import (attach_child_normal_local, attach_child_origin_local
                             attach_parent_tangent_hint_local)
 from .surface import build_mesh_attachment_vertices, resolve_tangent_strategy
 from .tree import children_map
+from ..vcp.surface_reference import is_muscle
 
 
 _TOKENS = count(1)
@@ -55,24 +56,32 @@ def attachment_surface_cache_stats():
 
 def attachment_request_current(request, root, scene):
     if request.scene_id != _runtime_id(scene) or request.root_id != _runtime_id(root): return False
-    objects = _attachment_object_maps(scene, root.name)
+    objects = _attachment_object_maps(scene, root.name, any(sid.startswith('AFSURFACE:') for sid, _ in request.generations))
     for sid, generation in request.generations:
         obj = indexed_geometry_mesh_scp_obj(objects, sid)
-        if obj is None or _current_generation(obj) != generation[:4]: return False
+        if obj is None: return False
+        current = _current_generation(obj)
+        if current != generation[:len(current)]: return False
     return True
 
 
-def _attachment_object_maps(scene, root_name):
+def _attachment_object_maps(scene, root_name, include_muscles=False):
     objects = dict(scp_object_maps(scene, root_name))
     geometry = dict(objects.get('geometry', {}))
     geometry.update(instance_geometry_objects(scene, root_name))
+    if include_muscles:
+        from ..vcp.attachment_surface import typed_objects
+        from types import SimpleNamespace
+        geometry.update(typed_objects(scene, SimpleNamespace(name=root_name)))
     return dict(objects, geometry=geometry)
 
 
 def capture_attachment_wave(root, scene, scp_by_id, target_ids, parent_ids, fibers=(),
                             blocked=(), backsolve=None, operation_limit=None, invalid_ids=()):
+    from ..vcp.attachment_surface import support_keys
     builder = _WaveCapture(root, scene, scp_by_id, target_ids, parent_ids, blocked,
-                           backsolve, operation_limit, invalid_ids)
+                           backsolve, operation_limit, invalid_ids,
+                           any(k.startswith('AFSURFACE:') for f in fibers for k in support_keys(f)))
     return builder.capture(tuple(fibers or ()))
 
 
@@ -85,16 +94,17 @@ def plan_attachment_waves(scps, target_ids, parent_ids, blocked=()):
 
 
 class _WaveCapture:
-    def __init__(self, root, scene, scps, targets, parents, blocked, backsolve, limit, invalid):
+    def __init__(self, root, scene, scps, targets, parents, blocked, backsolve, limit, invalid, muscles=False):
         self.root, self.scene, self.scps = root, scene, dict(scps)
         self.targets, self.parents = set(targets or ()), set(parents or ())
         self.blocked, self.backsolve = set(blocked or ()), dict(backsolve or {})
         self.limit = None if limit is None else set(limit)
-        self.depsgraph = depsgraph_for_scene(scene); self.objects = _attachment_object_maps(scene, root.name)
-        instances = {key for key in self.objects['geometry'] if key.startswith('AFI_')}
+        self.depsgraph = depsgraph_for_scene(scene); self.objects = _attachment_object_maps(scene, root.name, muscles)
+        instances = {key for key in self.objects['geometry'] if key.startswith(('AFI_', 'AFSURFACE:'))}
         self.ids = tuple(sorted(set(self.scps) | instances)); self.lookup = {sid: i for i, sid in enumerate(self.ids)}
         self.matrices, self.rotations = self._transforms()
         self.surfaces, self.surface_lookup, self.surface_cache = [], {}, {}
+        self.binding_contracts = {}
         invalid = set(invalid or ())
         self.scp_status = [int(sid in invalid) for sid in self.ids]; self.scp_issues = {}
 
@@ -191,11 +201,23 @@ class _WaveCapture:
     def _fiber_operations(self, fibers):
         ids, counts, operations, issues = [], [], [], []
         for fiber in sorted(fibers, key=lambda row: str(row.id)):
+            error = self._fiber_supports(fiber)
+            if error: issues.append((str(fiber.id), error)); continue
             payload, error = _fiber_payload(fiber)
             if error: issues.append((str(fiber.id), error)); continue
             ids.append(str(fiber.id)); counts.append(len(payload.nodes))
             operations.extend(self._fiber_nodes(str(fiber.id), payload.nodes))
         return tuple(ids), tuple(counts), tuple(operations), tuple(issues)
+
+    def _fiber_supports(self, fiber):
+        from ..vcp.attachment_surface import muscle_backed, support_keys, resolve_object
+        if not muscle_backed(fiber): return ''
+        try:
+            for target in support_keys(fiber):
+                resolve_object(self.root, self.scene, target, {'depsgraph': self.depsgraph, 'surface_cache': self.surface_cache})
+                if self._surface(target) < 0: return 'An attachment support is unavailable.'
+        except ValueError as error: return str(error)
+        return ''
 
     def _fiber_nodes(self, fiber_id, nodes):
         values = []
@@ -204,10 +226,24 @@ class _WaveCapture:
         return tuple(values)
 
     def _fiber_influence(self, fiber_id, index, node):
-        param = fiber_surface_param(node.attach_raw) or {}
+        from ..vcp.attachment_surface import binding_data
+        param = binding_data(node.attach_raw)
+        if not isinstance(param, dict) or param.get('mode') != 'surface_param_v2': param = {}
         owner = self.lookup.get(node.target_id, -1); surface = self._surface(node.target_id)
+        if not self._binding_matches(node.target_id, param): owner = -1
         return FiberNodeAttachmentOperation(fiber_id, index, owner, surface,
             _tri(param), _weights(param), _vec(node.offset_local), node.weight)
+
+    def _binding_matches(self, target_id, value):
+        if target_id not in self.binding_contracts:
+            from ..vcp.attachment_surface import binding_identity
+            obj = indexed_geometry_mesh_scp_obj(self.objects, target_id)
+            if obj is None: return False
+            runtime = {'depsgraph': self.depsgraph, 'surface_cache': self.surface_cache}
+            self.binding_contracts[target_id] = binding_identity(obj, runtime, self.scene), bool(obj.get('af_muscle_proxy'))
+        (target, topology), sealed = self.binding_contracts[target_id]
+        if 'target' not in value: return not sealed
+        return value['target'] == target and value.get('topology_signature') == topology
 
     def _fail_scp(self, sid, reason):
         index = self.lookup.get(sid)
@@ -318,14 +354,13 @@ def _backsolve_anchor(root, scene, snapshot):
 
 
 def _surface_generation(obj, payload):
-    data = getattr(obj, "data", None)
-    return (_runtime_id(obj), _runtime_id(data), deformation_generation(obj),
-            deformation_generation(data), id(payload), len(payload["verts_local"]), len(payload["triangles"]))
+    return (*_current_generation(obj), id(payload), len(payload['verts_local']), len(payload['triangles']))
 
 
 def _current_generation(obj):
     data = getattr(obj, "data", None)
-    return (_runtime_id(obj), _runtime_id(data), deformation_generation(obj), deformation_generation(data))
+    return (_runtime_id(obj), _runtime_id(data), deformation_generation(obj), deformation_generation(data),
+            int(obj.get('af_surface_generation', 0)), tuple(float(v) for row in obj.matrix_world for v in row))
 
 
 def _cached_arrays(scene, root, sid, payload):

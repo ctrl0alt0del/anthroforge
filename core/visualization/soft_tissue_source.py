@@ -14,7 +14,7 @@ from ..vcp.attachment_backend import (
     attachment_runtime, capture_attachment_from_world, resolve_attachment_normal,
     resolve_attachment_basis, resolve_attachment_world, capture_surface_param, resolve_surface_frame,
 )
-from ..vcp.surface_binding_codec import decode_binding_envelope, encode_binding_envelope, require_matching_envelope
+from ..vcp.surface_binding_codec import encode_binding_envelope
 from ..vcp.soft_tissue_surface_field import boundary_edges, boundary_falloff_weights
 
 
@@ -115,6 +115,8 @@ def _fiber_entity_sample(root, scene, tissue):
     points = None if fiber is None else cached_fiber_points(scene, root.name, fiber.id)
     if not points:
         raise ValueError("Fiber source geometry is unavailable.")
+    from .geometry_instance import row
+    points = row(root, scene, fiber, points)
     values = tuple(tuple(point) for point in points)
     return BaseSample(values, _curve_frame_normals(values), cyclic=str(fiber.topology_mode) == "LOOP")
 
@@ -133,6 +135,9 @@ def _mesh_proxy_sample(proxy, tissue):
     points = tuple(tuple(proxy.matrix_world @ vertex.co) for vertex in proxy.data.vertices)
     normals = tuple(tuple(_world_normal(proxy, vertex.normal)) for vertex in proxy.data.vertices)
     faces = tuple(tuple(poly.vertices) for poly in proxy.data.polygons)
+    if tissue.constraint_reference == 'SOURCE':
+        from ..vcp.source_surface_normals import normals as source_normals
+        normals = source_normals(points, faces)
     edges = tuple(tuple(edge.vertices) for edge in proxy.data.edges)
     bounds = boundary_edges(edges, faces)
     weights = _surface_field_weights(proxy, tissue.field_attribute, points, edges, faces)
@@ -160,7 +165,9 @@ def _curve_tangent(points, index):
 
 
 def _frame_normal(tangent, previous):
-    axis = Vector((0.0, 0.0, 1.0)) if abs(tangent.z) < 0.9 else Vector((0.0, 1.0, 0.0))
+    from .geometry_instance import direction
+    axis = direction((0.,0.,1.))
+    if abs(tangent.dot(axis)) >= .9: axis = direction((0.,1.,0.))
     normal = tangent.cross(axis).cross(tangent).normalized()
     if previous is not None and normal.dot(previous) < 0.0:
         normal.negate()
@@ -215,7 +222,7 @@ def capture_target_sample_bindings(target, sample, runtime):
 
 
 def resolve_target_sample_bindings(target, raw, runtime):
-    envelope = _target_envelope(target, raw)
+    envelope = _target_envelope(target, raw, runtime)
     values = [_resolve_target_row(target, row, runtime) for row in envelope.bindings]
     if any(value is None for value in values):
         raise ValueError("Stored base bindings no longer resolve.")
@@ -231,7 +238,7 @@ def capture_target_control_bindings(target, obj, runtime):
 
 
 def resolve_target_control_pose(target, obj, raw, runtime):
-    envelope = _target_envelope(target, raw)
+    envelope = _target_envelope(target, raw, runtime)
     rows = [_resolve_target_control(target, row, runtime) for row in envelope.bindings]
     if any(row is None for row in rows) or len(rows) != len(_control_world_points(obj)):
         raise ValueError("Stored base control bindings no longer resolve.")
@@ -248,10 +255,9 @@ def apply_control_pose(obj, pose):
             control.handle_left, control.handle_right = inverse @ Vector(left), inverse @ Vector(right)
 
 
-def _target_envelope(target, raw):
-    envelope = decode_binding_envelope(raw, target.reference, target.topology_signature)
-    require_matching_envelope(envelope, target.reference, target.topology_signature)
-    return envelope
+def _target_envelope(target, raw, runtime):
+    from .soft_tissue_binding_validation import target_envelope
+    return target_envelope(target, raw, runtime)
 
 
 def _capture_target_row(target, point, runtime):

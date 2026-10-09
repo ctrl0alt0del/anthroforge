@@ -166,6 +166,10 @@ class FiberSceneSync:
         )
 
     def apply_points(self, root, scene, fiber, points, bake=False, commit=True):
+        from ..vcp.fiber_instance import MirroredFiber
+        if isinstance(fiber, MirroredFiber):
+            from .fiber_instance_runtime import apply_points
+            return apply_points(root, scene, fiber, points, commit)
         return _apply_fiber_points_runtime(self, root, scene, fiber, points, bake=bake, commit=commit)
 
     def on_depsgraph_update(self, scene, depsgraph):

@@ -156,8 +156,9 @@ def _initialize_warm(session):
 
 
 def _initialize_oracle(session):
+    from .attachment_surface import support_keys
     session.oracle = CollisionOracle(session.root, session.scene, session.depsgraph,
-                                     session.params["margin"], session.solver.surface_offset)
+                                     session.params["margin"], session.solver.surface_offset, support_keys(session.fiber))
     _attach_sources(session)
 
 

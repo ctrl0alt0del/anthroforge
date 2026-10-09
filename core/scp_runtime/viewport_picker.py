@@ -12,10 +12,17 @@ def raycast_scp(context, event, candidates=()):
     return None if ray is None else _closest_hit(ray, candidates)
 
 
-def pick_candidates(context, root):
+def pick_candidates(context, root, include_muscles=False):
     if root is None:
         return ()
-    return tuple(_candidate_row(root, obj) for obj in context.scene.objects if _is_candidate(context, root, obj))
+    rows = tuple(_candidate_row(root, obj) for obj in context.scene.objects if _is_candidate(context, root, obj))
+    return rows + _muscle_candidates(context, root) if include_muscles else rows
+
+
+def _muscle_candidates(context, root):
+    from ..vcp.attachment_surface import muscle_objects
+    return tuple(('SURFACE', obj, obj.matrix_world.copy(), obj.matrix_world.inverted().copy(), key)
+                 for key, obj in muscle_objects(context.scene, root).items() if _visible_for_pick(context, obj))
 
 
 def has_pick_candidates(context, root):
@@ -129,7 +136,7 @@ def _local_ray(world_inv, origin, direction):
 
 
 def _row_pick(kind, obj, payload, face, world):
-    if kind == "SCP":
+    if kind in {"SCP", "SURFACE"}:
         return payload, world
     if kind == "MIRROR":
         return payload[0], _mapped_world(payload[1], world)

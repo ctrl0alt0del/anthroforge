@@ -64,6 +64,7 @@ def point_record(owner, slot):
 
 def endpoint_record(fiber, side):
     from types import SimpleNamespace
+    if hasattr(fiber, 'attachment_records'): return fiber.attachment_records[0 if side == 'a' else -1]
     point = point_record(fiber, side + "_point_id")
     if point is not None:
         return point

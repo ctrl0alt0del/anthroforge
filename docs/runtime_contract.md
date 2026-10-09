@@ -15,7 +15,7 @@ Every runtime request carries the same fields:
 
 - `root`: add-on root object.
 - `scene`: Blender scene that owns the root.
-- `dirty_hints`: entity ids by type, using the `SCP`, `FIBER`, `MUSCLE`, and `BLOB` keys.
+- `dirty_hints`: entity ids by type, using `SCP`, `FIBER`, `FIBER_SURFACE`, `MUSCLE`, `SOFT_TISSUE`, and `BLOB` keys.
 - `bake`: boolean that controls bake-sensitive sync work.
 - `source`: origin of the request such as `operator`, `property`, `depsgraph`, or `manual`.
 - `event_type`: semantic event label such as `UPDATE`, `DELETE`, `MARK`, `IMPORT`, or `TRANSFORM`.
@@ -57,7 +57,32 @@ The current payload contract includes these keys:
 - `non_source_ids_by_type` removes side-effect ids from the source-start set but does not remove them from the impacted sync set.
 - `source`, `event_type`, and `payload` are forwarded into `gate_meta` unchanged.
 - The runtime adds `runtime_dirty_ids_by_type` after dirty normalization. Drivers use it to distinguish authored entity inputs from downstream attachment-derived impacts; it is not a caller payload key.
-- Direct Fiber `input` mutations use the Fiber engine. SCP attachment edges target `FIBER.attachment_world`; derived SCP changes resolve pin and node surface attachments without invoking planner or solver code.
+- Direct Controlled Fiber `input` mutations use the Fiber engine. SCP attachment edges target `FIBER.attachment_world`; unchanged SCP-only derived changes retain the existing attachment-wave path.
+
+## Mixed surface dependencies
+
+Roots with muscle-backed fibers execute geometry consumers in deterministic
+topological waves. Structural typed parents, node influences, additional supports
+and active stacking relationships contribute dependency edges. Assign/Rebind and
+support mutations validate acyclicity before committing. SCP attachment waves
+remain a separate existing driver.
+
+Required source/mirror publications precede dependent fibers, their Fiber
+Surfaces and volumes. Readiness is `CURRENT`, pending, or invalid/stale, with a
+reason and generation. An asynchronous native or stacking job is a publication
+barrier; its final notification resumes affected dependents. Superseded requests
+cannot commit against a newer generation. A failed reroute is not retried for the
+same parent generation. Free collision failures never invoke automatic routing.
+
+Typed fiber payload version 3 retains barycentric triangles, topology signatures,
+frame offsets and blend weights. Versions 1/2 remain readable without implicit
+recapture. New signatures describe connectivity rather than deformation-sensitive
+quad triangulation. Ordinary resolution never substitutes another triangle.
+Attachments Enabled and manual tissue updates retain their existing gates.
+Decoded binding payloads are immutable and cached by their complete serialized
+content (128 entries, at most 256 KiB per cached payload). Each attachment wave
+captures fresh surface identity, topology and generation checks; the decode cache
+does not cache publication readiness or resolved geometry.
 
 ## Refactor Constraint
 

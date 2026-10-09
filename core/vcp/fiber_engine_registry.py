@@ -1,6 +1,6 @@
 """Stable registry for request-local Fiber engines."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .fiber_engine_selection import FiberEngineKind, select_fiber_engine
 from .v2.production import V2_PRODUCTION_VERSION, v2_backend_status
@@ -25,8 +25,12 @@ FIBER_ENGINE_REGISTRY = {
 
 
 def selection_for_fiber(fiber, explicit=None, environ=None):
+    from .attachment_surface import muscle_backed
     topology = getattr(fiber, "topology_mode", "OPEN")
-    return select_fiber_engine(topology, explicit, environ)
+    selection = select_fiber_engine(topology, explicit, environ)
+    if muscle_backed(fiber) and selection.actual is not FiberEngineKind.V3:
+        return replace(selection, error='Muscle parents require the native V3 engine.', actual=None)
+    return selection
 
 
 def adapter_for_selection(selection):

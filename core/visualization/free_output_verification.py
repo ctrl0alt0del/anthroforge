@@ -69,9 +69,39 @@ def _mirror(source, mirrored, rule):
     if rule is None:
         if mirrored is not None: raise ValueError('FREE_OUTPUT_NOT_CURRENT: obsolete mirror')
         return
+    if mirrored is not None and mirrored.get('af_independent_surface_instance'): return _independent(source, mirrored, rule)
     expected = mirror_world_matrix(source.matrix_world, axis=rule[0], origin=rule[1]) if source else None
     if source is None or mirrored is None or mirrored.data != source.data or not _same_matrix(mirrored.matrix_world, expected):
         raise ValueError('FREE_OUTPUT_NOT_CURRENT: derived mirror')
+
+
+def _independent(source, mirrored, rule):
+    import bpy
+    from ..utils import scene_for_id
+    root = bpy.data.objects.get(mirrored.get('af_root_name', '')); scene = scene_for_id(root)
+    if root is None or source is None: raise ValueError('FREE_OUTPUT_NOT_CURRENT: missing instance owner')
+    if mirrored.get('af_fiber_proxy'): return _independent_fiber(root, scene, mirrored)
+    from .volume_instance_runtime import _muscle_result
+    from ..vcp.muscle_envelope import faces_for
+    from ..muscle_stacking.publication import expected
+    muscle = next(m for m in root.af_vcp_system.muscles if m.id == mirrored['af_source_muscle_id'])
+    result = _muscle_result(root, scene, muscle, rule); inflated = mirrored.get('af_muscle_surface') == 'INFL'
+    vertices = expected(root, muscle.id, mirrored, result.inflated_vertices, 'mirror') if inflated else result.base_vertices
+    _published(mirrored, 'af_muscle_output_state', vertices, faces_for(result, inflated), muscle.id)
+
+
+def _independent_fiber(root, scene, mirrored):
+    import json
+    from mathutils import Vector
+    from ..vcp.fiber_instance import MirroredFiber
+    from .muscle_fiber_attachment import resolve_batch
+    fiber = next(f for f in root.af_vcp_system.fibers if f.id == mirrored['af_source_fiber_id'])
+    rows, errors = resolve_batch(root, scene, (MirroredFiber(fiber),))
+    actual = json.loads(mirrored.get('af_fiber_points_world', '[]')); expected = rows.get(fiber.id, ())
+    if errors or mirrored.get('af_fiber_output_state') != 'CURRENT' or len(actual) != len(expected):
+        raise ValueError('FREE_OUTPUT_NOT_CURRENT: independently evaluated Fiber')
+    if any((Vector(a)-b).length > 1e-5 for a,b in zip(actual,expected)):
+        raise ValueError('FREE_OUTPUT_NOT_CURRENT: independently evaluated Fiber geometry')
 
 
 def _same_matrix(actual, expected):

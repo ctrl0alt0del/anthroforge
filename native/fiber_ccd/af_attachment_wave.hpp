@@ -104,7 +104,8 @@ static bool af_surface_frame(const AfAttachmentSurface& surface,const double* ve
     double matrix[16],rotation[9];af_multiply4(matrices+16*surface.owner,surface.relative,matrix);
     af_multiply3(rotations+9*surface.owner,surface.rotation,rotation);Vec abc[3];
     if(!af_triangle(vertices+3*surface.vertex_start,surface.vertex_count,tri,matrix,abc))return false;
-    point=af_weighted(abc,weights);basis=af_basis(sub(abc[1],abc[0]),cross(sub(abc[1],abc[0]),sub(abc[2],abc[0])));return true;
+    Vec normal=cross(sub(abc[1],abc[0]),sub(abc[2],abc[0]));if(norm(normal)<=1.0e-12)return false;
+    point=af_weighted(abc,weights);basis=af_basis(sub(abc[1],abc[0]),normal);return true;
 }
 
 static bool af_scp_frame(const AfAttachmentScpOp& op,const AfAttachmentSurface* surfaces,const double* vertices,

@@ -13,6 +13,7 @@ COORDINATOR = DetectionCoordinator(DomainCaptureAdapter(), NativeStackEngine, pu
 ENABLED = False
 MEMBERS = {}
 TRANSFORMS = {}
+REQUEST_STAMPS = {}
 
 
 def key(scene, root):
@@ -22,10 +23,26 @@ def key(scene, root):
 def refresh(scene, root, explicit=False):
     if not ENABLED and not explicit: return
     token = key(scene, root)
+    if not explicit and _same_request(token, scene, root): return
     if token not in MEMBERS: initialize_transforms(scene, root)
     MEMBERS[token] = membership(root)
     enqueue(token, scene, root, explicit)
     ensure_timer()
+
+
+def _same_request(token, scene, root):
+    from ..deps.surface_dependencies import has_muscle_parents
+    if not has_muscle_parents(root): return False
+    from .capture import _PUBLISHED, _MIRROR_PUBLISHED
+    from ..visualization.surface_publication import generation
+    stamp = (configuration.inspect(root)['configuration_revision'],
+        tuple((m.id, _PUBLISHED.get((identity(root), m.id), (None,))[0]) for m in root.af_vcp_system.muscles),
+        tuple((m.id, _MIRROR_PUBLISHED.get((identity(root), m.id), (None,))[0]) for m in root.af_vcp_system.muscles),
+        tuple((identity(o), tuple(float(v) for row in o.matrix_world for v in row)) for o in scene.objects
+              if o.get('af_root_name') == root.name and o.get('af_muscle_surface') == 'BASE'),
+        tuple((identity(o), generation(o)) for o in scene.objects if o.get('af_root_name') == root.name and o.get('af_scp_geometry')))
+    previous = REQUEST_STAMPS.get(token); REQUEST_STAMPS[token] = stamp
+    return previous == stamp
 
 
 def enqueue(token, scene, root, explicit):
@@ -136,7 +153,7 @@ def before_change(_dummy):
     from ..muscle_relationships.blender_identity import suspend
     suspend()
     if bpy.app.timers.is_registered(tick): bpy.app.timers.unregister(tick)
-    COORDINATOR.reset(); clear(); MEMBERS.clear(); TRANSFORMS.clear()
+    COORDINATOR.reset(); clear(); MEMBERS.clear(); TRANSFORMS.clear(); REQUEST_STAMPS.clear()
 
 
 @persistent

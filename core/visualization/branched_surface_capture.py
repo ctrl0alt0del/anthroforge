@@ -32,7 +32,8 @@ def capture_assembly(root, scene, surface):
         raise ValueError("Main solved fibers are unavailable")
     branches = tuple(_branch_input(root, scene, fibers, routes, c) for c in surface.branches)
     _free_budget(root, surface, routes, branches)
-    return prepare_assembly(routes, branches, surface.flip_normals, main_stations=resolve(main_surface, fibers))
+    from .geometry_instance import active
+    return prepare_assembly(routes, branches, surface.flip_normals != active(), main_stations=resolve(main_surface, fibers))
 
 
 def _free_budget(root, surface, routes, branches):
@@ -76,6 +77,9 @@ def _root_indices(root, scene, fiber, route, keys):
     if is_free(fiber): return point_indices(decode(fiber.free_path_json), keys)
     from ..vcp.fiber_node_attachment import _anchor_specs, _open_pin_indices
     from ..vcp.attachment_backend import attachment_runtime
+    from .geometry_instance import active
+    from ..vcp.fiber_instance import MirroredFiber
+    if active(): fiber = MirroredFiber(fiber)
     specs = _anchor_specs(root, scene, fiber, attachment_runtime(scene, None))
     occurrences = slots(fiber)
     if len(specs) != len(occurrences):

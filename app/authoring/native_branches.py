@@ -76,7 +76,14 @@ def _free_mutation(root, request):
     import bpy
     from ..use_cases.free_point_edit import graph_action
     if protection_only(request['op'], request['params']): return _mutate(root, request['op'], request['params'])
-    return graph_action(root, bpy.context.scene, lambda: _mutate(root, request['op'], request['params']))
+    return graph_action(root, bpy.context.scene, lambda: _acyclic_mutation(root, request))
+
+
+def _acyclic_mutation(root, request):
+    from ...core.deps.surface_dependencies import require_acyclic
+    result = _mutate(root, request['op'], request['params'])
+    require_acyclic(root)
+    return result
 
 
 def protection_only(op, params):
@@ -107,7 +114,7 @@ def _runtime_memento(root, scene=None):
     from ...core.vcp import fiber_anchor_preflight as preflight
     from ...core.visualization import fiber_anchor_overlay as overlay
     from ...core.warnings.session import REPOSITORY, scopes_for
-    scene = scene or bpy.context.scene; names = ('fibers', 'fiber_surfaces', 'muscles'); scopes = set(scopes_for(scene, root))
+    scene = scene or bpy.context.scene; names = ('fibers', 'fiber_surfaces', 'muscles', 'soft_tissues'); scopes = set(scopes_for(scene, root))
     native = {name: {item.id: _custom_runtime(item) for item in getattr(root.af_vcp_system, name)} for name in names}
     proxies = {o.name: _custom_runtime(o, 'af_fiber_') for o in scene.objects if o.get('af_root_name') == root.name and o.get('af_fiber_id')}
     warnings = {key: dict(value) for key, value in REPOSITORY.provider_states.items() if key[0] in scopes}
@@ -230,7 +237,8 @@ def _edit_position(root, point, params):
     import bpy
     from mathutils import Vector
     from ...core.vcp.fiber_pin_snapping import capture_attachment_from_world
-    owner = params.get('scp_id', point.parent_id)
+    from ...core.vcp.surface_reference import key
+    owner = key(params.get('target', params.get('scp_id', point.parent_id)))
     radius = max((f.collision_radius for f, _, _ in point_users(root, point.id)), default=.002)
     raw = capture_attachment_from_world(root, bpy.context.scene, owner, Vector(params['position']),
                                         radius=radius, offset=params.get('offset', point.normal_offset))
@@ -244,7 +252,8 @@ def _edit_retained(root, point, params):
     from ...core.vcp.attachment_backend import attachment_runtime
     from ...core.vcp.fiber_pin_snapping import qualify_attachment
     require(not {'position', 'scp_id'} & params.keys(), 'INVALID_PARAMETER')
-    binding = params['attachment']; owner, raw = binding['parent_id'], binding['attach_param']
+    from ...core.vcp.surface_reference import key
+    binding = params['attachment']; owner, raw = key(binding.get('target', binding.get('parent_id'))), binding['attach_param']
     radius = max((f.collision_radius for f, _, _ in point_users(root, point.id)), default=.002)
     runtime = attachment_runtime(bpy.context.scene)
     _validate_retained_surface(root, bpy.context.scene, owner, raw, runtime)

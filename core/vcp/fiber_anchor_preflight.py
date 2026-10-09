@@ -129,7 +129,8 @@ def fiber_anchor_cache_stats():
 
 
 def _compute_preflight(root, scene, fiber, depsgraph, quality, probe, anchors):
-    oracle = CollisionOracle(root, scene, depsgraph, max(0.0, float(fiber.collision_radius)), 0.002)
+    from .attachment_surface import support_keys
+    oracle = CollisionOracle(root, scene, depsgraph, max(0.0, float(fiber.collision_radius)), 0.002, support_keys(fiber))
     sources = tuple(oracle.colliders())
     colliders = _capture_colliders(sources)
     slack = _clearance_slack(colliders, fiber.collision_radius, quality)
@@ -272,7 +273,7 @@ def _action(role, owner):
 def _probe_key(root, scene, fiber):
     scope = fiber_anchor_scope(scene, root, fiber)
     raw = _raw_anchor_specs(fiber)
-    colliders = _collider_probe_rows(root, scene)
+    colliders = _collider_probe_rows(root, scene) + _muscle_probe_rows(root, scene, fiber)
     radius = float(getattr(fiber, "collision_radius", 0.0))
     status = collision_backend_status()
     return (scope, str(getattr(fiber, "topology_mode", "OPEN")), raw, colliders,
@@ -311,6 +312,14 @@ def _source_key(source):
 
 def _object_sid(obj):
     return str(obj.get("af_scp_id", "") or "")
+
+
+def _muscle_probe_rows(root, scene, fiber):
+    from .attachment_surface import support_keys, resolve_object
+    from .surface_reference import is_muscle
+    targets = tuple(value for value in support_keys(fiber) if is_muscle(value))
+    objects = tuple(resolve_object(root, scene, target) for target in targets)
+    return tuple((key, obj.name, _collider_stamp(obj)) if obj else (key, '', ()) for key, obj in zip(targets, objects))
 
 
 def _hierarchy(root):

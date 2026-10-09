@@ -80,7 +80,9 @@ def _consumer_error(root, kind, entity_id):
         users = _surface_consumers(root, entity_id)
         return "Fiber Surface is used by: " + ", ".join(users) if users else ""
     if kind == "MUSCLE":
-        users = target_tissue_consumers(root, kind, entity_id)
+        try: from ...core.deps.surface_dependencies import consumers
+        except ImportError: from core.deps.surface_dependencies import consumers
+        users = [f'{k} {i}' for k, i in consumers(root, kind, entity_id)]
         return "Muscle is targeted by: " + ", ".join(users) if users else ""
     return ""
 

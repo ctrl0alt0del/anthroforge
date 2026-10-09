@@ -57,6 +57,9 @@ def _first_scp_rule(parent_ids, scp_map):
 
 
 def effective_rule_for_fiber(fiber_prop, scp_map, fibers_by_id=None):
+    from ..vcp.attachment_surface import muscle_backed
+    from .attachment_mirror_rules import for_fiber
+    if muscle_backed(fiber_prop): return for_fiber(fiber_prop, scp_map)
     _ = fibers_by_id
     if hasattr(fiber_prop, "get") and fiber_prop.get("af_authoring_symmetry") == "explicit":
         return None

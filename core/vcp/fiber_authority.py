@@ -5,7 +5,8 @@ from .free_path import is_free
 def token(root, fiber):
     from ..warnings import session
     return (session.EPOCH, int(root.session_uid), int(fiber.as_pointer()),
-            str(getattr(fiber, 'behavior_mode', 'CONTROLLED')), int(fiber.get('af_path_authority', 0)))
+            str(getattr(fiber, 'behavior_mode', 'CONTROLLED')), int(fiber.get('af_path_authority', 0)),
+            int(getattr(fiber, 'source', fiber).get('af_path_authority', 0)))
 
 
 def invalidate(fiber):

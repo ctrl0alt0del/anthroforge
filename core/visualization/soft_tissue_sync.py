@@ -26,6 +26,7 @@ from .soft_tissue_source import (
 )
 from .surface_target_service import default_surface_target_service
 from .soft_tissue_transaction import evaluation_transaction
+from .soft_tissue_binding_validation import require_stored_topology, commit_binding_topology
 
 
 @dataclass(frozen=True)
@@ -87,9 +88,7 @@ def _sync_tissues(sync, root, scene, ids, recapture, force, upgrade=False):
 def _sync_one(sync, root, scene, collection, tissue, recapture, force, upgrade=False):
     if _defer_legacy_evaluation(tissue, upgrade):
         return
-    if not bool(tissue.auto_recompute) and not force:
-        set_soft_tissue_status(tissue, "DIRTY")
-        return
+    if _defer_manual(root, scene, tissue, force): return
     started = time.perf_counter()
     set_soft_tissue_status(tissue, "SOLVING")
     try:
@@ -97,6 +96,20 @@ def _sync_one(sync, root, scene, collection, tissue, recapture, force, upgrade=F
             _evaluate_and_publish(sync, root, scene, collection, tissue, recapture, started, snapshot)
     except Exception as exc:
         _finish_error(tissue, started, exc)
+        _mark_outputs(root, scene, tissue, str(exc))
+
+
+def _defer_manual(root, scene, tissue, force):
+    if tissue.auto_recompute or force: return False
+    set_soft_tissue_status(tissue, 'DIRTY')
+    _mark_outputs(root, scene, tissue, 'Automatic tissue updates are disabled.')
+    return True
+
+
+def _mark_outputs(root, scene, tissue, reason):
+    for obj in scene.objects:
+        if obj.get('af_root_name') == root.name and obj.get('af_soft_tissue_id') == tissue.id:
+            obj['af_soft_tissue_output_state'] = 'STALE'; obj['af_attachment_error'] = reason
 
 
 def _evaluate_and_publish(sync, root, scene, collection, tissue, recapture, started, snapshot):
@@ -159,24 +172,23 @@ def _evaluate_generic_tissue(sync, root, scene, tissue, recapture):
         raise ValueError(" ".join(errors))
     runtime = attachment_runtime(scene)
     target = sync.target_service.resolve(root, scene, effective_tissue_target(tissue), runtime)
-    _require_target_topology(tissue, target, recapture)
+    _require_target_topology(tissue, target, recapture, runtime)
     sample, controls, base, pose = _prepare_generic_base(root, scene, tissue, target, runtime, recapture)
     rest = build_rest_shape(tissue, sample)
-    anchors, regions = _prepare_generic_regions(tissue, rest, target, runtime, recapture)
+    anchors, regions = _prepare_generic_regions(tissue, rest, target, runtime, recapture, sample)
     final = relax_shape(tissue, rest, None if target is None else target.mesh_object, anchors)
     signature = "" if target is None else target.topology_signature
     return TissueEvaluation(rest, final, sample, signature, controls, base, regions, pose)
 
 
-def _require_target_topology(tissue, target, recapture):
+def _require_target_topology(tissue, target, recapture, runtime=None):
     if target is None or recapture == "ALL":
         return
     stored = str(getattr(tissue, "attachment_topology_signature", "") or "")
     if not stored and int(tissue.schema_version) < 2:
         if tissue.host_topology_signature == host_signature(target.mesh_object):
             return
-    if not stored or stored != target.topology_signature:
-        raise ValueError("Attachment target topology changed. Use Rebind.")
+    require_stored_topology(target, stored, tissue.base_bindings_json, runtime)
 
 
 def _prepare_generic_base(root, scene, tissue, target, runtime, recapture):
@@ -209,7 +221,10 @@ def _upgrade_generic_base(tissue, target, runtime, scene):
     return sample, None, base, pose
 
 
-def _prepare_generic_regions(tissue, rest, target, runtime, recapture):
+def _prepare_generic_regions(tissue, rest, target, runtime, recapture, sample=None):
+    if tissue.constraint_reference == 'SOURCE':
+        from ..vcp.soft_tissue_source_goals import source_goals
+        return source_goals(tissue, rest, sample), None
     if target is None or not len(tissue.attachments):
         return (), None
     payloads = None
@@ -231,6 +246,7 @@ def _commit_evaluation(tissue, result):
         if result.base_bindings is not None:
             tissue.base_bindings_json = result.base_bindings
         _commit_region_bindings(tissue, result.region_bindings)
+        commit_binding_topology(tissue, result.target_signature)
 
 
 def _commit_control_pose(tissue, pose):
@@ -324,6 +340,9 @@ def _write_tissue_objects(root, collection, tissue, rest, final):
     rest_proxy = _ensure_proxy(collection, root, tissue, True)
     update_mesh_from_world(proxy, [Vector(value) for value in final.vertices], rest.faces)
     update_mesh_from_world(rest_proxy, [Vector(value) for value in rest.vertices], rest.faces)
+    proxy['af_soft_tissue_output_state'] = rest_proxy['af_soft_tissue_output_state'] = 'CURRENT'
+    for obj in (proxy, rest_proxy):
+        if 'af_attachment_error' in obj: del obj['af_attachment_error']
     rest_proxy.hide_viewport = not bool(tissue.show_rest)
     rest_proxy.hide_render = not bool(tissue.show_rest)
     _tag_base(root, tissue)
@@ -352,7 +371,7 @@ def _tag_proxy(obj, root_name, tissue_id, rest):
 def _find_proxy(collection, root_name, tissue_id, rest):
     key = "af_soft_tissue_rest_proxy" if rest else "af_soft_tissue_proxy"
     return next((obj for obj in collection.objects if obj.get(key) and obj.get("af_root_name") == root_name
-                 and obj.get("af_soft_tissue_id") == tissue_id), None)
+                 and not obj.get('af_soft_tissue_mirror_proxy') and obj.get("af_soft_tissue_id") == tissue_id), None)
 
 
 def _remove_stale_proxies(collection, root_name, live):

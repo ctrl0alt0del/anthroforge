@@ -20,7 +20,7 @@ from ..vcp.soft_tissue_surface_inflation import (
 from ..vcp.soft_tissue_surface_pipeline import GeometricRelaxationSpec, SurfaceTissuePipelineSpec, run_surface_tissue_pipeline
 from ..vcp.attachment_backend import capture_surface_param, resolve_surface_frame
 from ..vcp.surface_binding_codec import (
-    decode_binding_envelope, encode_binding_envelope, require_matching_envelope, rest_topology_signature,
+    encode_binding_envelope, rest_topology_signature,
 )
 from .blob_sync_helpers import unit_local_mesh
 
@@ -121,8 +121,8 @@ def _capture_target_region_row(rest, row, target, runtime, core):
 
 
 def _resolve_target_attachment(rest, attachment, target, runtime, raw, rest_signature):
-    envelope = decode_binding_envelope(raw, target.reference, target.topology_signature)
-    require_matching_envelope(envelope, target.reference, target.topology_signature, rest_signature)
+    from .soft_tissue_binding_validation import target_envelope
+    envelope = target_envelope(target, raw, runtime, rest_signature)
     return [_resolve_target_region_row(rest, attachment, target, runtime, row) for row in envelope.bindings]
 
 
@@ -261,7 +261,7 @@ def _static_envelope_shape(tissue, rest, anchors):
     fixed = _fixed_indices(tissue, rest)
     tethers = tuple(_tether(item, rest) for item in anchors if item[0] == "SOFT")
     count = len(rest.groups.get("BACKING", ()))
-    goals = {index: goal for index, goal in _fixed_goals(anchors).items() if index < count}
+    goals = _fixed_goals(anchors)
     result = solve_static_envelope(rest.vertices, rest.faces, fixed, count, settings, tethers, tissue.tolerance, goals)
     return FinalShape(result.vertices, result.iterations, result.max_displacement, result.report)
 

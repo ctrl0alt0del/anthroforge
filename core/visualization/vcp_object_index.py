@@ -46,7 +46,7 @@ def _index_obj(index, obj):
 
 
 def _index_fiber_surface(index, obj):
-    if obj.get("af_fiber_surface_proxy"):
+    if obj.get("af_fiber_surface_proxy") and not obj.get('af_fiber_surface_mirror_proxy'):
         index["fiber_surface"][_as_id(obj.get("af_fiber_surface_id"))] = obj
 
 

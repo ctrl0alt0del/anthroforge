@@ -44,7 +44,16 @@ def remap_binding_target(raw, target_type, source_id, target_id):
     if str(target.get("type", "")) != str(target_type) or str(target.get("id", "")) != str(source_id):
         return raw
     target["id"], value["target"] = str(target_id), target
+    value['bindings'] = [_remap_inner_binding(row, target_type, source_id, target_id) for row in value.get('bindings', ())]
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
+
+
+def _remap_inner_binding(row, kind, source, target):
+    from .surface_reference import remap_binding
+    if not isinstance(row, dict) or not row.get('raw'): return row
+    scps = {source: target} if kind == 'SCP' else {}
+    muscles = {source: target} if kind == 'MUSCLE' else {}
+    return dict(row, raw=remap_binding(row['raw'], scps, muscles))
 
 
 def _version_three(value):

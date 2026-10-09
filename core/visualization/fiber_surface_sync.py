@@ -40,6 +40,8 @@ class FiberSurfaceSceneSync:
             proxy = _ensure_proxy(collection, root, surface, index)
             update_mesh(proxy, result.vertices, result.faces)
             _mark_surface_current(proxy)
+            from .volume_instance_runtime import surface_mirror
+            surface_mirror(root, scene, surface, proxy)
             _finish_surface(surface, started, "CLEAN")
         except Exception as exc:
             _mark_surface_stale(index, surface)
@@ -71,8 +73,10 @@ def _evaluate_branched(root, scene, surface):
 
 
 def find_fiber_surface_proxy(scene, root_name, surface_id):
+    from .geometry_instance import active
     return next((obj for obj in scene.objects if obj.get("af_fiber_surface_proxy")
                  and obj.get("af_root_name") == root_name
+                 and bool(obj.get('af_fiber_surface_mirror_proxy')) == active()
                  and obj.get("af_fiber_surface_id") == surface_id), None)
 
 
@@ -115,11 +119,13 @@ def _validate_loft_fibers(surface, fibers):
 
 
 def _surface_spec(surface, fibers):
-    from ..vcp.free_surface_stations import resolve
+    from ..vcp.free_surface_stations import material_layout
+    from .geometry_instance import active
     loop = bool(fibers and is_loop_fiber(fibers[0]))
     count = fiber_geometry_point_count(fibers[0]) if fibers else 0
+    stations, across = material_layout(surface, fibers)
     return FiberSurfaceSpec(str(surface.construction_mode), bool(surface.close_across_fibers), loop,
-                            bool(surface.flip_normals), int(surface.patch_resolution), count, any(is_free(f) for f in fibers), resolve(surface, fibers))
+                            bool(surface.flip_normals) != active(), int(surface.patch_resolution), count, any(is_free(f) for f in fibers), stations, across)
 
 
 def _ensure_proxy(collection, root, surface, index):

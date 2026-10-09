@@ -3,9 +3,10 @@
 import json
 from dataclasses import dataclass, replace
 from math import isfinite
+from functools import lru_cache
 
 
-NODE_ATTACHMENT_VERSION = 2
+NODE_ATTACHMENT_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -39,8 +40,18 @@ def encode_node_attachments(payload):
 
 
 def decode_node_attachments(raw):
+    value = str(raw or '')
+    return _cached_decode(value) if len(value) <= 262144 else _decode_raw(value)
+
+
+@lru_cache(maxsize=128)
+def _cached_decode(raw):
+    return _decode_raw(raw)
+
+
+def _decode_raw(raw):
     try:
-        return _decode_payload(json.loads(str(raw or "")))
+        return _decode_payload(json.loads(raw))
     except Exception:
         return None
 
@@ -74,7 +85,7 @@ def _node_dict(node):
 
 
 def _decode_payload(value):
-    if not isinstance(value, dict) or int(value.get("version", 0)) not in (1, NODE_ATTACHMENT_VERSION):
+    if not isinstance(value, dict) or int(value.get("version", 0)) not in (1, 2, NODE_ATTACHMENT_VERSION):
         return None
     nodes = tuple(_decode_node(row) for row in value.get("nodes", ()))
     return _decoded_payload(value, nodes) if all(nodes) else None
@@ -124,5 +135,17 @@ def _payload_targets(payload):
 
 
 def _remap_node(row, mapping):
-    influences = tuple(replace(item, target_id=mapping[item.target_id]) for item in row.influences)
-    return replace(row, target_id=mapping[row.target_id], influences=influences)
+    influences = tuple(_remap_influence(item, mapping) for item in row.influences)
+    return replace(_remap_influence(row, mapping), influences=influences)
+
+
+def _remap_influence(row, mapping):
+    from .surface_reference import reference
+    from .surface_target import target_payload
+    raw = row.attach_raw; target = mapping[row.target_id]
+    try: value = json.loads(raw)
+    except (ValueError, TypeError): value = None
+    if isinstance(value, dict) and 'target' in value:
+        value['target'] = target_payload(reference(target))
+        raw = json.dumps(value, sort_keys=True, separators=(',', ':'))
+    return replace(row, target_id=target, attach_raw=raw)

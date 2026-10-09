@@ -90,6 +90,7 @@ class FiberRefinementJob:
     last_geometry_check: float = 0.0
     group_token: str = ""
     authority: tuple = ()
+    publication_error: str = ''
 
 
 @dataclass
@@ -333,7 +334,7 @@ def _start_or_finish(job, proxy):
         result = job.session.result()
         _apply_progress(job, result)
         _finish_job(job, result)
-        return RefinementRequest(True, proxy=proxy)
+        return RefinementRequest(not bool(job.publication_error), job.publication_error, proxy=proxy)
     _mark_refining(job.session.fiber)
     _JOBS[job.key] = job
     _register_batch_job(job)
@@ -460,8 +461,10 @@ def _apply_refined_geometry(job, result, root, scene, fiber, now):
     commit = bool(result.done and _commit_allowed(job, result))
     if _retain_safe_preview(job, commit, now):
         return
-    proxy = register_fiber_sync().apply_points(root, scene, fiber, result.points,
-                                               bake=_job_bake(job, result), commit=commit)
+    from .fiber_attachment_commit import apply
+    try: proxy = apply(register_fiber_sync(), root, scene, fiber, result.points, _job_bake(job, result), commit)
+    except (ValueError, RuntimeError) as error:
+        job.publication_error = str(error); return
     _set_refinement_display(proxy, result)
     job.output_committed = bool(result.done and commit and proxy is not None)
     job.proxy_name = "" if proxy is None else proxy.name
@@ -506,6 +509,7 @@ def _retain_safe_preview(job, commit, now):
 
 
 def _finish_job(job, result=None):
+    if getattr(job, 'publication_error', ''): return _reject_publication(job)
     reason = _invalid_job_reason(job, force_geometry=True)
     if reason:
         _terminate_job(job, reason, mark_unknown=True, stale=True)
@@ -516,6 +520,14 @@ def _finish_job(job, result=None):
         _finish_planner_preview_job(job)
         return
     _finish_refined_job(job, result)
+
+
+def _reject_publication(job):
+    from .muscle_fiber_attachment import fail
+    root, scene, fiber = _owned_job_data(job)
+    _terminate_job(job, FiberTermination.INVALID_ATTACHMENT, mark_unknown=False, stale=True)
+    if root is not None and fiber is not None: fail(root, scene, fiber, job.publication_error)
+    _group_member_done(_job_group_token(job), job.fiber_id, False, job.publication_error)
 
 
 def _finish_refined_job(job, result):
@@ -544,6 +556,8 @@ def _refresh_node_attachments(job, result):
     if not _authority_current(job): return False
     root, scene, fiber = _owned_job_data(job)
     if root is None or scene is None or fiber is None: return False
+    from ..vcp.attachment_surface import muscle_backed
+    if muscle_backed(fiber): return bool(fiber.node_attachments_json)
     from .fiber_node_attachment_runtime import capture_committed_fiber_node_attachments
     captured = capture_committed_fiber_node_attachments(root, scene, fiber, result.points)
     if captured: fiber.pop('af_controlled_retained_free', None)
@@ -796,9 +810,9 @@ def _sync_final(job):
     if root is None or scene is None or fiber is None:
         return
     if _BATCH_COMMITS is not None:
-        _BATCH_COMMITS.append((root, scene, fiber.id))
+        _BATCH_COMMITS.append((root, scene, fiber.id.removesuffix('@mirror')))
         return
-    _sync_fiber_group(root, scene, {fiber.id})
+    _sync_fiber_group(root, scene, {fiber.id.removesuffix('@mirror')})
 
 
 def _sync_fiber_group(root, scene, fiber_ids, immediate=False):
@@ -1042,7 +1056,8 @@ def _resolved_job_data(job):
     root = None if scene is None else _by_uid(scene.objects, job.root_uid)
     vcp = None if root is None else getattr(root, "af_vcp_system", None)
     fibers = () if vcp is None else vcp.fibers
-    fiber = next((item for item in fibers if item.id == job.fiber_id), None)
+    from ..vcp.fiber_instance import lookup
+    fiber = lookup(fibers, job.fiber_id)
     return root, scene, fiber
 
 
@@ -1068,7 +1083,7 @@ def _fiber_signature(fiber):
     values += (tuple(float(value) for value in fiber.symmetry_origin), tuple(endpoint_record(fiber, s).normal_offset for s in ("a", "b")))
     touches = tuple((item.parent_id, item.attach_param, float(item.normal_offset)) for item in fiber.mid_touches)
     anchors = tuple((item.parent_id, item.attach_param) for item in fiber.loop_anchors)
-    return values, touches, anchors
+    return values, touches, anchors, tuple(row.target_id for row in getattr(fiber, 'attachment_supports', ()))
 
 
 def _signature_value(value):
@@ -1148,14 +1163,17 @@ def _fiber_for_scene(scene, fiber_id):
         return None
     roots = [obj for obj in scene.objects if obj.get("anthroforge_root")]
     fibers = () if not roots else roots[0].af_vcp_system.fibers
-    return next((fiber for fiber in fibers if fiber.id == str(fiber_id)), None)
+    from ..vcp.fiber_instance import lookup
+    return lookup(fibers, str(fiber_id))
 
 
 def _find_proxy(scene, root_name, fiber_id):
     if scene is None:
         return None
-    return next((obj for obj in scene.objects if obj.get("af_fiber_proxy") and
-                 obj.get("af_root_name") == root_name and obj.get("af_fiber_id") == fiber_id), None)
+    mirrored = fiber_id.endswith('@mirror'); identity = fiber_id.removesuffix('@mirror')
+    return next((obj for obj in scene.objects if obj.get('af_fiber_proxy') and
+                 obj.get('af_root_name') == root_name and obj.get('af_fiber_id') == identity
+                 and bool(obj.get('af_fiber_mirror_proxy')) == mirrored), None)
 
 
 def _planner_preview_visible(scene, root_name, fiber_id):

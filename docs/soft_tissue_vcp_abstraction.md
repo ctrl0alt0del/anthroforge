@@ -66,6 +66,25 @@ visible rest-scale displacement.
 
 ## Surface attachment
 
+New Fiber/Fiber Surface-based Layer, Pouch and Rim tissues use
+`constraint_reference=SOURCE`: `Muscle → Fiber → Fiber Surface → Soft Tissue`
+(Rim can consume a Fiber directly). No second muscle target is required. Fixed
+and soft goals are regenerated from the current source-derived rest shape,
+including masks, feathering, strength and normal offsets. Fixed backing offsets
+are passed to the native envelope solver. Mirrored tissues consume independently
+evaluated mirrored rows and preserve their frame orientation.
+
+Source-derived surface normals use area weighting to avoid amplifying float
+precision noise from narrow loft faces, following the established
+[face-area weighting approach](https://docs.blender.org/manual/en/5.2/modeling/modifiers/normals/weighted_normal.html).
+This is a single geometry-capture pass; iterative relaxation remains native C++.
+
+Existing tissues retain `constraint_reference=TARGET` and the workflow below.
+Loading does not convert their attachment model. `ITERATION_LIMIT` remains an
+explicit unconverged solver report, distinct from attachment/currentness status;
+source-relative attachment support does not change the existing PBD solver's
+convergence contract.
+
 One tissue can target `SCP_GEOMETRY`, `MUSCLE_BASE`, or `MUSCLE_INFL`; Muscle
 INFL is the normal default and roles never silently fall back. Raw base controls
 and deterministic evaluated samples are captured as triangle/barycentric bindings
@@ -73,6 +92,13 @@ with signed surface-frame offsets. On target deformation, existing bindings
 resolve without selecting new triangles; the
 resolved positions are written back to the original base under an update guard,
 then rest and final meshes rebuild.
+
+The creation and reassignment chooser lists each muscle by its authored name
+with **Inflated surface** (follows inflation and stacking) and **Base surface**
+(before inflation). Inflated appears first. The internal proxy names
+`AF_MUSCLE_*` and `AF_MUSCLE_*_INF` are not target labels. When a Fiber or Fiber
+Surface is selected as the source, the panel explains that its attachments drive
+the tissue and does not offer an unused external target.
 
 Bézier control points are bound individually. Left/right handle vectors are
 stored in the captured surface frame so host rotation does not collapse the
@@ -103,7 +129,14 @@ same way. A guarded target-driven base rewrite is not treated as an artist edit;
 an artist edit schedules one coalesced recapture.
 
 Schema-1 SCP identities are accepted by the common target adapter. Schema-2 bindings include target type, entity ID,
-surface role, exact evaluated triangle topology, and rest topology. Constraint
+surface role, evaluated mesh connectivity, and rest topology. Blender may change
+quad tessellation during deformation; that does not invalidate retained vertex
+triples and barycentric coordinates. Earlier triangle-signature envelopes are
+accepted only when their sealed bindings prove the current connectivity, or
+their original triangle signature still matches. After successful evaluation,
+only envelope topology metadata is upgraded; coordinates and offsets remain
+unchanged. Real connectivity changes, missing targets, and degenerate attachment
+triangles remain invalid. Constraint
 mode, strength, and normal offset remain live settings and do not require recapture.
 
 Evaluation revision 1 is assigned explicitly to newly created tissues. Missing

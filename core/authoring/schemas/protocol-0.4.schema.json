@@ -4771,6 +4771,12 @@
           "type": "string",
           "minLength": 1
         },
+        "target": {
+          "$ref": "#/$defs/attachment_surface_target"
+        },
+        "position": {
+          "$ref": "#/$defs/xyz"
+        },
         "attach_param": {
           "type": "string",
           "minLength": 1
@@ -4781,6 +4787,39 @@
       },
       "required": [
         "point_id"
+      ],
+      "additionalProperties": false
+    },
+    "attachment_surface_target": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "SCP",
+            "MUSCLE"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "surface": {
+          "enum": [
+            "SCP_GEOMETRY",
+            "MUSCLE_BASE",
+            "MUSCLE_INFL"
+          ]
+        },
+        "instance": {
+          "enum": [
+            "source",
+            "mirror"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "id"
       ],
       "additionalProperties": false
     },
@@ -8607,6 +8646,9 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "target": {
+                  "$ref": "#/$defs/attachment_surface_target"
+                },
                 "offset": {
                   "type": "number"
                 },
@@ -8655,13 +8697,15 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "target": {
+                      "$ref": "#/$defs/attachment_surface_target"
+                    },
                     "attach_param": {
                       "type": "string",
                       "minLength": 1
                     }
                   },
                   "required": [
-                    "parent_id",
                     "attach_param"
                   ],
                   "additionalProperties": false
@@ -13841,6 +13885,14 @@
               },
               "required": [],
               "additionalProperties": false
+            },
+            "supports": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/attachment_surface_target"
+              },
+              "minItems": 0,
+              "maxItems": 4096
             }
           },
           "required": [
@@ -13951,6 +14003,14 @@
               },
               "required": [],
               "additionalProperties": false
+            },
+            "supports": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/attachment_surface_target"
+              },
+              "minItems": 0,
+              "maxItems": 4096
             },
             "path": {
               "$ref": "#/$defs/free_path_input"
@@ -14085,6 +14145,213 @@
             "fiber_id",
             "expected_path_revision",
             "path"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "fibers.supports_configure"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fiber_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "supports": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/attachment_surface_target"
+              },
+              "minItems": 0,
+              "maxItems": 4096
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "fiber_id",
+            "supports"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "fibers.rebind"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fiber_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "fiber_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message_type",
+        "version",
+        "request_id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dsl": {
+          "enum": [
+            "anthroforge.authoring.protocol"
+          ]
+        },
+        "message_type": {
+          "enum": [
+            "request"
+          ]
+        },
+        "version": {
+          "enum": [
+            "0.4.0"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "fibers.symmetry_configure"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "scene_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_scene_revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fiber_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "mode": {
+              "enum": [
+                "INHERIT",
+                "NONE",
+                "EXPLICIT"
+              ]
+            },
+            "axis": {
+              "enum": [
+                "X",
+                "Y",
+                "Z"
+              ]
+            },
+            "origin": {
+              "$ref": "#/$defs/xyz"
+            }
+          },
+          "required": [
+            "scene_id",
+            "expected_scene_revision",
+            "fiber_id",
+            "mode"
           ],
           "additionalProperties": false
         }

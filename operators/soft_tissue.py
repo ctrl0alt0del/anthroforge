@@ -7,6 +7,42 @@ from ..app.use_cases.soft_tissue_convert import convert_blob_to_soft_tissue
 from ..app.use_cases.soft_tissue_target import (
     assign_soft_tissue_target, clear_soft_tissue_target, select_soft_tissue_target,
 )
+from ..app.queries.root import root_for_context
+from ..app.queries.soft_tissue_target import target_choices
+from ..core.vcp.surface_reference import reference
+from ..core.visualization.surface_target_service import default_surface_target_service
+
+_TARGET_CHOICE_CACHE = {}
+
+
+def _target_choices(_operator, context):
+    if context is None: return ()
+    rows = tuple(target_choices(root_for_context(context), context.scene))
+    return _TARGET_CHOICE_CACHE.setdefault(rows, rows)
+
+
+class AF_OT_PickSoftTissueTarget(bpy.types.Operator):
+    bl_idname = 'af.pick_soft_tissue_target'
+    bl_label = 'Choose Tissue Target Surface'
+    bl_description = 'Choose Inflated surface for tissue that follows muscle inflation'
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_property = 'surface_choice'
+    surface_choice: bpy.props.EnumProperty(name='Target surface', items=_target_choices)
+
+    def invoke(self, context, event):
+        context.window_manager.invoke_search_popup(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        try:
+            root = root_for_context(context)
+            ref = reference(self.surface_choice) if self.surface_choice != 'NONE' else reference('')
+            target = default_surface_target_service().resolve(root, context.scene, ref)
+            context.scene.af_new_soft_tissue_target_obj = None if target is None else target.mesh_object
+            context.scene.af_new_soft_tissue_host_obj = None
+        except (ValueError, RuntimeError) as error:
+            self.report({'ERROR'}, str(error)); return {'CANCELLED'}
+        return {'FINISHED'}
 
 
 def _finish(operator, result):

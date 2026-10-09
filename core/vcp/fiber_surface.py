@@ -12,6 +12,7 @@ class FiberSurfaceSpec:
     target_node_count: int = 0
     exact_samples: bool = False
     parameter_stations: tuple = ()
+    across_inserts: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,7 @@ def _prepare_spec_rows(points, spec):
     if spec.parameter_stations:
         from .free_surface_stations import prepare
         if spec.closed_along_fibers: raise ValueError('FREE_CORRESPONDENCE_CLOSED')
-        return prepare(points, spec.parameter_stations)
+        return prepare(points, spec.parameter_stations, across_inserts=spec.across_inserts)
     if spec.exact_samples:
         from .free_surface import prepare_rows
         return prepare_rows(points, spec.closed_along_fibers, multiplier=4)

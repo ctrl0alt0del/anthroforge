@@ -14,7 +14,7 @@ from build_draft_skin_vendor import ROOT, VENDOR, build_bundle
 
 PACKAGE_DIRS = {"adapters", "app", "core", "native", "operators",
                 "properties", "ui", "vendor", "workers"}
-REQUIRED_NATIVE = ("af_fiber_ccd_v3_32.dll", "libomp.dll")
+REQUIRED_NATIVE = ("af_fiber_ccd_v3_33.dll", "libomp.dll")
 
 
 def tracked_package_files(source):

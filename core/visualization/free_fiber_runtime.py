@@ -35,12 +35,14 @@ def anchor_points(root, scene, fiber, runtime=None):
 
 def qualify(root, scene, fiber):
     from ..vcp.fiber_pin_snapping import qualify_attachment
+    from ..vcp.attachment_surface import support_keys
     runtime = attachment_runtime(scene)
+    runtime['supports'] = support_keys(fiber)
     for row in bindings(fiber):
         result = qualify_attachment(root, scene, row['parent_id'], row['attach_param'], runtime,
                                     fiber.collision_radius, row['normal_offset'])
         if not result.valid or result.raw != row['attach_param']:
-            raise ValueError('INVALID_ATTACHMENT: A structural binding is not qualified at its retained position.')
+            raise ValueError('INVALID_ATTACHMENT: ' + (result.reason or 'Qualification changed the retained binding.'))
 
 
 def prepare(root, scene, fiber, payload, points):
@@ -84,7 +86,9 @@ def update(root, scene, fiber, runtime=None):
         return False, str(error), None
 
 
-def publish(root, scene, fiber, points):
+def publish(root, scene, fiber, points, validated=False):
+    from ..vcp.fiber_support_validation import require_safe
+    if not validated: require_safe(root, scene, fiber, points)
     proxy = register_fiber_sync().apply_points(root, scene, fiber, tuple(Vector(p) for p in points), commit=True)
     if proxy is None: raise ValueError('Free curve proxy is unavailable.')
     proxy.pop('af_fiber_display_mode', None); proxy['af_fiber_behavior_mode'] = 'FREE'

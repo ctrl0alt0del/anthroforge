@@ -90,9 +90,14 @@ class LoaderTests(unittest.TestCase):
         self.bytecode = sys.dont_write_bytecode
         self.root = Path(self.temporary.name)
         self.bundle = tiny_bundle(self.root)
+        self.enterContext(mock.patch.object(sys, "path_hooks", list(sys.path_hooks)))
+        self.enterContext(mock.patch.dict(sys.path_importer_cache))
         self.vendor_patch = mock.patch.multiple(vendor, VENDOR_ROOT=self.root,
                                                 MANIFEST_PATH=self.root / "manifest.json")
         self.vendor_patch.start()
+        self._mock_import_checks()
+
+    def _mock_import_checks(self):
         self.runtime_fn = vendor._runtime
         self.runtime_patch = mock.patch.object(vendor, "_runtime")
         self.runtime_patch.start()

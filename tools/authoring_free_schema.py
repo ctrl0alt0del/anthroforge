@@ -13,17 +13,25 @@ def definitions():
     knot = obj(dict(sample_id=S, co=ref('xyz'), handle_left=ref('xyz'), handle_right=ref('xyz')))
     bezier = obj(dict(**common, representation=enum('BEZIER'), knots=array(knot, 2, 4096),
                       resolution=dict(type='integer', minimum=2, maximum=4096)))
-    attachment = obj(dict(point_id=S, parent_id=S, attach_param=S, normal_offset=N), ['point_id'])
-    return dict(free_path_input={'oneOf': [poly, bezier]}, free_path_attachment=attachment)
+    attachment = obj(dict(point_id=S, parent_id=S, target=ref('attachment_surface_target'), position=ref('xyz'), attach_param=S, normal_offset=N), ['point_id'])
+    return dict(free_path_input={'oneOf': [poly, bezier]}, free_path_attachment=attachment, attachment_surface_target=surface_target())
+
+
+def surface_target():
+    return obj(dict(type=enum('SCP', 'MUSCLE'), id=S, surface=enum('SCP_GEOMETRY', 'MUSCLE_BASE', 'MUSCLE_INFL'),
+                    instance=enum('source', 'mirror')), ['type', 'id'])
 
 
 def operations():
     revision = dict(expected_scene_revision=S); identified = dict(**revision, fiber_id=S, expected_path_revision=I)
-    create = dict(**revision, topology=enum('OPEN', 'LOOP'), name=S, attachments=array(ref('free_path_attachment'), 2, 4096), settings=settings())
+    create = dict(**revision, topology=enum('OPEN', 'LOOP'), name=S, attachments=array(ref('free_path_attachment'), 2, 4096), settings=settings(), supports=array(ref('attachment_surface_target'), 0, 4096))
     rows = [operation('fibers.create_controlled', create, ['expected_scene_revision', 'attachments'])]
     rows += [operation('fibers.create_free', dict(**create, path=ref('free_path_input')), ['expected_scene_revision', 'attachments', 'path'])]
     rows += [operation('fibers.path_inspect', dict(fiber_id=S), ['fiber_id'])]
     rows += [operation('fibers.path_update', dict(**identified, path=ref('free_path_input')), [*identified, 'path'])]
+    rows += [operation('fibers.supports_configure', dict(**revision, fiber_id=S, supports=array(ref('attachment_surface_target'), 0, 4096)), ['expected_scene_revision', 'fiber_id', 'supports'])]
+    rows += [operation('fibers.rebind', dict(**revision, fiber_id=S), ['expected_scene_revision', 'fiber_id'])]
+    rows += [operation('fibers.symmetry_configure', dict(**revision, fiber_id=S, mode=enum('INHERIT', 'NONE', 'EXPLICIT'), axis=enum('X', 'Y', 'Z'), origin=ref('xyz')), ['expected_scene_revision', 'fiber_id', 'mode'])]
     return rows + [operation('fibers.mode_configure', dict(**identified, mode=enum('FREE', 'CONTROLLED')), [*identified, 'mode'])]
 
 

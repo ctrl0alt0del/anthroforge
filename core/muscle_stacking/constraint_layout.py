@@ -2,7 +2,7 @@
 import numpy as np
 from ..vcp import fiber_surface as loft
 from ..vcp import free_surface as free
-from ..vcp.free_surface_stations import resolve
+from ..vcp.free_surface_stations import material_layout, station_union, _fixed_densify
 from ..vcp.free_path import is_free, stations
 
 
@@ -23,14 +23,15 @@ def ordinary(source, fibers, rows, request):
 
 
 def free_layout(source, fibers, rows, closed=False):
-    authored = resolve(source, fibers)
+    authored, counts = material_layout(source, fibers)
     if closed: return free_closed(rows)
     knots = [np.asarray(s, float) for s in authored] if authored else [row_knots(r, False) for r in rows]
-    target = np.unique(np.concatenate(knots))
+    target = station_union(knots) if authored else np.unique(np.concatenate(knots))
     sampled = [np.column_stack([np.interp(target, s, np.asarray(r)[:, j]) for j in range(3)]).tolist() for r, s in zip(rows, knots)]
     minimum = 1 if len(rows) == 2 else 0
-    across = row_addresses(sampled, minimum)
-    return across, target, knots, np.asarray(loft._densify_rows(sampled, minimum))
+    across = np.r_[0, np.cumsum(np.asarray(counts)+1)] if counts else row_addresses(sampled, minimum)
+    prepared = _fixed_densify(sampled, counts) if counts else loft._densify_rows(sampled, minimum)
+    return across, target, knots, np.asarray(prepared)
 
 
 def row_knots(row, closed):

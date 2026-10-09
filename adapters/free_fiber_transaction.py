@@ -1,13 +1,13 @@
 """Reversible RNA and generated-geometry memento shared by UI and authoring."""
 import bpy
 from .authoring.capture import native_records
-from .authoring.records import plain
+from .authoring.records import plain, record
 from ..core.vcp.prop_update_guard import suppress_vcp_prop_updates
 
 
 def _owned(root, scene):
     return [obj for obj in scene.objects if obj.get('af_root_name') == root.name
-            and any(obj.get(key) for key in ('af_fiber_proxy', 'af_fiber_surface_proxy', 'af_muscle_proxy', 'af_muscle_base', 'af_muscle_inflated'))]
+            and any(obj.get(key) for key in ('af_fiber_proxy', 'af_fiber_surface_proxy', 'af_muscle_proxy', 'af_muscle_base', 'af_muscle_inflated', 'af_soft_tissue_proxy'))]
 
 
 def snapshot(root, scene):
@@ -17,7 +17,8 @@ def snapshot(root, scene):
         if obj.data is not None and obj.data.name not in data: data[obj.data.name] = obj.data.copy()
     rows = {obj.name: (obj.data.name if obj.data else None, _custom(obj), obj.matrix_world.copy()) for obj in objects}
     runtime = {f.id: _custom(f) for f in root.af_vcp_system.fibers}
-    return dict(records=native_records(root), objects=rows, data=data, runtime=runtime,
+    records = dict(native_records(root), soft_tissues=[record(t) for t in root.af_vcp_system.soft_tissues])
+    return dict(records=records, objects=rows, data=data, runtime=runtime,
                 notifications=_runtime_memento(root, scene), root={k: plain(root[k]) for k in root.keys() if _root_key(k)})
 
 

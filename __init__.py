@@ -40,6 +40,7 @@ from .operators.tree import (
     AF_OT_SelectVCPInTree,
 )
 from .operators.add_fiber_vcp import AF_OT_AddFiberVCP
+from .operators.fiber_attachment import AF_OT_FiberAttachment, AF_OT_FiberAttachmentSymmetry
 from .operators.fiber_proxy import (
     AF_OT_ConnectProxyVerticesWithFiber,
     AF_OT_CreateLoopFiberFromSelectedVertices,
@@ -74,6 +75,7 @@ from .operators.soft_tissue import (
     AF_OT_AddSoftTissueAttachment, AF_OT_RemoveSoftTissueAttachment,
     AF_OT_AddSoftTissueVCP,
     AF_OT_AssignSoftTissueTarget,
+    AF_OT_PickSoftTissueTarget,
     AF_OT_ApplySoftTissuePreset,
     AF_OT_ClearSoftTissueTarget,
     AF_OT_DuplicateSoftTissueSnapshot,
@@ -164,6 +166,7 @@ from .properties.vcp_properties import (
     AF_BranchConnection_Property,
     AF_FiberSurfaceVCP_Property,
     AF_AuthoredPoint_Property,
+    AF_FiberSupport_Property,
     AF_FiberTouchPoint_Property,
     AF_FiberLoopAnchor_Property,
     AF_FiberVCP_Property,
@@ -291,6 +294,7 @@ classes = (
     AF_BranchConnection_Property,
     AF_FiberSurfaceVCP_Property,
     AF_AuthoredPoint_Property,
+    AF_FiberSupport_Property,
     AF_FiberTouchPoint_Property,
     AF_FiberLoopAnchor_Property,
     AF_FiberVCP_Property,
@@ -300,6 +304,8 @@ classes = (
     AF_VCP_System_Property,
 
     AF_OT_AddFiberVCP,
+    AF_OT_FiberAttachment,
+    AF_OT_FiberAttachmentSymmetry,
     AF_OT_ConnectProxyVerticesWithFiber,
     AF_OT_CreateLoopFiberFromSelectedVertices,
     AF_OT_CreateSymmetricLoopFiberFromSelectedVertices,
@@ -312,6 +318,7 @@ classes = (
     AF_OT_AddBlobVCP,
     AF_OT_AddSoftTissueVCP,
     AF_OT_AssignSoftTissueTarget,
+    AF_OT_PickSoftTissueTarget,
     AF_OT_ApplySoftTissuePreset,
     AF_OT_ClearSoftTissueTarget,
     AF_OT_RecomputeSoftTissue,

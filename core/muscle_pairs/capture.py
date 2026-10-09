@@ -9,6 +9,7 @@ from .model import snapshot
 _PUBLISHED = {}
 _FIELDS = {}
 _LAST_VALID = {}
+_MIRROR_PUBLISHED = {}
 
 
 def identity(value):
@@ -25,9 +26,12 @@ def fingerprint(value):
 
 
 def remember(root, work, result, scene=None):
-    from ..muscle_stacking.publication import forget
-    forget(identity(root), str(work.muscle.id))
-    _PUBLISHED[(identity(root), str(work.muscle.id))] = (fingerprint(work.request), result)
+    from ..muscle_stacking.publication import forget, reapply
+    key = identity(root), str(work.muscle.id); stamp = fingerprint(work.request)
+    previous = _PUBLISHED.get(key)
+    if previous is None or previous[0] != stamp: forget(*key)
+    elif scene is not None: reapply(scene, root, work.muscle.id)
+    _PUBLISHED[key] = stamp, result
     if scene is not None:
         from .runtime import refresh
         refresh(scene, root)
@@ -36,13 +40,13 @@ def remember(root, work, result, scene=None):
 def clear():
     from ..muscle_stacking.publication import forget
     forget()
-    _PUBLISHED.clear(); _FIELDS.clear(); _LAST_VALID.clear()
+    _PUBLISHED.clear(); _FIELDS.clear(); _LAST_VALID.clear(); _MIRROR_PUBLISHED.clear()
 
 
 def remove(root_id):
     from ..muscle_stacking.publication import forget
     forget(root_id)
-    for cache in (_PUBLISHED, _FIELDS, _LAST_VALID):
+    for cache in (_PUBLISHED, _FIELDS, _LAST_VALID, _MIRROR_PUBLISHED):
         for token in tuple(cache):
             if token[0] == root_id: cache.pop(token)
 
@@ -110,8 +114,36 @@ def capture_muscle(root, scene, muscle, settings, objects):
     domains = apply(root, scene, muscle, request, domains)
     mirrors = [o for o in objects if o.get('af_muscle_mirror_proxy') and o.get('af_source_muscle_id') == muscle.id and o.get('af_muscle_surface') == 'INFL']
     if len(mirrors) > 1: raise ValueError('PAIR_DUPLICATE_MIRROR')
-    if mirrors: validate_mirror(outer, mirrors[0], result.inflated_vertices, root, muscle.id)
-    return domains + mirror_domains(domains, outer, mirrors[0] if mirrors else None)
+    return domains + capture_mirror(root, scene, muscle, domains, outer, mirrors, result, settings)
+
+
+def remember_mirror(root, muscle_id, request, result):
+    _MIRROR_PUBLISHED[(identity(root), muscle_id)] = fingerprint(request), request, result
+
+
+def capture_mirror(root, scene, muscle, domains, source, mirrors, intrinsic, settings):
+    if not mirrors: return ()
+    mirror = mirrors[0]; own = _MIRROR_PUBLISHED.get((identity(root), muscle.id))
+    if not mirror.get('af_independent_surface_instance'):
+        validate_mirror(source, mirror, intrinsic.inflated_vertices, root, muscle.id)
+        return mirror_domains(domains, source, mirror)
+    if own is None: raise ValueError('Independent mirrored muscle publication is pending.')
+    from ..muscle_stacking.publication import expected
+    from ..muscle_relationships.identity import namespace
+    _stamp, request, result = own; group = str(muscle.get('af_pair_group_id', '') or muscle.id)
+    validate_surface(mirror, expected(root, muscle.id, mirror, result.inflated_vertices, 'mirror'))
+    revision = sha256(repr(fingerprint(request)).encode()).hexdigest()
+    values = export(namespace(root) or identity(root), muscle.id, group, revision, request, result, settings.displacement)
+    return _mirror_constraints(root, scene, muscle, request, values)
+
+
+def _mirror_constraints(root, scene, muscle, request, domains):
+    from ..muscle_stacking.constraint_capture import apply
+    from ..visualization.geometry_instance import mirrored
+    from ..visualization.mirror_rules import effective_rule_for_muscle
+    rule = effective_rule_for_muscle(muscle, {f.id: f for f in root.af_vcp_system.fibers}, {s.id: s for s in root.af_scp_system.scps})
+    with mirrored(rule): values = apply(root, scene, muscle, request, domains)
+    return tuple(replace(d, key=replace(d.key, instance='mirror')) for d in values)
 
 
 def validate_mirror(source, mirror, vertices, root=None, muscle=None):
@@ -149,7 +181,7 @@ class DomainCaptureAdapter:
 
 
 def prune(root_id, live):
-    for cache in (_PUBLISHED, _FIELDS, _LAST_VALID):
+    for cache in (_PUBLISHED, _FIELDS, _LAST_VALID, _MIRROR_PUBLISHED):
         for key in tuple(cache):
             if key[0] == root_id and key not in live: cache.pop(key)
 

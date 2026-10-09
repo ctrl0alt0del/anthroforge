@@ -6,11 +6,13 @@ from .free_fibers import remap_state
 
 
 def capture_graph(root):
+    from .surface_attachments import capture
     system = root.af_vcp_system
     references = {f.id: [getattr(o, s) for o, s, _ in slots(f)] for f in system.fibers}
     surfaces = {s.id: dict(main=s.main_surface_id, branches=[_connection(c) for c in s.branches])
                 for s in system.fiber_surfaces if s.construction_mode == 'BRANCHED_LOFT'}
-    return dict(version=1, points=[scalar_dict(p) for p in system.authored_points], fibers=references, surfaces=surfaces)
+    return dict(version=2, points=[scalar_dict(p) for p in system.authored_points], fibers=references, surfaces=surfaces,
+                surface_attachments=capture(root))
 
 
 def _connection(connection):
@@ -36,6 +38,8 @@ def restore_graph(state):
 
 def _finish_graph(state, point_ids, temporary):
     from .free_correspondence import restore
+    from .surface_attachments import restore as restore_attachments
+    restore_attachments(state, state.snapshot.branching)
     remap_state(state, point_ids)
     restore(state)
     _discard_temporary(state.root, temporary)
@@ -54,6 +58,7 @@ def _discard_temporary(root, keys):
 
 
 def _restore_points(state, data):
+    from .surface_attachments import remap_point
     remap = getattr(state, 'scps', {})
     wanted = {key for f, refs in data['fibers'].items() if f in state.fibers for key in refs}
     mapping = {}
@@ -63,7 +68,7 @@ def _restore_points(state, data):
         point = state.root.af_vcp_system.authored_points.add()
         apply_scalar_dict(point, row)
         point.id = str(uuid4())
-        point.parent_id = remap.get(point.parent_id, point.parent_id)
+        remap_point(point, remap, state.muscles)
         mapping[row['id']] = point.id
     return mapping
 

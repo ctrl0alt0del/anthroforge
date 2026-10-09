@@ -98,7 +98,7 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
     def _draw_touch_points(self, layout, root, fiber):
         touch_box = layout.box()
         touch_box.label(text="Mid Touch Points")
-        touch_box.label(text="Select SCP, then add")
+        touch_box.label(text="Select a surface, then add")
         op = touch_box.operator("af.add_fiber_touch_point", icon="ADD")
         op.fiber_id = fiber.id
         for i, tp in enumerate(fiber.mid_touches):
@@ -212,6 +212,8 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
         layout.label(text=f"{fiber.id} ({suffix})", icon="CURVE_DATA")
 
     def _draw_mode_layout(self, layout, scene, root, fiber):
+        from .fiber_attachment import draw
+        draw(layout, root, fiber)
         layout.prop(fiber, 'behavior_mode')
         if fiber.behavior_mode == 'FREE': return _draw_free(layout, scene, root, fiber)
         if is_solved_loop(fiber):

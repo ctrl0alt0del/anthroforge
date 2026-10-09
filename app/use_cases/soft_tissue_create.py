@@ -32,7 +32,7 @@ def _preflight_creation(root, source, domain, target_obj, preset, source_type, s
     error = _preflight_source(root, source, domain, preset, source_type, source_id)
     if error:
         return target_ref(), error
-    target, error = _preflight_target(root, target_obj, preset)
+    target, error = _preflight_target(root, target_obj, preset, source_type)
     if error:
         return target, error
     return target, _preflight_mirror(root, source_type, source_id, target)
@@ -101,7 +101,8 @@ def _preflight_entity_source(root, source_type, source_id, domain, preset):
     return "" if preset == "CUSTOM" or domain == required else f"{preset} requires a {required.title()} base."
 
 
-def _preflight_target(root, obj, preset):
+def _preflight_target(root, obj, preset, source_type='OBJECT'):
+    if source_type != 'OBJECT': return target_ref(), ''
     if obj is None:
         required = preset in {"RIM", "LAYER", "POUCH"}
         return target_ref(), "This preset requires an SCP or Muscle surface target." if required else ""
@@ -146,6 +147,7 @@ def _assign_record_identity(tissue, tissues, source, owned, source_type, source_
     tissue.name, tissue.schema_version = tissue.id, 2
     tissue.evaluation_revision = 1
     tissue.base_source_type, tissue.base_source_id = str(source_type), str(source_id)
+    tissue.constraint_reference = 'TARGET' if source_type == 'OBJECT' else 'SOURCE'
     tissue.base_object_ref, tissue.base_owned = source, bool(owned)
     tissue.base_domain = str(domain or infer_base_domain(source))
 

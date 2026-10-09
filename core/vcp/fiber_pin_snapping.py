@@ -15,7 +15,7 @@ from .v2.scales import resolve_tolerances
 
 
 def snap_request(root, scene, runtime, radius):
-    sources = CollisionOracle(root, scene, runtime['depsgraph'], radius, .002).colliders()
+    sources = CollisionOracle(root, scene, runtime['depsgraph'], radius, .002, runtime.get('supports', ())).colliders()
     colliders = _capture_colliders(sources)
     tolerances = resolve_tolerances(colliders, radius, V2Quality.FINAL)
     return V2Request(1, str(scene.as_pointer()), str(root.as_pointer()), 'pin-snap',
@@ -26,6 +26,7 @@ def snap_request(root, scene, runtime, radius):
 def qualify_attachment(root, scene, owner, raw, runtime=None, radius=.002, offset=0., origin=None):
     started = perf_counter()
     runtime = runtime if runtime is not None else backend.attachment_runtime(scene)
+    runtime['supports'] = tuple(dict.fromkeys((*runtime.get('supports', ()), owner)))
     result = _qualify(root, scene, owner, raw, runtime, radius, offset, origin)
     result = replace(result, elapsed_ms=1000*(perf_counter()-started))
     runtime['pin_snap_last_result'] = result
@@ -33,18 +34,25 @@ def qualify_attachment(root, scene, owner, raw, runtime=None, radius=.002, offse
 
 
 def _qualify(root, scene, owner, raw, runtime, radius, offset, origin):
-    obj = backend._parent_mesh(root, scene, owner)
+    obj = backend._parent_mesh(root, scene, owner, runtime)
     if obj is None or binding_row(obj, raw, runtime, offset) is None:
         return FiberPinSnapResult(reason='SURFACE_PICK_FAILED')
     try:
         request = _request(root, scene, runtime, radius)
         identity = str(obj.get('af_scp_id', '') or owner)
-        result = FiberPinSnapSearch(request, obj, identity, raw, runtime, offset, _parts(runtime, request, identity), origin).run()
+        result = _qualified_search(request, obj, identity, raw, runtime, offset, origin)
     except (OSError, RuntimeError) as error:
         result = FiberPinSnapResult(reason='BACKEND_UNAVAILABLE: ' + str(error))
     except ValueError as error:
         result = FiberPinSnapResult(reason='INVALID_CONFIGURATION: ' + str(error))
     return result
+
+
+def _qualified_search(request, obj, identity, raw, runtime, offset, origin):
+    search = FiberPinSnapSearch(request, obj, identity, raw, runtime, offset, _parts(runtime, request, identity), origin)
+    if not obj.get('af_muscle_proxy'): return search.run()
+    if not search.valid(search.nearest): return FiberPinSnapResult(reason='Muscle anchor: ' + next(iter(search.memo.values()), 'no qualified local exit'))
+    return search.result(search.nearest, 'NEAREST')
 
 
 def _parts(runtime, request, owner):
@@ -55,7 +63,7 @@ def _parts(runtime, request, owner):
 
 
 def _request(root, scene, runtime, radius):
-    key = (root.as_pointer(), scene.as_pointer(), float(radius))
+    key = (root.as_pointer(), scene.as_pointer(), float(radius), runtime.get('supports', ()))
     requests = runtime.setdefault('pin_snap_requests', {})
     if key not in requests: requests[key] = snap_request(root, scene, runtime, radius)
     return requests[key]

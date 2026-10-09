@@ -396,7 +396,12 @@ def _on_fiber_behavior_update(self, context):
     property_mode_changed(self, context)
 
 
+class AF_FiberSupport_Property(bpy.types.PropertyGroup):
+    target_id: bpy.props.StringProperty(name="Surface reference")
+
+
 class AF_FiberVCP_Property(bpy.types.PropertyGroup):
+    attachment_supports: bpy.props.CollectionProperty(type=AF_FiberSupport_Property)
     behavior_mode: bpy.props.EnumProperty(name="Mode", default="CONTROLLED",
         items=(("CONTROLLED", "Controlled", "Solver-controlled path"), ("FREE", "Free", "Explicit sampled path; no solver")),
         update=_on_fiber_behavior_update)
@@ -536,6 +541,8 @@ class AF_SoftTissueAttachment_Property(bpy.types.PropertyGroup):
 
 
 class AF_SoftTissueVCP_Property(bpy.types.PropertyGroup):
+    constraint_reference: bpy.props.EnumProperty(name="Constraint reference", default='TARGET',
+        items=(('TARGET', 'External target', ''), ('SOURCE', 'Fiber-defined base', '')), update=_on_soft_tissue_prop_update)
     evaluation_revision: bpy.props.IntProperty(name="Evaluation revision", default=0, min=0)
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="Soft Tissue", update=_on_soft_tissue_prop_update)

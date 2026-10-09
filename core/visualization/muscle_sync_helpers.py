@@ -164,6 +164,8 @@ def _update_mesh_payload(obj, verts, faces):
     if obj.get("af_mesh_signature") == sig:
         perf_count(scene_for_id(obj), "mesh_rewrite_skipped")
         return
+    from .surface_publication import changed
+    changed(obj)
     if _same_topology(obj, mesh, verts, topo):
         _update_mesh_vertices(obj, mesh, coordinates, sig)
         return

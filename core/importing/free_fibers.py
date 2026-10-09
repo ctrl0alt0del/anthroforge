@@ -17,6 +17,8 @@ def transaction(root, scene, action):
 
 
 def validate_snapshot(snapshot, available):
+    from .surface_attachments import available_targets
+    available = available_targets(snapshot, available)
     graph = getattr(snapshot, 'branching', {})
     points = {p['id']: p for p in graph.get('points', ())}
     for fiber in snapshot.fibers:
@@ -35,12 +37,21 @@ def remap_fiber(root, scene, fiber, point_ids):
     from ..visualization import free_fiber_runtime as runtime
     if not free_path.is_free(fiber): return
     fiber.free_path_json = free_path.remap(fiber.free_path_json, point_ids, attachments=fiber.node_attachments_json)
+    from ..vcp.attachment_surface import muscle_backed
+    if muscle_backed(fiber): return _deferred_remap(fiber, runtime)
     payload, points = runtime.current(root, scene, fiber)
     inverse = root.matrix_world.inverted()
     for row, point in zip(payload['samples'], points): row['co'] = list(inverse @ Vector(point))
     payload['bindings'] = runtime.bindings(fiber)
     fiber.free_path_json = free_path.encode(payload)
     fiber['af_free_committed_mode'] = 'FREE'
+
+
+def _deferred_remap(fiber, runtime):
+    payload = free_path.decode(fiber.free_path_json)
+    payload['bindings'] = runtime.bindings(fiber)
+    payload['attachment_digest'] = free_path.pair_digest(payload, fiber.node_attachments_json)
+    fiber.free_path_json = free_path.encode(payload); fiber['af_free_committed_mode'] = 'FREE'
 
 
 def remap_state(state, point_ids):
@@ -52,5 +63,14 @@ def atomic_import(root, scene, snapshot, available, action):
     from .free_correspondence import validate
     validate(snapshot)
     validate_snapshot(snapshot, available)
-    if not getattr(snapshot, 'relationships', None) and not any(f.props.get('behavior_mode') == 'FREE' for f in snapshot.fibers): return action()
-    return transaction(root, scene, action)
+    from .surface_attachments import validate as validate_surfaces
+    muscles = validate_surfaces(snapshot)
+    if not muscles and not getattr(snapshot, 'relationships', None) and not any(f.props.get('behavior_mode') == 'FREE' for f in snapshot.fibers): return action()
+    return transaction(root, scene, lambda: _validated_import(root, action))
+
+
+def _validated_import(root, action):
+    result = action()
+    from ..deps.surface_dependencies import require_acyclic
+    require_acyclic(root)
+    return result
