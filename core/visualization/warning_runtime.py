@@ -15,7 +15,9 @@ class InvalidAnchorProvider:
     name = "fiber_hard_anchor.v1"
 
     def check_all(self, context):
-        session.COORDINATOR.cancel_all()
+        for key in tuple(session.COORDINATOR.jobs):
+            if isinstance(key, tuple) and len(key) == 6:
+                session.COORDINATOR.cancel(key)
         _TARGETS.clear()
         invalidate()
         session.REPOSITORY.discovery = "PENDING"
@@ -128,7 +130,8 @@ def tick():
     if not _ENABLED:
         return None
     active = session.COORDINATOR.tick()
-    return 0.016 if pipeline.reap() or active else None
+    solving = session.SYSTEM.resolution.tick()
+    return 0.016 if pipeline.reap() or active or solving else None
 
 
 @persistent
@@ -155,6 +158,8 @@ def handlers():
 def register():
     global _ENABLED
     _ENABLED = True
+    from ...adapters.issue_registration import register as register_domains
+    register_domains()
     if "fiber_hard_anchor.v1" not in session.COORDINATOR.factories:
         session.COORDINATOR.register(InvalidAnchorProvider())
     for name, callback in handlers():
@@ -174,3 +179,5 @@ def unregister():
         if callback in group:
             group.remove(callback)
     session.COORDINATOR.factories.clear()
+    from ...adapters.issue_registration import unregister as unregister_domains
+    unregister_domains()

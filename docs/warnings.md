@@ -128,3 +128,34 @@ time and must not be added as an independent user-visible delay.
 
 Blender references: [Application handlers](https://docs.blender.org/api/current/bpy.app.handlers.html),
 [Python threading limitations](https://docs.blender.org/api/main/info_gotchas_threading.html).
+
+## Generic issue system
+
+`core.issues` contains the generic repository, reporting facade, registered listener
+scheduler, presentation projection, and explicit solver registry. Domain adapters
+live outside it. `core.warnings` remains a compatibility port for existing fiber
+callers and authoring `warnings.list`; it shares the same repository, not a second
+copy. Public module registration/reporting is available through `core.issues.api`.
+
+Use `system().reporting.begin_check(target.scope, producer)` and
+`complete_check(ticket, issues)` to reconcile a producer's entire checked scope.
+Failure/cancellation retains previous evidence as stale. Generation tickets and the
+session epoch reject old results. `report(issue)` adds a direct finding without
+running a detector. Issue identity includes target incarnation, producer, stage,
+artifact revision, code and producer-local key. Completing one producer never
+removes another producer's findings.
+
+Register listeners with `register_listener`, solvers with `register_solver`, and
+selection adapters with `register_target`. Listener jobs use provider-scoped keys
+and the existing debounced main-thread scheduler. Solvers provide applicability,
+invocation and optional polling/cancellation. Reporting, queries and drawing never
+invoke a solver. The first solver is the existing **Repair Fibers (whole root)**
+command, including its existing risky-change confirmation. Fix completion requests
+a fresh detector check; dismissal only hides a row for its current artifact revision.
+
+The warnings panel filters cached records and shows producer, stage, freshness and
+evidence. Select, Recheck, Dismiss and applicable Fix actions use the generic ports.
+Domain target adapters own selection; the framework contains no concrete geometry checks.
+
+Tests: `test_issue_system`, existing warning repository/scheduling/native tests,
+and Blender warning-system integration tests.

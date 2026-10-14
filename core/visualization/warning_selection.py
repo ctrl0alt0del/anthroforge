@@ -32,7 +32,7 @@ def resolve_entity(root, ref):
 
 
 def fresh(warning, scene, root, entity):
-    state = session.REPOSITORY.states.get(warning.entity.scope, {})
+    state = session.REPOSITORY.provider_states.get((warning.entity.scope, warning.provider), {})
     if entity is None or state.get("status") != "COMPLETE":
         return False
     ref = session.entity_reference(scene, root, entity, warning.entity.kind)

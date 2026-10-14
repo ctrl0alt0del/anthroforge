@@ -10,7 +10,7 @@ class WarningQuery:
         total, rows = repository.query(filters, params.get("offset", 0), params.get("limit", 100))
         states = [dict(scope=scope, **value) for scope, value in repository.states.items() if scope_matches(scope, filters)]
         payload = dict(epoch=session.EPOCH, repository_revision=repository.revision, scope=filters,
-                       total=total, records=[row.serialize(repository.states[row.entity.scope]["status"], repository.revision) for row in rows])
+                       total=total, records=[row.serialize(repository.provider_states.get((row.entity.scope, row.provider), {}).get("status", "UNSCANNED"), repository.revision) for row in rows])
         payload.update(repository.status(filters), source_scene_revision="unavailable", source_generations=states,
                        check_token=f"{session.EPOCH}:{repository.revision}", telemetry=dict(session.COORDINATOR.metrics))
         return payload

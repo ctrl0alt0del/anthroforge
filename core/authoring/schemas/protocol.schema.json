@@ -2,7 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:anthroforge:authoring-protocol:0.2.0",
   "oneOf": [
-    {"$ref": "#/$defs/warning_request"},
+    {
+      "$ref": "#/$defs/warning_request"
+    },
     {
       "$ref": "#/$defs/request"
     },
@@ -73,6 +75,15 @@
               "type": "string"
             },
             "authoring_id": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "stage": {
+              "type": "string"
+            },
+            "severity": {
               "type": "string"
             }
           },
@@ -396,7 +407,7 @@
       "additionalProperties": false
     },
     "length": {
-  "oneOf": [
+      "oneOf": [
         {
           "type": "object",
           "properties": {
@@ -2824,7 +2835,9 @@
         "job": {
           "$ref": "#/$defs/job"
         },
-        "warnings": {"$ref": "#/$defs/warning_state"},
+        "warnings": {
+          "$ref": "#/$defs/warning_state"
+        },
         "cost": {
           "type": "object",
           "propertyNames": {

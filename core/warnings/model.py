@@ -1,33 +1,6 @@
-"""Blender-independent, serializable warning contracts."""
+"""Compatibility contracts for the attachment warning subsystem."""
 from dataclasses import asdict, dataclass
-from hashlib import sha256
-from json import dumps
-
-
-@dataclass(frozen=True)
-class EntityReference:
-    epoch: str
-    scene: str
-    root: str
-    kind: str
-    native_id: str
-    incarnation: int
-    label: str = ""
-    scene_label: str = ""
-    root_label: str = ""
-    authoring_id: str = ""
-
-    @property
-    def scope(self):
-        return self.epoch, self.scene, self.root, self.kind, self.native_id, self.incarnation
-
-
-@dataclass(frozen=True)
-class PinReference:
-    role: str
-    index: int
-    attachment_revision: int
-    fingerprint: str
+from ..issues.model import EntityReference, PinReference, fingerprint
 
 
 @dataclass(frozen=True)
@@ -57,7 +30,3 @@ class Warning:
         value.update(id=self.id, evidence=dict(self.evidence), check_state=state,
                      freshness="current" if state == "COMPLETE" else "stale", repository_revision=revision)
         return value
-
-
-def fingerprint(value):
-    return sha256(dumps(value, sort_keys=True, default=str).encode()).hexdigest()

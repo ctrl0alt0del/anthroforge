@@ -7,6 +7,10 @@ from .coordinator import Coordinator
 
 REPOSITORY = WarningRepository()
 COORDINATOR = Coordinator(REPOSITORY)
+from ..issues.system import IssueSystem
+SYSTEM = IssueSystem(REPOSITORY, COORDINATOR)
+from ..issues.api import configure
+configure(SYSTEM)
 EPOCH = uuid4().hex
 _LEDGER, _SERIAL = {}, 0
 
@@ -71,6 +75,7 @@ def retire(root=None, entity_ids=None):
 def reset(state="UNSCANNED"):
     global EPOCH
     COORDINATOR.cancel_all()
+    SYSTEM.reset()
     EPOCH = uuid4().hex
     _LEDGER.clear(); REPOSITORY.clear(state)
 

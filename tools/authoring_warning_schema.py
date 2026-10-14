@@ -5,7 +5,7 @@ I = dict(type="integer", minimum=0)
 
 def warning_request(version):
     params = dict(scene_id=dict(S, minLength=1), offset=I, limit=dict(I, maximum=200))
-    params.update({name: S for name in ("scene", "root", "entity", "kind", "code", "type", "authoring_id")})
+    params.update({name: S for name in ("scene", "root", "entity", "kind", "code", "type", "authoring_id", "provider", "stage", "severity")})
     fields = dict(dsl=dict(enum=["anthroforge.authoring.protocol"]), version=dict(enum=[version]),
                   message_type=dict(enum=["request"]), request_id=dict(S, minLength=1), op=dict(enum=["warnings.list"]))
     fields["params"] = dict(type="object", properties=params, required=["scene_id"], additionalProperties=False)

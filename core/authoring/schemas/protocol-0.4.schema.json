@@ -4490,6 +4490,15 @@
             },
             "authoring_id": {
               "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "stage": {
+              "type": "string"
+            },
+            "severity": {
+              "type": "string"
             }
           },
           "required": [

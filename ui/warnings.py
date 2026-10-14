@@ -2,7 +2,8 @@
 import bpy
 from time import perf_counter
 from bpy.app.handlers import persistent
-from ..core.warnings.session import REPOSITORY
+from ..core.warnings.session import REPOSITORY, SYSTEM
+from .issue_actions import AF_OT_IssueAction, draw as draw_details
 from ..core.warnings.repository import sort_key
 
 _UNSUBSCRIBE = None
@@ -20,8 +21,7 @@ def request_refresh(repository=None):
 def select_index(manager, context):
     if _PROJECTING or not (0 <= manager.af_warning_index < len(manager.af_warning_rows)):
         return
-    from ..core.visualization.warning_selection import select_warning
-    select_warning(context, manager.af_warning_rows[manager.af_warning_index].token)
+    SYSTEM.presentation.select(manager.af_warning_rows[manager.af_warning_index].token, context)
 
 
 class AF_WarningRow(bpy.types.PropertyGroup):
@@ -34,8 +34,7 @@ class AF_OT_SelectWarning(bpy.types.Operator):
     token: bpy.props.StringProperty(options={"SKIP_SAVE"})
 
     def execute(self, context):
-        from ..core.visualization.warning_selection import select_warning
-        if not select_warning(context, self.token):
+        if not SYSTEM.presentation.select(self.token, context):
             self.report({"WARNING"}, "Warning target is stale or unavailable; checking again.")
             return {"CANCELLED"}
         return {"FINISHED"}
@@ -61,8 +60,9 @@ def draw(layout, context):
     if not status["complete"]:
         box.label(text=status_label(status), icon="TIME" if not status["counts"]["FAILED"] else "ERROR")
     if manager.af_warnings_expanded:
-        box.label(text="All loaded scenes and AnthroForge roots")
+        box.prop(manager, "af_issue_filter", text="Filter")
         box.template_list("AF_UL_Warnings", "", manager, "af_warning_rows", manager, "af_warning_index", rows=5)
+        draw_details(box, context)
 
 
 def status_label(status):
@@ -103,12 +103,15 @@ def _refresh_when_ready():
 
 
 def _project_rows():
-    tokens = tuple(warning.id for warning in sorted(REPOSITORY.records.values(), key=sort_key))
+    rows = sorted(REPOSITORY.records.values(), key=sort_key)
+    tokens = tuple(row.id for row in rows if row.id not in SYSTEM.presentation.dismissed)
     for manager in bpy.data.window_managers:
         _project_manager(manager, tokens)
 
 
 def _project_manager(manager, tokens):
+    text = manager.af_issue_filter.casefold()
+    tokens = tuple(t for t in tokens if text in str(SYSTEM.presentation.serialize(REPOSITORY.records[t])).casefold())
     current = tuple(row.token for row in manager.af_warning_rows)
     if current == tokens: return
     selected = current[manager.af_warning_index] if 0 <= manager.af_warning_index < len(current) else None
@@ -150,11 +153,12 @@ def register():
     global _UNSUBSCRIBE
     if _UNSUBSCRIBE is not None:
         return refresh()
-    for cls in (AF_WarningRow, AF_OT_SelectWarning, AF_UL_Warnings):
+    for cls in (AF_WarningRow, AF_OT_SelectWarning, AF_UL_Warnings, AF_OT_IssueAction):
         bpy.utils.register_class(cls)
     wm = bpy.types.WindowManager
     wm.af_warning_rows = bpy.props.CollectionProperty(type=AF_WarningRow, options={"SKIP_SAVE"})
     wm.af_warning_index = bpy.props.IntProperty(default=-1, update=select_index, options={"SKIP_SAVE"})
+    wm.af_issue_filter = bpy.props.StringProperty(options={"SKIP_SAVE"}, update=filter_changed)
     wm.af_warnings_expanded = bpy.props.BoolProperty(default=False, options={"SKIP_SAVE"})
     _UNSUBSCRIBE = REPOSITORY.subscribe(request_refresh)
     for name, callback in projection_handlers():
@@ -172,8 +176,12 @@ def unregister():
         group = getattr(bpy.app.handlers, name)
         if callback in group:
             group.remove(callback)
-    for name in ("af_warning_rows", "af_warning_index", "af_warnings_expanded"):
+    for name in ("af_warning_rows", "af_warning_index", "af_warnings_expanded", "af_issue_filter"):
         if hasattr(bpy.types.WindowManager, name):
             delattr(bpy.types.WindowManager, name)
-    for cls in (AF_UL_Warnings, AF_OT_SelectWarning, AF_WarningRow):
+    for cls in (AF_OT_IssueAction, AF_UL_Warnings, AF_OT_SelectWarning, AF_WarningRow):
         bpy.utils.unregister_class(cls)
+
+
+def filter_changed(_manager, _context):
+    refresh()

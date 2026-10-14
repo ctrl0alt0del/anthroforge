@@ -42,7 +42,7 @@ def related_entities(scene, root, value):
 
 def current(scene, root, fiber):
     ref, attachment = identity(scene, root, fiber)
-    state = REPOSITORY.states.get(ref.scope, {})
+    state = REPOSITORY.provider_states.get((ref.scope, PROVIDER), {})
     metadata = REPOSITORY.metadata.get((ref.scope, PROVIDER))
     valid = state.get("status") == "COMPLETE" and metadata is not None and metadata[-2:] == attachment
     return result_for_scope(ref.scope) if valid else None
@@ -65,4 +65,6 @@ def result_for_scope(scope):
 def invalidate(scene=None, root=None, entity_ids=None):
     with REPOSITORY.batch():
         for scope in scopes_for(scene, root, entity_ids):
+            if (scope, PROVIDER) not in REPOSITORY.provider_states:
+                continue
             REPOSITORY.state(scope, "PENDING", REPOSITORY.states[scope]["generation"] + 1)
