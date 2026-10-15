@@ -10,11 +10,17 @@ except ImportError:
 
 
 def replace_draft_skin(scene, root, result, source_map):
+    _validate_publication(result)
     previous = _previous_skin(scene, root)
     mesh = _build_mesh(result)
     if previous is not None:
         return _replace_mesh(scene, root, result, source_map, previous, mesh)
     return _create_object(scene, root, result, source_map, mesh)
+
+
+def _validate_publication(result):
+    from ..mesh_issues import require_mesh
+    require_mesh(result.vertices, result.triangles, 3)
 
 
 def _create_object(scene, root, result, source_map, mesh):
@@ -37,6 +43,8 @@ def _replace_mesh(scene, root, result, source_map, obj, mesh):
         obj.data = previous
         bpy.data.meshes.remove(mesh)
         raise
+    from ..mesh_issues import retain_reference
+    retain_reference(scene, root, previous)
     if previous is not None and not previous.users:
         bpy.data.meshes.remove(previous)
     return obj
@@ -46,15 +54,30 @@ def _finish_object(scene, root, result, source_map, obj):
     _tag_object(obj, root, result, source_map)
     obj.name = obj.data.name = "AF_DRAFT_SKIN"
     _select_only(scene, obj)
+    from ..mesh_issues import publish
+    publish(obj, scene, root)
 
 
 def _build_mesh(result):
     mesh = bpy.data.meshes.new("AF_DRAFT_SKIN_NEW")
-    mesh.from_pydata(result.vertices.tolist(), [], result.triangles.tolist())
-    mesh.update(calc_edges=True)
-    _write_collagen(mesh, result.collagen)
-    _write_bindings(mesh, result.binding)
+    try:
+        _fill_geometry(mesh, result)
+        mesh.update(calc_edges=True)
+        _write_collagen(mesh, result.collagen)
+        _write_bindings(mesh, result.binding)
+    except Exception:
+        bpy.data.meshes.remove(mesh)
+        raise
     return mesh
+
+
+def _fill_geometry(mesh, result):
+    vertices, faces = result.vertices, result.triangles
+    mesh.vertices.add(len(vertices)); mesh.vertices.foreach_set('co', np.asarray(vertices, np.float32).ravel())
+    mesh.loops.add(faces.size); mesh.loops.foreach_set('vertex_index', np.asarray(faces, np.int32).ravel())
+    mesh.polygons.add(len(faces))
+    mesh.polygons.foreach_set('loop_start', np.arange(len(faces), dtype=np.int32)*3)
+    mesh.polygons.foreach_set('loop_total', np.full(len(faces), 3, dtype=np.int32))
 
 
 def _write_collagen(mesh, values):
@@ -96,6 +119,8 @@ def _output_collection(scene):
 
 
 def _tag_object(obj, root, result, source_map):
+    from ..mesh_issues import persist
+    persist(obj, result, "skin")
     obj["af_draft_skin"] = True
     obj["af_root_name"] = root.name
     obj["af_skin_input_hash"] = str(result.statistics.get("input_hash", ""))

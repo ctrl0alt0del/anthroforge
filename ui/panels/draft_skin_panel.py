@@ -2,6 +2,7 @@ import bpy
 
 from ...app.queries.draft_skin import draft_skin_panel_state
 from ...app.queries.root import root_for_context
+from .skin_gap import draw_model
 
 
 class AF_PT_DraftSkinPanel(bpy.types.Panel):
@@ -19,6 +20,7 @@ class AF_PT_DraftSkinPanel(bpy.types.Panel):
     def draw(self, context):
         state = draft_skin_panel_state(context)
         _draw_settings(self.layout, root_for_context(context), state.running)
+        draw_model(self.layout, context, state.running)
         if state.running:
             _draw_running(self.layout, context.scene, state)
         else:

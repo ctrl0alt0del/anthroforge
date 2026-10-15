@@ -73,6 +73,79 @@ def worker_spec(folder):
 
 
 class DraftSkinIntegrationTests(BlenderTestCase):
+    def test_gap_override_survives_native_duplication(self):
+        from core.scp_runtime.copy import copy_scp_subtree
+        owner = root(); scp = scp_with_object(owner, "Bone", mesh_object("Bone"))
+        scp.skin_gap_mode = "OVERRIDE"; scp.skin_gap_limit_percent = .25; scp.skin_gap_strength_percent = 50
+        copied_id = copy_scp_subtree(owner, bpy.context.scene, scp.id)
+        copied = next(item for item in owner.af_scp_system.scps if item.id == copied_id)
+        self.assertEqual((copied.skin_gap_mode, copied.skin_gap_limit_percent, copied.skin_gap_strength_percent),
+                         ("OVERRIDE", .25, 50))
+
+    def test_gap_controls_undo_together_with_native_records(self):
+        owner = root(); scp = scp_with_object(owner, "Bone", mesh_object("Bone")); identity = scp.id
+        scp.skin_gap_mode = "OVERRIDE"; scp.skin_gap_limit_percent = .25
+        owner.af_draft_skin_settings.gap_strength_percent = 25
+        bpy.ops.ed.undo_push(message="Gap policy first")
+        scp.skin_gap_limit_percent = 1; owner.af_draft_skin_settings.gap_strength_percent = 100
+        bpy.ops.ed.undo_push(message="Gap policy second"); bpy.ops.ed.undo()
+        owner = root(); restored = next(item for item in owner.af_scp_system.scps if item.id == identity)
+        self.assertEqual((restored.skin_gap_limit_percent, owner.af_draft_skin_settings.gap_strength_percent), (.25, 25))
+
+    def test_consumed_fiber_uses_final_muscle_gap_policy(self):
+        owner = root(); scp_with_object(owner, "Bone", mesh_object("Bone"))
+        muscle = vcp_record(owner.af_vcp_system.muscles, "M1")
+        fiber = vcp_record(owner.af_vcp_system.fibers, "F1", "M1")
+        muscle.skin_gap_mode = fiber.skin_gap_mode = "OVERRIDE"
+        muscle.skin_gap_limit_percent = .25; fiber.skin_gap_limit_percent = 0
+        tag(mesh_object("Infl"), owner, af_muscle_proxy=True, af_muscle_id="M1", af_muscle_surface="INFL")
+        tag(mesh_object("Consumed"), owner, af_fiber_proxy=True, af_fiber_id="F1")
+        capture = capture_skin(owner, bpy.context.scene, bpy.context.evaluated_depsgraph_get())
+        self.assertFalse(any(item.entity_type == "FIBER" for item in capture.sources))
+        self.assertEqual(next(item.gap_limit_ratio for item in capture.sources if item.entity_type == "MUSCLE"), .0025)
+
+    def test_gap_overrides_and_mirrors_are_captured(self):
+        root_obj = root()
+        scp = scp_with_object(root_obj, "Bone", mesh_object("Bone"))
+        mirror_scp(root_obj, scp)
+        root_obj.af_draft_skin_settings.gap_limit_percent = 0.8
+        inherited = capture_skin(root_obj, bpy.context.scene, bpy.context.evaluated_depsgraph_get())
+        self.assertTrue(all(abs(source.gap_limit_ratio-0.008) < 1e-9 for source in inherited.sources))
+        scp.skin_gap_mode = "OVERRIDE"
+        scp.skin_gap_limit_percent = 0.2; scp.skin_gap_strength_percent = 25
+        overridden = capture_skin(root_obj, bpy.context.scene, bpy.context.evaluated_depsgraph_get())
+        self.assertTrue(all(abs(source.gap_limit_ratio-0.002) < 1e-9 for source in overridden.sources))
+        self.assertTrue(all(source.gap_strength == 0.25 for source in overridden.sources))
+        self.assertNotEqual(inherited.input_hash, overridden.input_hash)
+
+    def test_native_records_export_gap_scalars(self):
+        from anthroforge.core.importing.rna import scalar_dict, apply_scalar_dict
+        root_obj = root()
+        records = [root_obj.af_scp_system.scps.add()]
+        records += [getattr(root_obj.af_vcp_system, name).add() for name in ("muscles", "fibers", "blobs", "soft_tissues")]
+        for record in records:
+            record.skin_gap_mode = "OVERRIDE"; record.skin_gap_limit_percent = 0.3
+            record.skin_gap_strength_percent = 50
+            payload = scalar_dict(record)
+            record.skin_gap_limit_percent = 1
+            apply_scalar_dict(record, payload)
+            self.assertAlmostEqual(record.skin_gap_limit_percent, 0.3)
+            self.assertEqual(record.skin_gap_strength_percent, 50)
+
+    def test_gap_settings_survive_saved_file(self):
+        root_obj = root(); name = root_obj.name
+        scp = scp_with_object(root_obj, "Bone", mesh_object("Bone"))
+        scp.skin_gap_mode = "OVERRIDE"; scp.skin_gap_limit_percent = 0.2
+        root_obj.af_draft_skin_settings.gap_strength_percent = 75
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "gap_settings.blend")
+            bpy.ops.wm.save_as_mainfile(filepath=path)
+            bpy.ops.wm.open_mainfile(filepath=path)
+            restored = bpy.data.objects[name]
+            self.assertEqual(restored.af_draft_skin_settings.gap_strength_percent, 75)
+            self.assertAlmostEqual(restored.af_scp_system.scps[0].skin_gap_limit_percent, 0.2)
+            self.assertEqual(restored.af_scp_system.scps[0].skin_gap_mode, "OVERRIDE")
+
     def test_scp_collagen_properties_and_capture(self):
         root_obj = root()
         obj = mesh_object("Ear")
@@ -144,8 +217,7 @@ class DraftSkinIntegrationTests(BlenderTestCase):
         self.assertIsNotNone(new.data.attributes.get("af_skin_collagen"))
 
     def test_capture_filters_final_contributors_and_hidden_objects(self):
-        root_obj = root()
-        scp = scp_with_object(root_obj, "Skull", mesh_object("Skull"))
+        root_obj = root(); scp = scp_with_object(root_obj, "Skull", mesh_object("Skull"))
         vcp_record(root_obj.af_vcp_system.muscles, "M1")
         vcp_record(root_obj.af_vcp_system.fibers, "F1", "M1")
         vcp_record(root_obj.af_vcp_system.fibers, "F2")
@@ -162,8 +234,7 @@ class DraftSkinIntegrationTests(BlenderTestCase):
         self.assertEqual(sum(item.entity_type == "SCP" for item in capture.sources), 2)
 
     def test_painted_values_transfer_to_mirror_and_mismatch_warns(self):
-        root_obj = root()
-        source = mesh_object("Nose")
+        root_obj = root(); source = mesh_object("Nose")
         scp = scp_with_object(root_obj, "Nose", source)
         scp.skin_collagen_mode, scp.skin_collagen = "PAINTED", 0.6
         group = source.vertex_groups.new(name="AF_SKIN_COLLAGEN")
@@ -189,6 +260,16 @@ class DraftSkinIntegrationTests(BlenderTestCase):
                 replace_draft_skin(bpy.context.scene, root_obj, result, [])
         skins = [obj for obj in bpy.context.scene.objects if obj.get("af_draft_skin")]
         self.assertEqual((len(skins), skins[0].as_pointer()), (1, previous.as_pointer()))
+
+    def test_gap_validation_failure_preserves_previous_skin(self):
+        root_obj = root(); vertices, faces = cube_arrays()
+        result = SkinResult(vertices, faces, np.ones(8), {}, validate_mesh(vertices, faces))
+        previous = replace_draft_skin(bpy.context.scene, root_obj, result, [])
+        mesh_pointer = previous.data.as_pointer()
+        result.statistics['protected_gap_violations'] = 1
+        with self.assertRaisesRegex(ValueError, 'protected_gap_violations'):
+            replace_draft_skin(bpy.context.scene, root_obj, result, [])
+        self.assertEqual(previous.data.as_pointer(), mesh_pointer)
 
     def test_undo_restores_previous_result(self):
         root_obj = root()

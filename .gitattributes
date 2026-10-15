@@ -1,2 +1,4 @@
 # Preserve byte-identical upstream sources and their recorded dependency hashes.
 native/smoothing/vendor/** -text -whitespace
+native/deformation/vendor/** -text -whitespace
+vendor/deformation/** -text -whitespace

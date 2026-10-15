@@ -442,6 +442,10 @@ def _register_runtime_hooks():
 def _register_pairs():
     from .ui import muscle_pairs
     muscle_pairs.register()
+    from .operators import deformation
+    deformation.register()
+    from .adapters.deformation import runtime
+    runtime.register()
 
 
 def _register_warnings():
@@ -494,6 +498,10 @@ def _unregister_fiber_attachment_runtime():
 
 
 def _shutdown_background_jobs():
+    from .adapters.deformation import runtime
+    runtime.shutdown()
+    from .operators import deformation
+    deformation.unregister()
     from .ui import muscle_pairs
     muscle_pairs.unregister()
     from .adapters.draft_skin.jobs import shutdown_jobs

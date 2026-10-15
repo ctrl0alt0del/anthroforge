@@ -29,6 +29,14 @@ def direction(value):
     return Vector(value) if rule is None else mirror_matrix(*rule).to_3x3() @ Vector(value)
 
 
+def domain(plane):
+    if plane is None or not active(): return plane
+    from mathutils import Vector
+    normal = direction(plane['normal'])
+    origin = Vector(point(Vector(plane['normal']) * plane['offset']))
+    return dict(plane, normal=tuple(normal), offset=float(origin.dot(normal)))
+
+
 def row(root, scene, fiber, original):
     if not active(): return original
     from .fiber_instance_runtime import actual_rows

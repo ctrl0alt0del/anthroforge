@@ -5,6 +5,7 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -14,16 +15,18 @@ from build_draft_skin_vendor import ROOT, VENDOR, build_bundle
 
 PACKAGE_DIRS = {"adapters", "app", "core", "native", "operators",
                 "properties", "ui", "vendor", "workers"}
-REQUIRED_NATIVE = ("af_fiber_ccd_v3_33.dll", "libomp.dll")
+REQUIRED_NATIVE = ("af_fiber_ccd_v3_57.dll", "libomp.dll")
 
 
 def tracked_package_files(source):
-    raw = subprocess.check_output(["git", "-C", str(source), "ls-files", "-z"])
+    raw = subprocess.check_output(["git", "-C", str(source), "ls-files", "--cached", "--others", "--exclude-standard", "-z"])
     names = [Path(x.decode()) for x in raw.split(b"\0") if x]
     return [p for p in names if production_file(p)]
 
 
 def production_file(path):
+    if path.suffix in {'.obj', '.exp', '.pdb', '.ilk', '.pyc'} or '__pycache__' in path.parts:
+        return False
     if path.parts[:2] == ('native', 'fiber_ccd') and path.suffix == '.dll':
         return path.name in REQUIRED_NATIVE
     return path.as_posix() == '__init__.py' or (path.parts[0] in PACKAGE_DIRS and
@@ -43,16 +46,28 @@ def stage_files(source, target):
 def native_inventory(stage):
     paths = [stage / "native" / "fiber_ccd" / name for name in REQUIRED_NATIVE]
     paths.append(stage / 'native/smoothing/af_height_smoothing_v1.dll')
+    paths.append(stage / 'native/deformation/af_deformation_v1.dll')
     if any(not path.is_file() for path in paths):
         raise ValueError("Package lacks required production native DLLs")
     verify_pair_abi(stage)
     verify_auxiliary_abi(stage)
+    verify_deformation_abi(stage)
     return {path.name: {"size": path.stat().st_size,
                         "sha256": hashlib.sha256(path.read_bytes()).hexdigest()} for path in paths}
 
 
+def verify_deformation_abi(stage):
+    path = stage / 'native/deformation/af_deformation_v1.dll'
+    script = 'import ctypes,sys; lib=ctypes.CDLL(sys.argv[1]); assert lib.af_ad_version()==1'
+    subprocess.run([sys.executable, '-c', script, str(path)], check=True, timeout=30)
+    folder = stage / 'vendor/deformation'
+    manifest = json.loads((folder/'manifest.json').read_text())
+    for name, digest in manifest['files'].items():
+        if hashlib.sha256((folder/name).read_bytes()).hexdigest() != digest:
+            raise ValueError('Deformation dependency bundle is incomplete or corrupt: '+name)
+
+
 def verify_pair_abi(stage):
-    import sys
     directory = stage / 'native/fiber_ccd'
     script = ('import ctypes, os, sys\n'
         'with os.add_dll_directory(sys.argv[1]):\n'
@@ -70,13 +85,17 @@ def verify_pair_abi(stage):
 
 
 def verify_auxiliary_abi(stage):
-    import sys
     fiber = stage / 'native/fiber_ccd' / REQUIRED_NATIVE[0]
     height = stage / 'native/smoothing/af_height_smoothing_v1.dll'
     script = ('import ctypes, os, sys\n'
         'with os.add_dll_directory(os.path.dirname(sys.argv[1])):\n'
         ' fiber = ctypes.CDLL(sys.argv[1]); height = ctypes.CDLL(sys.argv[2])\n'
         ' assert fiber.af_warning_async_version() == 1, "Missing warning worker ABI"\n'
+        ' assert fiber.af_skin_gap_version() == 3, "Missing draft-skin gap ABI"\n'
+        ' assert fiber.af_skin_tiles_memory_version() == 1, "Missing compact skin field ABI"\n'
+        ' assert fiber.af_mesh_diagnostics_version() == 1, "Missing mesh diagnostics ABI"\n'
+        ' assert fiber.af_skin_gap_validation_version() == 2, "Missing contact-permitted gap validation ABI"\n'
+        ' for name in ("af_skin_tiles_create", "af_skin_tiles_copy_range", "af_skin_tiles_validate", "af_skin_gap_precision_field", "af_skin_bind", "af_skin_source_intersections"): getattr(fiber, name)\n'
         ' assert height.af_height_version() == 1, "Missing height smoothing ABI"\n'
         ' getattr(height, "af_height_smooth")\n')
     subprocess.run([sys.executable, '-c', script, str(fiber), str(height)], check=True)

@@ -74,14 +74,82 @@ The final implicit field is
 
 `required + collagen * (full_rest - required)`.
 
-Lewiner marching cubes extracts the zero surface. The largest connected shell
-is retained, oriented outward, and receives eight `0.45/-0.47` Taubin passes.
+The native local-gap stage evaluates the protected field on a shared fine
+lattice. Lewiner marching cubes extracts its zero surface. Source-supported
+components are retained, oriented outward, and receive eight constrained
+`0.45/-0.47` smoothing passes. Source coverage and protected gaps are validated
+before publication.
 Collagen is sampled back onto the output's point-domain
 `af_skin_collagen` attribute.
 
+### Contact-permitted gap validation
+
+Native build `af_fiber_ccd_v3_55.dll` provides gap-validation capability v2.
+Both protected separator and exterior-corridor samples may lie on the skin
+surface or arbitrarily close to it from outside. The previous final-validation
+requirements of `1.5h` and `1.75h` empty radius have been removed. A sample
+strictly inside solid skin still fails, as do exposed source vertices and
+source-skin crossings. Minimum clearance remains a diagnostic statistic;
+zero is allowed. Boundary classification uses only a floating-point tolerance
+derived from coordinate precision, not a voxel-based minimum gap width.
+
+Generation and geometry-only warm revalidation use the same native predicate.
+Results record `gap_validation_policy=contact-permitted-v2`; solver version
+`native-local-gaps-5` and gap-signature version 2 invalidate older cached skin
+when generation/update is requested. Opening a file does not regenerate it.
+Old native libraries are rejected before work, preserving previous output.
+
+This changes validation only. Field construction still carves finite corridors
+and reserves fine samples around protected gaps. The validator samples those
+original constraints; it is not a continuous collision detector or a proof of
+separate-sheet identity at arbitrary contact. In particular, the existing
+watertightness/orientation checks do not prove absence of self-intersections.
+The regression suite tests exact contact between distinct closed components,
+sub-voxel openings, solid bridges, scaling, translation, warm revalidation,
+cache invalidation, and native capability rejection.
+
+### Native field memory
+
+Native build `af_fiber_ccd_v3_54.dll` provides compact-field capability v1.
+Uniform 32-cubed tiles retain one exact value; varying tiles allocate float
+arrays on demand. X/Y sphere-distance propagation runs in independent Z slabs.
+Only intermediate columns that can influence the final target domain survive
+into the Z pass. Propagation-only tiles outside the coarse envelope are
+released before final classification, and uniform finished tiles are compacted.
+Read-only output-validation BVHs omit the duplicate face-index bounds table
+used for refitting mutable snapshots; source and runtime snapshots retain it.
+Positive intermediate distances must remain exact: the exterior-corridor tests
+interpolate the field before the final clamp.
+
+This applies sparse-storage ideas from
+[topology-adapted octree offsets](https://daniel-zint.github.io//publication/2023-07-04-Feature-Preserving-Offset-Mesh-Generation-from-Topology-Adapted-Octrees)
+and [constant-region storage](https://www.openvdb.org/documentation/doxygen/overview.html).
+It does not introduce adaptive voxel spacing or change gap thresholds, collagen,
+source coverage, marching cubes, or smoothing. Fine-grid work and flag storage
+still depend on the smallest protected gap.
+
+Statistics distinguish resident/peak field arrays, auxiliary field storage,
+logical samples, and process memory. The native-field budget does not represent
+total process RAM: input geometry, BVHs, output meshes, and validation also use
+memory. Allocation failures retain the previous output. Varying-field budget
+errors report the budget, lattice dimensions, and voxel spacing.
+
+`tools/draft_skin_memory_probe.py` replays a saved capture against an explicit
+native DLL. The October 12 rib-radius capture reproduced the old propagation
+failure at 512 MiB. Compact storage completed that field at the same budget and
+produced byte-identical raw and smoothed meshes against the original build,
+including production component filtering and outward orientation. Retained
+field storage fell from 506 MB to 211 MB; peak process resident memory fell
+from 1.78 GB to 1.47 GB. The final paired replay took 219 seconds originally
+and 240 seconds with compact storage (9% slower); earlier diagnostic timings
+varied. Both builds still reported six protected-gap violations and failed
+watertightness/orientation checks on that capture. It is a memory regression
+fixture, not an accepted anatomical skin result. Binding and publication were
+not run after failed geometry validation.
+
 ## Protocol and dependencies
 
-Jobs use protocol-v2, `allow_pickle=False` `input.npz` and `result.npz`
+Jobs use protocol-v4, `allow_pickle=False` `input.npz` and `result.npz`
 files plus atomically replaced `job.json` and `status.json`. `job.log` is
 append-only and `cancel.request` is the cancellation signal.
 

@@ -1,7 +1,9 @@
 from ...core.draft_skin.settings import effective_collagen
+from .skin_gap import draw_contributor
 
 
 def draw_skin_collagen_box(layout, context, scp):
+    draw_contributor(layout, context, scp)
     box = layout.box()
     box.label(text="Draft Skin Collagen")
     box.prop(scp, "skin_collagen_mode", text="Mode")

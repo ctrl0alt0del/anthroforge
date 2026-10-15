@@ -1,12 +1,12 @@
 import json
 import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .model import WarmInvalidationReason, WarmUpdateStatus
 
-WARM_JOB_VERSION = 2
+WARM_JOB_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -27,6 +27,7 @@ class WarmJobSpec:
     topology_capture_path: str
     current_skin_path: str
     current_topology_path: str
+    topology_update: dict = field(default_factory=dict)
 
 
 def atomic_json(path, payload):
@@ -52,8 +53,11 @@ def write_job(spec):
 
 def read_job(path):
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    if int(payload.get("version", -1)) != WARM_JOB_VERSION:
+    if int(payload.get("version", -1)) not in {2, 3, 4, WARM_JOB_VERSION}:
         raise ValueError("Unsupported coordinated update protocol.")
+    from .strategy_registry import update_options
+    payload["topology_update"] = asdict(update_options(payload.get("topology_update")))
+    payload["version"] = WARM_JOB_VERSION
     return WarmJobSpec(**payload)
 
 

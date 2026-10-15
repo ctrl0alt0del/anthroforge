@@ -4,6 +4,10 @@ from ..core.topology.constants import DEFAULT_TARGET_QUADS, MAX_TARGET_QUADS, MI
 
 
 class AF_TopologySettings_Property(bpy.types.PropertyGroup):
+    deformation_method: bpy.props.EnumProperty(
+        name="Deformation Method", default="LE",
+        items=(("LE", "Linear Elasticity", "Deform the persistent final skin with linear elasticity"),
+               ("FAST", "FAST", "Deform the persistent final skin with reduced ARAP")))
     target_quad_count: bpy.props.IntProperty(
         name="Target Quads", description="Approximate final all-quad face count",
         default=DEFAULT_TARGET_QUADS, min=MIN_TARGET_QUADS, max=MAX_TARGET_QUADS,

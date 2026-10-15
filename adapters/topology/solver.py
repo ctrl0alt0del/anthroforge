@@ -220,8 +220,8 @@ def _finish(capture, result, anchors, guide_map, warnings, target, density, upda
     stats = _result_stats(capture, metrics, target, guide_map, all_warnings,
                           budgets, density[4], transitions)
     stats.update(_warm_statistics(capture, vertices, faces, guide_map))
-    _require_valid_topology(capture, report, metrics)
-    bindings = _result_bindings(capture, vertices, faces, regions, indices, anchors)
+    stats["warnings"].extend(_require_valid_topology(capture, report, metrics) or ())
+    bindings = _safe_bindings(capture, vertices, faces, regions, indices, anchors, stats)
     return _topology_result(result, stats, report, owners, lengths, bindings)
 
 
@@ -237,13 +237,15 @@ def _require_valid_topology(capture, report, metrics):
     if not report.valence_ok:
         details.append(f"maximum vertex valence {metrics['valence']['maximum']} exceeds 8")
     suffix = f" ({'; '.join(details)})" if details else ""
-    raise RuntimeError(report.message + suffix)
+    return [report.message + suffix]
 
 
 def _topology_result(result, stats, report, owners, lengths, bindings):
     vertices, faces, regions, indices, _transitions = result
-    return TopologyResult(vertices, faces, regions, indices, stats, report,
-                          owners, lengths, *bindings)
+    from ..mesh_issues import annotate
+    from ..mesh_issues import check_result
+    return annotate(check_result(TopologyResult(vertices, faces, regions, indices, stats, report,
+                          owners, lengths, *bindings)), "topology")
 
 
 def _result_bindings(capture, vertices, faces, regions, indices, anchors):
@@ -341,7 +343,7 @@ def _metrics(capture, vertices, faces, regions, anchors):
             "guide_preserved": int(np.count_nonzero(regions == REGION_GUIDE)) == guide_faces,
             "symmetry_error": symmetry, "symmetry_ok": symmetry <= 1e-6 * diagonal,
             "fidelity_p95": fidelity, "fidelity_ok": fidelity <= 0.005 * diagonal,
-            "self_intersections": instant.self_intersection_count(vertices, tuple(map(tuple, faces))),
+            "self_intersections": None,
             "valence": instant.valence_metrics(len(vertices), counts)}
 
 
@@ -350,3 +352,12 @@ def _fidelity(vertices, capture):
     distances = [np.linalg.norm(np.asarray(guides._nearest(bvh, point)[0]) - point)
                  for point in vertices]
     return float(np.quantile(distances, 0.95))
+
+
+def _safe_bindings(capture, vertices, faces, regions, indices, anchors, stats):
+    try:
+        return _result_bindings(capture, vertices, faces, regions, indices, anchors)
+    except (ValueError, RuntimeError, MemoryError) as error:
+        stats["warnings"].append(f"Persistent bindings unavailable: {error}")
+        stats["binding_available"] = False
+        return None, None

@@ -1,4 +1,5 @@
 import bpy
+from .skin_gap import with_gap_controls
 
 from ..app.runtime_api import dispatch_intent_context, sync_context
 from ..core.deps.dirty_hints import dirty_hints_for, empty_dirty_hints
@@ -77,6 +78,7 @@ class AF_SCP_BoundObject_Property(bpy.types.PropertyGroup):
     )
 
 
+@with_gap_controls
 class AF_SCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="", update=_on_scp_prop_update)

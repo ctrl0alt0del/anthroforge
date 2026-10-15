@@ -29,6 +29,7 @@ class WarmChangeState:
     has_skin: bool = True
     has_topology: bool = True
     geometry_state: str = ""
+    gap_settings: str = ""
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,8 @@ def _skin_reasons(previous, current):
     _changed(reasons, previous.source_identity, current.source_identity, "contributors changed")
     _changed(reasons, previous.source_connectivity, current.source_connectivity, "source connectivity changed")
     _changed(reasons, previous.source_contact, current.source_contact, "possible contact or separation")
+    if previous.gap_settings != current.gap_settings:
+        reasons.append("gap filling settings or solver version changed")
     if _large_collagen_change(previous.collagen_settings, current.collagen_settings):
         reasons.append("collagen envelope changed substantially")
     if not previous.skin_valid or not current.skin_valid:
@@ -97,8 +100,8 @@ def _topology_reasons(previous, current):
     _changed(reasons, previous.guide_pairing, current.guide_pairing, "nested guide pairing changed")
     _changed(reasons, previous.symmetry_settings, current.symmetry_settings, "symmetry settings changed")
     _changed(reasons, previous.density_settings, current.density_settings, "topology density changed")
-    if not previous.topology_valid or not current.topology_valid or current.quad_distortion > 8.0:
-        reasons.append("quad distortion is irreparable")
+    if not previous.topology_valid or not current.topology_valid:
+        reasons.append("topology has no usable mesh contract")
     return reasons
 
 

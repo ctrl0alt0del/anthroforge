@@ -10,6 +10,7 @@ def replace_outputs(scene, root, skin_result=None, topology_result=None):
         _install(scene, root, prepared)
     except Exception:
         _rollback(prepared); raise
+    _publish(scene, root, prepared)
     _discard_old(prepared)
     selected = prepared[-1][1] if prepared else None
     if selected is not None:
@@ -30,6 +31,7 @@ def _prepare(scene, root, skin_result, topology_result):
 def _prepare_skin(values, scene, root, result):
     if result is None:
         return
+    skin_output._validate_publication(result)
     obj = skin_output._previous_skin(scene, root)
     mesh = _skin_mesh(obj, result)
     values.append(("SKIN", obj, mesh,
@@ -39,6 +41,8 @@ def _prepare_skin(values, scene, root, result):
 def _prepare_topology(values, scene, root, result):
     if result is None:
         return
+    from ..mesh_issues import require_mesh
+    require_mesh(result.vertices, result.quads, 4)
     obj = topology_output._previous(scene, root)
     mesh = _topology_mesh(obj, result)
     values.append(("TOPOLOGY", obj, mesh,
@@ -60,8 +64,12 @@ def _topology_mesh(obj, result):
 
 
 def _position_compatible(obj, vertices, faces):
-    return bool(obj is not None and len(obj.data.vertices) == len(vertices)
-                and len(obj.data.polygons) == len(faces))
+    import numpy as np
+    if obj is None or len(obj.data.vertices) != len(vertices) or len(obj.data.polygons) != len(faces):
+        return False
+    indices = np.empty(len(obj.data.loops), np.int32)
+    obj.data.loops.foreach_get("vertex_index", indices)
+    return np.array_equal(indices, np.asarray(faces).ravel())
 
 
 def _warm_result(result):
@@ -162,3 +170,14 @@ def _select_only(scene, selected):
     for obj in tuple(scene.objects):
         obj.select_set(obj == selected)
     scene.view_layers[0].objects.active = selected
+
+
+def _publish(scene, root, prepared):
+    from ..mesh_issues import bind_reference, retain_reference, publish
+    kinds = {row[0] for row in prepared}
+    for kind, obj, _mesh, old, _result, _snapshot_value in prepared:
+        if kind == "SKIN" and "TOPOLOGY" not in kinds:
+            retain_reference(scene, root, old)
+        if kind == "TOPOLOGY":
+            bind_reference(scene, root, obj)
+        publish(obj, scene, root)

@@ -15,6 +15,8 @@ for entry in (str(ADDON_ROOT.parent), str(ADDON_ROOT)):
 from core.warm_start.invalidation import WarmChangeClass, classify_change
 from core.warm_start.job import read_job, write_status, write_summary
 from core.warm_start.model import WarmUpdateStatus
+from core.warm_start.strategy_pipeline import require_rebuild_allowed
+from workers.topology_update import attempt_update, augment_summary, options_for, preflight, record_outcome, annotate_rebuild
 
 
 def run_job(job_dir):
@@ -28,22 +30,26 @@ def run_job(job_dir):
 def _run_update(root, scene, depsgraph, spec, started):
     previous, skin_capture, topology_capture = _captures(root, scene, depsgraph, spec)
     decision = _decision(previous, skin_capture, topology_capture, spec.mode)
+    from adapters.warm_update.current_output import bound_skin_result
+    before_skin = bound_skin_result(root, scene) if _topology_object(root, scene) is not None else _current_skin(root, scene)
     skin_result, skin_type = _solve_skin(root, scene, depsgraph, skin_capture, decision, spec)
+    from workers.stage_results import checkpoint
+    checkpoint(spec, skin_result, "skin", skin_type)
     if skin_result is not None:
         _install_skin(root, scene, skin_result)
         topology_capture = _updated_topology_capture(topology_capture, skin_result)
     topology_result, topology_type = _solve_topology(root, scene, depsgraph, decision, skin_type, spec,
-                                                     topology_capture)
-    _write_results(spec, skin_result, topology_result)
-    summary = _summary(decision, skin_type, topology_type, started, skin_result, topology_result)
-    write_summary(spec.summary_path, summary)
-    _status(spec, "SUCCEEDED", "Complete", 1.0, _summary_message(summary), summary["update_type"])
+                                                     topology_capture, before_skin, skin_capture.sources)
+    checkpoint(spec, topology_result, "topology", topology_type)
+    _finish_update(spec, decision, skin_type, topology_type, started, skin_result, topology_result)
 
 
 def _run_prepare(root, scene, depsgraph, spec, started):
     from adapters.draft_skin.capture import capture_skin
     from adapters.warm_update.migration import migration_state
     state = migration_state(root, scene)
+    require_rebuild_allowed(options_for(spec), {"status": "UNSUPPORTED",
+        "message": "Binding migration is unavailable in STOP mode; prepare bindings separately."})
     if not any(state.values()):
         raise ValueError("Existing outputs already contain warm-start bindings.")
     skin, skin_type, warnings = _prepare_skin_stage(root, scene, depsgraph, spec, state)
@@ -182,19 +188,21 @@ def _try_warm_skin(root, scene, depsgraph, capture, spec):
         warm_capture = capture_warm_skin(root, scene, depsgraph, capture)
         result = solve_warm_skin(warm_capture)
         elapsed = time.perf_counter() - started
-        return _warm_skin_result(root, scene, capture, warm_capture, result, elapsed) if result.status.valid else None
+        return _warm_skin_result(root, scene, capture, warm_capture, result, elapsed, spec) if result.status.valid else None
     except Exception as error:
         _append_log(spec, f"Warm skin fallback: {error}")
         return None
 
 
-def _warm_skin_result(root, scene, capture, warm_capture, warm_result, elapsed=0.0):
+def _warm_skin_result(root, scene, capture, warm_capture, warm_result, elapsed=0.0, spec=None):
     from core.draft_skin.model import SkinResult
-    from core.draft_skin.validation import validate_mesh
+    from core.diagnostic_checks import warm_quality as revalidate
     obj = _skin_object(root, scene); stats = _updated_skin_stats(obj, capture, "warm")
     stats["update_elapsed_seconds"] = float(elapsed)
     collagen = _point_attribute(obj.data, "af_skin_collagen")
-    validation = validate_mesh(warm_result.vertices, warm_capture.triangles, True)
+    validation, quality = revalidate(capture, warm_result.vertices, warm_capture.triangles,
+        _skin_progress(spec) if spec else None, (lambda: _cancelled(spec)) if spec else None)
+    stats.update(quality)
     return SkinResult(warm_result.vertices, warm_capture.triangles, collagen,
                       stats, validation, warm_result.binding)
 
@@ -215,28 +223,32 @@ def _install_skin(root, scene, result):
     replace_draft_skin(scene, root, result, result.statistics.get("source_map", []))
 
 
-def _solve_topology(root, scene, depsgraph, decision, skin_type, spec, capture=None):
+def _solve_topology(root, scene, depsgraph, decision, skin_type, spec, capture=None, before_skin=None, sources=()):
     if not decision.topology_rebuild and _topology_object(root, scene) is not None:
-        warm = _try_warm_topology(root, scene, depsgraph, skin_type, spec, capture)
+        warm = _try_warm_topology(root, scene, depsgraph, skin_type, spec, capture, before_skin, sources)
         if warm is not None:
             return warm, "rebound" if skin_type == "rebuilt" else "warm"
+    require_rebuild_allowed(options_for(spec))
     _status(spec, "RUNNING", "Topology rebuild", 0.62, "Rebuilding guided quad topology.")
     return _full_topology(root, scene, depsgraph, spec, capture), "rebuilt"
 
 
-def _try_warm_topology(root, scene, depsgraph, skin_type, spec, capture=None):
-    try:
-        from adapters.topology.warm import rebind_after_skin, update_topology
-        _status(spec, "RUNNING", "Topology update", 0.58, "Reprojecting existing quad topology.")
-        started = time.perf_counter()
-        result = (rebind_after_skin(root, scene, depsgraph, capture=capture) if skin_type == "rebuilt"
-                  else update_topology(root, scene, depsgraph, capture))
-        status = result[3] if skin_type == "rebuilt" else result[1]
-        elapsed = time.perf_counter() - started
-        return _topology_result(root, scene, status.update_type or "rebound", elapsed, capture) if status.valid else None
-    except Exception as error:
-        _append_log(spec, f"Topology fallback: {error}")
-        return None
+def _try_warm_topology(root, scene, depsgraph, skin_type, spec, capture=None, before_skin=None, sources=()):
+    from adapters.warm_update.current_output import current_topology_result
+    from adapters.topology.capture import capture_topology
+    from types import SimpleNamespace
+    _status(spec, "RUNNING", "Topology update", 0.58, "Evaluating topology update strategy.")
+    capture = capture or capture_topology(root, scene, depsgraph)
+    old, skin = current_topology_result(root, scene), _current_skin(root, scene)
+    from adapters.topology.strategy import binding_update_type
+    skin_type = binding_update_type(before_skin, skin, skin_type)
+    return attempt_update(spec, capture, skin, old, SimpleNamespace(topology_rebuild=False),
+                          skin_type, before_skin, sources)
+
+
+def _current_skin(root, scene):
+    from adapters.warm_update.current_output import current_skin_result
+    return current_skin_result(root, scene)
 
 
 def _full_topology(root, scene, depsgraph, spec, capture=None):
@@ -246,7 +258,7 @@ def _full_topology(root, scene, depsgraph, spec, capture=None):
     capture = capture or capture_topology(root, scene, depsgraph); vendor = ensure_worker_dependencies()
     result = solve_capture(capture, vendor, _topology_progress(spec), lambda: _cancelled(spec))
     result.statistics["last_update_type"] = "rebuilt"
-    return result
+    return annotate_rebuild(spec, result)
 
 
 def _topology_result(root, scene, update_type, elapsed=0.0, capture=None):
@@ -390,6 +402,11 @@ def fail_job(job_dir, error):
     spec = read_job(job_dir / "job.json"); _append_log(spec, traceback.format_exc())
     cancelled = _cancelled(spec)
     state, message = ("CANCELLED", "Update cancelled.") if cancelled else ("FAILED", str(error))
+    from workers.stage_results import failed_stage
+    if not cancelled and failed_stage(spec, error):
+        state = "PARTIAL"
+    if hasattr(error, "diagnostics"):
+        record_outcome(spec, error.diagnostics)
     write_status(spec.status_path, WarmUpdateStatus(False, state.title(), 0.0, message,
                  state=state, cancelled=cancelled))
 
@@ -412,3 +429,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def _finish_update(spec, decision, skin_type, topology_type, started, skin_result, topology_result):
+    summary = augment_summary(spec, _summary(decision, skin_type, topology_type, started, skin_result, topology_result))
+    write_summary(spec.summary_path, summary)
+    _status(spec, "SUCCEEDED", "Complete", 1.0, _summary_message(summary), summary["update_type"])

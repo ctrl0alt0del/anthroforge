@@ -45,6 +45,9 @@ def run_job(job_dir):
     vendor = ensure_worker_dependencies()
     from adapters.topology.solver import solve_capture
     result = solve_capture(capture, vendor, status_writer(spec), lambda: cancelled(spec))
+    from workers.deformation_construction import attempt
+    status_writer(spec)("Deformation reference",.9,"Preparing durable final-skin reference.")
+    attempt(spec,result,capture)
     write_result(spec.result_path, result)
     warnings = tuple(result.statistics.get("warnings", ()))
     finish_status(spec, "SUCCEEDED", "Topology generated.", warnings)

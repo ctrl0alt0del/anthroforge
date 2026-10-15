@@ -9,7 +9,6 @@ for entry in (str(ADDON_ROOT.parent), str(ADDON_ROOT)):
     if entry not in sys.path:
         sys.path.insert(0, entry)
 
-from workers.warm_update_worker import fail_job, run_job
 
 
 def service_argument():
@@ -36,6 +35,7 @@ def _claim(path):
 
 
 def _run_request(path):
+    from workers.warm_update_worker import fail_job
     job_dir = Path(json.loads(path.read_text(encoding="utf-8"))["job_dir"])
     try:
         _run_job(job_dir)
@@ -48,9 +48,16 @@ def _run_request(path):
 def _run_job(job_dir):
     from core.warm_start.job import read_job
     spec = read_job(job_dir / "job.json")
+    if spec.mode == "INITIALIZE_DEFORMATION":
+        from workers.deformation_reference import run_reference_job
+        run_reference_job(job_dir); return
+    if spec.mode == "DEFORM":
+        from workers.final_skin import run_final_job
+        run_final_job(job_dir); return
     if Path(spec.request_path).exists():
         from workers.warm_update_array import run_array_job
         run_array_job(job_dir); return
+    from workers.warm_update_worker import run_job
     run_job(job_dir)
 
 

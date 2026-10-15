@@ -28,6 +28,7 @@ def prepare_array_job(context, root, spec):
     encoded = time.perf_counter()
     _write_payloads(spec, skin, topology, current_skin, current_topology)
     timings["serialization"] = time.perf_counter() - encoded
+    _write_bound_skin(spec, root, context.scene, current_topology)
     _write_request(spec, decision, timings)
 
 
@@ -99,3 +100,12 @@ def _write_request(spec, decision, timings):
                "topology_rebuild": decision.topology_rebuild, "client_timings": timings,
                "dispatched_at": time.time()}
     atomic_json(spec.request_path, payload)
+
+
+def _write_bound_skin(spec, root, scene, topology):
+    from pathlib import Path
+    from .current_output import bound_skin_result
+    if topology is not None:
+        result = bound_skin_result(root, scene)
+        if result is not None:
+            write_skin_result(Path(spec.job_dir) / "bound_skin.npz", result)

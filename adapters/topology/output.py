@@ -10,6 +10,8 @@ except ImportError:
 
 
 def replace_topology(scene, root, result):
+    from ..mesh_issues import require_mesh
+    require_mesh(result.vertices, result.quads, 4)
     previous = _previous(scene, root)
     mesh = _build_mesh(result)
     if previous is not None:
@@ -87,9 +89,13 @@ def _finish(scene, root, result, obj):
     _tag(obj, root, result)
     obj.name = obj.data.name = "AF_TOPOLOGY"
     _select_only(scene, obj)
+    from ..mesh_issues import bind_reference, publish
+    bind_reference(scene, root, obj); publish(obj, scene, root)
 
 
 def _tag(obj, root, result):
+    from ..mesh_issues import persist
+    persist(obj, result, "topology")
     obj["af_topology"] = True
     obj["af_root_name"] = root.name
     obj["af_topology_input_hash"] = str(result.statistics.get("input_hash", ""))

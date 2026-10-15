@@ -1,0 +1,16 @@
+pytetwild/py.typed,sha256=mDShSrm8qg9qjacQc2F-rI8ATllqP6EdgHuEYxuCXZ0,7
+pytetwild/PyfTetWildWrapper.pyd,sha256=ME2pkI1m2lKrzwKiPu5RB7GoNiE0iro_xOMPW5nSKhU,6202368
+pytetwild/PyfTetWildWrapper.pyi,sha256=K9zbI_EztnfJx7gibm3t8KzfmNMVcoJeM5UCar2-iew,908
+pytetwild/pytetwild.py,sha256=cAeCTA9lkl1-bYZvjVIRsjdaAqla5AbtbOrpbmxrpx4,20576
+pytetwild/_accessor.py,sha256=XU5KPU7GprUXzJcAvZWRp0mKeWf8QPuO7J5P3dGxHu4,2796
+pytetwild/_version.py,sha256=fbDDGWxZ5jeTsugc7xIo09qIKJoF90AjvI_IKvQMTig,544
+pytetwild/__init__.py,sha256=FyZx8OGkgP-PxKDAAO63OgHys1TkiHmc8irXcLWPoz4,822
+pytetwild-0.4.2.dist-info/DELVEWHEEL,sha256=NNtZHQYloiHp8prhsy_rgze6tHw70cZrkSQu3RZRlA0,421
+pytetwild-0.4.2.dist-info/entry_points.txt,sha256=PmlkIPX2v0qOfbd55dsBwROwaRMct_SzsdP-zJSM0bU,51
+pytetwild-0.4.2.dist-info/METADATA,sha256=xosXu5YoX8ariCQqK31PvTeYztLrxtDA_HW5u5Pvwr8,7866
+pytetwild-0.4.2.dist-info/RECORD,,
+pytetwild-0.4.2.dist-info/WHEEL,sha256=tiKkQ-2WTLZq7R-gz-on9lUQ9Sb8jBdllNzzMACbwFs,105
+pytetwild-0.4.2.dist-info/licenses/LICENSE,sha256=k0P1sbYupRWlxoESvbYq2UzoMW6MXA84LltqR-4mEo4,17096
+pytetwild.libs/concrt140-100e011fccc815614ad4edd53d6585b1.dll,sha256=Tdd-AaxpN-lUblulGjwXEqmWzVs9_EZNrFtQ52kzPz4,353792
+pytetwild.libs/mpir-d0ae301780753d60e7b1003153e9434e.dll,sha256=4J53AsU8BYn81MidfKfd5-un9uSevdvAeABEHxhUdww,612352
+pytetwild.libs/msvcp140-7c26614e1d733892c2deac7e245ce115.dll,sha256=fCZhTh1zOJLC3qx-JFzhFVBLHYBZLdCgGwjj5aVfico,643512

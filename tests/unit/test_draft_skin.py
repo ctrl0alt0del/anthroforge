@@ -83,9 +83,10 @@ class DraftSkinTests(unittest.TestCase):
         fibers = {"F1": SimpleNamespace(muscle_id="M1"), "F2": SimpleNamespace(muscle_id="")}
         first = {"af_fiber_id": "F1"}
         second = {"af_fiber_id": "F2"}
-        self.assertFalse(_include_fiber(first, fibers, {"M1"}))
+        self.assertFalse(_include_fiber(first, fibers, {("M1", "ORIGINAL")}))
+        self.assertTrue(_include_fiber({**first, "af_fiber_mirror_proxy": True}, fibers, {("M1", "ORIGINAL")}))
         self.assertTrue(_include_fiber(first, fibers, set()))
-        self.assertTrue(_include_fiber(second, fibers, {"M1"}))
+        self.assertTrue(_include_fiber(second, fibers, {("M1", "ORIGINAL")}))
 
     def test_collagen_field_spreads_zero_seed(self):
         surface = np.zeros((31, 31, 31), dtype=bool)
@@ -114,7 +115,7 @@ class DraftSkinTests(unittest.TestCase):
     def test_percentage_settings_round_trip(self):
         settings = settings_from_percentages(0.5, 0.9, 2.1, 4.0)
         values = settings_percentages(settings)
-        self.assertEqual(tuple(round(value, 6) for value in values.values()), (0.5, 0.9, 2.1, 4.0))
+        self.assertEqual(tuple(round(value, 6) for value in values.values()), (0.5, 0.9, 2.1, 4.0, 0.5, 100.0))
 
     def test_cube_validation_accepts_closed_outward_mesh(self):
         vertices, faces = cube_mesh()
@@ -124,12 +125,9 @@ class DraftSkinTests(unittest.TestCase):
     def test_protocol_round_trips_capture_and_result(self):
         vertices, faces = cube_mesh()
         source = SkinSource(0, "SCP", "S1", "ORIGINAL", "Cube", vertices, faces, np.ones(8))
-        digest = capture_hash("ROOT", (source,))
         settings = SkinSolverSettings(0.01, 0.02, 0.03, 0.04)
         digest = capture_hash("ROOT", (source,), settings)
-        capture = SkinCapture(
-            "ROOT", (source,), vertices.min(0), vertices.max(0), digest, 1 / 220, settings=settings
-        )
+        capture = SkinCapture("ROOT", (source,), vertices.min(0), vertices.max(0), digest, 1 / 220, settings=settings)
         result = SkinResult(vertices, faces, np.ones(8), {"input_hash": digest}, validate_mesh(vertices, faces))
         with tempfile.TemporaryDirectory() as folder:
             input_path, result_path = Path(folder) / "input.npz", Path(folder) / "result.npz"

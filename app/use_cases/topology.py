@@ -37,11 +37,11 @@ def _complete_success(context):
     if job is None:
         raise RuntimeError("The completed topology job is no longer available.")
     result = _jobs().result_for_job(job)
-    if result.validation is None or not result.validation.valid:
-        raise ValueError("The worker returned invalid topology.")
+    from ...core.mesh_issues import require_mesh
+    require_mesh(result.vertices, result.quads, 4)
     obj = _import_result(context, job, result)
-    _jobs().finish_job(context.scene, True)
-    warnings = tuple(result.statistics.get("warnings", ()))
+    _jobs().finish_job(context.scene, not result.statistics.get("issues"))
+    warnings = tuple(row["summary"] for row in result.statistics.get("issues", ()))
     message = _success_message(warnings)
     _set_status(context.scene, "Complete", 1.0, message, False)
     return success(message, "WARNING" if warnings else "INFO", obj)
@@ -54,10 +54,13 @@ def _success_message(warnings):
 
 
 def _import_result(context, job, result):
+    from ...adapters.job_revision import require_current
+    require_current(job, context.scene)
     root = context.scene.objects.get(job.spec.root_name)
     if root is None or not root.get("anthroforge_root"):
         raise RuntimeError("The source AnthroForge root is no longer in this scene.")
-    return _output().replace_topology(context.scene, root, result)
+    from ...adapters.deformation.construction import publish
+    return publish(context.scene,root,result,job.spec.job_dir)
 
 
 def _finish_failure(context, status):

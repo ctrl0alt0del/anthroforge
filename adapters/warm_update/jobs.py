@@ -2,7 +2,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 try:
@@ -10,9 +10,11 @@ try:
         WARM_JOB_VERSION, WarmJobSpec, read_status, read_summary, write_job, write_status,
     )
     from ...core.warm_start.model import WarmUpdateStatus
+    from ...core.warm_start.strategy_registry import update_options
 except ImportError:
     from core.warm_start.job import WARM_JOB_VERSION, WarmJobSpec, read_status, read_summary, write_job, write_status
     from core.warm_start.model import WarmUpdateStatus
+    from core.warm_start.strategy_registry import update_options
 
 
 @dataclass
@@ -36,16 +38,18 @@ def active_job(scene):
     return _ACTIVE.get(scene_key(scene))
 
 
-def start_job(scene, root_name, mode, blender_binary, prepare_job):
+def start_job(scene, root_name, mode, blender_binary, prepare_job, topology_update=None):
     key = scene_key(scene)
     if key in _ACTIVE:
         raise RuntimeError("A coordinated AnthroForge update is already running.")
-    _cleanup_last(key); spec = _new_spec(root_name, mode)
+    _cleanup_last(key); spec = _new_spec(root_name, mode, topology_update)
     try:
         process = _prepare(spec, blender_binary, prepare_job)
     except Exception:
         _LAST_DIAGNOSTIC[key] = spec.log_path; raise
     job = RunningWarmJob(key, spec, process, str(blender_binary)); _ACTIVE[key] = job
+    from ..job_revision import attach
+    attach(job, scene)
     return job
 
 
@@ -58,8 +62,7 @@ def poll_job(scene):
         if _retry_job(job):
             return WarmUpdateStatus(True, "Restarting", status.progress,
                                     "Numerical worker restarted after an unexpected exit.", state="RUNNING")
-        return WarmUpdateStatus(False, "Failed", 0.0, "Update worker exited unexpectedly.",
-                                state="FAILED")
+        return _exit_status(job)
     return status
 
 
@@ -122,7 +125,8 @@ def shutdown_jobs():
         _cleanup_last(key)
 
 
-def _new_spec(root_name, mode):
+def _new_spec(root_name, mode, topology_update=None):
+    options = asdict(update_options(topology_update))
     folder = Path(tempfile.mkdtemp(prefix="anthroforge_update_"))
     value = lambda name: str(folder / name)
     return WarmJobSpec(WARM_JOB_VERSION, str(root_name), str(mode), str(folder),
@@ -131,7 +135,7 @@ def _new_spec(root_name, mode):
                        value("status.json"), value("job.log"), value("cancel.request"),
                        value("request.json"), value("skin_capture.npz"),
                        value("topology_capture.npz"), value("current_skin.npz"),
-                       value("current_topology.npz"))
+                       value("current_topology.npz"), options)
 
 
 def _prepare(spec, binary, prepare_job):
@@ -150,7 +154,7 @@ def _launch_service(folder, binary):
                str(worker), "--", "--service", str(folder)]
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     with open(folder / "service.log", "a", encoding="utf-8") as log:
-        return subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
+        return subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, creationflags=flags,cwd=str(folder))
 
 
 def _ensure_service(binary):
@@ -196,6 +200,14 @@ def _retry_job(job):
 
 
 def _cleanup_last(key):
-    path = _LAST_DIAGNOSTIC.pop(key, "")
-    if path:
-        shutil.rmtree(Path(path).parent, ignore_errors=True)
+    _LAST_DIAGNOSTIC.pop(key, None)
+
+
+def _exit_status(job):
+    from workers.stage_results import failed_stage
+    message = "Update worker exited unexpectedly."
+    partial = failed_stage(job.spec, RuntimeError(message))
+    state = "PARTIAL" if partial else "FAILED"
+    status = WarmUpdateStatus(False, state.title(), 1.0 if partial else 0.0, message, state=state)
+    write_status(job.spec.status_path, status)
+    return status

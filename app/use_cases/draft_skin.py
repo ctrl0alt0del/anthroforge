@@ -31,9 +31,7 @@ def complete_generation(context, status):
             raise RuntimeError("The completed draft-skin job is no longer available.")
         result = _validated_result(job)
         obj = _import_result(context, job, result)
-        _jobs().finish_job(context.scene, True)
-        _set_scene_status(context.scene, "Complete", 1.0, "Draft skin generated.", False)
-        return success("Draft skin generated.", value=obj)
+        return _generation_success(context, result, obj)
     except Exception as error:
         _jobs().finish_job(context.scene, False)
         return failure(str(error))
@@ -41,12 +39,14 @@ def complete_generation(context, status):
 
 def _validated_result(job):
     result = _jobs().result_for_job(job)
-    if result.validation is None or not result.validation.valid:
-        raise ValueError("The worker returned an invalid draft skin.")
+    from ...core.mesh_issues import require_mesh
+    require_mesh(result.vertices, result.triangles, 3)
     return result
 
 
 def _import_result(context, job, result):
+    from ...adapters.job_revision import require_current
+    require_current(job, context.scene)
     root = context.scene.objects.get(job.spec.root_name)
     if root is None or not root.get("anthroforge_root"):
         raise RuntimeError("The source AnthroForge root is no longer in this scene.")
@@ -131,3 +131,11 @@ def _binary_path():
 def _save_copy(path):
     import bpy
     bpy.ops.wm.save_as_mainfile(filepath=str(path), copy=True, compress=False)
+
+
+def _generation_success(context, result, obj):
+    issues = result.statistics.get("issues", ())
+    _jobs().finish_job(context.scene, not issues)
+    message = f"Draft skin generated with {len(issues)} warning(s)." if issues else "Draft skin generated."
+    _set_scene_status(context.scene, "Complete", 1.0, message, False)
+    return success(message, "WARNING" if issues else "INFO", obj)

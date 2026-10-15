@@ -2,10 +2,15 @@
 import bpy
 from ..core.warnings import session
 from ..core.issues.resolution import Solver
+from .mesh_issues import ArtifactListener, select
 
 
 def register():
     system = session.SYSTEM
+    if "mesh_pipeline.v1" not in session.COORDINATOR.factories:
+        system.listening.register(ArtifactListener())
+    if "ARTIFACT" not in system.presentation.targets:
+        system.presentation.register_target("ARTIFACT", select)
     if "FIBER" not in system.presentation.targets:
         system.presentation.register_target("FIBER", _select_fiber)
     if "repair_fibers" not in system.resolution.solvers:

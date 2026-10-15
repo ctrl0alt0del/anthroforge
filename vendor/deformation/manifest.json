@@ -1,0 +1,23 @@
+{
+  "package": "pytetwild",
+  "version": "0.4.2",
+  "wheel_sha256": "b71487fd79408da6bcc85191566a3d03e7184dab0eae5917d2247a484efdcda6",
+  "files": {
+    "pytetwild/py.typed": "9834a14ab9bcaa0f6a8da71073617eac8f004e596a3fa11d807b84631b825d9d",
+    "pytetwild/PyfTetWildWrapper.pyd": "304da9908d66da52abcf02a23eee5107b1a83621348aba3fc4e30f5b99d22a15",
+    "pytetwild/PyfTetWildWrapper.pyi": "2bdcdb23f133b677c9c7b8226e6dedf0acdf98d31572825e3395026abdbe89ec",
+    "pytetwild/pytetwild.py": "7007824c0f65925d7e6d866f8d5211b2375a02a95ae406ed6ceae96e6c6ba71e",
+    "pytetwild/_accessor.py": "5d4e4a3d4ec6a6b517cc9700bd9591a7498a7967fc40fb8eec9e4fddd1b11eee",
+    "pytetwild/_version.py": "7db0c3196c59e63793b2e81cef1228d3da88289a05f74023bc8fc82af40c4e28",
+    "pytetwild/__init__.py": "172671f0e1a480ff8fc4a0c000eeb73a01f2b354e488799cf22ad770b58fa33e",
+    "pytetwild-0.4.2.dist-info/DELVEWHEEL": "34db591d0625a221e9f29ae1b32feb8337bab47c3bd1c66b91242edd1651940d",
+    "pytetwild-0.4.2.dist-info/entry_points.txt": "3e696420f5f6bf4a8e7db779e5db01c113b069131cb7f4b3b1d3fecc948cd1b5",
+    "pytetwild-0.4.2.dist-info/METADATA": "c68b17bb96285fc6ab88242a2b7d4fbd3798ced2ebc6d0c0fc75b9bb93efc2bf",
+    "pytetwild-0.4.2.dist-info/RECORD": "bb435e6a4c53623789028c137c3f1f7f9f0ddb3f863b22d6b562088cc2591f76",
+    "pytetwild-0.4.2.dist-info/WHEEL": "b622a443ed964cb66aed1fa0cfea27f65510f526fc8c176594dcf330009bc05b",
+    "pytetwild-0.4.2.dist-info/licenses/LICENSE": "9343f5b1b62ea515a5c68112bdb62ad94ce8316e8c5c0f382e5b6a47ee26128e",
+    "pytetwild.libs/concrt140-100e011fccc815614ad4edd53d6585b1.dll": "4dd77e01ac6937e9546e5ba51a3c1712a996cd5b3dfc464dac5b50e769333f3e",
+    "pytetwild.libs/mpir-d0ae301780753d60e7b1003153e9434e.dll": "e09e7702c53c0589fcd4c89d7ca7dde7eba7f6e49ebddbc07800441f1854770c",
+    "pytetwild.libs/msvcp140-7c26614e1d733892c2deac7e245ce115.dll": "7c26614e1d733892c2deac7e245ce115504b1d80592dd0a01b08e3e5a55f89ca"
+  }
+}

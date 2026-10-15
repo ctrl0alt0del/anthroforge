@@ -8,10 +8,12 @@ try:
         WarmChangeState, guide_pairing_signature, settings_signature,
         source_contact_signature,
     )
+    from ...core.draft_skin.gap_settings import gap_signature
     from ...core.warm_start.signatures import (
         geometry_state_hash, guide_layout_signature, source_connectivity_signature, source_identity_signature,
     )
 except ImportError:
+    from core.draft_skin.gap_settings import gap_signature
     from core.warm_start.invalidation import WarmChangeState, guide_pairing_signature, settings_signature, source_contact_signature
     from core.warm_start.signatures import geometry_state_hash, guide_layout_signature, source_connectivity_signature, source_identity_signature
 
@@ -30,7 +32,8 @@ def previous_change_state(root, scene):
         density_settings=topology_stats.get("density_settings_signature", ""),
         skin_valid=skin is not None, topology_valid=_valid_topology(topology),
         quad_distortion=_quad_distortion(topology), has_skin=skin is not None,
-        has_topology=topology is not None, geometry_state=skin_stats.get("geometry_state_hash", ""))
+        has_topology=topology is not None, geometry_state=skin_stats.get("geometry_state_hash", ""),
+        gap_settings=skin_stats.get("gap_settings_signature", ""))
 
 
 def current_change_state(skin_capture, topology_capture):
@@ -39,12 +42,12 @@ def current_change_state(skin_capture, topology_capture):
         source_identity=source_identity_signature(skin_capture.sources),
         source_connectivity=source_connectivity_signature(skin_capture.sources),
         source_contact=source_contact_signature(skin_capture.sources),
-        collagen_settings=tuple(asdict(settings).values()),
+        collagen_settings=_collagen_settings({"settings": asdict(settings)}),
         guide_layout=guide_layout_signature(topology_capture.guides),
         guide_pairing=guide_pairing_signature(topology_capture.guides),
         symmetry_settings=_symmetry_signature(topology_capture),
         density_settings=_density_signature(topology_capture),
-        geometry_state=geometry_state_hash(skin_capture.sources))
+        geometry_state=geometry_state_hash(skin_capture.sources), gap_settings=gap_signature(skin_capture))
 
 
 def _outputs(root, scene):
@@ -101,10 +104,11 @@ def _face_ratio(points):
 def _valid_topology(obj):
     if obj is None:
         return False
+    from ..mesh_issues import require_mesh
     try:
-        from ...core.topology.validation import validate_topology
-    except ImportError:
-        from core.topology.validation import validate_topology
-    vertices = np.asarray([vertex.co[:] for vertex in obj.data.vertices])
-    faces = np.asarray([tuple(face.vertices) for face in obj.data.polygons], np.int32)
-    return validate_topology(vertices, faces).valid
+        vertices = np.asarray([vertex.co[:] for vertex in obj.data.vertices])
+        faces = np.asarray([tuple(face.vertices) for face in obj.data.polygons], np.int32)
+        require_mesh(vertices, faces, 4)
+        return True
+    except ValueError:
+        return False

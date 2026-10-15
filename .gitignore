@@ -46,8 +46,12 @@ Thumbs.db
 !native/fiber_ccd/af_fiber_ccd_v3_28.dll
 !native/fiber_ccd/af_fiber_ccd_v3_32.dll
 !native/fiber_ccd/af_fiber_ccd_v3_33.dll
+!native/fiber_ccd/af_fiber_ccd_v3_57.dll
 !native/fiber_ccd/libomp.dll
 !native/smoothing/af_height_smoothing_v1.dll
+!native/deformation/af_deformation_v1.dll
+!vendor/deformation/**/*.dll
+!vendor/deformation/**/*.pyd
 *.dylib
 
 # Distribution artifacts

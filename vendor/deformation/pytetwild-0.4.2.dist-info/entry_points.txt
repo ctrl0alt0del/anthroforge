@@ -1,0 +1,3 @@
+[pyvista.accessors]
+tetwild = pytetwild._accessor
+

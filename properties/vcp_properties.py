@@ -1,4 +1,5 @@
 import bpy
+from .skin_gap import with_gap_controls
 
 from ..core.vcp.shared_point_storage import binding_getter, binding_setter, point_updated, clear_indexes, stacking_protection_updated
 
@@ -213,6 +214,7 @@ class AF_FiberSurfaceFiberRef_Property(bpy.types.PropertyGroup):
     fiber_id: bpy.props.StringProperty(name="Fiber ID", default="")
 
 
+@with_gap_controls
 class AF_MuscleVCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="Muscle", update=_on_muscle_prop_update)
@@ -400,6 +402,7 @@ class AF_FiberSupport_Property(bpy.types.PropertyGroup):
     target_id: bpy.props.StringProperty(name="Surface reference")
 
 
+@with_gap_controls
 class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     attachment_supports: bpy.props.CollectionProperty(type=AF_FiberSupport_Property)
     behavior_mode: bpy.props.EnumProperty(name="Mode", default="CONTROLLED",
@@ -472,6 +475,7 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
     legacy_eps_pen: bpy.props.FloatProperty(default=0.0, options={"HIDDEN"})
 
 
+@with_gap_controls
 class AF_BlobVCP_Property(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty(name="ID")
     name: bpy.props.StringProperty(name="Name", default="Blob", update=_on_blob_prop_update)
@@ -540,6 +544,7 @@ class AF_SoftTissueAttachment_Property(bpy.types.PropertyGroup):
     bindings_json: bpy.props.StringProperty(name="Bindings", default="[]", options={"HIDDEN"})
 
 
+@with_gap_controls
 class AF_SoftTissueVCP_Property(bpy.types.PropertyGroup):
     constraint_reference: bpy.props.EnumProperty(name="Constraint reference", default='TARGET',
         items=(('TARGET', 'External target', ''), ('SOURCE', 'Fiber-defined base', '')), update=_on_soft_tissue_prop_update)

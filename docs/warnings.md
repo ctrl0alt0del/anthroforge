@@ -116,7 +116,8 @@ evaluate collisions, repair geometry, or begin planner/solver sessions.
 
 The RNA list stores warning tokens only, is cleared before save/load, and is
 rebuilt from Python state after save. It is not authoritative, even if a Blender
-version restores WindowManager properties. Load never restores warning payloads.
+version restores WindowManager properties. Fiber warning payloads are regenerated;
+the generic artifact subsystem restores persisted evidence as stale, as described below.
 Repository notifications are batched per scheduler tick; queries still see each
 state change immediately. Progress refreshes are coalesced to 100 ms, and an
 unchanged token list does not rewrite RNA rows. Completion refreshes immediately.
@@ -129,7 +130,8 @@ time and must not be added as an independent user-visible delay.
 Blender references: [Application handlers](https://docs.blender.org/api/current/bpy.app.handlers.html),
 [Python threading limitations](https://docs.blender.org/api/main/info_gotchas_threading.html).
 
-## Generic issue system
+
+## Generic issue system and stage progression
 
 `core.issues` contains the generic repository, reporting facade, registered listener
 scheduler, presentation projection, and explicit solver registry. Domain adapters
@@ -155,7 +157,50 @@ a fresh detector check; dismissal only hides a row for its current artifact revi
 
 The warnings panel filters cached records and shows producer, stage, freshness and
 evidence. Select, Recheck, Dismiss and applicable Fix actions use the generic ports.
-Domain target adapters own selection; the framework contains no concrete geometry checks.
+Artifact rechecks capture Blender arrays on the main thread and run read-only
+native diagnostics off-thread. Loading/undo restores persisted artifact evidence
+as stale and does not regenerate geometry. Older meshes without reports are
+unknown; reading an output no longer fabricates passing validation flags.
 
-Tests: `test_issue_system`, existing warning repository/scheduling/native tests,
-and Blender warning-system integration tests.
+### Skin and topology policy
+
+Quality findings are warnings: protected-gap violations, exposed/crossed source
+geometry, pre-existing source intersections, disconnected components, non-watertight
+or inconsistent orientation, geometric degeneracy, high valence, guide/boundary,
+symmetry, fidelity or quad-budget deviations, and update/inversion quality findings.
+A quality warning alone does not request a topology rebuild. The result's validation
+report remains available and may be false even when publication succeeds.
+
+Actual consumer requirements still block: missing or malformed arrays, nonfinite
+positions, invalid indices, no usable nonzero-area surface, unavailable required
+native code, failed allocation without an output, missing required update bindings,
+or changed vertex identities/connectivity for an update that requires fixed topology.
+Newly generated meshes can be published without usable update bindings; the binding
+failure is reported and a later binding-dependent consumer must rebuild/rebind or stop.
+Explicit cancellation prevents publication of unfinished jobs.
+
+Native intersection diagnostics use a bounded BVH traversal, at most 256 stored
+witness pairs, a memory preflight, a pair-work limit and cancellation. Proper
+crossings and contact-only pairs are reported separately. Quad checks use diagonal
+0–2 tessellation, so they are not interchangeable with Blender's chosen tessellation.
+An optional diagnostic failure means **quality unknown**, never a clean result.
+
+Coordinated worker protocol 4 checkpoints completed skin/topology stages atomically.
+A topology failure after completed skin returns `PARTIAL`: publish skin, retain the
+previous topology marked stale and keep its bound skin as a referenced mesh datablock
+without another visible object. The reference persists through save/reopen and is
+used by subsequent update capture. Cancellation retains checkpoint files for diagnosis
+without publishing them. Publication also rejects a changed source epoch/revision.
+Skin/topology array protocol 5 adds issue metadata; readers accept previous supported
+array versions. New job protocols reject incompatible worker generations.
+
+Tests: `test_issue_system`, `test_mesh_issues`, existing warning/scheduling tests,
+`test_issue_system_integration`, and existing warm/topology integration tests.
+`tools/issue_system_acceptance.py` exercises the actual torso fixture, Root Y,
+initial topology and the real Ribs Top Radius +2% update, saving a debug copy.
+
+The October 14 torso acceptance run preserved the update's 7,350 quads and their
+exact connectivity. Native checks reported 149 crossings in the updated skin and
+1,090 in the updated topology. These findings remained visible warnings while
+the update completed; this validates progression, not collision-free geometry.
+The debug copy was reopened with 124 visible fibers and 22 native-colored SCPs.

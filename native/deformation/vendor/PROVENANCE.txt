@@ -1,0 +1,10 @@
+libigl 2.5.0 and Eigen 3.4.0, copied from the locally retained anatomy-deformation
+experiment dependency snapshot. No Git remotes accessed for this promotion.
+libigl release archive provenance retained by that experiment:
+https://github.com/libigl/libigl/archive/refs/tags/v2.5.0.zip
+SHA256 84af6a5f9266a4c1ce530f9ef8028c8a3569318563012d72a753622f61ea2f68
+Experimental acquisition also fetched missing headers from official libigl
+Doxygen source pages. File hashes in manifest.json identify the exact copied
+snapshot, rather than assuming every file came from the release archive.
+Source copyright notices remain in individual files. MPL-2.0.txt accompanies
+the snapshot. Eigen is compiled with EIGEN_MPL2_ONLY.

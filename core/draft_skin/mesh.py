@@ -10,7 +10,7 @@ from .status import check_cancelled
 
 def extract_mesh(field, origin, voxel):
     values = np.asarray(field, dtype=np.float32)
-    vertices, faces, _normals, _values = measure.marching_cubes(values, 0.0, spacing=(voxel,) * 3)
+    vertices, faces, _normals, _values = measure.marching_cubes(values, 0.0, spacing=(voxel,) * 3, allow_degenerate=False)
     return (vertices + origin).astype(np.float32), faces.astype(np.int32)
 
 

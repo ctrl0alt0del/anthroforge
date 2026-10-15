@@ -104,6 +104,8 @@ def remove_root(key):
 def notify_action(root=None, scene=None, dirty=None, event_type="CHANGE", full=False):
     if not _ENABLED:
         return
+    if root is not None and event_type != "SELECTION":
+        key = session.id_token(root); session.CHANGES[key] = session.CHANGES.get(key, 0) + 1
     session.COORDINATOR.on_action(dict(dirty=dirty, event_type=event_type, full=full), (scene, root))
 
 

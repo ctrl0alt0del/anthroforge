@@ -10,7 +10,7 @@ from ..vcp.muscle_numeric import MuscleNumericSpec, execute_muscle_batch, make_m
 from ..vcp.muscle_surface import validate_anchor_structure
 from ..vcp.muscle_inflation_state import inflation_control_initialized, migrate_inflation_control
 from ..vcp.runtime_state import muscle_inflation_ctrl_world, set_muscle_inflation_ctrl_world
-from ..vcp.muscle_output_domain import capture as capture_domain
+from ..vcp.muscle_output_domain import capture as capture_source_domain
 from ..vcp.muscle_envelope import faces_for
 
 
@@ -149,6 +149,11 @@ def _surface_input(sync, root, scene, muscle):
         return None
     points, closed_u, config = payload
     return points, len(points[0]), False, closed_u, config, _free_source(root, config)
+
+
+def capture_domain(muscle):
+    from .geometry_instance import domain
+    return domain(capture_source_domain(muscle))
 
 
 def _make_request(muscle, payload, initialize=False, envelope=True):

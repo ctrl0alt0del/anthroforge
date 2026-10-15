@@ -1,3 +1,4 @@
+from ..mesh_issues import restore_report
 import json
 
 import numpy as np
@@ -17,18 +18,19 @@ def current_skin_result(root, scene):
         return None
     vertices, triangles = _skin_arrays(obj)
     collagen = _point_values(obj.data, "af_skin_collagen", np.float32)
-    report = SkinValidationReport(True, True, True, True, True, True, True, True)
+    report = restore_report(_stats(obj, "af_skin_stats_json"), SkinValidationReport)
     return SkinResult(vertices, triangles, collagen, _stats(obj, "af_skin_stats_json"), report,
-                      _read_binding(obj.data))
+                      _optional_binding(obj.data))
 
 
-def current_topology_result(root, scene):
-    TopologyResult, report = _topology_contract()
+def current_topology_result(root, scene, obj=None):
+    TopologyResult, report_type = _topology_contract()
     try:
-        obj = _topology(root, scene)
+        obj = obj if obj is not None else _topology(root, scene)
     except ValueError:
         return None
-    vertices, quads = _topology_arrays(obj); skin, guide = _read_bindings(obj.data)
+    vertices, quads = _topology_arrays(obj); skin, guide = _optional_topology_bindings(obj.data)
+    report = restore_report(_stats(obj, "af_topology_stats_json"), report_type)
     return TopologyResult(vertices, quads, _face_values(obj.data, "af_topology_region"),
                           _face_values(obj.data, "af_topology_face_guide_index"),
                           _stats(obj, "af_topology_stats_json"), report,
@@ -41,9 +43,7 @@ def _topology_contract():
         from ...core.topology.model import TopologyResult, TopologyValidationReport
     except ImportError:
         from core.topology.model import TopologyResult, TopologyValidationReport
-    report = TopologyValidationReport(True, True, True, True, True, True, True,
-                                      True, True, True, True, True)
-    return TopologyResult, report
+    return TopologyResult, TopologyValidationReport
 
 
 def _point_values(mesh, name, dtype):
@@ -68,3 +68,33 @@ def _stats(obj, key):
         return json.loads(obj.get(key, "{}"))
     except (TypeError, ValueError):
         return {}
+
+
+def bound_skin_result(root, scene):
+    from types import SimpleNamespace
+    try:
+        from ...core.draft_skin.model import SkinResult, SkinValidationReport
+    except ImportError:
+        from core.draft_skin.model import SkinResult, SkinValidationReport
+    obj = _topology(root, scene)
+    mesh = obj.get("af_bound_skin")
+    if mesh is None:
+        return current_skin_result(root, scene)
+    vertices, faces = _skin_arrays(SimpleNamespace(data=mesh))
+    stats = json.loads(mesh.get("af_result_stats_json", "{}"))
+    return SkinResult(vertices, faces, _point_values(mesh, "af_skin_collagen", np.float32), stats,
+                      restore_report(stats, SkinValidationReport), _optional_binding(mesh))
+
+
+def _optional_binding(mesh):
+    try:
+        return _read_binding(mesh)
+    except ValueError:
+        return None
+
+
+def _optional_topology_bindings(mesh):
+    try:
+        return _read_bindings(mesh)
+    except ValueError:
+        return None, None

@@ -81,7 +81,7 @@ def validate_topology(vertices, faces, metrics=None):
         manifold=checks["manifold"], no_degenerates=checks["no_degenerates"],
         boundary_match=checks["boundary_match"], guide_preserved=checks["guide_preserved"],
         symmetry_ok=checks["symmetry_ok"], fidelity_ok=checks["fidelity_ok"],
-        valence_ok=checks["valence_ok"], self_intersections=int(metrics.get("self_intersections", 0)),
+        valence_ok=checks["valence_ok"], self_intersections=None if metrics.get("self_intersections", 0) is None else int(metrics.get("self_intersections", 0)),
         message="" if not failed else f"Validation failed: {', '.join(failed)}")
 
 

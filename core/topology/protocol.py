@@ -132,7 +132,7 @@ def _concat_faces(arrays):
 
 def _check_protocol(data):
     version = int(data["protocol_version"][0])
-    if version != PROTOCOL_VERSION:
+    if version not in {4, PROTOCOL_VERSION}:
         raise ValueError(f"Unsupported topology protocol {version}.")
 
 
@@ -221,7 +221,8 @@ def _empty_guide_binding(count):
 def read_result(path):
     with np.load(path, allow_pickle=False) as data:
         _check_protocol(data)
-        report = TopologyValidationReport(**json.loads(str(data["validation"])))
+        payload = json.loads(str(data["validation"]))
+        report = TopologyValidationReport(**payload) if payload else None
         skin, guide = _read_topology_bindings(data)
         return TopologyResult(data["vertices"].copy(), data["quads"].copy(),
                               data["face_regions"].copy(), data["guide_indices"].copy(),

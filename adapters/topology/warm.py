@@ -20,22 +20,15 @@ except ImportError:
     from core.warm_start.signatures import guide_layout_signature
 
 
-def update_topology(root, scene, depsgraph, capture=None):
-    reproject_topology = _topology_solvers()[1]
+def update_topology(root, scene, depsgraph, capture=None, options=None, before_skin=None):
+    from .strategy import solve_update, apply_result, legacy_result
     obj = _topology(root, scene)
-    vertices, quads = _mesh_arrays(obj)
-    skin_binding, guide_binding = _read_bindings(obj.data)
     capture = capture or capture_topology(root, scene, depsgraph)
-    old_guides = _stored_guides(obj)
-    new_guides = _current_patch_guides(obj, capture.guides)
-    if not _valid_guide_layout(obj, new_guides):
-        return _guide_fallback(vertices)
-    result = reproject_topology(vertices, quads, capture.vertices, capture.triangles,
-                                skin_binding, guide_binding, old_guides, new_guides,
-                                symmetry_plane=capture.plane)
-    if result[1].valid:
-        apply_topology_vertices(obj, result[0])
-    return result
+    if not _valid_guide_layout(obj, _current_patch_guides(obj, capture.guides)):
+        return _guide_fallback(_mesh_arrays(obj)[0])
+    old, outcome = solve_update(root, scene, capture, "warm", options, before_skin)
+    apply_result(obj, outcome)
+    return legacy_result(old, outcome)
 
 
 def _valid_guide_layout(obj, guides):
@@ -52,20 +45,13 @@ def _guide_fallback(vertices):
     return vertices, status, report
 
 
-def rebind_after_skin(root, scene, depsgraph, predicted=None, capture=None):
-    project_and_rebind_topology = _topology_solvers()[0]
+def rebind_after_skin(root, scene, depsgraph, predicted=None, capture=None, options=None, before_skin=None):
+    from .strategy import solve_update, apply_result, legacy_result
     obj = _topology(root, scene)
-    vertices, quads = _mesh_arrays(obj)
     capture = capture or capture_topology(root, scene, depsgraph)
-    regions = _face_values(obj.data, "af_topology_region")
-    guides = _face_values(obj.data, "af_topology_face_guide_index")
-    patch_guides = _current_patch_guides(obj, capture.guides)
-    result = project_and_rebind_topology(vertices, quads, capture.vertices, capture.triangles,
-                                         regions, guides, patch_guides, predicted, capture.plane)
-    if result[3].valid:
-        apply_topology_vertices(obj, result[0])
-        _write_rebindings(obj.data, result[1], result[2])
-    return result
+    old, outcome = solve_update(root, scene, capture, "rebuilt", options, before_skin, predicted)
+    apply_result(obj, outcome)
+    return legacy_result(old, outcome, rebound=True)
 
 
 def _topology_solvers():

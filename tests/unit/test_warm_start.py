@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 import tempfile
 import sys
 from pathlib import Path
@@ -150,6 +151,20 @@ class WarmStartTests(unittest.TestCase):
         result = solve_warm_skin(capture)
         self.assertEqual(result.status.reason, WarmInvalidationReason.SOURCE_CONNECTIVITY_CHANGED)
 
+    def test_invalid_binding_stops_before_deformation(self):
+        source = _source(0.0); points, faces = _skin(0.0)
+        binding, _quality = build_skin_bindings(points, (source,))
+        invalid = ({"source_indices": np.full_like(binding.source_indices, 99)},
+                   {"triangle_indices": np.full_like(binding.triangle_indices, 99)},
+                   {"weights": np.full_like(binding.weights, np.nan)}, {"weights": np.ones(4)})
+        for change in invalid:
+            capture = _warm_capture(points, faces, replace(binding, **change), source, source)
+            with self.subTest(change=tuple(change)), mock.patch("core.warm_start.skin_solver.constrained_arap") as arap:
+                result = solve_warm_skin(capture)
+                self.assertFalse(result.status.valid)
+                self.assertEqual(result.status.reason, WarmInvalidationReason.BINDING_QUALITY)
+                arap.assert_not_called()
+
     def test_topology_reprojection_preserves_connectivity_and_order(self):
         skin, triangles = _skin(0.0)
         moved, _unused = _skin(1.0)
@@ -232,11 +247,15 @@ class WarmStartTests(unittest.TestCase):
     def test_each_topology_invalidation_trigger(self):
         changes = ({"guide_layout": "new"}, {"guide_pairing": "new"},
                    {"symmetry_settings": "new"}, {"density_settings": "new"},
-                   {"quad_distortion": 9.0}, {"topology_valid": False})
+                   {"topology_valid": False})
         for change in changes:
             with self.subTest(change=change):
                 decision = classify_change(_change_state(), _change_state(**change))
                 self.assertTrue(decision.topology_rebuild)
+
+    def test_distortion_quality_does_not_rebuild_topology(self):
+        decision = classify_change(_change_state(), _change_state(quad_distortion=9.0))
+        self.assertFalse(decision.topology_rebuild)
 
     def test_contact_and_pairing_signatures_are_deterministic(self):
         sources = (_source(0.0), _source(0.5))

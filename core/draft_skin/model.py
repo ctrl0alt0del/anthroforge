@@ -12,6 +12,8 @@ class SkinSource:
     vertices: Any
     triangles: Any
     collagen: Any = None
+    gap_limit_ratio: float = -1.0
+    gap_strength: float = -1.0
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,8 @@ class SkinSolverSettings:
     collagen_depth_ratio: float = (3.1717975628378534 - 1.189424086064195) / 220.0
     collagen_core_ratio: float = 4.75769634425678 / 220.0
     collagen_falloff_ratio: float = (13.480139642060877 - 4.75769634425678) / 220.0
+    gap_limit_ratio: float = 0.005
+    gap_strength: float = 1.0
 
 
 @dataclass(frozen=True)

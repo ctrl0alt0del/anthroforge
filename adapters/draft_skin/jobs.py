@@ -45,9 +45,7 @@ def start_job(scene, root_name, blender_binary, save_copy):
     except Exception:
         _LAST_DIAGNOSTIC[key] = spec.log_path
         raise
-    job = RunningSkinJob(key, spec, process)
-    _ACTIVE[key] = job
-    return job
+    return _record_job(scene, RunningSkinJob(key, spec, process))
 
 
 def _prepare_process(spec, blender_binary, save_copy):
@@ -131,9 +129,7 @@ def diagnostic_path(scene):
 
 
 def _cleanup_last(key):
-    path = _LAST_DIAGNOSTIC.pop(key, "")
-    if path:
-        shutil.rmtree(Path(path).parent, ignore_errors=True)
+    _LAST_DIAGNOSTIC.pop(key, None)
 
 
 def shutdown_jobs():
@@ -144,3 +140,10 @@ def shutdown_jobs():
     _ACTIVE.clear()
     for key in tuple(_LAST_DIAGNOSTIC):
         _cleanup_last(key)
+
+
+def _record_job(scene, job):
+    from ..job_revision import attach
+    attach(job, scene)
+    _ACTIVE[job.scene_key] = job
+    return job

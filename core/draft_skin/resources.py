@@ -38,3 +38,22 @@ def _posix_available():
 def worker_memory_limit():
     available = available_memory() or (4 * 1024**3)
     return int(min(4 * 1024**3, available * 0.35))
+
+
+class _ProcessMemoryCounters(ctypes.Structure):
+    _fields_ = [('cb', ctypes.c_ulong), ('page_faults', ctypes.c_ulong)]
+    _fields_ += [(name, ctypes.c_size_t) for name in ('peak_resident', 'resident', 'peak_paged_pool',
+        'paged_pool', 'peak_nonpaged_pool', 'nonpaged_pool', 'private', 'peak_private')]
+
+
+def memory_metrics():
+    if os.name != 'nt':
+        return {}
+    counters = _ProcessMemoryCounters(); counters.cb = ctypes.sizeof(counters)
+    process = ctypes.WinDLL('kernel32').GetCurrentProcess; process.restype = ctypes.c_void_p
+    query = ctypes.WinDLL('psapi').GetProcessMemoryInfo
+    query.argtypes = [ctypes.c_void_p, ctypes.POINTER(_ProcessMemoryCounters), ctypes.c_ulong]
+    if not query(process(), ctypes.byref(counters), counters.cb):
+        raise OSError('Cannot read draft-skin worker memory usage.')
+    return {'worker_peak_resident_bytes': int(counters.peak_resident),
+            'worker_resident_bytes': int(counters.resident), 'worker_peak_private_bytes': int(counters.peak_private)}

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <numeric>
 #include <queue>
@@ -443,14 +444,14 @@ static int emit_candidates(const TriangleSnapshot& snapshot, const Bounds& movin
     return count;
 }
 
-static TriangleSnapshot* create_snapshot(const double* vertices, const int64_t* triangles, int count) {
-    auto* snapshot=new TriangleSnapshot(); int maximum=-1;
+static TriangleSnapshot* create_snapshot(const double* vertices, const int64_t* triangles, int count, bool indexed=true) {
+    auto snapshot=std::make_unique<TriangleSnapshot>(); int maximum=-1;
     snapshot->triangles.assign(triangles,triangles+3*count);
     for (int i=0; i<3*count; ++i) maximum=std::max(maximum,int(triangles[i]));
     snapshot->vertices.reserve(maximum+1); for (int i=0; i<=maximum; ++i) snapshot->vertices.push_back(load3(vertices+3*i));
     snapshot->faces.reserve(count); for (int i=0; i<count; ++i) snapshot->faces.push_back(face_bounds(vertices,triangles+3*i,i));
-    snapshot->indexed_faces=snapshot->faces;
-    if (count) build_bvh(*snapshot,0,count); return snapshot;
+    if(indexed)snapshot->indexed_faces=snapshot->faces;
+    if (count) build_bvh(*snapshot,0,count); return snapshot.release();
 }
 
 AF_EXPORT void* af_triangle_snapshot_create(const double* vertices, const int64_t* triangles,
@@ -567,8 +568,23 @@ AF_EXPORT int af_candidate_pairs(const double* start, const double* end, const i
 #include "af_attachment_graft.hpp"
 #include "af_soft_tissue.hpp"
 #include "af_soft_tissue_point.hpp"
+#include "af_skin_gap.hpp"
+#include "af_skin_wrap.hpp"
+#include "af_skin_finish.hpp"
+#include "af_skin_bind.hpp"
+#include "af_skin_precision.hpp"
+#include "af_skin_tiles.hpp"
+#include "af_skin_tile_wrap.hpp"
+#include "af_skin_gap_corridors.hpp"
+#include "af_skin_exterior_precision.hpp"
+#include "af_skin_quality.hpp"
+#include "af_skin_tile_finish.hpp"
+#include "af_skin_components.hpp"
+#include "af_skin_gap_validation.hpp"
 #if defined(AF_V3_OPERATION_EXPERIMENT) || defined(AF_V3_NATIVE_CONTROLLER)
 #include "af_fiber_v3_operations.hpp"
 #include "af_fiber_v3_coordinator.hpp"
 #include "af_fiber_v3_native_sqp.hpp"
 #endif
+
+#include "af_mesh_diagnostics.hpp"

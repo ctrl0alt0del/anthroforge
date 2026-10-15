@@ -8,6 +8,8 @@ import numpy as np
 from core.warm_start.invalidation import WarmChangeClass, WarmChangeDecision
 from core.warm_start.job import read_job, write_status, write_summary
 from core.warm_start.model import SkinWarmCapture, WarmUpdateStatus
+from core.warm_start.strategy_guides import guide_sets as _guide_sets
+from workers.topology_update import attempt_update, augment_summary, preflight, annotate_rebuild
 
 _TIMINGS = {}
 
@@ -15,17 +17,29 @@ _TIMINGS = {}
 def run_array_job(job_dir):
     _TIMINGS.clear()
     started, spec = time.perf_counter(), read_job(Path(job_dir) / "job.json")
-    request = json.loads(Path(spec.request_path).read_text(encoding="utf-8"))
-    _TIMINGS["queue_wait"] = max(0.0, time.time() - float(request.get("dispatched_at", time.time())))
+    request = _request(spec)
     skin_capture, topology_capture, old_skin, old_topology = _timed("decode", _read_inputs, spec)
     decision = _decision(request)
     skin, skin_type = _timed("skin_stage", _solve_skin, spec, skin_capture, old_skin, decision)
+    from workers.stage_results import checkpoint
+    checkpoint(spec, skin, "skin", skin_type)
     active_skin = skin or old_skin
     topology, topology_type = _timed("topology_stage", _solve_topology, spec, topology_capture,
-                                     active_skin, old_topology, decision, skin_type)
+                                     active_skin, old_topology, decision, skin_type, _bound_skin(spec, old_skin), skin_capture.sources)
+    _complete_stages(spec,request,skin_type,topology_type,started,skin,topology,active_skin,topology_capture)
+
+
+def _complete_stages(spec, request, skin_type, topology_type, started, skin, topology, active_skin, topology_capture):
+    from workers.stage_results import checkpoint
     _check_cancelled(spec)
-    _timed("result_write", _write_outputs, spec, skin, topology)
-    summary = _summary(request, skin_type, topology_type, started, skin, topology)
+    from workers.deformation_rebuild import prepare
+    if topology is not None: prepare(spec,topology,active_skin,topology_capture)
+    checkpoint(spec, topology, "topology", topology_type)
+    _finish_job(spec, request, skin_type, topology_type, started, skin, topology)
+
+
+def _finish_job(spec, request, skin_type, topology_type, started, skin, topology):
+    summary = augment_summary(spec, _summary(request, skin_type, topology_type, started, skin, topology))
     write_summary(spec.summary_path, summary)
     _status(spec, "SUCCEEDED", "Complete", 1.0, _message(summary), summary["update_type"])
 
@@ -50,7 +64,7 @@ def _solve_skin(spec, capture, old, decision):
     if spec.mode == "FORCE_TOPOLOGY" and not decision.skin_rebuild:
         return None, "retained"
     if old is not None and not decision.skin_rebuild:
-        warm = _warm_skin(capture, old)
+        warm = _warm_skin(capture, old, spec)
         if warm is not None:
             return warm, "warm"
     _status(spec, "RUNNING", "Skin rebuild", 0.22, "Rebuilding draft skin.")
@@ -60,13 +74,13 @@ def _solve_skin(spec, capture, old, decision):
     return result, "rebuilt"
 
 
-def _warm_skin(capture, old):
+def _warm_skin(capture, old, spec=None):
     from core.warm_start.skin_solver import solve_warm_skin
     warm_capture = _warm_capture(capture, old)
     started = time.perf_counter(); result = solve_warm_skin(warm_capture)
     if not result.status.valid:
         return None
-    return _skin_result(capture, old, result, time.perf_counter() - started)
+    return _skin_result(capture, old, result, time.perf_counter() - started, spec)
 
 
 def _warm_capture(capture, old):
@@ -82,11 +96,13 @@ def _warm_capture(capture, old):
                            stats.get("structural_signature", ""), stats.get("solver_settings_hash", ""))
 
 
-def _skin_result(capture, old, warm, elapsed):
+def _skin_result(capture, old, warm, elapsed, spec=None):
     from core.draft_skin.model import SkinResult
-    from core.draft_skin.validation import validate_mesh
+    from core.diagnostic_checks import warm_quality as revalidate
     stats = _skin_stats(capture, old.statistics, elapsed)
-    validation = validate_mesh(warm.vertices, old.triangles, True)
+    validation, quality = revalidate(capture, warm.vertices, old.triangles,
+        _skin_progress(spec) if spec else None, (lambda: _cancelled(spec)) if spec else None)
+    stats.update(quality)
     return SkinResult(warm.vertices, old.triangles, old.collagen, stats, validation, warm.binding)
 
 
@@ -104,16 +120,18 @@ def _skin_stats(capture, previous, elapsed):
     return stats
 
 
-def _solve_topology(spec, capture, skin, old, decision, skin_type):
-    from core.warm_start.topology_solver import reset_projection_stats
-    reset_projection_stats()
+def _solve_topology(spec, capture, skin, old, decision, skin_type, before_skin=None, sources=()):
     if capture is None or skin is None:
+        from workers.topology_update import options_for
+        from core.warm_start.strategy_pipeline import require_rebuild_allowed
+        require_rebuild_allowed(options_for(spec))
         return None, "missing"
+    from adapters.topology.strategy import binding_update_type
+    skin_type = binding_update_type(before_skin, skin, skin_type)
     capture = _skin_capture(capture, skin)
-    if old is not None and not decision.topology_rebuild:
-        warm = _warm_topology(capture, old, skin_type)
-        if warm is not None:
-            return warm, "rebound" if skin_type == "rebuilt" else "warm"
+    warm = attempt_update(spec, capture, skin, old, decision, skin_type, before_skin, sources)
+    if warm is not None:
+        return warm, "rebound" if skin_type == "rebuilt" else "warm"
     _status(spec, "RUNNING", "Topology rebuild", 0.64, "Rebuilding guided quad topology.")
     return _full_topology(spec, capture), "rebuilt"
 
@@ -124,77 +142,6 @@ def _skin_capture(capture, skin):
                    lower=vertices.min(axis=0), upper=vertices.max(axis=0))
 
 
-def _warm_topology(capture, old, skin_type):
-    started = time.perf_counter()
-    result = _rebound_topology(capture, old) if skin_type == "rebuilt" else _project_topology(capture, old)
-    if result is None:
-        return None
-    result.statistics["update_elapsed_seconds"] = time.perf_counter() - started
-    result.statistics["last_update_type"] = "rebound" if skin_type == "rebuilt" else "warm"
-    result.statistics["diagnostics_deferred"] = True
-    from core.warm_start.arap import arap_cache_stats
-    from core.warm_start.topology_solver import projection_stats
-    result.statistics["arap_cache"] = arap_cache_stats()
-    result.statistics["projection"] = projection_stats()
-    return result
-
-
-def _project_topology(capture, old):
-    from core.warm_start.topology_solver import reproject_topology
-    old_guides, new_guides = _guide_sets(old.statistics, capture.guides)
-    vertices, status, _report = reproject_topology(old.vertices, old.quads, capture.vertices,
-                                                   capture.triangles, old.skin_binding,
-                                                   old.guide_binding, old_guides, new_guides,
-                                                   symmetry_plane=capture.plane)
-    return _topology_result(old, vertices, old.skin_binding, old.guide_binding) if status.valid else None
-
-
-def _rebound_topology(capture, old):
-    from core.warm_start.topology_solver import project_and_rebind_topology
-    guides = _guide_sets(old.statistics, capture.guides)[1]
-    result = project_and_rebind_topology(old.vertices, old.quads, capture.vertices,
-                                         capture.triangles, old.face_regions, old.guide_indices,
-                                         guides, symmetry_plane=capture.plane)
-    return _topology_result(old, result[0], result[1], result[2]) if result[3].valid else None
-
-
-def _topology_result(old, vertices, skin_binding, guide_binding):
-    from core.topology.model import TopologyResult
-    from core.topology.validation import validate_topology
-    return TopologyResult(vertices, old.quads, old.face_regions, old.guide_indices,
-                          dict(old.statistics), validate_topology(vertices, old.quads),
-                          old.owner_scp_indices, old.target_edge_lengths, skin_binding, guide_binding)
-
-
-def _guide_sets(stats, guides):
-    old = _stored_guides(stats)
-    mapping = stats.get("guide_map", ())
-    by_name = {item.object_name: item for item in guides}
-    current = tuple(_mapped_guide(index, item, by_name) for index, item in enumerate(mapping))
-    current = tuple(item for item in current if item is not None)
-    return old, current or tuple(guides)
-
-
-def _stored_guides(stats):
-    from core.topology.model import TopologyGuide
-    return tuple(TopologyGuide(int(item["guide_index"]), item["fiber_id"], item["fiber_id"],
-                               "ORIGINAL", np.asarray(item["points"]))
-                 for item in stats.get("guide_layout", ()))
-
-
-def _mapped_guide(index, mapping, by_name):
-    from core.topology.model import TopologyGuide
-    candidates = [by_name[name] for name in mapping.get("sources", ()) if name in by_name]
-    if not candidates:
-        return None
-    source = max(candidates, key=lambda item: _perimeter(item.points))
-    return TopologyGuide(index, source.fiber_id, source.object_name, source.mirror_role, source.points)
-
-
-def _perimeter(points):
-    values = np.asarray(points)
-    return float(np.linalg.norm(np.roll(values, -1, axis=0) - values, axis=1).sum())
-
 
 def _full_topology(spec, capture):
     from adapters.topology.solver import solve_capture
@@ -202,7 +149,7 @@ def _full_topology(spec, capture):
     result = solve_capture(capture, ensure_worker_dependencies(), _topology_progress(spec),
                            lambda: _cancelled(spec))
     result.statistics["last_update_type"] = "rebuilt"
-    return result
+    return annotate_rebuild(spec, result)
 
 
 def _write_outputs(spec, skin, topology):
@@ -262,3 +209,15 @@ def _elapsed(timings):
 def _check_cancelled(spec):
     if _cancelled(spec):
         raise RuntimeError("Coordinated update cancelled.")
+
+
+def _bound_skin(spec, fallback):
+    from core.draft_skin.protocol import read_result
+    path = Path(spec.job_dir) / "bound_skin.npz"
+    return read_result(path) if path.exists() else fallback
+
+
+def _request(spec):
+    request = json.loads(Path(spec.request_path).read_text(encoding="utf-8"))
+    _TIMINGS["queue_wait"] = max(0.0, time.time() - float(request.get("dispatched_at", time.time())))
+    return request

@@ -3,6 +3,7 @@ import time
 import numpy as np
 
 from .arap import constrained_arap
+from .binding_validation import valid_skin_binding
 from .model import SkinWarmResult, WarmInvalidationReason, WarmUpdateStatus, WarmValidationReport
 from .signatures import source_connectivity_signature, source_identity_signature
 
@@ -104,6 +105,8 @@ def validate_warm_skin(reference, triangles, vertices, binding):
 
 
 def _compatibility(capture):
+    if not valid_skin_binding(capture.binding, capture.new_sources, len(capture.vertices)):
+        return WarmInvalidationReason.BINDING_QUALITY
     if capture.binding.schema != 1:
         return WarmInvalidationReason.SCHEMA_MISMATCH
     if capture.expected_structural_signature not in {"", capture.structural_signature}:
@@ -123,7 +126,7 @@ def _compatibility(capture):
 def _influence_points(binding, sources, influence):
     output = np.zeros((len(binding.weights), 3), dtype=np.float64)
     for source_index, source in sources.items():
-        mask = binding.source_indices[:, influence] == source_index
+        mask = (binding.source_indices[:, influence] == source_index) & (binding.weights[:, influence] > 0)
         if np.any(mask):
             faces = source.triangles[binding.triangle_indices[mask, influence]]
             output[mask] = np.einsum("ni,nij->nj", binding.barycentric[mask, influence], source.vertices[faces])
@@ -133,7 +136,7 @@ def _influence_points(binding, sources, influence):
 def _influence_normals(binding, sources, influence):
     output = np.zeros((len(binding.weights), 3), dtype=np.float64)
     for source_index, source in sources.items():
-        mask = binding.source_indices[:, influence] == source_index
+        mask = (binding.source_indices[:, influence] == source_index) & (binding.weights[:, influence] > 0)
         if np.any(mask):
             faces = source.triangles[binding.triangle_indices[mask, influence]]
             output[mask] = _normals(source.vertices[faces])
@@ -157,8 +160,9 @@ def _fallback(capture, reason, message):
 
 
 def _result(capture, vertices, validation, started, transform_count=0):
-    reason = WarmInvalidationReason.NONE if validation.valid else WarmInvalidationReason.VALIDATION_FAILED
-    status = WarmUpdateStatus(validation.valid, "Complete", 1.0, validation.message, reason)
+    usable = validation.finite and validation.containment
+    reason = WarmInvalidationReason.NONE if usable else WarmInvalidationReason.VALIDATION_FAILED
+    status = WarmUpdateStatus(usable, "Complete", 1.0, validation.message, reason)
     stats = {"elapsed_seconds": time.perf_counter() - started,
              "geometry_state_hash": capture.geometry_state_hash,
              "transformed_sources": int(transform_count)}

@@ -13,6 +13,7 @@ from ..issues.api import configure
 configure(SYSTEM)
 EPOCH = uuid4().hex
 _LEDGER, _SERIAL = {}, 0
+CHANGES = {}
 
 
 def measure(name, callback, *args, **kwargs):
@@ -75,7 +76,7 @@ def retire(root=None, entity_ids=None):
 def reset(state="UNSCANNED"):
     global EPOCH
     COORDINATOR.cancel_all()
-    SYSTEM.reset()
+    SYSTEM.reset(); CHANGES.clear()
     EPOCH = uuid4().hex
     _LEDGER.clear(); REPOSITORY.clear(state)
 

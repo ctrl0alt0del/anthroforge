@@ -17,8 +17,11 @@ class AF_PT_WarmUpdatePanel(bpy.types.Panel):
 
     def draw(self, context):
         scene = context.scene
+        root = root_for_context(context)
         if scene.af_warm_update_running:
             _draw_running(self.layout, scene); return
+        if root.get("af_deformation_reference") is not None:
+            _draw_deformation(self.layout,root); return
         _draw_migration(self.layout, context)
         _button(self.layout, "Update Skin & Topology", "AUTO", "FILE_REFRESH")
         row = self.layout.row(align=True)
@@ -32,8 +35,28 @@ def _button(layout, text, mode, icon):
     operator.mode = mode
 
 
+def _draw_deformation(layout, root):
+    layout.prop(root.af_topology_settings,"deformation_method")
+    layout.label(text=root.get("af_deformation_status","Ready"))
+    layout.label(text=f"Issues: {root.get('af_deformation_issue_count',0)} (see Issues panel)")
+    if root.get("af_deformation_construction_stale"):
+        layout.label(text="Construction settings changed; explicit rebuild required",icon="INFO")
+    row = layout.row(align=True)
+    row.operator("af.update_final_skin",icon="FILE_REFRESH")
+    row.operator("af.cancel_final_skin",icon="CANCEL")
+    layout.operator("af.initialize_final_skin",text="Reinitialize Reference",icon="MOD_DATA_TRANSFER")
+    _button(layout,"Rebuild Skin & Topology","FORCE_FULL","MOD_REMESH")
+    if root.get("af_deformation_seconds") is not None:
+        layout.label(text=f"Last update: {root['af_deformation_seconds']:.2f}s")
+
+
 def _draw_migration(layout, context):
     root = root_for_context(context)
+    _button(layout,"Build Skin & Topology","FORCE_FULL","MOD_REMESH")
+    layout.operator("af.initialize_final_skin",icon="MOD_DATA_TRANSFER")
+    if root.get("af_deformation_status"):
+        layout.label(text=root["af_deformation_status"],icon="INFO")
+        layout.operator("af.cancel_final_skin",icon="CANCEL")
     from ...adapters.warm_update.migration import migration_state
     state = migration_state(root, context.scene)
     if any(state.values()):

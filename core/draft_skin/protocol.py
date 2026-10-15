@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .constants import PROTOCOL_VERSION
+from .constants import PROTOCOL_VERSION, SOLVER_VERSION
 from .model import SkinCapture, SkinJobSpec, SkinJobStatus, SkinResult, SkinSource, SkinValidationReport
 from .settings import DEFAULT_SETTINGS, settings_from_payload, settings_payload
 from ..warm_start.model import SkinWarmBinding
@@ -68,6 +68,8 @@ def _source_metadata(source):
         "entity_id": str(source.entity_id),
         "mirror_role": str(source.mirror_role),
         "object_name": str(source.object_name),
+        "gap_limit_ratio": float(source.gap_limit_ratio),
+        "gap_strength": float(source.gap_strength),
     }
 
 
@@ -145,19 +147,20 @@ def read_capture(path):
 
 def _check_protocol(data):
     version = int(data["protocol_version"][0])
-    if version != PROTOCOL_VERSION:
+    if version not in (3, 4, PROTOCOL_VERSION):
         raise ValueError(f"Unsupported draft-skin protocol {version}.")
 
 
 def _read_sources(data):
     metadata = json.loads(str(data["metadata"]))
     voff, toff = data["vertex_offsets"], data["triangle_offsets"]
+    vertices, triangles, collagen = data["vertices"], data["triangles"], data["collagen"]
     for index, item in enumerate(metadata):
         yield SkinSource(
             **item,
-            vertices=data["vertices"][voff[index] : voff[index + 1]].copy(),
-            triangles=data["triangles"][toff[index] : toff[index + 1]].copy(),
-            collagen=data["collagen"][voff[index] : voff[index + 1]].copy(),
+            vertices=vertices[voff[index] : voff[index + 1]].copy(),
+            triangles=triangles[toff[index] : toff[index + 1]].copy(),
+            collagen=collagen[voff[index] : voff[index + 1]].copy(),
         )
 
 
@@ -197,7 +200,8 @@ def _empty_binding(count):
 def read_result(path):
     with np.load(path, allow_pickle=False) as data:
         _check_protocol(data)
-        report = SkinValidationReport(**json.loads(str(data["validation"])))
+        payload = json.loads(str(data["validation"]))
+        report = SkinValidationReport(**payload) if payload else None
         binding = _read_binding(data)
         return SkinResult(
             vertices=data["vertices"].copy(),
@@ -218,6 +222,7 @@ def _read_binding(data):
 
 def capture_hash(root_name, sources, settings=DEFAULT_SETTINGS):
     digest = hashlib.sha256(str(root_name).encode("utf-8"))
+    digest.update(SOLVER_VERSION.encode("utf-8"))
     digest.update(json.dumps(settings_payload(settings), sort_keys=True).encode("utf-8"))
     for source in sources:
         _update_source_hash(digest, source)

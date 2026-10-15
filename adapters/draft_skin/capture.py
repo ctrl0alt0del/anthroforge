@@ -1,6 +1,7 @@
 from dataclasses import replace
 
 import numpy as np
+from .gap_settings import contributor_gap
 
 try:
     from ...core.draft_skin.constants import COLLAGEN_GROUP, TARGET_RESOLUTION
@@ -24,7 +25,7 @@ def capture_skin(root, scene, depsgraph):
 def _capture_sources(objects, root, depsgraph, cache, warnings):
     regular = [_capture_object(obj, root, depsgraph, cache, warnings) for obj in objects if _role(obj) != "FIBER"]
     regular = [item for item in regular if item is not None]
-    valid = {item.entity_id for item in regular if item.entity_type == "MUSCLE"}
+    valid = {(item.entity_id, item.mirror_role) for item in regular if item.entity_type == "MUSCLE"}
     fibers = _capture_fibers(objects, root, depsgraph, valid, cache, warnings)
     return tuple(replace(item, source_index=i) for i, item in enumerate((*regular, *fibers)))
 
@@ -71,7 +72,7 @@ def _fiber_properties(root):
 def _include_fiber(obj, fibers, valid_muscles):
     fiber = fibers.get(_entity_id(obj, "FIBER"))
     muscle_id = "" if fiber is None else str(getattr(fiber, "muscle_id", "") or "")
-    return not muscle_id or muscle_id not in valid_muscles
+    return not muscle_id or (muscle_id, _mirror_role(obj)) not in valid_muscles
 
 
 def _capture_object(obj, root, depsgraph, cache, warnings):
@@ -81,7 +82,9 @@ def _capture_object(obj, root, depsgraph, cache, warnings):
     vertices, faces = arrays
     role = _role(obj)
     collagen = _collagen_values(obj, root, depsgraph, len(vertices), cache, warnings) if role == "SCP" else None
-    return SkinSource(0, role, _entity_id(obj, role), _mirror_role(obj), obj.name, vertices, faces, collagen)
+    entity_id = _entity_id(obj, role)
+    gap = contributor_gap(root, role, entity_id, _root_settings(root))
+    return SkinSource(0, role, entity_id, _mirror_role(obj), obj.name, vertices, faces, collagen, *gap)
 
 
 def _evaluated_arrays(obj, depsgraph):
@@ -212,4 +215,6 @@ def _root_settings(root):
         values.collagen_depth_percent,
         values.collagen_core_percent,
         values.collagen_falloff_percent,
+        getattr(values, "gap_limit_percent", 0.5),
+        getattr(values, "gap_strength_percent", 100.0),
     )

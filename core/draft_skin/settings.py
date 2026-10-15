@@ -13,8 +13,8 @@ from .model import SkinSolverSettings
 DEFAULT_SETTINGS = SkinSolverSettings()
 
 
-def settings_from_percentages(minimum, depth, core, falloff):
-    values = (minimum, depth, core, falloff)
+def settings_from_percentages(minimum, depth, core, falloff, gap_limit=0.5, gap_strength=100.0):
+    values = (minimum, depth, core, falloff, gap_limit, gap_strength)
     return SkinSolverSettings(*(float(value) / 100.0 for value in values))
 
 
@@ -29,6 +29,8 @@ def root_settings_percentages(settings=DEFAULT_SETTINGS):
         "collagen_depth_percent": values["collagen_depth_ratio"],
         "collagen_core_percent": values["collagen_core_ratio"],
         "collagen_falloff_percent": values["collagen_falloff_ratio"],
+        "gap_limit_percent": values["gap_limit_ratio"],
+        "gap_strength_percent": values["gap_strength"],
     }
 
 
