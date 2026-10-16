@@ -86,6 +86,7 @@ class TopologyCapture:
     ownership_sources: tuple[TopologyOwnershipSource, ...] = ()
     flow_samples: Any = None
     flow_guides: tuple[TopologyGuide, ...] = ()
+    flow_regions: tuple = ()
 
 
 @dataclass(frozen=True)

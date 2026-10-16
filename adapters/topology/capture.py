@@ -26,11 +26,11 @@ def capture_topology_surface(root, scene, depsgraph, vertices, triangles):
     rules = density_rules(root)
     sources = ownership_sources(root, scene, depsgraph)
     from .flow_capture import capture_flow
-    samples, paths, notices = capture_flow(root, scene, depsgraph, settings)
+    regions = []; samples, paths, notices = capture_flow(root, scene, depsgraph, settings, regions)
     lower, upper = vertices.min(axis=0), vertices.max(axis=0)
-    digest = capture_hash(root.name, vertices, triangles, guides, settings, plane, rules, sources, samples, paths)
+    digest = capture_hash(root.name, vertices, triangles, guides, settings, plane, rules, sources, samples, paths, tuple(regions))
     return TopologyCapture(root.name, vertices, triangles, guides, lower, upper,
-                           digest, settings, plane, tuple(warnings) + notices, rules, sources, samples, paths)
+                           digest, settings, plane, tuple(warnings) + notices, rules, sources, samples, paths, tuple(regions))
 
 
 def _draft_skin(root, scene):

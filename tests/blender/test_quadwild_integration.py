@@ -14,6 +14,18 @@ from adapters.topology.solver import _transitions
 
 
 class QuadWildIntegrationTests(BlenderTestCase):
+    def test_branched_patches_supply_soft_flow_without_hard_seams(self):
+        from types import SimpleNamespace
+        from adapters.topology.flow_capture import append_patches
+        grid=np.array([[[x,y,0.] for x in range(5)] for y in range(5)])
+        patches=(('main',grid,False,None),('branch',grid+[0,4,0],False,{'parent':'main'}))
+        samples,paths,regions=[],[],[]
+        append_patches(SimpleNamespace(id='m',name='Muscle'),'MIRROR',patches,True,samples,paths,regions)
+        self.assertEqual(paths,[]); self.assertEqual(len(samples),2)
+        self.assertEqual(regions[1]['seam'],{'parent':'main'})
+        self.assertEqual(regions[1]['role'],'MIRROR')
+        self.assertEqual(set(samples[1][:,9]),{1.})
+
     def test_explicit_flow_is_captured_separately_from_loops(self):
         obj = root(); fiber = obj.af_vcp_system.fibers.add(); fiber.id = 'flow'; fiber.topology_flow_guide = True
         draft_skin(obj); loop_proxy(obj, fiber.id, 'Flow')

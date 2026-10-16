@@ -38,6 +38,15 @@ replaces the experiment's four manually selected fiber indices; it is determinis
 and applies to all native muscles with regular charts. Unsupported charts produce
 warnings and can still receive explicit FLOW fiber guidance.
 
+Branched loft muscles are supported through their constituent material grids.
+Capture recovers evaluated, connector-adjusted patch positions using the assembly's
+explicit shared vertex identities. Patch winding determines normal orientation;
+interior sampling excludes shared seam vertices. The existing native four-way
+soft field handles direction exchange across the connected region. Internal seams
+and branch centerlines do not automatically become hard paths. This does not add a
+separate junction optimizer or guarantee seamless final edge flow. Muscle/patch
+ownership, mirror role and seam correspondence are retained in capture metadata.
+
 ## Issues and failure policy
 
 Finite, usable quad meshes can publish with geometry warnings. These include
@@ -74,8 +83,9 @@ AnthroForge native field helper with `native/topology/build_windows.ps1` or the
 maintained `native/build_windows.ps1` entrypoint. The package tool verifies both the
 helper ABI and dependency bundle.
 
-Topology protocol 6 persists FLOW samples, identities and paths. Readers accept
-protocols 4 and 5 with empty guidance. Root settings use the normal Blender
+Topology protocol 7 persists FLOW samples, identities, paths and patch regions.
+Readers accept protocols 4–6 (missing guidance or patch metadata remains empty).
+Root settings use the normal Blender
 save/undo/duplication and import/export paths. The capture hash includes guidance
 and backend settings; construction signatures include the selected backend.
 

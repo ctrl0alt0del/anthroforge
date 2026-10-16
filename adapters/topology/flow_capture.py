@@ -11,23 +11,10 @@ def unit(values):
     return values / np.maximum(np.linalg.norm(values, axis=-1, keepdims=True), 1e-12)
 
 
-def chart_samples(chart, owner):
-    rows, cols = chart.row_count, chart.column_count
-    if rows < 2 or cols < 2 or len(chart.inflated_vertices) != rows * cols:
-        raise ValueError("Muscle has no regular material chart; use explicit FLOW fibers.")
-    grid = np.asarray(chart.inflated_vertices).reshape(rows, cols, 3)
-    along, across = np.gradient(grid, axis=1), np.gradient(grid, axis=0)
-    select = (slice(1, -1, 2), slice(1, -1, 3))
-    points = grid[select].reshape(-1, 3)
-    samples = np.column_stack((points, unit(along)[select].reshape(-1, 3),
-                              unit(np.cross(across, along))[select].reshape(-1, 3), np.full(len(points), owner)))
-    return samples, grid[rows // 2, ::3].copy()
-
-
-def capture_flow(root, scene, depsgraph, settings):
+def capture_flow(root, scene, depsgraph, settings, regions=None):
     if settings.backend != "QUADWILD": return np.empty((0, 10)), (), ()
     samples, paths, warnings = [], [], []
-    capture_muscles(root, scene, samples, paths, warnings)
+    capture_muscles(root, scene, samples, paths, warnings, regions)
     selected = {f.id for f in root.af_vcp_system.fibers if f.topology_mode == "OPEN" and f.topology_flow_guide}
     for obj in sorted(scene.objects, key=_guide_sort_key):
         if not obj.get("af_fiber_proxy") or obj.get("af_root_name") != root.name: continue
@@ -35,21 +22,34 @@ def capture_flow(root, scene, depsgraph, settings):
         points = _curve_points(obj, depsgraph)[::3]
         if len(points) < 2: continue
         direction = unit(np.diff(points, axis=0)); mid = (points[:-1] + points[1:]) * .5
-        samples.append(np.column_stack((mid, direction, np.zeros_like(mid), np.full(len(mid), len(paths)))))
+        samples.append(np.column_stack((mid, direction, np.zeros_like(mid), np.full(len(mid), len(samples)))))
         paths.append(TopologyGuide(len(paths), _fiber_id(obj), obj.name, _mirror_role(obj), points))
     return np.vstack(samples) if samples else np.empty((0, 10)), tuple(paths), tuple(warnings)
 
 
-def capture_muscles(root, scene, samples, paths, warnings):
-    from anthroforge.adapters.deformation.muscles import material_chart
+def capture_muscles(root, scene, samples, paths, warnings, regions=None):
+    from .muscle_flow import material_patches
+    regions = [] if regions is None else regions
     for muscle in sorted(root.af_vcp_system.muscles, key=lambda m: m.id):
         for role in muscle_roles(root, muscle):
             try:
-                data, line = chart_samples(material_chart(root, scene, muscle, role), len(paths))
-                samples.append(data)
-                paths.append(TopologyGuide(len(paths), muscle.id, muscle.name, role, line))
+                patches, branched = material_patches(root, scene, muscle, role)
+                append_patches(muscle, role, patches, branched, samples, paths, regions)
             except (ValueError, RuntimeError) as error:
                 warnings.append(f"Muscle FLOW unavailable for {muscle.name} ({role}): {error}")
+
+
+def append_patches(muscle, role, patches, branched, samples, paths, regions):
+    from anthroforge.core.topology.flow_patches import grid_samples
+    for key, grid, flip, seam in patches:
+        owner = len(samples)
+        data = grid_samples(grid, owner, flip)
+        if not len(data): raise ValueError("Muscle FLOW patch has no nondegenerate interior samples.")
+        samples.append(data)
+        regions.append(dict(owner=owner, muscle_id=muscle.id, name=muscle.name, role=role,
+                            patch=key, branched=branched, seam=seam, samples=len(data)))
+        if not branched:
+            paths.append(TopologyGuide(len(paths), muscle.id, muscle.name, role, grid[len(grid)//2, ::3].copy()))
 
 
 def muscle_roles(root, muscle):
