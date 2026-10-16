@@ -74,13 +74,13 @@ class AF_PT_FiberEditPanel(bpy.types.Panel):
     def _draw_solver(self, layout, fiber):
         solver_box = layout.box()
         solver_box.label(text=f"Solver V{int(fiber.solver_version)}")
-        solver_box.prop(fiber, "use_warm_start")
-        solver_box.prop(fiber, "use_surface_routing")
+        solver_box.prop(fiber, "use_warm_start"); solver_box.prop(fiber, "use_surface_routing")
         solver_box.prop(fiber, "use_segment_collisions")
         solver_box.prop(fiber, "preview_planner_route")
         op = solver_box.operator("af.clear_fiber_warm_start", icon="TRASH")
         op.fiber_id = fiber.id
         layout.prop(fiber, "name", text="Name")
+        if not is_loop_fiber(fiber): layout.prop(fiber, "topology_flow_guide")
         solver_box.prop(fiber, "node_count")
         solver_box.prop(fiber, "iterations_interactive")
         solver_box.prop(fiber, "iterations_bake")

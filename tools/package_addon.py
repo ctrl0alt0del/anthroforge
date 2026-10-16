@@ -47,11 +47,12 @@ def native_inventory(stage):
     paths = [stage / "native" / "fiber_ccd" / name for name in REQUIRED_NATIVE]
     paths.append(stage / 'native/smoothing/af_height_smoothing_v1.dll')
     paths.append(stage / 'native/deformation/af_deformation_v1.dll')
+    paths.append(stage / 'native/topology/af_topology_field_v1.dll')
     if any(not path.is_file() for path in paths):
         raise ValueError("Package lacks required production native DLLs")
     verify_pair_abi(stage)
     verify_auxiliary_abi(stage)
-    verify_deformation_abi(stage)
+    verify_deformation_abi(stage); verify_topology_abi(stage)
     return {path.name: {"size": path.stat().st_size,
                         "sha256": hashlib.sha256(path.read_bytes()).hexdigest()} for path in paths}
 
@@ -65,6 +66,14 @@ def verify_deformation_abi(stage):
     for name, digest in manifest['files'].items():
         if hashlib.sha256((folder/name).read_bytes()).hexdigest() != digest:
             raise ValueError('Deformation dependency bundle is incomplete or corrupt: '+name)
+
+
+def verify_topology_abi(stage):
+    path = stage / 'native/topology/af_topology_field_v1.dll'
+    script = 'import ctypes,sys; lib=ctypes.CDLL(sys.argv[1]); assert lib.af_topology_version()==1; lib.af_select_paths'
+    subprocess.run([sys.executable, '-c', script, str(path)], check=True, timeout=30)
+    from core.topology.quadwild_bundle import verify_bundle
+    verify_bundle(stage / 'vendor/quadwild')
 
 
 def verify_pair_abi(stage):

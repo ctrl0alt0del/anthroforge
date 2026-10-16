@@ -6,3 +6,5 @@ if ($LASTEXITCODE -ne 0) { throw 'Fiber library build failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Height smoothing build failed' }
 & "$PSScriptRoot/deformation/build_windows.ps1"
 if ($LASTEXITCODE -ne 0) { throw 'Final-skin deformation build failed' }
+& "$PSScriptRoot/topology/build_windows.ps1"
+if ($LASTEXITCODE -ne 0) { throw 'Topology field build failed' }

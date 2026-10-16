@@ -8,10 +8,12 @@ from pathlib import Path
 try:
     from ...core.topology.constants import PROTOCOL_VERSION, SOLVER_VERSION
     from ...core.topology.model import TopologyJobSpec, TopologyJobStatus
+    from ...core.topology.process import terminate_tree
     from ...core.topology.protocol import read_result, read_status, write_job, write_status
 except ImportError:
     from core.topology.constants import PROTOCOL_VERSION, SOLVER_VERSION
     from core.topology.model import TopologyJobSpec, TopologyJobStatus
+    from core.topology.process import terminate_tree
     from core.topology.protocol import read_result, read_status, write_job, write_status
 
 
@@ -95,7 +97,7 @@ def cancel_job(scene):
     write_status(job.spec.status_path, TopologyJobStatus(
         "CANCELLED", "Cancelled", 0.0, "Topology generation cancelled.", (), True))
     if job.process.poll() is None:
-        job.process.terminate()
+        terminate_tree(job.process)
     return True
 
 

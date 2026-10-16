@@ -5,9 +5,10 @@ import bpy
 import numpy as np
 from anthroforge.adapters.deformation.capture import capture_anatomy
 from core.deformation.reference import DeformationSettings
-from core.deformation.serialization import encode, decode
-from workers.deformation_reference import build
-from types import SimpleNamespace
+from core.deformation.serialization import decode
+import json
+from core.topology.process import execute
+from core.topology.protocol import write_result
 
 
 def prepare(spec, result, capture):
@@ -17,10 +18,21 @@ def prepare(spec, result, capture):
         plane=np.zeros(6) if capture.plane is None else np.concatenate((capture.plane.origin,capture.plane.normal)))
     for i,row in enumerate(records): source.update({f"points_{i}":points[row["key"]],f"faces_{i}":faces[row["key"]]})
     settings = DeformationSettings(method=root.af_topology_settings.deformation_method)
-    adapted = SimpleNamespace(cancel_path=spec.cancel_path,topology_update=dict(settings=asdict(settings)))
-    reference = build(adapted,result,records,source); payload = encode(reference)
-    if decode(payload).signature != reference.signature: raise ValueError("Reference serialization failed.")
-    Path(spec.job_dir,"reference.txt").write_text(payload,encoding="ascii")
+    folder = Path(spec.job_dir); write_result(folder/"reference_input.npz", result)
+    np.savez(folder/"reference_source.npz", **source)
+    (folder/"reference_request.json").write_text(json.dumps(dict(records=records,settings=asdict(settings),cancel=spec.cancel_path)))
+    _run_preparation(folder, spec.cancel_path)
+
+
+def _run_preparation(folder, cancel_path):
+    worker = Path(__file__).with_name("deformation_prepare_worker.py")
+    reference = folder/"reference.txt"
+    if reference.exists(): reference.unlink()
+    status = execute([bpy.app.binary_path,"--factory-startup","-b","--python",worker,"--",folder],
+                     folder,"reference_prepare",lambda: Path(cancel_path).exists(),600)
+    if status["exit_code"] or not reference.exists():
+        raise RuntimeError(f"Reference preparation failed; see {folder/'reference_prepare.log'}")
+    decode(reference.read_text(encoding="ascii"))
 
 
 def attempt(spec, result, capture):

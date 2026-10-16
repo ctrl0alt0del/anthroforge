@@ -25,10 +25,12 @@ def capture_topology_surface(root, scene, depsgraph, vertices, triangles):
     guides, warnings = _guides(root, scene, depsgraph)
     rules = density_rules(root)
     sources = ownership_sources(root, scene, depsgraph)
+    from .flow_capture import capture_flow
+    samples, paths, notices = capture_flow(root, scene, depsgraph, settings)
     lower, upper = vertices.min(axis=0), vertices.max(axis=0)
-    digest = capture_hash(root.name, vertices, triangles, guides, settings, plane, rules, sources)
+    digest = capture_hash(root.name, vertices, triangles, guides, settings, plane, rules, sources, samples, paths)
     return TopologyCapture(root.name, vertices, triangles, guides, lower, upper,
-                           digest, settings, plane, tuple(warnings), rules, sources)
+                           digest, settings, plane, tuple(warnings) + notices, rules, sources, samples, paths)
 
 
 def _draft_skin(root, scene):
@@ -68,7 +70,7 @@ def _root_settings(root):
                "symmetry_mode": value.symmetry_mode,
                "custom_origin": tuple(value.custom_origin),
                "custom_normal": tuple(value.custom_normal),
-               "refinement_strategy": value.refinement_strategy}
+               "refinement_strategy": value.refinement_strategy, "backend": value.backend}
     return settings_from_payload(payload)
 
 

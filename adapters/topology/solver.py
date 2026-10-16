@@ -40,10 +40,10 @@ def solve_capture(capture, vendor, status=None, cancelled=None):
     update("Density", 0.32, "Resolving hierarchical SCP topology density.")
     density = build_density(capture)
     target = _initial_target(capture, density, anchors)
-    result = _run_mesh(capture, skin, anchors, collection, vendor, target, density, update)
-    if needs_correction(len(result[1]), capture.settings.target_quad_count):
+    result = _run_mesh(capture, skin, anchors, collection, vendor, target, density, update, cancelled)
+    if capture.settings.backend == "INSTANT" and needs_correction(len(result[1]), capture.settings.target_quad_count):
         target = corrected_target(target, len(result[1]), capture.settings.target_quad_count)
-        result = _run_mesh(capture, skin, anchors, collection, vendor, target, density, update)
+        result = _run_mesh(capture, skin, anchors, collection, vendor, target, density, update, cancelled)
     check_cancelled(cancelled)
     return _finish(capture, result, anchors, guide_map, warnings, target, density, update)
 
@@ -51,7 +51,7 @@ def solve_capture(capture, vendor, status=None, cancelled=None):
 def _initial_target(capture, density, anchors):
     reserved = _reserved_quads(anchors)
     base = base_quad_target(capture, density, reserved) if has_adaptive_density(capture) else capture.settings.target_quad_count
-    return internal_target(base, reserved)
+    return max(128, base-reserved) if capture.settings.backend == "QUADWILD" else internal_target(base, reserved)
 
 
 def _skin_object(capture):
@@ -77,6 +77,7 @@ def _engine_plane(capture):
 
 
 def _anchors(capture, skin, collection):
+    if not capture.guides: return (), [], []
     vertices, faces, _normals = guides.mesh_arrays(skin)
     bvh, diagonal = guides.surface_bvh(vertices, faces), float(np.linalg.norm(np.ptp(vertices, axis=0)))
     graph, tree = annuli.surface_graph(vertices, faces), cKDTree(vertices)
@@ -119,21 +120,28 @@ def _reserved_quads(anchors):
     return sum(len(obj.data.polygons) for obj in anchors) * 3
 
 
-def _run_mesh(capture, skin, anchors, collection, vendor, target, density, update):
+def _run_mesh(capture, skin, anchors, collection, vendor, target, density, update, cancelled=None):
     update("Remeshing", 0.48, f"Solving field-aligned quads (target {target}).")
     faces = proxy_face_count(len(capture.triangles), capture.settings.target_quad_count)
     work = layout.smooth_proxy(skin, faces, collection)
-    if capture.plane is None:
-        vertices, quads = _full_remesh(work, anchors, vendor, target)
-    else:
-        plane = instant.SymmetryPlane(capture.plane.origin, capture.plane.normal)
-        vertices, quads = instant.remesh_arrays(work, anchors, vendor, target, plane)
+    vertices, quads, backend = _remesh_backend(capture, work, anchors, vendor, target, cancelled, update)
     if has_adaptive_density(capture):
         labels = np.full(len(quads), REGION_AUTO); indices = np.full(len(quads), -1)
         vertices, quads, _labels, _indices = refine_to_density(
             capture, (vertices, quads, labels, indices), density)
     update("Stitching", 0.76, "Stitching immutable guide annuli.")
-    return _assemble(vertices, quads, anchors, capture.plane)
+    return (*_assemble(vertices, quads, anchors, capture.plane, capture.settings.backend == "QUADWILD"), backend)
+
+
+def _remesh_backend(capture, work, anchors, vendor, target, cancelled, update):
+    if capture.settings.backend == "QUADWILD":
+        from .quadwild import remesh
+        return remesh(capture, work, anchors, target, cancelled, update)
+    if capture.plane is None: vertices, faces = _full_remesh(work, anchors, vendor, target)
+    else:
+        plane = instant.SymmetryPlane(capture.plane.origin, capture.plane.normal)
+        vertices, faces = instant.remesh_arrays(work, anchors, vendor, target, plane)
+    return vertices, faces, {"backend": "INSTANT"}
 
 
 def _full_remesh(work, anchors, vendor, target):
@@ -146,9 +154,9 @@ def _full_remesh(work, anchors, vendor, target):
             return data["vertices"].copy(), data["faces"].copy()
 
 
-def _assemble(vertices, faces, anchors, plane):
+def _assemble(vertices, faces, anchors, plane, allow_unstitched=False):
     values = np.asarray(faces, dtype=np.int32)
-    transitions = instant.guide_transitions(vertices, values, anchors, _instant_plane(plane))
+    transitions, notices = _transitions(vertices, values, anchors, plane, allow_unstitched)
     parts = [(np.asarray(vertices), values, REGION_AUTO, -1)]
     parts.extend((item.vertices, item.faces, REGION_TRANSITION, i)
                  for i, item in enumerate(transitions))
@@ -156,7 +164,7 @@ def _assemble(vertices, faces, anchors, plane):
                  for i, anchor in enumerate(anchors))
     diagonal = max(float(np.linalg.norm(np.ptp(vertices, axis=0))), 1e-9)
     mesh = _weld_labeled(parts, 1e-6 * diagonal)
-    diagnostics = tuple(dict(item.diagnostics) for item in transitions)
+    diagnostics = tuple(dict(item.diagnostics) for item in transitions) + notices
     return (*mesh, diagnostics)
 
 
@@ -164,6 +172,14 @@ def _instant_plane(plane):
     if plane is None:
         return None
     return instant.SymmetryPlane(np.asarray(plane.origin), np.asarray(plane.normal))
+
+
+def _transitions(vertices, values, anchors, plane, allow_unstitched):
+    try: return instant.guide_transitions(vertices, values, anchors, _instant_plane(plane)), ()
+    except (ValueError, RuntimeError) as error:
+        if not allow_unstitched: raise
+        notice = dict(mode="UNSTITCHED", guide_name="Authored LOOP annuli", fallback_reason=str(error))
+        return (), (notice,)
 
 
 def _weld_labeled(parts, tolerance):
@@ -211,15 +227,15 @@ def _combined_labeled(parts):
 
 def _finish(capture, result, anchors, guide_map, warnings, target, density, update):
     update("Validation", 0.9, "Validating topology and guide preservation.")
-    vertices, faces, regions, indices, transitions = result
+    vertices, faces, regions, indices, transitions = result[:5]
     owners, lengths = sample_density(capture, density[0], density[1], vertices)
     metrics = _metrics(capture, vertices, faces, regions, anchors)
     report = validate_topology(vertices, faces, metrics)
     budgets = budget_statistics(capture, owners, faces, density[2])
-    all_warnings = _result_warnings(capture, warnings, density, metrics, budgets, transitions)
+    all_warnings = _result_warnings(capture, warnings, density, metrics, budgets, transitions) + result[5].get("warnings", [])
     stats = _result_stats(capture, metrics, target, guide_map, all_warnings,
                           budgets, density[4], transitions)
-    stats.update(_warm_statistics(capture, vertices, faces, guide_map))
+    stats.update(_warm_statistics(capture, vertices, faces, guide_map), backend_runtime=result[5], diagnostic_path=result[5].get("diagnostic", ""))
     stats["warnings"].extend(_require_valid_topology(capture, report, metrics) or ())
     bindings = _safe_bindings(capture, vertices, faces, regions, indices, anchors, stats)
     return _topology_result(result, stats, report, owners, lengths, bindings)
@@ -241,7 +257,7 @@ def _require_valid_topology(capture, report, metrics):
 
 
 def _topology_result(result, stats, report, owners, lengths, bindings):
-    vertices, faces, regions, indices, _transitions = result
+    vertices, faces, regions, indices, _transitions = result[:5]
     from ..mesh_issues import annotate
     from ..mesh_issues import check_result
     return annotate(check_result(TopologyResult(vertices, faces, regions, indices, stats, report,
@@ -266,8 +282,10 @@ def _result_warnings(capture, warnings, density, metrics, budgets, transitions=(
 
 def transition_warnings(transitions):
     staged = [item for item in transitions if item.get("mode") == "STAGED"]
-    return [f"Topology guide '{item['guide_name']}' used staged transition: "
-            f"{item['fallback_reason']}." for item in staged]
+    warnings = [f"Topology guide '{item['guide_name']}' used staged transition: {item['fallback_reason']}." for item in staged]
+    warnings.extend(f"LOOP annuli retained, but joining strips are missing; skin has open seams: {item['fallback_reason']}"
+                    for item in transitions if item.get("mode") == "UNSTITCHED")
+    return warnings
 
 
 def _result_stats(capture, metrics, target, guide_map, warnings, budgets, refinement,
@@ -328,7 +346,7 @@ def _loop_perimeter(points):
 
 
 def _density_backend(capture):
-    return "CONFORMING_QUAD_REFINEMENT" if has_adaptive_density(capture) else "UNIFORM_INSTANT_MESHES"
+    return "CONFORMING_QUAD_REFINEMENT" if has_adaptive_density(capture) else capture.settings.backend
 
 
 def _metrics(capture, vertices, faces, regions, anchors):

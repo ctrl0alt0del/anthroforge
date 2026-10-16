@@ -23,7 +23,8 @@ def construction_signature(root):
     values = {key:getattr(value,key) for key in fields}
     topology = root.af_topology_settings
     values.update(quads=topology.target_quad_count,symmetry=topology.symmetry_mode,origin=tuple(topology.custom_origin),
-        normal=tuple(topology.custom_normal),refinement=topology.refinement_strategy,gaps=gap_settings(root))
+        normal=tuple(topology.custom_normal),refinement=topology.refinement_strategy,gaps=gap_settings(root),backend=topology.backend,
+        flow_guides=[(f.id,f.topology_flow_guide) for f in root.af_vcp_system.fibers])
     return hashlib.sha256(canonical(values)).hexdigest()
 
 

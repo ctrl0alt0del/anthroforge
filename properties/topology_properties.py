@@ -4,6 +4,10 @@ from ..core.topology.constants import DEFAULT_TARGET_QUADS, MAX_TARGET_QUADS, MI
 
 
 class AF_TopologySettings_Property(bpy.types.PropertyGroup):
+    backend: bpy.props.EnumProperty(
+        name="Topology Method", default="QUADWILD",
+        items=(("QUADWILD", "QuadWild: Muscle FLOW + Paths", "Anatomical cross field and feature paths with Bi-MDF quantization"),
+               ("INSTANT", "Instant Meshes", "Legacy geometry-driven quad generation")))
     deformation_method: bpy.props.EnumProperty(
         name="Deformation Method", default="LE",
         items=(("LE", "Linear Elasticity", "Deform the persistent final skin with linear elasticity"),

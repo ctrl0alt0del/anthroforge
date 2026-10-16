@@ -14,6 +14,7 @@ def settings_payload(settings):
         "custom_origin": list(settings.custom_origin),
         "custom_normal": list(settings.custom_normal),
         "refinement_strategy": str(settings.refinement_strategy),
+        "backend": str(settings.backend),
     }
 
 
@@ -24,7 +25,9 @@ def settings_from_payload(payload):
     origin = tuple(float(x) for x in data.get("custom_origin", (0, 0, 0)))
     normal = tuple(float(x) for x in data.get("custom_normal", (1, 0, 0)))
     strategy = normalized_strategy(data.get("refinement_strategy"))
-    return TopologySettings(target, mode, origin, normal, strategy)
+    backend = str(data.get("backend", "QUADWILD"))
+    if backend not in {"QUADWILD", "INSTANT"}: raise ValueError("Unknown topology backend.")
+    return TopologySettings(target, mode, origin, normal, strategy, backend)
 
 
 def clamp_target(value):

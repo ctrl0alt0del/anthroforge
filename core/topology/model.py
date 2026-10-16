@@ -9,6 +9,7 @@ class TopologySettings:
     custom_origin: tuple[float, float, float] = (0.0, 0.0, 0.0)
     custom_normal: tuple[float, float, float] = (1.0, 0.0, 0.0)
     refinement_strategy: str = "NONE"
+    backend: str = "QUADWILD"
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,8 @@ class TopologyCapture:
     warnings: tuple[str, ...] = ()
     density_rules: tuple[TopologyDensityRule, ...] = ()
     ownership_sources: tuple[TopologyOwnershipSource, ...] = ()
+    flow_samples: Any = None
+    flow_guides: tuple[TopologyGuide, ...] = ()
 
 
 @dataclass(frozen=True)

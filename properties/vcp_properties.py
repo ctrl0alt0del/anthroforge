@@ -420,6 +420,9 @@ class AF_FiberVCP_Property(bpy.types.PropertyGroup):
         default="OPEN",
         update=_on_fiber_topology_update,
     )
+    topology_flow_guide: bpy.props.BoolProperty(
+        name="Topology FLOW Guide", default=False,
+        description="Use this open fiber as an additional QuadWild direction and edge-path guide on rebuild")
     symmetry_mode: bpy.props.EnumProperty(
         name="Symmetry",
         items=(("NONE", "None", ""), ("MIRROR_SEAM_LOOP", "Mirror Seam Loop", "")),

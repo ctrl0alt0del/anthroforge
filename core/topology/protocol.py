@@ -109,8 +109,7 @@ def _capture_payload(capture, points, origin, normal):
         "warnings": np.asarray(json.dumps(list(capture.warnings))),
         "density_rules": np.asarray(json.dumps([asdict(item) for item in capture.density_rules])),
     }
-    payload.update(_ownership_payload(capture.ownership_sources))
-    return payload
+    payload.update(_ownership_payload(capture.ownership_sources)); payload.update(_flow_payload(capture)); return payload
 
 
 def _ownership_payload(sources):
@@ -132,7 +131,7 @@ def _concat_faces(arrays):
 
 def _check_protocol(data):
     version = int(data["protocol_version"][0])
-    if version not in {4, PROTOCOL_VERSION}:
+    if version not in {4, 5, PROTOCOL_VERSION}:
         raise ValueError(f"Unsupported topology protocol {version}.")
 
 
@@ -147,7 +146,7 @@ def read_capture(path):
         return TopologyCapture(
             str(data["root_name"]), data["vertices"].copy(), data["triangles"].copy(),
             guides, data["lower"].copy(), data["upper"].copy(), str(data["input_hash"]),
-            settings, plane, tuple(json.loads(str(data["warnings"]))), rules, sources,
+            settings, plane, tuple(json.loads(str(data["warnings"]))), rules, sources, *_read_flow(data),
         )
 
 
@@ -244,7 +243,7 @@ def _optional_array(values, dtype):
     return np.empty(0, dtype=dtype) if values is None else np.asarray(values, dtype=dtype)
 
 
-def capture_hash(root_name, vertices, triangles, guides, settings, plane, rules=(), sources=()):
+def capture_hash(root_name, vertices, triangles, guides, settings, plane, rules=(), sources=(), samples=None, paths=()):
     digest = hashlib.sha256(str(root_name).encode("utf-8"))
     digest.update(json.dumps(settings_payload(settings), sort_keys=True).encode("utf-8"))
     _update_array(digest, vertices); _update_array(digest, triangles)
@@ -254,7 +253,30 @@ def capture_hash(root_name, vertices, triangles, guides, settings, plane, rules=
         digest.update(json.dumps(_guide_meta(guide), sort_keys=True).encode("utf-8"))
         _update_array(digest, guide.points)
     _update_density_hash(digest, rules, sources)
+    _update_flow_hash(digest, samples, paths)
     return digest.hexdigest()
+
+
+def _flow_payload(capture):
+    paths = capture.flow_guides
+    return dict(flow_samples=np.empty((0, 10)) if capture.flow_samples is None else capture.flow_samples,
+                flow_points=_concat([g.points for g in paths]), flow_offsets=_guide_offsets(paths),
+                flow_metadata=np.asarray(json.dumps([_guide_meta(g) for g in paths])))
+
+
+def _read_flow(data):
+    if "flow_samples" not in data: return None, ()
+    points, offsets = data["flow_points"], data["flow_offsets"]
+    paths = tuple(TopologyGuide(**row, points=points[offsets[i]:offsets[i+1]].copy())
+                  for i, row in enumerate(json.loads(str(data["flow_metadata"]))))
+    return data["flow_samples"].copy(), paths
+
+
+def _update_flow_hash(digest, samples, paths):
+    if samples is not None: _update_array(digest, samples)
+    for guide in paths:
+        digest.update(json.dumps(_guide_meta(guide), sort_keys=True).encode())
+        _update_array(digest, guide.points)
 
 
 def _update_density_hash(digest, rules, sources):

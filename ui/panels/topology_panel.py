@@ -33,6 +33,7 @@ def _draw_settings(layout, root, running):
     box, settings = layout.box(), root.af_topology_settings
     box.label(text="Quad Generation")
     column = box.column(); column.enabled = not running
+    column.prop(settings, "backend")
     column.prop(settings, "target_quad_count")
     column.prop(settings, "refinement_strategy")
     column.prop(settings, "symmetry_mode")

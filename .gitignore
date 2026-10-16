@@ -65,3 +65,5 @@ venv/
 .env/
 artifacts/
 .artifacts/
+
+!native/topology/af_topology_field_v1.dll
