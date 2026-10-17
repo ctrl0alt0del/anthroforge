@@ -3,6 +3,21 @@
 Use repository `ctrl0alt0del/anthroforge`, starting branch `rc/0.3.20260905`.
 The older `main` branch does not contain the current production implementation.
 
+## Working scope
+
+Cloud is for draft implementation, portable checks and small Blender/native
+smoke tests on simple files. Full-model experiments, visual geometry acceptance
+and production validation are performed locally on the Windows PC when it is
+available. Do not launch the torso suite or other large-model runs by default.
+Clearly label cloud changes as awaiting local acceptance where applicable.
+
+On 2026-10-17, both Linux cloud and Windows passed 63 native/unit tests and
+16 Blender integration tests. The cloud torso baseline opened, saved/reopened
+and rendered, but its full rebuild failed with SIGSEGV in QuadWild quantization.
+The LE/FAST torso cases therefore did not run. This is an unresolved full-model
+failure, not a validated production geometry result. Preserve its logs for
+local investigation; the user explicitly deferred further full-model cloud work.
+
 ## Environment setup
 
 ### Blender/native geometry runtime
@@ -22,6 +37,8 @@ Run actual native and Blender integration tests:
   --python-exit-code 1 --python tools/cloud/geometry_tests.py
 ```
 
+The following large-model commands are retained for explicitly requested
+experiments only; they are not routine cloud validation.
 Supply a private torso fixture separately; setup does not upload model files.
 For each case (`baseline`, `rebuild`, `arc5`, `pec2`) and method (`LE`, `FAST`):
 
@@ -36,8 +53,8 @@ Outputs include a reopened/verified debug blend, numerical report and four CPU
 renders. The pectoral fixture uses SECTION_PROFILE, so `pec2` doubles its actual
 section depths, not the inactive Max Inflation property. Render-only changes
 are applied after saving the debug file. A successful install is not geometry
-acceptance; inspect these outputs and the full construction case. Initial
-cloud geometry acceptance is still in progress.
+acceptance; inspect these outputs and the full construction case locally.
+Full-model cloud acceptance was not achieved and is no longer the default goal.
 
 For everyday cloud use, `python3.11 tools/cloud/blender.py` accepts Blender's
 normal arguments and supplies writable config/cache directories. Run all torso
