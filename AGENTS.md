@@ -1,5 +1,9 @@
 # AnthroForge agent rules
 
+For Codex Cloud or a Linux checkout, first read `docs/codex_cloud.md` for the
+setup command, portable test scope, production architecture, and local-only
+Blender/native validation requirements. Cloud checks do not establish geometry acceptance.
+
 - Search the web first for existing APIs, approaches, algorithms, packages, or tools. Prefer primary and official sources.
 - Keep every function at 15 lines of code or fewer.
 - Preserve unrelated local changes.

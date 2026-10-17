@@ -1,0 +1,18 @@
+name: Portable Python contracts
+on:
+  push:
+    branches: ['rc/0.3.20260905', 'codex/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  portable:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/cloud/setup.py
