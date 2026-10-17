@@ -185,8 +185,13 @@ class StaticScene(BlenderScene):
             raise
 
     def save_copy(self, path):
+        from .storage_export import export_preferences
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        bpy.ops.wm.save_as_mainfile(filepath=str(path), copy=True, check_existing=False)
+        with export_preferences(path) as settings:
+            options = dict(filepath=str(path), copy=True, check_existing=False)
+            if settings and 'compress_blend_exports' in settings:
+                options['compress'] = bool(settings['compress_blend_exports'])
+            bpy.ops.wm.save_as_mainfile(**options)
 
     def save_debug_copy(self, path):
         from .presentation import prepare_debug_presentation
