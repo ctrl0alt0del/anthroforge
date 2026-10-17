@@ -38,7 +38,9 @@ def contact_stage(spec, context, candidate):
 
 
 def finish(spec, result, signature, elapsed):
+    from core.draft_skin.resources import memory_metrics
     if Path(spec.cancel_path).exists(): raise RuntimeError("CANCELLED")
+    result.statistics.update(memory_metrics())
     write_result(spec.topology_result_path,result)
     summary = dict(state="SUCCEEDED",has_skin_result=False,has_topology_result=True,
         update_type="deformed",reference_signature=signature,elapsed_seconds=elapsed,
