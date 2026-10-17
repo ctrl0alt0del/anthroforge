@@ -63,6 +63,14 @@ Tokens are scoped to the loaded scene/root session and expire on reload/unregist
 In background Blender scripts, advance the ordinary refinement queue with
 drain_fiber_refinements(max_slices=...) between polls; GUI timers do this normally.
 
+Partial Free-path tightening (DSL 0.4): fibers.tighten_preview takes scene_id,
+fiber_id, expected_scene_revision, expected_path_revision, max_displacement in
+world scene units and optional accepted_steps (default 1 per structural span).
+It runs bounded native V3 solves on exact existing samples with fixed attachments,
+returning entities[0].path and tightening metrics without modifying the scene.
+Apply that path with fibers.path_update. Step count is a budget, not a strength.
+See docs/fiber_tightening.md for measured starting values and validation scope.
+
 Read-only point picker (DSL 0.4): use op='anatomy.snap_points', with params
 scene_id, instance_id, expected_scene_revision, and points=[[world_x, y, z], ...].
 Get instance IDs and the current revision from anatomy.discover; initialize IDs

@@ -123,6 +123,7 @@ All requests use `version: "0.4.0"`, `message_type: "request"`, a unique
 | `fibers.create_free` | `expected_scene_revision`, ordered `attachments`, `path` |
 | `fibers.path_inspect` | `fiber_id` |
 | `fibers.path_update` | `fiber_id`, `expected_scene_revision`, `expected_path_revision`, `path` |
+| `fibers.tighten_preview` | `fiber_id`, `expected_scene_revision`, `expected_path_revision`, `max_displacement`; optional `accepted_steps` |
 | `fibers.mode_configure` | `fiber_id`, `expected_scene_revision`, `expected_path_revision`, `mode: "FREE"` or `"CONTROLLED"` |
 | `fibers.supports_configure` | `fiber_id`, `expected_scene_revision`, `supports` (typed target array) |
 | `fibers.rebind` | `fiber_id`, `expected_scene_revision` |

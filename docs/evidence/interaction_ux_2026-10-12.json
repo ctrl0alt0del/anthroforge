@@ -1,0 +1,719 @@
+{
+  "date": "2026-10-12",
+  "status": "disposable experiment; not a production implementation",
+  "head": "c385b302d792537cd80c25fa944376b0b8644aa0",
+  "revision_scope": "Existing uncommitted changes were present; HEAD alone does not identify the tested working tree. Listed source hashes were collected while documenting the audit.",
+  "fixture": {
+    "path": "E:\\development\\WIP_models\\skull_muscles.blend",
+    "sha256": "4855042f259135c569c3e89b50df5d0441e6794bef5e774aebf924fd8372287e"
+  },
+  "inventory": {
+    "blender": "5.0.1",
+    "background": false,
+    "objects": 175,
+    "scps": 19,
+    "fibers": 24,
+    "muscles": 12,
+    "fiber_modes": {
+      "CONTROLLED": 24
+    }
+  },
+  "initial": {
+    "edit": {
+      "before": 1.0,
+      "after": 1.0099999904632568,
+      "ms": 310.9074999811128
+    },
+    "source_unchanged": true,
+    "telemetry": [
+      {
+        "request_id": 1,
+        "cause": "shortcut",
+        "source": "shortcut",
+        "event": "UPDATE",
+        "quality": "INTERACTIVE",
+        "full": false,
+        "aspects": {},
+        "queue_ms": 0.0,
+        "run_ms": 310.4606000124477,
+        "phase_ms": {
+          "build": 27.610199991613626,
+          "impacted": 0.058699981309473515,
+          "constraints": 0.5159000284038484,
+          "constraint_expand": 0.004499976057559252,
+          "sync": 270.6764999893494
+        },
+        "driver_ms": {
+          "constraints": {
+            "runtime_graph_driver": 0.000600004568696022,
+            "runtime_intent_driver": 0.02789997961372137,
+            "scp_mirror_role_driver": 0.344799947924912,
+            "scp_attachment_capture_driver": 0.018799968529492617,
+            "scp_sync_driver": 0.000200001522898674,
+            "fiber_sync_driver": 0.000200001522898674,
+            "fiber_surface_sync_driver": 0.000200001522898674,
+            "muscle_sync_driver": 0.000100000761449337,
+            "blob_sync_driver": 0.000100000761449337,
+            "soft_tissue_sync_driver": 0.000100000761449337,
+            "vcp_mirror_sync_driver": 0.000100000761449337
+          },
+          "sync": {
+            "runtime_graph_driver": 0.000400003045797348,
+            "runtime_intent_driver": 0.000100000761449337,
+            "scp_mirror_role_driver": 0.000100000761449337,
+            "scp_attachment_capture_driver": 0.000100000761449337,
+            "scp_sync_driver": 105.35800002980977,
+            "fiber_sync_driver": 0.018799968529492617,
+            "fiber_surface_sync_driver": 0.0024999608285725117,
+            "muscle_sync_driver": 158.78739999607205,
+            "blob_sync_driver": 0.002900022082030773,
+            "soft_tissue_sync_driver": 0.004999979864805937,
+            "vcp_mirror_sync_driver": 5.507900030352175
+          },
+          "post_sync": {
+            "runtime_graph_driver": 0.000800006091594696,
+            "runtime_intent_driver": 0.000200001522898674,
+            "scp_mirror_role_driver": 0.000200001522898674,
+            "scp_attachment_capture_driver": 0.000100000761449337,
+            "scp_sync_driver": 0.000200001522898674,
+            "fiber_sync_driver": 0.000200001522898674,
+            "fiber_surface_sync_driver": 0.000200001522898674,
+            "muscle_sync_driver": 0.000100000761449337,
+            "blob_sync_driver": 0.000100000761449337,
+            "soft_tissue_sync_driver": 0.000200001522898674,
+            "vcp_mirror_sync_driver": 0.000100000761449337
+          }
+        },
+        "timings_ms": {
+          "dependency_capture": 11.109700019005686,
+          "dependency_graph_key": 11.179099965374917,
+          "fiber_curve_update": 7.256399840116501,
+          "scp_sync_body": 105.24429997894913,
+          "muscle_numeric_batch": 0.9653999586589634,
+          "muscle_mesh_update": 21.2689001346007
+        },
+        "counters": {
+          "dependency_payload_reads": 24,
+          "dependency_payload_bytes": 752089,
+          "dependency_owner_hits": 24,
+          "dependency_graph_misses": 1,
+          "dependency_graph_rebuilds": 1,
+          "fiber_writes": 24
+        },
+        "progressive_slices": {
+          "count": 0,
+          "total_ms": 0.0,
+          "max_ms": 0.0,
+          "histogram": {},
+          "phases": {}
+        },
+        "cache_before_bytes": 1177148,
+        "cache_bytes": 1182106,
+        "cache_delta_bytes": 4958,
+        "solves": 0,
+        "iterations": 0,
+        "collision_queries": 0,
+        "writes": 24
+      }
+    ]
+  },
+  "comparison": {
+    "reference": {
+      "edits": [
+        {
+          "before": 1.0,
+          "after": 1.0099999904632568,
+          "ms": 301.99590005213395
+        },
+        {
+          "before": 1.0099999904632568,
+          "after": 1.0200999975204468,
+          "ms": 293.78900001756847
+        }
+      ],
+      "source_unchanged": true,
+      "source_sha256": "4855042f259135c569c3e89b50df5d0441e6794bef5e774aebf924fd8372287e",
+      "args": {
+        "output": "C:\\Users\\alexe\\AppData\\Local\\Temp\\anthroforge_ux_compare_20261012_140505\\reference",
+        "shortcut": "Cranium Lobe Width",
+        "baseline": 5.0,
+        "after": 5.0,
+        "factor": 1.01,
+        "profile": false,
+        "disable_warnings": false,
+        "no_edit": false,
+        "skip_scp_mirrors": false,
+        "skip_role_sync": false,
+        "guard_after": 0,
+        "verify_edit": true,
+        "mute_scp_after": 0
+      },
+      "telemetry": [
+        [
+          {
+            "request_id": 1,
+            "cause": "shortcut",
+            "source": "shortcut",
+            "event": "UPDATE",
+            "quality": "INTERACTIVE",
+            "full": false,
+            "aspects": {},
+            "queue_ms": 0.0,
+            "run_ms": 301.56029999488965,
+            "phase_ms": {
+              "build": 21.40200004214421,
+              "impacted": 0.04929996794089675,
+              "constraints": 0.4189000464975834,
+              "constraint_expand": 0.0038999714888632298,
+              "sync": 268.0903999716975
+            },
+            "driver_ms": {
+              "constraints": {
+                "runtime_graph_driver": 0.000300002284348011,
+                "runtime_intent_driver": 0.029499991796910763,
+                "scp_mirror_role_driver": 0.27540000155568123,
+                "scp_attachment_capture_driver": 0.016000005416572094,
+                "scp_sync_driver": 0.000200001522898674,
+                "fiber_sync_driver": 0.000100000761449337,
+                "fiber_surface_sync_driver": 0.000100000761449337,
+                "muscle_sync_driver": 0.000100000761449337,
+                "blob_sync_driver": 0.000100000761449337,
+                "soft_tissue_sync_driver": 0.000100000761449337,
+                "vcp_mirror_sync_driver": 0.000100000761449337
+              },
+              "sync": {
+                "runtime_graph_driver": 0.0005999463610351086,
+                "runtime_intent_driver": 0.000200001522898674,
+                "scp_mirror_role_driver": 0.000200001522898674,
+                "scp_attachment_capture_driver": 0.000200001522898674,
+                "scp_sync_driver": 104.65190000832081,
+                "fiber_sync_driver": 0.02039998071268201,
+                "fiber_surface_sync_driver": 0.002300017513334751,
+                "muscle_sync_driver": 156.78730001673102,
+                "blob_sync_driver": 0.003300025127828121,
+                "soft_tissue_sync_driver": 0.005299982149153948,
+                "vcp_mirror_sync_driver": 5.534099997021258
+              },
+              "post_sync": {
+                "runtime_graph_driver": 0.000500003807246685,
+                "runtime_intent_driver": 0.000100000761449337,
+                "scp_mirror_role_driver": 0.000100000761449337,
+                "scp_attachment_capture_driver": 0.000200001522898674,
+                "scp_sync_driver": 0.000100000761449337,
+                "fiber_sync_driver": 0.000200001522898674,
+                "fiber_surface_sync_driver": 0.000100000761449337,
+                "muscle_sync_driver": 0.000200001522898674,
+                "blob_sync_driver": 0.000100000761449337,
+                "soft_tissue_sync_driver": 0.000100000761449337,
+                "vcp_mirror_sync_driver": 0.000100000761449337
+              }
+            },
+            "timings_ms": {
+              "dependency_capture": 9.947699960321188,
+              "dependency_graph_key": 10.021299996878952,
+              "fiber_curve_update": 6.879199878312647,
+              "scp_sync_body": 104.53720000805333,
+              "muscle_numeric_batch": 0.9553999989293516,
+              "muscle_mesh_update": 22.24210021086037
+            },
+            "counters": {
+              "dependency_payload_reads": 24,
+              "dependency_payload_bytes": 752089,
+              "dependency_owner_hits": 24,
+              "dependency_graph_misses": 1,
+              "dependency_graph_rebuilds": 1,
+              "fiber_writes": 24
+            },
+            "progressive_slices": {
+              "count": 0,
+              "total_ms": 0.0,
+              "max_ms": 0.0,
+              "histogram": {},
+              "phases": {}
+            },
+            "cache_before_bytes": 1177148,
+            "cache_bytes": 1182106,
+            "cache_delta_bytes": 4958,
+            "solves": 0,
+            "iterations": 0,
+            "collision_queries": 0,
+            "writes": 24
+          }
+        ],
+        [
+          {
+            "request_id": 2,
+            "cause": "shortcut",
+            "source": "shortcut",
+            "event": "UPDATE",
+            "quality": "INTERACTIVE",
+            "full": false,
+            "aspects": {},
+            "queue_ms": 0.0,
+            "run_ms": 293.2892999961041,
+            "phase_ms": {
+              "build": 13.348199950996786,
+              "impacted": 0.08890003664419055,
+              "constraints": 0.5549999768845737,
+              "constraint_expand": 0.006299989763647318,
+              "sync": 267.0782000059262
+            },
+            "driver_ms": {
+              "constraints": {
+                "runtime_graph_driver": 0.000600004568696022,
+                "runtime_intent_driver": 0.031000003218650818,
+                "scp_mirror_role_driver": 0.37189997965469956,
+                "scp_attachment_capture_driver": 0.020199979189783335,
+                "scp_sync_driver": 0.000200001522898674,
+                "fiber_sync_driver": 0.000100000761449337,
+                "fiber_surface_sync_driver": 0.000200001522898674,
+                "muscle_sync_driver": 0.000100000761449337,
+                "blob_sync_driver": 0.000200001522898674,
+                "soft_tissue_sync_driver": 0.000200001522898674,
+                "vcp_mirror_sync_driver": 0.000100000761449337
+              },
+              "sync": {
+                "runtime_graph_driver": 0.000600004568696022,
+                "runtime_intent_driver": 0.000200001522898674,
+                "scp_mirror_role_driver": 0.000200001522898674,
+                "scp_attachment_capture_driver": 0.000200001522898674,
+                "scp_sync_driver": 101.35760001139715,
+                "fiber_sync_driver": 0.016000005416572094,
+                "fiber_surface_sync_driver": 0.001800013706088066,
+                "muscle_sync_driver": 158.74709998024628,
+                "blob_sync_driver": 0.003700028173625469,
+                "soft_tissue_sync_driver": 0.005999987479299307,
+                "vcp_mirror_sync_driver": 5.5207000114023685
+              },
+              "post_sync": {
+                "runtime_graph_driver": 0.000700005330145359,
+                "runtime_intent_driver": 0.000200001522898674,
+                "scp_mirror_role_driver": 0.000100000761449337,
+                "scp_attachment_capture_driver": 0.000100000761449337,
+                "scp_sync_driver": 0.000200001522898674,
+                "fiber_sync_driver": 0.000200001522898674,
+                "fiber_surface_sync_driver": 0.000100000761449337,
+                "muscle_sync_driver": 0.000200001522898674,
+                "blob_sync_driver": 0.000100000761449337,
+                "soft_tissue_sync_driver": 0.000200001522898674,
+                "vcp_mirror_sync_driver": 0.000100000761449337
+              }
+            },
+            "timings_ms": {
+              "dependency_capture": 13.16099998075515,
+              "dependency_graph_key": 13.25000001816079,
+              "fiber_curve_update": 6.5426998771727085,
+              "scp_sync_body": 101.23209998710081,
+              "muscle_numeric_batch": 0.839599990285933,
+              "muscle_mesh_update": 20.857600087765604
+            },
+            "counters": {
+              "dependency_payload_reads": 24,
+              "dependency_payload_bytes": 752089,
+              "dependency_owner_hits": 24,
+              "dependency_graph_hits": 1,
+              "fiber_writes": 24
+            },
+            "progressive_slices": {
+              "count": 0,
+              "total_ms": 0.0,
+              "max_ms": 0.0,
+              "histogram": {},
+              "phases": {}
+            },
+            "cache_before_bytes": 1182106,
+            "cache_bytes": 1182106,
+            "cache_delta_bytes": 0,
+            "solves": 0,
+            "iterations": 0,
+            "collision_queries": 0,
+            "writes": 24
+          }
+        ]
+      ]
+    },
+    "batched_v2": {
+      "edits": [
+        {
+          "before": 1.0,
+          "after": 1.0099999904632568,
+          "ms": 193.9031999791041
+        },
+        {
+          "before": 1.0099999904632568,
+          "after": 1.0200999975204468,
+          "ms": 168.3690000209026
+        }
+      ],
+      "source_unchanged": true,
+      "source_sha256": "4855042f259135c569c3e89b50df5d0441e6794bef5e774aebf924fd8372287e",
+      "args": {
+        "output": "C:/Users/alexe/AppData/Local/Temp/anthroforge_ux_compare_20261012_140505/batched_v2",
+        "shortcut": "Cranium Lobe Width",
+        "baseline": 5.0,
+        "after": 5.0,
+        "factor": 1.01,
+        "profile": false,
+        "disable_warnings": false,
+        "no_edit": false,
+        "skip_scp_mirrors": false,
+        "skip_role_sync": false,
+        "guard_after": 0,
+        "verify_edit": true,
+        "mute_scp_after": 0
+      },
+      "telemetry": [
+        [
+          {
+            "request_id": 1,
+            "cause": "shortcut",
+            "source": "shortcut",
+            "event": "UPDATE",
+            "quality": "INTERACTIVE",
+            "full": false,
+            "aspects": {},
+            "queue_ms": 0.0,
+            "run_ms": 193.45889997202903,
+            "phase_ms": {
+              "build": 29.786899976897985,
+              "impacted": 0.059399986639618874,
+              "constraints": 0.5556000396609306,
+              "constraint_expand": 0.0048999791033566,
+              "sync": 151.6655000159517
+            },
+            "driver_ms": {
+              "constraints": {
+                "runtime_graph_driver": 0.000800006091594696,
+                "runtime_intent_driver": 0.031400006264448166,
+                "scp_mirror_role_driver": 0.36559998989105225,
+                "scp_attachment_capture_driver": 0.027800037059932947,
+                "scp_sync_driver": 0.000200001522898674,
+                "fiber_sync_driver": 0.000100000761449337,
+                "fiber_surface_sync_driver": 0.000100000761449337,
+                "muscle_sync_driver": 0.000200001522898674,
+                "blob_sync_driver": 0.000100000761449337,
+                "soft_tissue_sync_driver": 0.000100000761449337,
+                "vcp_mirror_sync_driver": 0.000200001522898674
+              },
+              "sync": {
+                "runtime_graph_driver": 0.000500003807246685,
+                "runtime_intent_driver": 0.000200001522898674,
+                "scp_mirror_role_driver": 0.000100000761449337,
+                "scp_attachment_capture_driver": 0.000200001522898674,
+                "scp_sync_driver": 101.54479998163879,
+                "fiber_sync_driver": 0.018799968529492617,
+                "fiber_surface_sync_driver": 0.002200016751885414,
+                "muscle_sync_driver": 43.45219995593652,
+                "blob_sync_driver": 0.0026999623514711857,
+                "soft_tissue_sync_driver": 0.004400033503770828,
+                "vcp_mirror_sync_driver": 5.249999987427145
+              },
+              "post_sync": {
+                "runtime_graph_driver": 0.000600004568696022,
+                "runtime_intent_driver": 0.000100000761449337,
+                "scp_mirror_role_driver": 0.000100000761449337,
+                "scp_attachment_capture_driver": 0.000200001522898674,
+                "scp_sync_driver": 0.000100000761449337,
+                "fiber_sync_driver": 0.000100000761449337,
+                "fiber_surface_sync_driver": 0.000200001522898674,
+                "muscle_sync_driver": 0.000200001522898674,
+                "blob_sync_driver": 0.000100000761449337,
+                "soft_tissue_sync_driver": 0.000100000761449337,
+                "vcp_mirror_sync_driver": 0.000200001522898674
+              }
+            },
+            "timings_ms": {
+              "dependency_capture": 13.198599976021796,
+              "dependency_graph_key": 13.292599993292242,
+              "fiber_curve_update": 6.476700073108077,
+              "scp_sync_body": 101.40609997324646,
+              "muscle_numeric_batch": 0.9479000000283122,
+              "muscle_mesh_update": 23.044500092510134
+            },
+            "counters": {
+              "dependency_payload_reads": 24,
+              "dependency_payload_bytes": 752089,
+              "dependency_owner_hits": 24,
+              "dependency_graph_misses": 1,
+              "dependency_graph_rebuilds": 1,
+              "fiber_writes": 24
+            },
+            "progressive_slices": {
+              "count": 0,
+              "total_ms": 0.0,
+              "max_ms": 0.0,
+              "histogram": {},
+              "phases": {}
+            },
+            "cache_before_bytes": 1177148,
+            "cache_bytes": 1182106,
+            "cache_delta_bytes": 4958,
+            "solves": 0,
+            "iterations": 0,
+            "collision_queries": 0,
+            "writes": 24
+          }
+        ],
+        [
+          {
+            "request_id": 2,
+            "cause": "shortcut",
+            "source": "shortcut",
+            "event": "UPDATE",
+            "quality": "INTERACTIVE",
+            "full": false,
+            "aspects": {},
+            "queue_ms": 0.0,
+            "run_ms": 167.88930003531277,
+            "phase_ms": {
+              "build": 10.59650001116097,
+              "impacted": 0.06779999239370227,
+              "constraints": 0.38409995613619685,
+              "constraint_expand": 0.004700035788118839,
+              "sync": 143.12159997643903
+            },
+            "driver_ms": {
+              "constraints": {
+                "runtime_graph_driver": 0.000300002284348011,
+                "runtime_intent_driver": 0.024499953724443913,
+                "scp_mirror_role_driver": 0.2427000436000526,
+                "scp_attachment_capture_driver": 0.016400008462369442,
+                "scp_sync_driver": 0.000100000761449337,
+                "fiber_sync_driver": 0.000100000761449337,
+                "fiber_surface_sync_driver": 0.000100000761449337,
+                "muscle_sync_driver": 0.000100000761449337,
+                "blob_sync_driver": 0.000100000761449337,
+                "soft_tissue_sync_driver": 0.000100000761449337,
+                "vcp_mirror_sync_driver": 0.000100000761449337
+              },
+              "sync": {
+                "runtime_graph_driver": 0.000300002284348011,
+                "runtime_intent_driver": 0.000200001522898674,
+                "scp_mirror_role_driver": 0.000100000761449337,
+                "scp_attachment_capture_driver": 0.000100000761449337,
+                "scp_sync_driver": 89.96589999878779,
+                "fiber_sync_driver": 0.01910002902150154,
+                "fiber_surface_sync_driver": 0.0017999554984271526,
+                "muscle_sync_driver": 45.9444000152871,
+                "blob_sync_driver": 0.0032999669201672077,
+                "soft_tissue_sync_driver": 0.006699992809444666,
+                "vcp_mirror_sync_driver": 6.213699991349131
+              },
+              "post_sync": {
+                "runtime_graph_driver": 0.000600004568696022,
+                "runtime_intent_driver": 0.000200001522898674,
+                "scp_mirror_role_driver": 0.000200001522898674,
+                "scp_attachment_capture_driver": 0.000200001522898674,
+                "scp_sync_driver": 0.000100000761449337,
+                "fiber_sync_driver": 0.000200001522898674,
+                "fiber_surface_sync_driver": 0.000100000761449337,
+                "muscle_sync_driver": 0.000200001522898674,
+                "blob_sync_driver": 0.000100000761449337,
+                "soft_tissue_sync_driver": 0.000200001522898674,
+                "vcp_mirror_sync_driver": 0.000200001522898674
+              }
+            },
+            "timings_ms": {
+              "dependency_capture": 10.503800003789365,
+              "dependency_graph_key": 10.548799997195601,
+              "fiber_curve_update": 6.451199820730835,
+              "scp_sync_body": 89.86870001535863,
+              "muscle_numeric_batch": 1.0142000392079353,
+              "muscle_mesh_update": 23.93079997273162
+            },
+            "counters": {
+              "dependency_payload_reads": 24,
+              "dependency_payload_bytes": 752089,
+              "dependency_owner_hits": 24,
+              "dependency_graph_hits": 1,
+              "fiber_writes": 24
+            },
+            "progressive_slices": {
+              "count": 0,
+              "total_ms": 0.0,
+              "max_ms": 0.0,
+              "histogram": {},
+              "phases": {}
+            },
+            "cache_before_bytes": 1182106,
+            "cache_bytes": 1182106,
+            "cache_delta_bytes": 0,
+            "solves": 0,
+            "iterations": 0,
+            "collision_queries": 0,
+            "writes": 24
+          }
+        ]
+      ]
+    }
+  },
+  "geometry_comparison": {
+    "equal": true,
+    "object_count": 139,
+    "reference_hashes": {
+      "blSkeleton_m4_35244.Shape": "94bfce47f7789d015271ce5ba78722f10b3f4dba67a3dc82b5587ac9d51a06cb",
+      "Cranium": "ce62d2f38102c05cf780b7eda211a94775efe50d1939e0da0d95ba5d586f09f3",
+      "brow_ridge_curve": "b70968f2ffc69a8fcd1598c87d6efdaa92dc2efd5cc1955380b5daa49014a13a",
+      "brow_ridge_geom": "8b231d7cd5120b99f4e08ad406a8009f58026c278275822a130c943a11138df3",
+      "maxilla_top_curve": "76c01ea8cce470e05d4e15f8f4b8edf1585b7b3575e479b874ddc8f42e58cfc5",
+      "maxilla_bottom_curve": "76c01ea8cce470e05d4e15f8f4b8edf1585b7b3575e479b874ddc8f42e58cfc5",
+      "maxilla_geom": "84c19bb07281d9c247ef637154335fda11e01f5b92bbe5a5b984e2bed546fa31",
+      "nasal_geom": "5c9c1d4bf7815d299c7d4090e6c1a97e69a91512818e5e5c3ae119138a51f2c8",
+      "cheekbone_curve_side": "367b8c723a7b054d2f047d30189dd516cd53f0dc6952f5bdefbe4680ada7769f",
+      "cheekbone_geom_side": "cd2145975caf9be248e558eaaa7b46db0258145a43dfc76c1ff99e0ad76bab45",
+      "cheekbone_geom_front": "68ebf47c98a40478585ad56b0a6ec85c4e8994798be498065617070c5975ff7c",
+      "cheekbone_curve_front": "93359a7000ac011ec0166eada51306908770961159276720962c75762ec10d76",
+      "mandible_front_bottom_curve": "76c01ea8cce470e05d4e15f8f4b8edf1585b7b3575e479b874ddc8f42e58cfc5",
+      "mandible_front_top_curve": "76c01ea8cce470e05d4e15f8f4b8edf1585b7b3575e479b874ddc8f42e58cfc5",
+      "mandible_front_middle_curve": "76c01ea8cce470e05d4e15f8f4b8edf1585b7b3575e479b874ddc8f42e58cfc5",
+      "mandible_front_geom": "59910ad8a608b049efeb3653aa59bc6a66393bb27f9bdfb19e33c6ecfac4bd3c",
+      "mandible_side_curve": "eb2c5a2f1981ac99d923ff8248a4818e26e4729c46335c3ac468a787ec9c9763",
+      "mandible_side_geom": "9f9b0c9760018775c2ca7077a975f51c8c4ac273a7f1d2e418621d2921b347d5",
+      "Cheeckbone_Joint": "381e9e9871eb2fe27adbf4a4036cbc3de63372bd28bab410170034e0eb163505",
+      "Lateral_Cartilage": "06ab58afa7c2d52ae4ef442a31ebcdd446129a968c0a164abd496730be5d218b",
+      "Septal_Cartilage": "22b0c6ccb41a3c1be3ff3e22e6c2db0e419a68cd623fe753da112d6fb7a38c19",
+      "Ajar_Cartilage": "dff9969ea85775812e60704161311b0cc2692cb4b3a7a9cc910e10ee3105d600",
+      "Ear": "ae5e0b3ea22fc15e3c4729832bebcbcab9ecdd4d01bb5f440557aee56b0d9757",
+      "brow_ridge_geom.001": "4532922013cb83b48de0b38e1827a310173f86620aff7c68fced3c0225f22aa5",
+      "brow_ridge_curve.001": "18f2991f36d81ca6bdcb65c2a96fe38d2c6ed744c50b276a5c47f1d8a4721f40",
+      "brow_ridge_geom.002": "d4feebd8c55f3c4b6c35584f504469cdf89dad4cbbed844c91db4279cc3be31d",
+      "brow_ridge_curve.002": "2c2e12f2a086cae6cfd90ce54b42728bf709bdf94e53cde17d0427b8226ba1e4",
+      "Mouth_Corner": "140e2d9066c7e07ac8beba32aed134b3d79eb8a2f688832f381f1092b271e962",
+      "Eyes": "a21053a83b52d13c988f3d2271ddc8bb31f4e4c5311bca0bb21bc8f2e69cff03",
+      "lower_lip_geom": "67dee7461e2ca9fa969345b315185eca78857b8b5957b94520bbff091c322ae4",
+      "lower_lip_curve": "a1dc25654f4f3d99604d6f2039e6eefd69efc0daa66c92177a49f3b404e78435",
+      "upper_lip_curve": "02c813289f5546e8a8f8ccd5b0425a5c4b8c6f0dc9ccc4c909de9718ae9b29dc",
+      "upper_lip_geom": "48ffe22b236aff211262ad4d205857909710158c58ef741cec2c85095a05f5f0",
+      "brow_ridge_geom_AF_MIR": "871d23b3b73e5b811f76b4d63ee361ceab0959f2b5326c30ca7f61eed27cfb5a",
+      "cheekbone_geom_side_AF_MIR": "201c9118f25b30a057c997b55b792928e9f03e27585201b7a917d16848439ddb",
+      "cheekbone_geom_front_AF_MIR": "b99f2c1eeec31707e8809ef7e3be627458ad05283180e87f062f0d8a438ea3bf",
+      "mandible_side_geom_AF_MIR": "ff70f906a9b659c5f74ecb9b375709b7c2cbe14e7b7f9d92af4e1ad2d70c2478",
+      "Cheeckbone_Joint_AF_MIR": "c9d876562ebb4e701f59d285e0c5b024a0ed75667070a1e9878979ed5cad04dc",
+      "Lateral_Cartilage_AF_MIR": "3f92e2e8af373cfa55ad8a1d66e2e869f96cd414bf1f0a4f1805fee3e1c1c520",
+      "Ajar_Cartilage_AF_MIR": "879a5395f9e0375a30397eec8b6aaf5704909ad36224bfb8ed796462c5682141",
+      "Ear_AF_MIR": "2d3f0a0309f7456c844b5bdc4ce69dc457c882b03fbd35da0705974e67bf023b",
+      "brow_ridge_geom.001_AF_MIR": "2850eb5c7345c4121d856b11577ddef43cb9b6b026d440eb6e96ad3e85eb0aaf",
+      "brow_ridge_geom.002_AF_MIR": "acfdd62ccf51e9632a56f1279a441fdd94712efa9182070786e185482fba58cc",
+      "Mouth_Corner_AF_MIR": "6d9b894426789049ee1d09857cfaa7c4625b7ef62ff7cafdce058dedf93d72dc",
+      "Eyes_AF_MIR": "ed814adaa14fcedbab85831987fd7a451ea2f85b03cfca174c27813929463d05",
+      "lower_lip_geom_AF_MIR": "d51f46f7c4d8e69f915aa0951c67a1d13aa7b0e6f29fb8870f4d6cfeee10ac75",
+      "upper_lip_geom_AF_MIR": "61ec85c0d0b94b5e60357278b3583c148241e04487fa657e7f8c6acd9d0e3be8",
+      "AF_FIBER_1": "4c22096cd88d941b407f431646f0c35fc7f9891039024029766f2b939af1571b",
+      "AF_FIBER_1_MIR": "4c22096cd88d941b407f431646f0c35fc7f9891039024029766f2b939af1571b",
+      "AF_FIBER_2": "780f5b1be666a0bd9d3debac053294c46d701d66935030b881d71ec512c51bee",
+      "AF_FIBER_2_MIR": "780f5b1be666a0bd9d3debac053294c46d701d66935030b881d71ec512c51bee",
+      "AF_FIBER_3": "68f83d484716e1a36d225117746f8913313e650e096eb00fe7969eceb87e9793",
+      "AF_FIBER_3_MIR": "68f83d484716e1a36d225117746f8913313e650e096eb00fe7969eceb87e9793",
+      "AF_MUSCLE_1": "3f714a30ef465007cfa760d40993fb00fdd52e35c9f07370b2a5eabdcd8986a3",
+      "AF_MUSCLE_1_INFL": "418d0f2b08efc038109df4a879da545cdac265e33ba38035fcb90f961ccf1317",
+      "AF_MUSCLE_1_MIR": "014196dccd2a403637c4ee1bbe8eef37f87c6aa879535c692ce3c746989cfa3c",
+      "AF_MUSCLE_1_INFL_MIR": "c15af5b9b428715e41037f81f744a4bc7474ab05461e0e32786ab0c26ada927a",
+      "AF_FIBER_4": "e2cd62ca4e54ee4281d7798a86ea6fced4ee819d5a3adb2037c9477010038042",
+      "AF_FIBER_4_MIR": "e2cd62ca4e54ee4281d7798a86ea6fced4ee819d5a3adb2037c9477010038042",
+      "AF_MUSCLE_2": "c006f3de0f846e6039a17c2c559b97745098eaa6688425ebd094e759c86c949b",
+      "AF_MUSCLE_2_INFL": "cca8ae6a31da3b23967faba774105fbe9850f5d0021300d8e288bf3bc50bace5",
+      "AF_FIBER_6": "d8e82fb94416212d48550ea823ea70f74eb3e7d60e63749d570554c1585a2844",
+      "AF_FIBER_6_MIR": "d8e82fb94416212d48550ea823ea70f74eb3e7d60e63749d570554c1585a2844",
+      "AF_FIBER_7": "b41af99f4d0c4a82bf1cd6d33dcb86e5eb7bc9434279cd14353237b136532304",
+      "AF_FIBER_7_MIR": "b41af99f4d0c4a82bf1cd6d33dcb86e5eb7bc9434279cd14353237b136532304",
+      "AF_MUSCLE_3": "64b080523fae6c9a89f2e82415c9c54ec3f32f5ca15bf6c67dcc2c335d170585",
+      "AF_MUSCLE_3_INFL": "76dc33910cba414fa43bd63b5886fd5c4e6609bd70dfca31019b38f45213594b",
+      "AF_MUSCLE_3_MIR": "ca942d8d2893ed77ff85d70562fa8b28314fb629fb62fd4b0e89eb438699c426",
+      "AF_MUSCLE_3_INFL_MIR": "a47e33a3ed892b179773f311ecee4253ab00aa99056e0288e60ee8e88e51cbb9",
+      "AF_FIBER_5": "d1c45385e2900fdb022e5fdcd194ad0835ef05def31f8c9b70987fda3c31ef7e",
+      "AF_FIBER_5_MIR": "d1c45385e2900fdb022e5fdcd194ad0835ef05def31f8c9b70987fda3c31ef7e",
+      "AF_FIBER_8": "fc5a4278af510bfbd2c5de1c06cc037da13bdc9bd48b76fe5287ae2724ba6070",
+      "AF_FIBER_8_MIR": "fc5a4278af510bfbd2c5de1c06cc037da13bdc9bd48b76fe5287ae2724ba6070",
+      "AF_MUSCLE_4": "1e648b287b057632674c8f34d9e90ae28154e2fcb4fb4a3764d81c69df8efdbc",
+      "AF_MUSCLE_4_INFL": "6f56a0084c81f84ec84a938716249999b09a30dd3f0bf00ef6a9ce7f46dbe815",
+      "AF_MUSCLE_4_MIR": "cceaf2df4201df05caca1d47d34cbeebe968d39830539f1d7cfaede613473245",
+      "AF_MUSCLE_4_INFL_MIR": "7d659646922d4185ed240da1c835bf8d6e059637822fee4e6e52ef40502bd70e",
+      "AF_FIBER_9": "fa5d75e3b4cac99cb90dad469cafd8884ee6336c620a68e47753d82d186efe9b",
+      "AF_FIBER_9_MIR": "fa5d75e3b4cac99cb90dad469cafd8884ee6336c620a68e47753d82d186efe9b",
+      "AF_FIBER_10": "7a146634a5191ebc3699edc1288300d78f2ab0c052db2e648d3bd7b87162cecd",
+      "AF_FIBER_10_MIR": "7a146634a5191ebc3699edc1288300d78f2ab0c052db2e648d3bd7b87162cecd",
+      "AF_MUSCLE_5": "ed5a72968337baae1a7469018f21215554ab07d76ed1d739bc509e306ceb0a56",
+      "AF_MUSCLE_5_INFL": "157d5724254a26bbebbab7164742bb6f3f9007878cd9a9ee8a39b5d8eb4a294a",
+      "AF_MUSCLE_5_MIR": "eca2d79de8764710f9a44d7d3bc60f4839221aeeb0c8218dda819e769a640cac",
+      "AF_MUSCLE_5_INFL_MIR": "6d08d8bb9b55a47c0ad704ae56cb3ee6bfa0212d33d6ad29a298cb55a0e4d0bc",
+      "AF_FIBER_11": "851151177656e16521e202f66263a14c1896adf1b89293b80b3187cde648c7e5",
+      "AF_FIBER_11_MIR": "851151177656e16521e202f66263a14c1896adf1b89293b80b3187cde648c7e5",
+      "AF_FIBER_12": "8d4080d3469859b2a59a4f6872f5160827c38920160a8bdf1da545fc80288a33",
+      "AF_FIBER_12_MIR": "8d4080d3469859b2a59a4f6872f5160827c38920160a8bdf1da545fc80288a33",
+      "AF_MUSCLE_6": "7fc4f6eea27e905d22b385dc1c47bb59d9c62e46ba650026ef774a6350a6bdfc",
+      "AF_MUSCLE_6_INFL": "f74cb9a78aa3b6c9f7fc245c58df70bd407370261a0ceb74c90c70269a8f8693",
+      "AF_MUSCLE_6_MIR": "0e8fa23ba584ec7055fecbda188ec3ed280b24f76ebee0b810d45d2f4be0a010",
+      "AF_MUSCLE_6_INFL_MIR": "4493304a736c60eead77d34fb77d49d96fcb37e5d015dfa84c07fc1f8f7605ee",
+      "AF_FIBER_13": "4787696b57add06aeca5bc57e9ef2d284c6f3d6fbfb470715bbb9431269b83e9",
+      "AF_FIBER_13_MIR": "4787696b57add06aeca5bc57e9ef2d284c6f3d6fbfb470715bbb9431269b83e9",
+      "AF_FIBER_14": "bd553c3f2a7042a504a3a4b53565e2b0cf7a925df5c468c01a223eb2a6485663",
+      "AF_FIBER_14_MIR": "bd553c3f2a7042a504a3a4b53565e2b0cf7a925df5c468c01a223eb2a6485663",
+      "AF_MUSCLE_7": "e5b6da75ecc037d23e47a514829bc8976e297d886e854d316ffc9df9e9e65694",
+      "AF_MUSCLE_7_INFL": "784c04030ecbd7fd539925455ede4adceb58cec33703bb7a32415d412168331c",
+      "AF_MUSCLE_7_MIR": "1bdc6238d21ff9e62c262f25ce14c73a4444a06db12998955d8d919fd2477cc4",
+      "AF_MUSCLE_7_INFL_MIR": "c35671d810aa5324c1f266698ab96d5582ef2185c76d6e0f9a8386bc8c128a1b",
+      "AF_FIBER_15": "c09605a6c62dc812c5d546a06ec8286e51578c608b1abbbdae204461c34aebc4",
+      "AF_FIBER_15_MIR": "c09605a6c62dc812c5d546a06ec8286e51578c608b1abbbdae204461c34aebc4",
+      "AF_FIBER_17": "4205804957e6f6bb9a80a1b1d317ba59f15327ccf877a21d137fbbec31652d05",
+      "AF_FIBER_17_MIR": "4205804957e6f6bb9a80a1b1d317ba59f15327ccf877a21d137fbbec31652d05",
+      "AF_FIBER_18": "409ce80212883134c5e82e8e70c9cb297edf27632a25b5aa3217f3751e8adade",
+      "AF_FIBER_18_MIR": "409ce80212883134c5e82e8e70c9cb297edf27632a25b5aa3217f3751e8adade",
+      "AF_MUSCLE_9": "a5787eef3e2b8a00fffdec816bbe4369d59aa6d2be8743e4f575ea8bfdd4d545",
+      "AF_MUSCLE_9_INFL": "5f59d2b6a04b1ddba265506b692c7466aae01957336695a974e7e8e30927bf2a",
+      "AF_MUSCLE_9_MIR": "26b632930cf50906151cf330e4bdb4d4a2fb7dfb1027e41fd5491e9f09a5d77c",
+      "AF_MUSCLE_9_INFL_MIR": "f139ae63861aaedbfdcede61633cd6bb774197e3dfe21e56ea5f39fee914bb9b",
+      "AF_FIBER_19": "7294ea924a9ec0d6627cc6bef9574db638cdd61007ca18403d06fd4eaeaf6ad9",
+      "AF_FIBER_19_MIR": "7294ea924a9ec0d6627cc6bef9574db638cdd61007ca18403d06fd4eaeaf6ad9",
+      "AF_MUSCLE_10": "08ca79487c661b5313b6733f8dbca8e19c45bf27851416e1c58d87934ea69915",
+      "AF_MUSCLE_10_INFL": "f30ee3da673108727014fcfe7011367f2e0fd3ec27c22ff0b88b30fb9502ca92",
+      "AF_FIBER_20": "109283d0769f58467993c2bbdb9c4c0317450bed46df11d981c1a08e05e7d900",
+      "AF_FIBER_20_MIR": "109283d0769f58467993c2bbdb9c4c0317450bed46df11d981c1a08e05e7d900",
+      "AF_FIBER_21": "b36393815d1c147ba8362fe328000876e259dd7af86860e31747a876a64faa04",
+      "AF_FIBER_21_MIR": "b36393815d1c147ba8362fe328000876e259dd7af86860e31747a876a64faa04",
+      "AF_MUSCLE_11": "6c24a4c646ec697ff679e87360899ce48b91e2aba8ab37b4c0e30fb03e0178d0",
+      "AF_MUSCLE_11_INFL": "65c492a3dfe2df4ddbd0d2ed5b3b991750b132c4696fce85b2c54896e3138019",
+      "AF_MUSCLE_11_MIR": "4f34b464a8b622aab2cd96b2e9136630c794f3da1c8a00facb7dd1ed8ab448f8",
+      "AF_MUSCLE_11_INFL_MIR": "b79ddb514fa5c19cb177691e90e76122b730041ba20a28bb92a757ec2bbaeb0b",
+      "AF_FIBER_22": "cc422829ee549290903993e64f18f725f46d151e3104fd1a741d76af30e70dea",
+      "AF_FIBER_22_MIR": "cc422829ee549290903993e64f18f725f46d151e3104fd1a741d76af30e70dea",
+      "AF_FIBER_23": "accdd85e6849aee5fab819c41ec3ed9587b769a031f1e0c3d518c950aee3a471",
+      "AF_FIBER_23_MIR": "accdd85e6849aee5fab819c41ec3ed9587b769a031f1e0c3d518c950aee3a471",
+      "AF_MUSCLE_12": "279bbc2b557c56910927f2623de5af063cbabbb7d8d1d530411057891eff544e",
+      "AF_MUSCLE_12_INFL": "5ca9e8a12f84419e0e559a2098837ca2aa991533e95730add514dd0c5d8e9141",
+      "AF_MUSCLE_12_MIR": "056b19e2eacaf50208043a777c715d46db226c6e07d05c71deae4e25e846320e",
+      "AF_MUSCLE_12_INFL_MIR": "d35e042d8cbf0a0c703ef0b0e1ce4800696e0067cbd3a38cb9f332d617bec4cb",
+      "AF_FIBER_24": "b5870ea96618fbc883955a635cc35f0fcdfff79460a09d18c83526671b23202b",
+      "AF_FIBER_24_MIR": "b5870ea96618fbc883955a635cc35f0fcdfff79460a09d18c83526671b23202b",
+      "AF_FIBER_25": "cdc9d526dd0f6a30ffceb60b01bf970dc93ebb494d16bc29a146e29af53bdff3",
+      "AF_FIBER_25_MIR": "cdc9d526dd0f6a30ffceb60b01bf970dc93ebb494d16bc29a146e29af53bdff3",
+      "AF_MUSCLE_13": "a49ed4bf2723c930839c95d3f993c8c72d029926e673fe9ddeedf47248f32b0c",
+      "AF_MUSCLE_13_INFL": "d8b1bdd70aea41d9e5d884309d08a7c6c6f23b218efe5b675671382d738639ea",
+      "AF_MUSCLE_13_MIR": "e14f1504e9f72e184602582c8e92ff2d416877884482ea9b0f3b801c6978b8cd",
+      "AF_MUSCLE_13_INFL_MIR": "579ac610286d59443ef68556c839e23e31ac1c7bf5883d57a90df748b2057b98"
+    },
+    "coverage": "Mesh local vertices, loop indices, face sizes and world matrices; curve point and Bezier control coordinates. Does not qualify materials, all curve attributes, UI state, undo or persistence."
+  },
+  "experiment": {
+    "description": "During publish_muscle_work collect non-explicit muscle_pairs.runtime.refresh requests by scene/root, then refresh each once at batch exit. Keep remember calls and geometry publication. Patch the imported publish alias in muscle_sync too. Observed 24 deferred requests across two edits.",
+    "script": "import bpy\nimport hashlib\nimport json\nimport numpy as np\nfrom pathlib import Path\nimport runpy\nimport sys\nsys.path.insert(0, r'C:\\Users\\alexe\\AppData\\Roaming\\Blender Foundation\\Blender\\5.0\\scripts\\addons')\nimport anthroforge\nanthroforge.register()\nbpy.ops.wm.open_mainfile(filepath=r'E:\\development\\WIP_models\\skull_muscles.blend')\nfrom anthroforge.core.muscle_pairs import runtime\nfrom anthroforge.core.visualization import muscle_numeric_runtime, muscle_sync\noriginal_refresh = runtime.refresh\noriginal_publish = muscle_numeric_runtime.publish_muscle_work\nbatch = {'depth': 0, 'pending': {}, 'deferred': 0}\n\ndef deferred_refresh(scene, root, explicit=False):\n    if batch['depth'] and not explicit:\n        batch['pending'][(scene.name, root.name)] = (scene, root)\n        batch['deferred'] += 1\n        return\n    return original_refresh(scene, root, explicit)\n\ndef batched_publish(*args, **kwargs):\n    batch['depth'] += 1\n    try:\n        return original_publish(*args, **kwargs)\n    finally:\n        batch['depth'] -= 1\n        if not batch['depth']:\n            rows = tuple(batch['pending'].values())\n            batch['pending'].clear()\n            for scene, root in rows:\n                original_refresh(scene, root)\n\nif Path(__file__).stem == 'batched':\n    runtime.refresh = deferred_refresh\n    muscle_numeric_runtime.publish_muscle_work = batched_publish\n    muscle_sync.publish_muscle_work = batched_publish\n\ndef mesh_digest(obj):\n    vertices = np.empty(len(obj.data.vertices)*3, dtype=np.float32)\n    loops = np.empty(len(obj.data.loops), dtype=np.int32)\n    counts = np.empty(len(obj.data.polygons), dtype=np.int32)\n    obj.data.vertices.foreach_get('co', vertices)\n    obj.data.loops.foreach_get('vertex_index', loops)\n    obj.data.polygons.foreach_get('loop_total', counts)\n    payload = vertices.tobytes()+loops.tobytes()+counts.tobytes()\n    payload += np.asarray(obj.matrix_world, dtype=np.float64).tobytes()\n    return hashlib.sha256(payload).hexdigest()\n\ndef curve_digest(obj):\n    values = [[tuple(p.co) for p in spline.points] for spline in obj.data.splines]\n    values += [[tuple(p.co) for p in spline.bezier_points] for spline in obj.data.splines]\n    return hashlib.sha256(json.dumps(values).encode()).hexdigest()\n\nmodule = runpy.run_path(r'C:\\Users\\alexe\\AppData\\Roaming\\Blender Foundation\\Blender\\5.0\\scripts\\addons\\anthroforge\\tools\\shortcut_performance_probe.py')\nProbe = module['Probe']\noriginal_finish = Probe.finish\n\ndef finish_with_geometry(self):\n    print('EXPERIMENT_REFRESH_DEFERRED', batch['deferred'], flush=True)\n    rows = {}\n    for obj in bpy.context.scene.objects:\n        if obj.type == 'MESH': rows[obj.name] = mesh_digest(obj)\n        if obj.type == 'CURVE': rows[obj.name] = curve_digest(obj)\n    (self.output/'geometry.json').write_text(json.dumps(rows, indent=2))\n    return original_finish(self)\n\nProbe.finish = finish_with_geometry\nmodule['main']()\n\n",
+    "reference_script": "import bpy\nimport hashlib\nimport json\nimport numpy as np\nfrom pathlib import Path\nimport runpy\nimport sys\nsys.path.insert(0, r'C:\\Users\\alexe\\AppData\\Roaming\\Blender Foundation\\Blender\\5.0\\scripts\\addons')\nimport anthroforge\nanthroforge.register()\nbpy.ops.wm.open_mainfile(filepath=r'E:\\development\\WIP_models\\skull_muscles.blend')\nfrom anthroforge.core.muscle_pairs import runtime\nfrom anthroforge.core.visualization import muscle_numeric_runtime\noriginal_refresh = runtime.refresh\noriginal_publish = muscle_numeric_runtime.publish_muscle_work\nbatch = {'depth': 0, 'pending': {}}\n\ndef deferred_refresh(scene, root, explicit=False):\n    if batch['depth'] and not explicit:\n        batch['pending'][(scene.name, root.name)] = (scene, root)\n        return\n    return original_refresh(scene, root, explicit)\n\ndef batched_publish(*args, **kwargs):\n    batch['depth'] += 1\n    try:\n        return original_publish(*args, **kwargs)\n    finally:\n        batch['depth'] -= 1\n        if not batch['depth']:\n            rows = tuple(batch['pending'].values())\n            batch['pending'].clear()\n            for scene, root in rows:\n                original_refresh(scene, root)\n\nif Path(__file__).stem == 'batched':\n    runtime.refresh = deferred_refresh\n    muscle_numeric_runtime.publish_muscle_work = batched_publish\n\ndef mesh_digest(obj):\n    vertices = np.empty(len(obj.data.vertices)*3, dtype=np.float32)\n    loops = np.empty(len(obj.data.loops), dtype=np.int32)\n    counts = np.empty(len(obj.data.polygons), dtype=np.int32)\n    obj.data.vertices.foreach_get('co', vertices)\n    obj.data.loops.foreach_get('vertex_index', loops)\n    obj.data.polygons.foreach_get('loop_total', counts)\n    payload = vertices.tobytes()+loops.tobytes()+counts.tobytes()\n    payload += np.asarray(obj.matrix_world, dtype=np.float64).tobytes()\n    return hashlib.sha256(payload).hexdigest()\n\ndef curve_digest(obj):\n    values = [[tuple(p.co) for p in spline.points] for spline in obj.data.splines]\n    values += [[tuple(p.co) for p in spline.bezier_points] for spline in obj.data.splines]\n    return hashlib.sha256(json.dumps(values).encode()).hexdigest()\n\nmodule = runpy.run_path(r'C:\\Users\\alexe\\AppData\\Roaming\\Blender Foundation\\Blender\\5.0\\scripts\\addons\\anthroforge\\tools\\shortcut_performance_probe.py')\nProbe = module['Probe']\noriginal_finish = Probe.finish\n\ndef finish_with_geometry(self):\n    rows = {}\n    for obj in bpy.context.scene.objects:\n        if obj.type == 'MESH': rows[obj.name] = mesh_digest(obj)\n        if obj.type == 'CURVE': rows[obj.name] = curve_digest(obj)\n    (self.output/'geometry.json').write_text(json.dumps(rows, indent=2))\n    return original_finish(self)\n\nProbe.finish = finish_with_geometry\nmodule['main']()\n"
+  },
+  "source_sha256": {
+    "app/use_cases/shortcut_edit.py": "960d5270465212b9af29bb2c169f9a20ce862af5d341b257a3e08da57551728f",
+    "core/visualization/sync_runner.py": "de39394c8b7cb0297fe0bec992353a1ae910430edfe67904bdbb53b533e61556",
+    "core/visualization/muscle_sync.py": "e87e6923954b1e26e3885357dea8deea89e85fc5a42e5c856efa1c07506c1067",
+    "core/visualization/muscle_numeric_runtime.py": "72f0ee64913fc8ba9440ea66506dc9cdc20c7d2cf416fa620e6df47f621d8e30",
+    "core/muscle_pairs/runtime.py": "0e98535d80ae1fe4cbf35dab6651e38e87b9421fd968a2071ddc60dcdec4ccbe",
+    "core/muscle_pairs/capture.py": "caa64e223fd06b51dc9f06bae411f244ce78acdb895c7cd54d1e8c2e305f280a",
+    "core/muscle_pairs/configuration.py": "103b03ab39d43d50e9af0e4c5dcf0173a3438b7bf10e9d47f77b3ca243276829",
+    "core/muscle_relationships/store.py": "4b87a7ccd0bfb6fed0ef01b29b4284a6e257ec46488195faab3bfc03da76715d",
+    "tools/shortcut_performance_probe.py": "691cc16047f41ec7e95f8ba160f1f80382fd4cb68c55c3363e102e12e146c9d1"
+  },
+  "limitations": [
+    "One fixture; two consecutive edits per comparison process; no statistical qualification.",
+    "Hidden foreground Blender event loop, not an interactive dragging or viewport FPS test.",
+    "Timers were observed; their heartbeat includes scheduling and redraw, not just addon execution.",
+    "No saved geometry deliverable, material comparison, anatomical review, undo test or cancellation test.",
+    "The first bootstrap attempt failed addon registration and was excluded. The first batching attempt missed an imported function alias and was excluded as an inactive experiment."
+  ]
+}

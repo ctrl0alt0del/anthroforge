@@ -5,6 +5,10 @@ Blender addon runtime. It does not replace the native authoring API or execute a
 automatic muscle fitter. The entry point for reconstruction is the personal
 `anthroforge-muscle-reconstruction` skill. No stage or librarian agent is required.
 
+Storage policy, conservative cleanup and archive restoration are documented in
+[authoring storage](../../docs/authoring_storage.md). Current builds and evidence
+retain their original paths; automated exports use versioned filenames.
+
 ## Installed paths
 
 - Artifacts: `E:/development/WIP_models/muscle_reconstruction_workflow`.

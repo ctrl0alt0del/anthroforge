@@ -1,0 +1,56 @@
+{
+  "date": "2026-10-12",
+  "scope": "Synthetic Blender Workbench object-alpha capability check; not a production performance benchmark",
+  "result": {
+    "version": "5.0.1",
+    "xray": false,
+    "rows": [
+      {
+        "alpha": 1.0,
+        "updates": [
+          {
+            "id": "front",
+            "geometry": false,
+            "transform": false,
+            "shading": true
+          }
+        ],
+        "png_sha256": "e03c051ca0bb6edace6b6346ad62b5d7f423ff785ec271dc7d1bd46d95c8057a"
+      },
+      {
+        "alpha": 0.6,
+        "updates": [
+          {
+            "id": "front",
+            "geometry": false,
+            "transform": false,
+            "shading": true
+          }
+        ],
+        "png_sha256": "9000f27588ce7c4d09f0523190b03d93faf4776fc08a587b16116eb86e85f26e"
+      },
+      {
+        "alpha": 0.2,
+        "updates": [
+          {
+            "id": "front",
+            "geometry": false,
+            "transform": false,
+            "shading": true
+          }
+        ],
+        "png_sha256": "817eaee57b53289ae95c41c10aec9b6a4cd39a6d2e0e46f63a703e857fcbfed2"
+      }
+    ]
+  },
+  "script": "import bpy\nimport hashlib\nimport json\nfrom pathlib import Path\n\nOUT = Path(__file__).parent\nbpy.ops.object.select_all(action='SELECT')\nbpy.ops.object.delete(use_global=False)\nscene = bpy.context.scene\nscene.render.engine = 'BLENDER_WORKBENCH'\nscene.render.resolution_x = 480\nscene.render.resolution_y = 360\nscene.render.resolution_percentage = 100\nscene.render.image_settings.file_format = 'PNG'\nshading = scene.display.shading\nshading.color_type = 'OBJECT'\nshading.light = 'FLAT'\nshading.show_shadows = False\nshading.show_cavity = False\nshading.show_object_outline = False\nshading.show_xray = False\nshading.background_type = 'VIEWPORT'\nshading.background_color = (0.05, 0.05, 0.05)\n\n\ndef quad(name, x, z, color):\n    mesh = bpy.data.meshes.new(name)\n    mesh.from_pydata([(x-1, -1, z), (x+1, -1, z), (x+1, 1, z), (x-1, 1, z)], [], [(0, 1, 2, 3)])\n    obj = bpy.data.objects.new(name, mesh)\n    scene.collection.objects.link(obj)\n    obj.color = color\n    return obj\n\n\nback = quad('back', 0.45, 0, (0.05, 0.8, 0.1, 1))\nfront = quad('front', -0.45, 1, (0.8, 0.05, 0.05, 1))\ncamera = bpy.data.cameras.new('Camera')\nscene.camera = bpy.data.objects.new('Camera', camera)\nscene.collection.objects.link(scene.camera)\nscene.camera.location = (0, 0, 8)\ncamera.type = 'ORTHO'\ncamera.ortho_scale = 4\nbpy.context.view_layer.update()\nupdates = []\n\n\ndef observe(scene, graph):\n    for update in graph.updates:\n        updates.append({'id': update.id.name, 'geometry': update.is_updated_geometry,\n                        'transform': update.is_updated_transform, 'shading': update.is_updated_shading})\n\n\nbpy.app.handlers.depsgraph_update_post.append(observe)\nrows = []\nfor alpha in (1.0, 0.6, 0.2):\n    updates.clear()\n    front.color[3] = alpha\n    bpy.context.view_layer.update()\n    color_updates = list(updates)\n    path = OUT / ('alpha_' + str(alpha) + '.png')\n    scene.render.filepath = str(path)\n    bpy.ops.render.render(write_still=True)\n    rows.append({'alpha': alpha, 'updates': color_updates, 'png_sha256': hashlib.sha256(path.read_bytes()).hexdigest()})\n(OUT / 'result.json').write_text(json.dumps({'version': bpy.app.version_string, 'xray': shading.show_xray, 'rows': rows}, indent=2))\n",
+  "command": "blender.exe --background --factory-startup --python probe.py",
+  "visual_review": "Opaque foreground obscured the green plane; alpha 0.2 revealed it in the overlap. Both outputs inspected.",
+  "limitations": [
+    "Two planes in a factory scene; AnthroForge was not registered.",
+    "Workbench render, not an interactive viewport frame-rate benchmark.",
+    "Dependency-graph flags do not measure addon handler costs.",
+    "Curve display, hover picking, production legibility, undo and persistence were not tested."
+  ],
+  "production_code_changed": false
+}

@@ -31,3 +31,7 @@ Set `AF_DEPS_TELEMETRY=1` to collect records without console tracing. `AF_DEPS_T
 The runtime retains at most 256 completed records. Each record contains cause, source, event, aspects, quality, queue/run time, dependency and driver phase timings, solver iterations, actual BVH queries, persistent Fiber curve writes, low-level timings, bounded-cache bytes, and a fixed-bucket progressive-slice histogram. Use `request_telemetry(clear=True)` from `core.deps.runtime_trace` to retrieve and clear records.
 
 Progressive work retains the originating request record after the request itself returns. Later slices, collision queries, iterations, writes, and cache publication therefore remain attributed to the edit that started the solve.
+
+## Editing responsiveness
+
+See [Editing responsiveness and viewport clarity](interaction_ux.md) for the October 12, 2026 production-file audit, the disposable publication-batching experiment, proposed interaction modes, and the viewport-clutter follow-up. It separates measured setter latency from viewport frame rate and preserves the accepted evidence without treating the experiment as a production change.
