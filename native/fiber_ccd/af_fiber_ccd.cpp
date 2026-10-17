@@ -1,3 +1,4 @@
+#include "../export.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -20,7 +21,7 @@
 #include <omp.h>
 #endif
 
-#define AF_EXPORT extern "C" __declspec(dllexport)
+#define AF_EXPORT AF_NATIVE_EXPORT
 #include "af_roadmap_preparation.hpp"
 
 constexpr int AF_V3_CCD_JOB_PAIRS=128;

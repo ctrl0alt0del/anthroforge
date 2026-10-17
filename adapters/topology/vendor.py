@@ -13,6 +13,9 @@ MANIFEST_PATH = VENDOR_ROOT / "manifest.json"
 
 
 def ensure_worker_dependencies():
+    if platform.system() == 'Linux':
+        from ..draft_skin.linux_vendor import ensure
+        return ensure()
     _ensure_numeric_dependencies()
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     _validate_runtime(manifest)

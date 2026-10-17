@@ -2,6 +2,7 @@
 from ctypes import CDLL, Structure, POINTER, byref, c_double, c_int, c_int64, c_char
 from functools import lru_cache
 from pathlib import Path
+from ..native_platform import library_path
 import numpy as np
 
 
@@ -13,7 +14,7 @@ class Report(Structure):
 
 @lru_cache(maxsize=1)
 def library():
-    path = Path(__file__).resolve().parents[2]/'native/smoothing/af_height_smoothing_v1.dll'
+    path = library_path('native/smoothing/af_height_smoothing_v1.dll')
     try: lib = CDLL(str(path))
     except OSError as error: raise RuntimeError('SMOOTHING_NATIVE_UNAVAILABLE: '+str(error)) from error
     lib.af_height_version.restype = c_int

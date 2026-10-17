@@ -8,6 +8,9 @@ ROOT = Path(__file__).resolve().parents[2] / "vendor/quadwild"
 
 
 def verify_bundle(root=ROOT):
+    if platform.system() == 'Linux':
+        from ..linux_dependencies import BUNDLE, verify
+        return verify(BUNDLE / 'quadwild')
     if platform.system() != "Windows" or platform.machine().lower() not in {"amd64", "x86_64"}:
         raise RuntimeError("QuadWild bundle requires Windows x64.")
     try:

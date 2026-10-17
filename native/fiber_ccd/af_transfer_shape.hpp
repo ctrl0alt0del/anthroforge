@@ -61,7 +61,7 @@ static void solve(const Input&a) {
     store(x,a.output);
 }
 }
-extern "C" __declspec(dllexport) int af_transfer_shape_fit(af_transfer_shape::Input*a) {
+AF_NATIVE_EXPORT int af_transfer_shape_fit(af_transfer_shape::Input*a) {
     if(!a)return 1;
     try {af_transfer_shape::validate(*a);af_transfer_shape::solve(*a);return 0;}
     catch(const std::invalid_argument&){return 1;}catch(const std::bad_alloc&){return 2;}catch(...){return 3;}

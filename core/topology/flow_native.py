@@ -1,6 +1,7 @@
 """Batched native field construction and path routing."""
 import ctypes as C
 from pathlib import Path
+from ..native_platform import library_path
 import numpy as np
 
 P = np.ctypeslib.ndpointer(np.float64, flags="C_CONTIGUOUS")
@@ -8,7 +9,7 @@ I = np.ctypeslib.ndpointer(np.int32, flags="C_CONTIGUOUS")
 
 
 def library():
-    path = Path(__file__).resolve().parents[2] / "native/topology/af_topology_field_v1.dll"
+    path = library_path("native/topology/af_topology_field_v1.dll")
     lib = C.CDLL(str(path))
     if lib.af_topology_version() != 1: raise RuntimeError("Incompatible native topology field library.")
     lib.af_field.argtypes = [P, I, C.c_int, P, P, P, P, I, C.c_int, C.c_double, C.c_int, P, P]

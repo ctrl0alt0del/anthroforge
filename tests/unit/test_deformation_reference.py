@@ -74,7 +74,7 @@ class DeformationReferenceTests(unittest.TestCase):
             DeformationReference(bad,ref.metadata)
 
 
-    @unittest.skipUnless(os.name == 'nt', 'Requires production Windows deformation DLL')
+    @unittest.skipUnless(os.name == 'nt' or (Path(__file__).parents[2]/'native/deformation/libaf_deformation_v1.so').is_file(), 'Requires built production deformation library')
     def test_native_le_identity_translation_and_reference_reset(self):
         tmp_path = Path(self.temporary.name)
         from core.deformation.native import PreparedSolver
@@ -90,7 +90,7 @@ class DeformationReferenceTests(unittest.TestCase):
         np.testing.assert_allclose((ref.arrays["proxy_vertices"][ids]*weights[:,:,None]).sum(1),identity,atol=1e-10)
 
 
-    @unittest.skipUnless(os.name == 'nt', 'Requires production Windows deformation DLL')
+    @unittest.skipUnless(os.name == 'nt' or (Path(__file__).parents[2]/'native/deformation/libaf_deformation_v1.so').is_file(), 'Requires built production deformation library')
     def test_native_cancel_and_unknown_strategy(self):
         tmp_path = Path(self.temporary.name)
         from core.deformation.native import PreparedSolver

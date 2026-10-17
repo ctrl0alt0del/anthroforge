@@ -1,0 +1,86 @@
+[
+  {
+    "name": "numpy",
+    "version": "1.26.4",
+    "file": "numpy-1.26.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "url": "https://files.pythonhosted.org/packages/3a/d0/edc009c27b406c4f9cbc79274d6e46d634d139075492ad055e3d68445925/numpy-1.26.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "sha256": "666dbfb6ec68962c033a450943ded891bed2d54e6755e35e5835d63f4f6931d5"
+  },
+  {
+    "name": "scipy",
+    "version": "1.15.3",
+    "file": "scipy-1.15.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "url": "https://files.pythonhosted.org/packages/bd/37/89f19c8c05505d0601ed5650156e50eb881ae3918786c8fd7262b4ee66d3/scipy-1.15.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "sha256": "39cb9c62e471b1bb3750066ecc3a3f3052b37751c7c3dfd0fd7e48900ed52982"
+  },
+  {
+    "name": "scikit-image",
+    "version": "0.25.2",
+    "file": "scikit_image-0.25.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "url": "https://files.pythonhosted.org/packages/dd/9b/9fb556463a34d9842491d72a421942c8baff4281025859c84fcdb5e7e602/scikit_image-0.25.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "sha256": "24cc986e1f4187a12aa319f777b36008764e856e5013666a4a83f8df083c2641"
+  },
+  {
+    "name": "pillow",
+    "version": "11.2.1",
+    "file": "pillow-11.2.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "url": "https://files.pythonhosted.org/packages/1f/e3/0a58b5d838687f40891fff9cbaf8669f90c96b64dc8f91f87894413856c6/pillow-11.2.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "sha256": "b93a07e76d13bff9444f1a029e0af2964e654bfc2e2c2d46bfd080df5ad5f3d8"
+  },
+  {
+    "name": "imageio",
+    "version": "2.37.0",
+    "file": "imageio-2.37.0-py3-none-any.whl",
+    "url": "https://files.pythonhosted.org/packages/cb/bd/b394387b598ed84d8d0fa90611a90bee0adc2021820ad5729f7ced74a8e2/imageio-2.37.0-py3-none-any.whl",
+    "sha256": "11efa15b87bc7871b61590326b2d635439acc321cf7f8ce996f812543ce10eed"
+  },
+  {
+    "name": "networkx",
+    "version": "3.4.2",
+    "file": "networkx-3.4.2-py3-none-any.whl",
+    "url": "https://files.pythonhosted.org/packages/b9/54/dd730b32ea14ea797530a4479b2ed46a6fb250f682a9cfb997e968bf0261/networkx-3.4.2-py3-none-any.whl",
+    "sha256": "df5d4365b724cf81b8c6a7312509d0c22386097011ad1abe274afd5e9d3bbc5f"
+  },
+  {
+    "name": "lazy-loader",
+    "version": "0.4",
+    "file": "lazy_loader-0.4-py3-none-any.whl",
+    "url": "https://files.pythonhosted.org/packages/83/60/d497a310bde3f01cb805196ac61b7ad6dc5dcf8dce66634dc34364b20b4f/lazy_loader-0.4-py3-none-any.whl",
+    "sha256": "342aa8e14d543a154047afb4ba8ef17f5563baad3fc610d7b15b213b0f119efc"
+  },
+  {
+    "name": "packaging",
+    "version": "25.0",
+    "file": "packaging-25.0-py3-none-any.whl",
+    "url": "https://files.pythonhosted.org/packages/20/12/38679034af332785aac8774540895e234f4d07f7545804097de4b666afd8/packaging-25.0-py3-none-any.whl",
+    "sha256": "29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484"
+  },
+  {
+    "name": "tifffile",
+    "version": "2025.5.10",
+    "file": "tifffile-2025.5.10-py3-none-any.whl",
+    "url": "https://files.pythonhosted.org/packages/5d/06/bd0a6097da704a7a7c34a94cfd771c3ea3c2f405dd214e790d22c93f6be1/tifffile-2025.5.10-py3-none-any.whl",
+    "sha256": "e37147123c0542d67bc37ba5cdd67e12ea6fbe6e86c52bee037a9eb6a064e5ad"
+  },
+  {
+    "name": "pytetwild",
+    "version": "0.4.2",
+    "file": "pytetwild-0.4.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+    "url": "https://files.pythonhosted.org/packages/ca/93/9f3fc1be788043c90eac91974cb7db064cc318007d5d274f707204b14a35/pytetwild-0.4.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+    "sha256": "4b5a369785bd3b9cdc18612af0d1d0257e6dbec4605b963d32a4cc5cdc098cb5"
+  },
+  {
+    "name": "pyinstantmeshes",
+    "version": "1.0.0",
+    "file": "pyinstantmeshes-1.0.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+    "url": "https://files.pythonhosted.org/packages/0c/44/3f25b7161264464dbfd891636b78870eaac05c16e36f455824bdb38a7032/pyinstantmeshes-1.0.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+    "sha256": "e3abc7da1c7821526d38f32bccf5c9936578eb6ae65e5c69039e3f49527de058"
+  },
+  {
+    "name": "psutil",
+    "version": "7.0.0",
+    "file": "psutil-7.0.0-cp36-abi3-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "url": "https://files.pythonhosted.org/packages/bf/b9/b0eb3f3cbcb734d930fdf839431606844a825b23eaf9a6ab371edac8162c/psutil-7.0.0-cp36-abi3-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "sha256": "4b1388a4f6875d7e2aff5c4ca1cc16c545ed41dd8bb596cefea80111db353a34"
+  }
+]

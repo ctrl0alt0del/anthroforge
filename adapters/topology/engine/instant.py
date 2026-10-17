@@ -2,6 +2,10 @@ import argparse
 import json
 import subprocess
 import sys
+try:
+    from ....core.native_platform import python_executable
+except ImportError:
+    from core.native_platform import python_executable
 import tempfile
 from collections import Counter
 from dataclasses import dataclass
@@ -267,7 +271,7 @@ def write_worker_input(folder, vertices, faces):
 
 
 def run_worker(input_path, output_path, vendor, count):
-    python = Path(sys.prefix, "bin", "python.exe")
+    python = python_executable()
     worker = Path(__file__).resolve().parents[3] / "workers" / "topology_instant_worker.py"
     command = [str(python), str(worker), "--input", str(input_path), "--output", str(output_path),
                "--vendor", str(vendor), "--target-vertices", str(count)]

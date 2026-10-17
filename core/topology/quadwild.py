@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 import numpy as np
 from .quadwild_bundle import verify_bundle
+from ..native_platform import executable_name
 from .quadwild_io import read_obj, write_obj, read_field, write_features
 from .flow_native import solve, route, select_paths
 from .process import execute
@@ -21,7 +22,7 @@ def progress(folder, stage, amount, message):
 
 def trace(folder, vendor, guided=False):
     (folder/"prep.txt").write_text("do_remesh 0\nsharp_feature_thr -1\nalpha 0.02\nscaleFact 1\n")
-    args = [vendor/"quadwild.exe", folder/"mesh.obj", 2, folder/"prep.txt"]
+    args = [vendor/executable_name("quadwild"), folder/"mesh.obj", 2, folder/"prep.txt"]
     if guided: args.append(folder/"mesh.rosy")
     if (folder/"mesh.sharp").exists(): args.append(folder/"mesh.sharp")
     stats = execute(args, folder, "trace", cwd=vendor)
@@ -51,7 +52,7 @@ def quantize(folder, vendor, scale, index, warnings):
     config.write_text((vendor/"config/main_config/flow.txt").read_text().replace("scaleFact 1", f"scaleFact {scale:.9g}"))
     output = folder/"mesh_rem_p0_1_quadrangulation_smooth.obj"
     if output.exists(): output.unlink()
-    stats = execute([vendor/"quad_from_patches.exe", folder/"mesh_rem_p0.obj", 1, config], folder, f"quantize_{index}", cwd=vendor)
+    stats = execute([vendor/executable_name("quad_from_patches"), folder/"mesh_rem_p0.obj", 1, config], folder, f"quantize_{index}", cwd=vendor)
     check_exit(stats, folder/f"quantize_{index}.log")
     v, f = read_obj(output, 4)
     if stats["exit_code"]: warnings.append("QuadWild completed geometry but its Windows executable exited abnormally (2147483651). Output was validated; package issue remains.")

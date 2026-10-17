@@ -163,6 +163,13 @@ def _preloaded(path):
 
 
 def ensure_worker_dependencies():
+    if platform.system() == 'Linux':
+        from .linux_vendor import ensure
+        return ensure()
+    return _ensure_windows()
+
+
+def _ensure_windows():
     source = _manifest()
     path = _bundle_path(source)
     payload = _payload(source, path)

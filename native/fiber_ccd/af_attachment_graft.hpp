@@ -28,7 +28,7 @@ static void build(int count,int rings,const double*first,const double*second,con
         double depth=escape*(.15+.85*std::clamp((ca[i][1]+1)*.5,0.,1.));P p=evaluate(a[i],b[j],norm[i],t,depth);for(int c=0;c<3;++c)out[(k*count+i)*3+c]=p[c];}}
 }
 }
-extern "C" __declspec(dllexport) int af_attachment_graft(int count,int rings,const double*a,const double*b,const double*normals,const double*axes,double escape,double*out,int*order) {
+AF_NATIVE_EXPORT int af_attachment_graft(int count,int rings,const double*a,const double*b,const double*normals,const double*axes,double escape,double*out,int*order) {
     try{if(count<3||count>1024||rings<1||rings>128||!a||!b||!normals||!axes||!out||!order||escape<0||!std::isfinite(escape))return 1;
         af_graft::build(count,rings,a,b,normals,axes,escape,out,order);return 0;}catch(...){return 2;}
 }

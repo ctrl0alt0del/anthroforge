@@ -1,6 +1,7 @@
 """Versioned maintained native boundary; no Python numerical solver fallback."""
 import ctypes as C
 from pathlib import Path
+from ..native_platform import library_path
 import numpy as np
 
 P = np.ctypeslib.ndpointer(dtype=np.float64, flags="C_CONTIGUOUS")
@@ -8,7 +9,7 @@ I = np.ctypeslib.ndpointer(dtype=np.int32, flags="C_CONTIGUOUS")
 
 
 def library():
-    path = Path(__file__).resolve().parents[2] / "native/deformation/af_deformation_v1.dll"
+    path = library_path("native/deformation/af_deformation_v1.dll")
     if not path.is_file():
         raise RuntimeError("Final-skin native library is missing; install the matching AnthroForge package.")
     lib = C.CDLL(str(path))

@@ -1,3 +1,4 @@
+#include "../export.h"
 #include <Eigen/Dense>
 #include <complex>
 #include <vector>
@@ -5,7 +6,7 @@
 #include <algorithm>
 #include <queue>
 using V=Eigen::Vector3d;using C=std::complex<double>;
-extern "C" __declspec(dllexport) int af_topology_version(){return 1;}
+AF_NATIVE_EXPORT int af_topology_version(){return 1;}
 struct Face {V p,n,x,y;C prior,target,z;double weight=0,confidence=0;int owner=-1;std::vector<int> adjacent;};
 V vec(const double*p,int i){return V(p[3*i],p[3*i+1],p[3*i+2]);}
 C phase(const V&v,const Face&f){double a=std::atan2(v.dot(f.y),v.dot(f.x));return std::polar(1.,4*a);}
@@ -51,7 +52,7 @@ void relax(std::vector<Face>&fs,int iterations){
    next[i]=std::abs(sum)>1e-12?sum/std::abs(sum):f.z;}
   for(size_t i=0;i<fs.size();i++)fs[i].z=next[i];}
 }
-extern "C" __declspec(dllexport) int af_field(const double*v,const int*t,int count,const double*prior,
+AF_NATIVE_EXPORT int af_field(const double*v,const int*t,int count,const double*prior,
  const double*p,const double*d,const double*n,const int*ids,int samples,double radius,int robust,double*out,double*info){
  try{auto fs=geometry(v,t,count,prior);for(auto&f:fs)constrain(f,p,d,n,ids,samples,radius,false);relax(fs,100);
   if(robust)for(int pass=0;pass<3;pass++){for(auto&f:fs)constrain(f,p,d,n,ids,samples,radius,true);relax(fs,60);}
@@ -60,14 +61,14 @@ extern "C" __declspec(dllexport) int af_field(const double*v,const int*t,int cou
  }catch(...){return 0;}
 }
 
-extern "C" __declspec(dllexport) int af_path(const double*v,int nv,const int*t,int nt,const double*p,int np,int*out,int capacity){
+AF_NATIVE_EXPORT int af_path(const double*v,int nv,const int*t,int nt,const double*p,int np,int*out,int capacity){
  try {return path_impl(v,nv,t,nt,p,np,out,capacity);}catch(...){return -3;}
 }
 bool overlaps(const double*p,int a,int b,const std::vector<V>&used,double radius){
  for(int j=a;j<b;j++)for(auto&v:used)if((vec(p,j)-v).squaredNorm()<radius*radius)return true;
  return false;
 }
-extern "C" __declspec(dllexport) int af_select_paths(const double*p,const int*offsets,int count,double radius,int*out){
+AF_NATIVE_EXPORT int af_select_paths(const double*p,const int*offsets,int count,double radius,int*out){
  try{std::vector<std::pair<double,int>>order;std::vector<V>used;int n=0;
   for(int i=0;i<count;i++){double length=0;for(int j=offsets[i]+1;j<offsets[i+1];j++)length+=(vec(p,j)-vec(p,j-1)).norm();order.emplace_back(-length,i);}
   std::sort(order.begin(),order.end());

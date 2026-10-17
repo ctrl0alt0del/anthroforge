@@ -1,3 +1,4 @@
+#include "../export.h"
 #include <memory>
 #include <igl/bbw.h>
 #include <igl/arap_dof.h>
@@ -9,7 +10,7 @@
 #include "reduced.hpp"
 namespace af_ad {
 static thread_local std::string error;
-#define API extern "C" __declspec(dllexport)
+#define API AF_NATIVE_EXPORT
 API int af_ad_version(){return 1;}
 API const char* af_ad_error(){return error.c_str();}
 API void af_ad_destroy(void* handle){delete static_cast<State*>(handle);}

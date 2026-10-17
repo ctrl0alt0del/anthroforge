@@ -9,11 +9,25 @@ _DLL_DIRECTORY = None
 
 def library():
     global _DLL_DIRECTORY
+    if os.name != 'nt':
+        return linux_library()
     folder = Path(__file__).resolve().parents[2]/"vendor/deformation"
     verify(folder)
     _DLL_DIRECTORY = os.add_dll_directory(str(folder/"pytetwild.libs"))
     spec = importlib.util.spec_from_file_location("PyfTetWildWrapper",folder/"pytetwild/PyfTetWildWrapper.pyd")
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    return module
+
+
+def linux_library():
+    from ..linux_dependencies import ensure
+    folder = ensure() / 'pytetwild'
+    paths = list(folder.glob('PyfTetWildWrapper*.so'))
+    if len(paths) != 1:
+        raise RuntimeError('Linux PyTetWild extension is missing or ambiguous')
+    spec = importlib.util.spec_from_file_location('PyfTetWildWrapper', paths[0])
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
     return module
 
 

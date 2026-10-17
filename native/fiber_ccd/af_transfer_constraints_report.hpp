@@ -48,7 +48,7 @@ static void report(const Input&a,const State&s) {
     for(int k=0;k<a.count;++k){residuals(a,s,k,shape);strain(a,s,k);summarize(a,s,k);coverage(a,k,source,mass);}
 }
 }
-extern "C" __declspec(dllexport) int af_transfer_constraints_fit(af_transfer_constraints::Input*a) {
+AF_NATIVE_EXPORT int af_transfer_constraints_fit(af_transfer_constraints::Input*a) {
     if(!a)return 1;
     try {af_transfer_constraints::validate(*a);auto s=af_transfer_constraints::compile(*a);af_transfer_constraints::solve(*a,s);af_transfer_constraints::report(*a,s);return 0;}
     catch(const std::domain_error&){return 4;}catch(const std::invalid_argument&){return 1;}catch(const std::bad_alloc&){return 2;}catch(...){return 3;}

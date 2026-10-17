@@ -3,6 +3,7 @@
 from ctypes import CDLL, POINTER, Structure, byref, c_double, c_int, c_int64, c_uint64, c_void_p
 from os import environ
 from pathlib import Path
+from ...native_platform import library_path
 
 import numpy as np
 
@@ -80,7 +81,7 @@ class _NativeV3BatchStats(Structure):
 
 _REASONS = ("CLEAR", "AABB_CLEAR", "INVALID_START", "POSSIBLE_COLLISION", "BUDGET_EXHAUSTED")
 _LIBRARIES = {}
-_DEFAULT_NATIVE_PATH = Path(__file__).resolve().parents[3] / "native" / "fiber_ccd" / "af_fiber_ccd_v3_57.dll"
+_DEFAULT_NATIVE_PATH = library_path("native/fiber_ccd/af_fiber_ccd_v3_57.dll")
 
 
 def native_path():
