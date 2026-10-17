@@ -1,5 +1,6 @@
-"""OS-enforced memory ceiling for each native deformation service on Windows."""
+"""OS-enforced memory ceilings for native deformation services."""
 import ctypes as C
+import os
 from ...core.draft_skin.resources import available_memory
 
 
@@ -24,6 +25,7 @@ def api():
 
 
 def enforce(process):
+    if os.name != 'nt': return enforce_linux(process)
     lib = api(); handle = lib.CreateJobObjectW(None,None)
     limits = Limits(); limits.basic.flags = 0x100|0x2000
     limits.process_memory = int(min(8*1024**3,(available_memory() or 8*1024**3)*.5))
@@ -40,3 +42,16 @@ def enforce(process):
 def release(process):
     handle = getattr(process,"deformation_job_handle",None)
     if handle: api().CloseHandle(handle); process.deformation_job_handle = None
+
+
+def enforce_linux(process):
+    import resource
+    limit = int(min(8*1024**3, (available_memory() or 8*1024**3)*.5))
+    try:
+        _, hard = resource.prlimit(process.pid, resource.RLIMIT_AS)
+        limit = limit if hard == resource.RLIM_INFINITY else min(limit, hard)
+        resource.prlimit(process.pid, resource.RLIMIT_AS, (limit, limit))
+        process.deformation_memory_limit = limit
+    except (OSError, ValueError):
+        process.terminate()
+        raise

@@ -1,5 +1,6 @@
 import ctypes
 import os
+from pathlib import Path
 
 
 class _MemoryStatus(ctypes.Structure):
@@ -30,9 +31,20 @@ def _windows_available():
 
 def _posix_available():
     try:
-        return int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
+        host = int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
+        return min(host, _cgroup_available(host))
     except (AttributeError, ValueError, OSError):
         return 4 * 1024**3
+
+
+def _cgroup_available(fallback):
+    folder = Path('/sys/fs/cgroup')
+    try:
+        maximum = (folder / 'memory.max').read_text().strip()
+        used = int((folder / 'memory.current').read_text())
+        return fallback if maximum == 'max' else max(0, int(maximum) - used)
+    except (OSError, ValueError):
+        return fallback
 
 
 def worker_memory_limit():
@@ -48,7 +60,7 @@ class _ProcessMemoryCounters(ctypes.Structure):
 
 def memory_metrics():
     if os.name != 'nt':
-        return {}
+        return _linux_metrics()
     counters = _ProcessMemoryCounters(); counters.cb = ctypes.sizeof(counters)
     process = ctypes.WinDLL('kernel32').GetCurrentProcess; process.restype = ctypes.c_void_p
     query = ctypes.WinDLL('psapi').GetProcessMemoryInfo
@@ -57,3 +69,10 @@ def memory_metrics():
         raise OSError('Cannot read draft-skin worker memory usage.')
     return {'worker_peak_resident_bytes': int(counters.peak_resident),
             'worker_resident_bytes': int(counters.resident), 'worker_peak_private_bytes': int(counters.peak_private)}
+
+
+def _linux_metrics():
+    import resource
+    resident = int(Path('/proc/self/statm').read_text().split()[1]) * os.sysconf('SC_PAGE_SIZE')
+    return dict(worker_peak_resident_bytes=int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)*1024,
+                worker_resident_bytes=resident)

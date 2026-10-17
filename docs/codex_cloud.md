@@ -5,6 +5,42 @@ The older `main` branch does not contain the current production implementation.
 
 ## Environment setup
 
+### Blender/native geometry runtime
+
+The Linux runtime is installed with `python3.11 tools/cloud/geometry_setup.py`.
+It pins Blender 5.0.1, verifies downloaded archives and Linux wheel hashes,
+installs QuadWild Bi-MDF, and builds the four production C++ libraries with
+CMake. Windows retains its existing DLLs, package checks and build scripts.
+On Ubuntu install `clang cmake libomp-dev libxrender1 libxi6 libxkbcommon0
+libsm6 libgl1 xvfb` first. Allow the official Blender download/mirror hosts,
+GitHub release downloads and PyPI. No GPU is needed for CPU previews.
+
+Run actual native and Blender integration tests:
+
+```sh
+.artifacts/blender-5.0.1-linux-x64/blender -b --factory-startup \
+  --python-exit-code 1 --python tools/cloud/geometry_tests.py
+```
+
+Supply a private torso fixture separately; setup does not upload model files.
+For each case (`baseline`, `rebuild`, `arc5`, `pec2`) and method (`LE`, `FAST`):
+
+```sh
+.artifacts/blender-5.0.1-linux-x64/blender -b --factory-startup \
+  --python-exit-code 1 --python tools/cloud/torso_validate.py -- \
+  --fixture /workspace/fixtures/anthroforge/torso.blend \
+  --output /workspace/results/torso/arc5-le --case arc5 --method LE
+```
+
+Outputs include a reopened/verified debug blend, numerical report and four CPU
+renders. The pectoral fixture uses SECTION_PROFILE, so `pec2` doubles its actual
+section depths, not the inactive Max Inflation property. Render-only changes
+are applied after saving the debug file. A successful install is not geometry
+acceptance; inspect these outputs and the full construction case. Initial
+cloud geometry acceptance is still in progress.
+
+### Portable-only runtime
+
 Create a private environment in Settings > Codex Cloud > Environments, select
 this repository and the current branch, and use this setup request:
 
@@ -42,8 +78,8 @@ suite as the complete regression suite.
 
 ## Boundaries and handoff
 
-- Production targets Blender 5.0 on Windows. Native DLLs, QuadWild EXEs,
-  package loaders and Windows build scripts are not Linux executables.
+- Windows DLLs and EXEs cannot run on Linux. Use the maintained Linux build
+  and bundle above; do not copy Windows binaries into the Linux installation.
 - Do not bypass native checks, create Python optimizer fallbacks, or rewrite
   platform paths merely to make cloud tests pass. Native changes require the
   maintained Windows build/load workflow and representative geometry tests.
