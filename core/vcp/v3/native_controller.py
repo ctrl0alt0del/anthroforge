@@ -197,17 +197,32 @@ class NativeAsyncCoordinator:
         return bool(self.runs)
 
 
-def solve_native_controller(session, ccd_mode=INDEXED_CCD):
+def solve_native_controller(session, ccd_mode=INDEXED_CCD, *, max_step_displacement=None):
     if not cn.native_controller_status(): raise RuntimeError("native V3 controller is unavailable")
-    report = _solve_session(session, ccd_mode); _install_report(session, report)
+    report = _solve_session(session, ccd_mode, max_step_displacement); _install_report(session, report)
     from .solver import _finalize
     _finalize(session); return session.package, report
 
 
-def _solve_session(session, ccd_mode):
-    _prime(session); run = NativeControllerRun(session, ccd_mode)
-    while not run.done: run.step(64)
-    return run.finish()
+def _solve_session(session, ccd_mode, max_step_displacement=None):
+    _prime(session); _limit_motion(session, max_step_displacement)
+    run = NativeControllerRun(session, ccd_mode)
+    try:
+        while not run.done: run.step(64)
+        return run.finish()
+    finally:
+        if run.handle: run.cancel()
+
+
+def _limit_motion(session, limit):
+    """Configure the existing C++ trust bound; never clip solved geometry afterward."""
+    if limit is None: return
+    if not np.isfinite(limit) or limit <= 0: raise ValueError('Invalid native motion limit.')
+    for span in session.spans:
+        state = span.state
+        state.trust_radius = min(state.trust_radius, limit)
+        state.max_trust = min(state.max_trust, limit)
+        state.min_trust = min(state.min_trust, limit)
 
 
 def begin_native_controller(session, ccd_mode=INDEXED_CCD):

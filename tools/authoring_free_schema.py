@@ -45,5 +45,12 @@ def settings():
 
 def extend(schema):
     schema['$defs'].update(definitions())
-    schema['oneOf'].extend(operations())
+    schema['oneOf'].extend(operations() + [tightening_operation()])
     return schema
+
+
+def tightening_operation():
+    fields = dict(fiber_id=S, expected_scene_revision=S, expected_path_revision=I,
+                  max_displacement=dict(type='number', exclusiveMinimum=0),
+                  accepted_steps=dict(type='integer', minimum=1, maximum=64))
+    return operation('fibers.tighten_preview', fields, [k for k in fields if k != 'accepted_steps'])

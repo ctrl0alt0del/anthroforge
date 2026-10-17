@@ -38,6 +38,9 @@ class AuthoringInterpreter:
         with request_scope(self.scene.root, request, self.store): return self._dispatch(request)
 
     def _dispatch(self, request):
+        if request['op'] == 'fibers.tighten_preview':
+            from .native_tightening import execute
+            return execute(self.scene, request)
         from . import native_free
         if request['op'] in native_free.OPERATIONS: return native_free.execute(self.scene, request, self.store)
         from . import native_branches, native_fibers
