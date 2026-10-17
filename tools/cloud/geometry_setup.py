@@ -40,7 +40,7 @@ def unpack_zip(archive, target):
 
 def inventory(folder):
     files = {p.relative_to(folder).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
-             for p in folder.rglob('*') if p.is_file() and p.name != 'inventory.json'}
+             for p in folder.rglob('*') if p.is_file() and '__pycache__' not in p.parts and p.name != 'inventory.json'}
     lock = hashlib.sha256((ROOT / 'tools/cloud/linux-wheels.json').read_bytes()).hexdigest()
     (folder / 'inventory.json').write_text(json.dumps(dict(files=files, wheel_lock=lock), sort_keys=True))
 
@@ -49,8 +49,11 @@ def install_packages():
     target = BUNDLE / 'packages'
     if target.exists():
         from core.linux_dependencies import verify
-        verify(target)
-        return
+        try:
+            verify(target)
+            return
+        except (ValueError, OSError, RuntimeError):
+            shutil.rmtree(target)
     rows = json.loads((ROOT / 'tools/cloud/linux-wheels.json').read_text())
     for row in rows:
         unpack_zip(download(row['url'], row['sha256']), target)
@@ -58,7 +61,7 @@ def install_packages():
 
 
 def install_blender():
-    url = 'https://download.blender.org/release/Blender5.0/blender-5.0.1-linux-x64.tar.xz'
+    url = 'https://mirror.blender.org/release/Blender5.0/blender-5.0.1-linux-x64.tar.xz'
     digest = '8019580ee1b7262e505f4196a00237ccf743c88d205b38d34201510676e60b09'
     if not (BLENDER / 'blender').is_file():
         with tarfile.open(download(url, digest)) as archive:
