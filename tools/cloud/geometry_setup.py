@@ -21,7 +21,8 @@ def download(url, digest):
     path = DOWNLOADS / url.rsplit('/', 1)[-1]
     if not path.exists() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
         temporary = path.with_suffix('.download')
-        with urllib.request.urlopen(url, timeout=180) as source, temporary.open('wb') as target:
+        request = urllib.request.Request(url, headers={'User-Agent': 'AnthroForge-Geometry-Setup/1.0'})
+        with urllib.request.urlopen(request, timeout=180) as source, temporary.open('wb') as target:
             shutil.copyfileobj(source, target)
         if hashlib.sha256(temporary.read_bytes()).hexdigest() != digest:
             raise RuntimeError('Download checksum mismatch: ' + url)
@@ -61,7 +62,7 @@ def install_packages():
 
 
 def install_blender():
-    url = 'https://mirror.blender.org/release/Blender5.0/blender-5.0.1-linux-x64.tar.xz'
+    url = 'https://download.blender.org/release/Blender5.0/blender-5.0.1-linux-x64.tar.xz'
     digest = '8019580ee1b7262e505f4196a00237ccf743c88d205b38d34201510676e60b09'
     if not (BLENDER / 'blender').is_file():
         with tarfile.open(download(url, digest)) as archive:
