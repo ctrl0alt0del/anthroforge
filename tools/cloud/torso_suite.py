@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from blender import environment
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,7 +35,7 @@ def run_case(args, case, method, fixture):
                '--output', str(folder.resolve()), '--case', case, '--method', method]
     started = time.monotonic(); peak = 0
     with (folder / 'execution.log').open('w') as log:
-        process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+        process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=environment())
         while process.poll() is None:
             peak = max(peak, memory(process)); time.sleep(.25)
     result = dict(case=case, method=method, exit_code=process.returncode, peak_process_tree_rss=peak,

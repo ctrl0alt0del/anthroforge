@@ -39,6 +39,20 @@ are applied after saving the debug file. A successful install is not geometry
 acceptance; inspect these outputs and the full construction case. Initial
 cloud geometry acceptance is still in progress.
 
+For everyday cloud use, `python3.11 tools/cloud/blender.py` accepts Blender's
+normal arguments and supplies writable config/cache directories. Run all torso
+cases, including a fresh rebuild, with:
+
+```sh
+python3.11 tools/cloud/torso_suite.py \
+  --blender .artifacts/blender-5.0.1-linux-x64/blender \
+  --fixture /workspace/fixtures/anthroforge/torso.blend \
+  --output /workspace/results/anthroforge-torso
+```
+
+The suite writes `gallery.html`, per-case numerical reports and execution logs,
+plus sampled peak RSS for the Blender process tree. It never edits the input.
+
 ### Portable-only runtime
 
 Create a private environment in Settings > Codex Cloud > Environments, select
