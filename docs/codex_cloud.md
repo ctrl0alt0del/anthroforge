@@ -33,7 +33,8 @@ The explicit smoke suite covers issue reporting, authoring storage contracts,
 topology data/protocol operations, branched muscle FLOW, deformation scheduling,
 and durable reference validation. Each module runs in a separate process to
 avoid cross-test mock/module pollution. Failures are never silently excluded.
-The NTFS-only test is explicitly skipped on Linux.
+The NTFS-only test and two Windows-native deformation execution tests are
+explicitly skipped on Linux; reference serialization/identity tests still run.
 
 GitHub Actions runs the same command on Ubuntu/Python 3.11. Extend the suite
 when another test module is verified portable. Do not interpret this selected

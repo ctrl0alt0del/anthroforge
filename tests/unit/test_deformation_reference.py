@@ -1,5 +1,6 @@
 """Reference corruption, identity and method selection must fail closed."""
 import sys
+import os
 from pathlib import Path
 import numpy as np
 import unittest
@@ -73,6 +74,7 @@ class DeformationReferenceTests(unittest.TestCase):
             DeformationReference(bad,ref.metadata)
 
 
+    @unittest.skipUnless(os.name == 'nt', 'Requires production Windows deformation DLL')
     def test_native_le_identity_translation_and_reference_reset(self):
         tmp_path = Path(self.temporary.name)
         from core.deformation.native import PreparedSolver
@@ -88,6 +90,7 @@ class DeformationReferenceTests(unittest.TestCase):
         np.testing.assert_allclose((ref.arrays["proxy_vertices"][ids]*weights[:,:,None]).sum(1),identity,atol=1e-10)
 
 
+    @unittest.skipUnless(os.name == 'nt', 'Requires production Windows deformation DLL')
     def test_native_cancel_and_unknown_strategy(self):
         tmp_path = Path(self.temporary.name)
         from core.deformation.native import PreparedSolver
